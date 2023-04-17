@@ -26,3 +26,11 @@ impl Display for Value {
         }
     }
 }
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Literal {
+    Nil,
+    Bool(bool),
+    Uint(u64),
+    Float(f64),
+}
