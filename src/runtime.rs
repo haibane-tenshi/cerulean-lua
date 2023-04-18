@@ -62,12 +62,31 @@ impl Runtime {
 
                 let r = match (lhs, rhs) {
                     (Value::Uint(lhs), Value::Uint(rhs)) => match op {
-                        BinaryOp::Add => Value::Uint(lhs + rhs),
-                        BinaryOp::Mul => Value::Uint(lhs * rhs),
+                        BinaryOp::Add => Value::Uint(lhs.wrapping_add(rhs)),
+                        BinaryOp::Sub => Value::Uint(lhs.wrapping_sub(rhs)),
+                        BinaryOp::Mul => Value::Uint(lhs.wrapping_mul(rhs)),
+                        BinaryOp::Rem => Value::Uint(lhs.rem_euclid(rhs)),
+                        BinaryOp::Div => {
+                            let r = (lhs as f64) / (rhs as f64);
+                            Value::Float(r)
+                        }
+                        BinaryOp::FloorDiv => {
+                            let r = ((lhs as f64) / (rhs as f64)).floor();
+                            Value::Float(r)
+                        }
+                        BinaryOp::Exp => {
+                            let r = (lhs as f64).powf(rhs as f64);
+                            Value::Float(r)
+                        }
                     },
                     (Value::Float(lhs), Value::Float(rhs)) => match op {
                         BinaryOp::Add => Value::Float(lhs + rhs),
+                        BinaryOp::Sub => Value::Float(lhs - rhs),
                         BinaryOp::Mul => Value::Float(lhs * rhs),
+                        BinaryOp::Div => Value::Float(lhs / rhs),
+                        BinaryOp::FloorDiv => Value::Float((lhs / rhs).floor()),
+                        BinaryOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
+                        BinaryOp::Exp => Value::Float(lhs.powf(rhs)),
                     },
                     _ => return Err(RuntimeError),
                 };

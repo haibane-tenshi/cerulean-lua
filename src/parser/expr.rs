@@ -74,7 +74,12 @@ fn bin_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], BinaryOp), Par
 
     let op = match token {
         Token::Plus => BinaryOp::Add,
+        Token::Minus => BinaryOp::Sub,
         Token::Asterisk => BinaryOp::Mul,
+        Token::Slash => BinaryOp::Div,
+        Token::DoubleSlash => BinaryOp::FloorDiv,
+        Token::Percent => BinaryOp::Rem,
+        Token::Caret => BinaryOp::Exp,
         _ => return Err(ParseError),
     };
 
@@ -82,8 +87,11 @@ fn bin_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], BinaryOp), Par
 }
 
 pub fn infix_binding_power(op: BinaryOp) -> (u64, u64) {
+    use BinaryOp::*;
+
     match op {
-        BinaryOp::Add => (1, 2),
-        BinaryOp::Mul => (3, 4),
+        Add | Sub => (19, 20),
+        Mul | Div | FloorDiv | Rem => (21, 22),
+        Exp => (25, 26),
     }
 }

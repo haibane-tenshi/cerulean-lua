@@ -39,14 +39,26 @@ impl Display for OpCode {
 #[derive(Debug, Copy, Clone)]
 pub enum BinaryOp {
     Add,
+    Sub,
     Mul,
+    Div,
+    FloorDiv,
+    Rem,
+    Exp,
 }
 
 impl Display for BinaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use BinaryOp::*;
+
         let s = match *self {
-            BinaryOp::Add => '+',
-            BinaryOp::Mul => '*',
+            Add => "+",
+            Sub => "-",
+            Mul => "*",
+            Div => "/",
+            FloorDiv => "//",
+            Rem => "%",
+            Exp => "^",
         };
 
         write!(f, "{s}")
