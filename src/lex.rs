@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt::Display;
 use std::str::FromStr;
 
 use decorum::Finite;
@@ -5,6 +7,7 @@ use logos::Logos;
 
 #[derive(Debug, Copy, Clone, PartialEq, Logos)]
 #[logos(skip r"[ \t\n\f]+")]
+#[logos(error = LexError)]
 pub enum Token<'s> {
     #[token("nil")]
     Nil,
@@ -193,7 +196,7 @@ pub enum Number {
 }
 
 impl FromStr for Number {
-    type Err = ();
+    type Err = LexError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use lexical::{
@@ -300,7 +303,7 @@ impl FromStr for Number {
                 {
                     Number::Float(value.try_into().unwrap())
                 } else {
-                    return Err(());
+                    return Err(LexError);
                 }
             }
             None => {
@@ -314,7 +317,7 @@ impl FromStr for Number {
                 {
                     Number::Float(value.try_into().unwrap())
                 } else {
-                    return Err(());
+                    return Err(LexError);
                 }
             }
         };
@@ -322,3 +325,14 @@ impl FromStr for Number {
         Ok(r)
     }
 }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub struct LexError;
+
+impl Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "lexing error")
+    }
+}
+
+impl Error for LexError {}

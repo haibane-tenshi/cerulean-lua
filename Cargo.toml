@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.70"
+clap = { version = "4.2.2", features = ["derive"] }
 decorum = { version = "0.3.1", default-features = false }
 lexical = { version = "6.1.1", default-features = false, features = ["parse", "parse-floats", "parse-integers", "format", "power-of-two"] }
 logos = "0.13.0"

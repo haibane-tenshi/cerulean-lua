@@ -1,9 +1,21 @@
+use std::error::Error;
+use std::fmt::Display;
+
 use crate::opcode::{Chunk, OpCode};
 use crate::value::Value;
 
 pub type ControlFlow = std::ops::ControlFlow<()>;
 
+#[derive(Debug)]
 pub struct RuntimeError;
+
+impl Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "runtime error")
+    }
+}
+
+impl Error for RuntimeError {}
 
 pub struct Runtime {
     chunk: Chunk,
@@ -12,6 +24,14 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    pub fn new(chunk: Chunk) -> Self {
+        Runtime {
+            chunk,
+            stack: Default::default(),
+            ip: 0,
+        }
+    }
+
     pub fn run(&mut self) -> Result<(), RuntimeError> {
         while let ControlFlow::Continue(()) = self.step()? {}
 

@@ -3,3 +3,6 @@
 
 # Lockfile
 Cargo.lock
+
+# Test input files
+/test

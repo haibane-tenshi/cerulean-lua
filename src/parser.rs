@@ -1,10 +1,21 @@
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::Display;
 
 use crate::lex::Token;
 use crate::opcode::{Chunk, ConstId, OpCode};
 use crate::value::Literal;
 
-pub struct Error;
+#[derive(Debug)]
+pub struct ParseError;
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "parsing error")
+    }
+}
+
+impl Error for ParseError {}
 
 #[derive(Debug, Default)]
 struct ConstStorage {
@@ -33,12 +44,12 @@ struct Storages {
     codes: Vec<OpCode>,
 }
 
-fn next<'a, 's>(s: &'a [Token<'s>]) -> Result<(Token<'s>, &'a [Token<'s>]), Error> {
-    let (token, s) = s.split_first().ok_or(Error)?;
+fn next<'a, 's>(s: &'a [Token<'s>]) -> Result<(Token<'s>, &'a [Token<'s>]), ParseError> {
+    let (token, s) = s.split_first().ok_or(ParseError)?;
     Ok((*token, s))
 }
 
-pub fn chunk(mut s: &[Token]) -> Result<Chunk, Error> {
+pub fn chunk(mut s: &[Token]) -> Result<Chunk, ParseError> {
     let mut storages = Storages::default();
 
     while !s.is_empty() {
@@ -61,10 +72,10 @@ pub fn chunk(mut s: &[Token]) -> Result<Chunk, Error> {
 fn assignment<'a, 's>(
     s: &'a [Token<'s>],
     storages: &mut Storages,
-) -> Result<(&'a [Token<'s>], ()), Error> {
+) -> Result<(&'a [Token<'s>], ()), ParseError> {
     let (_, s) = match s {
         [Token::Local, Token::Ident(ident), Token::Assign, rest @ ..] => (ident, rest),
-        _ => return Err(Error),
+        _ => return Err(ParseError),
     };
 
     let (s, const_id) = literal(s, &mut storages.constants)?;
@@ -77,7 +88,7 @@ fn assignment<'a, 's>(
 fn literal<'a, 's>(
     s: &'a [Token<'s>],
     const_storage: &mut ConstStorage,
-) -> Result<(&'a [Token<'s>], ConstId), Error> {
+) -> Result<(&'a [Token<'s>], ConstId), ParseError> {
     use crate::lex::Number;
 
     let (token, s) = next(s)?;
@@ -88,7 +99,7 @@ fn literal<'a, 's>(
         Token::False => Literal::Bool(false),
         Token::Numeral(Number::Uint(value)) => Literal::Uint(value),
         Token::Numeral(Number::Float(value)) => Literal::Float(value),
-        _ => return Err(Error),
+        _ => return Err(ParseError),
     };
 
     let id = const_storage.insert(literal);
