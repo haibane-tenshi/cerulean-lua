@@ -41,13 +41,12 @@ impl Runtime {
     }
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
+        use crate::opcode::BinaryOp;
         use crate::opcode::OpCode::*;
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(()))
         };
-
-        tracing::trace!(stack = ?self.stack, "executing opcode");
 
         let r = match code {
             Return => ControlFlow::Break(()),
@@ -57,7 +56,29 @@ impl Runtime {
 
                 ControlFlow::Continue(())
             }
+            BinaryOp(op) => {
+                let rhs = self.stack.pop().ok_or(RuntimeError)?;
+                let lhs = self.stack.pop().ok_or(RuntimeError)?;
+
+                let r = match (lhs, rhs) {
+                    (Value::Uint(lhs), Value::Uint(rhs)) => match op {
+                        BinaryOp::Add => Value::Uint(lhs + rhs),
+                        BinaryOp::Mul => Value::Uint(lhs * rhs),
+                    },
+                    (Value::Float(lhs), Value::Float(rhs)) => match op {
+                        BinaryOp::Add => Value::Float(lhs + rhs),
+                        BinaryOp::Mul => Value::Float(lhs * rhs),
+                    },
+                    _ => return Err(RuntimeError),
+                };
+
+                self.stack.push(r);
+
+                ControlFlow::Continue(())
+            }
         };
+
+        tracing::trace!(stack = ?self.stack, "executed opcode");
 
         Ok(r)
     }

@@ -19,6 +19,7 @@ impl Display for ConstId {
 pub enum OpCode {
     Return,
     LoadConstant(ConstId),
+    BinaryOp(BinaryOp),
 }
 
 impl Display for OpCode {
@@ -26,8 +27,26 @@ impl Display for OpCode {
         use OpCode::*;
 
         let s = match *self {
-            Return => "Return",
-            LoadConstant(_) => "LoadConst",
+            Return => "Return".to_string(),
+            LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
+            BinaryOp(op) => format!("{:<10} [{op}]", "BinOp"),
+        };
+
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum BinaryOp {
+    Add,
+    Mul,
+}
+
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match *self {
+            BinaryOp::Add => '+',
+            BinaryOp::Mul => '*',
         };
 
         write!(f, "{s}")
@@ -78,7 +97,7 @@ impl Display for Chunk {
                 None => "?".to_string(),
             };
 
-            write!(f, "{i:04} {line:>3} {code:<9}")?;
+            write!(f, "{i:04} {line:>3} {code}")?;
 
             match code {
                 Return => (),
@@ -88,9 +107,12 @@ impl Display for Chunk {
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "<FAILED TO RESOLVE CONSTANT>".to_string());
 
-                    writeln!(f, " {index:03} {constant}")?;
+                    write!(f, " {constant}")?;
                 }
+                BinaryOp(_) => (),
             }
+
+            writeln!(f)?;
         }
 
         Ok(())

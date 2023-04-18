@@ -1,3 +1,5 @@
+mod expr;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
@@ -78,31 +80,7 @@ fn assignment<'a, 's>(
         _ => return Err(ParseError),
     };
 
-    let (s, const_id) = literal(s, &mut storages.constants)?;
-
-    storages.codes.push(OpCode::LoadConstant(const_id));
+    let (s, ()) = expr::expr(s, storages)?;
 
     Ok((s, ()))
-}
-
-fn literal<'a, 's>(
-    s: &'a [Token<'s>],
-    const_storage: &mut ConstStorage,
-) -> Result<(&'a [Token<'s>], ConstId), ParseError> {
-    use crate::lex::Number;
-
-    let (token, s) = next(s)?;
-
-    let literal = match token {
-        Token::Nil => Literal::Nil,
-        Token::True => Literal::Bool(true),
-        Token::False => Literal::Bool(false),
-        Token::Numeral(Number::Uint(value)) => Literal::Uint(value),
-        Token::Numeral(Number::Float(value)) => Literal::Float(value),
-        _ => return Err(ParseError),
-    };
-
-    let id = const_storage.insert(literal);
-
-    Ok((s, id))
 }
