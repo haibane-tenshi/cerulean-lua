@@ -61,11 +61,11 @@ impl Runtime {
                 let lhs = self.stack.pop().ok_or(RuntimeError)?;
 
                 let r = match (lhs, rhs) {
-                    (Value::Uint(lhs), Value::Uint(rhs)) => match op {
-                        BinaryOp::Add => Value::Uint(lhs.wrapping_add(rhs)),
-                        BinaryOp::Sub => Value::Uint(lhs.wrapping_sub(rhs)),
-                        BinaryOp::Mul => Value::Uint(lhs.wrapping_mul(rhs)),
-                        BinaryOp::Rem => Value::Uint(lhs.rem_euclid(rhs)),
+                    (Value::Int(lhs), Value::Int(rhs)) => match op {
+                        BinaryOp::Add => Value::Int(lhs.wrapping_add(rhs)),
+                        BinaryOp::Sub => Value::Int(lhs.wrapping_sub(rhs)),
+                        BinaryOp::Mul => Value::Int(lhs.wrapping_mul(rhs)),
+                        BinaryOp::Rem => Value::Int(lhs.rem_euclid(rhs)),
                         BinaryOp::Div => {
                             let r = (lhs as f64) / (rhs as f64);
                             Value::Float(r)

@@ -191,7 +191,7 @@ pub enum Token<'s> {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Number {
-    Uint(u64),
+    Int(i64),
     Float(Finite<f64>),
 }
 
@@ -285,7 +285,7 @@ impl FromStr for Number {
         let r = match hex {
             Some(s) => {
                 if let Ok(value) = parse_with_options::<_, _, BASE_16_EXPBASE_10>(s, &OPTIONS_INT) {
-                    Number::Uint(value)
+                    Number::Int(value)
                 } else if let Ok(value) =
                     parse_with_options::<f64, _, BASE_16_EXPBASE_10>(s, &OPTIONS_FLOAT_E)
                 {
@@ -308,7 +308,7 @@ impl FromStr for Number {
             }
             None => {
                 if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &OPTIONS_INT) {
-                    Number::Uint(value)
+                    Number::Int(value)
                 } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &OPTIONS_FLOAT_E)
                 {
                     Number::Float(value.try_into().unwrap())

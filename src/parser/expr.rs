@@ -16,7 +16,7 @@ fn literal<'a, 's>(
         Token::Nil => Literal::Nil,
         Token::True => Literal::Bool(true),
         Token::False => Literal::Bool(false),
-        Token::Numeral(Number::Uint(value)) => Literal::Uint(value),
+        Token::Numeral(Number::Int(value)) => Literal::Int(value),
         Token::Numeral(Number::Float(value)) => Literal::Float(value),
         _ => return Err(ParseError),
     };

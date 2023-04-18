@@ -6,7 +6,7 @@ use decorum::Finite;
 pub enum Value {
     Nil,
     Bool(bool),
-    Uint(u64),
+    Int(i64),
     Float(f64),
 }
 
@@ -23,7 +23,7 @@ impl Display for Value {
         match *self {
             Nil => write!(f, "nil"),
             Bool(v) => write!(f, "{v}"),
-            Uint(v) => write!(f, "{v}_u64"),
+            Int(v) => write!(f, "{v}_i64"),
             Float(v) => write!(f, "{v}_f64"),
         }
     }
@@ -34,7 +34,7 @@ impl From<Literal> for Value {
         match value {
             Literal::Nil => Value::Nil,
             Literal::Bool(value) => Value::Bool(value),
-            Literal::Uint(value) => Value::Uint(value),
+            Literal::Int(value) => Value::Int(value),
             Literal::Float(value) => Value::Float(value.into_inner()),
         }
     }
@@ -44,7 +44,7 @@ impl From<Literal> for Value {
 pub enum Literal {
     Nil,
     Bool(bool),
-    Uint(u64),
+    Int(i64),
     Float(Finite<f64>),
 }
 
