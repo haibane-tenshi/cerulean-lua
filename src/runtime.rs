@@ -25,6 +25,8 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn new(chunk: Chunk) -> Self {
+        tracing::trace!(chunk = %chunk, "constructed runtime");
+
         Runtime {
             chunk,
             stack: Default::default(),
@@ -45,6 +47,8 @@ impl Runtime {
             return Ok(ControlFlow::Break(()))
         };
 
+        tracing::trace!(stack = ?self.stack, "executing opcode");
+
         let r = match code {
             Return => ControlFlow::Break(()),
             LoadConstant(index) => {
@@ -60,6 +64,9 @@ impl Runtime {
 
     pub fn next_code(&mut self) -> Option<OpCode> {
         let r = *self.chunk.codes.get(self.ip)?;
+
+        tracing::trace!(ip = self.ip, opcode = %r, "next opcode");
+
         self.ip += 1;
 
         Some(r)

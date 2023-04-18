@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+trace = ["tracing/max_level_trace"]
+
 [dependencies]
 anyhow = "1.0.70"
 clap = { version = "4.2.2", features = ["derive"] }
@@ -13,3 +16,5 @@ lexical = { version = "6.1.1", default-features = false, features = ["parse", "p
 logos = "0.13.0"
 rle_vec = "0.4.1"
 static_assertions = "1.1.0"
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"

@@ -6,7 +6,7 @@ use decorum::Finite;
 use logos::Logos;
 
 #[derive(Debug, Copy, Clone, PartialEq, Logos)]
-#[logos(skip r"[ \t\n\f]+")]
+#[logos(skip r"[ \t\r\n\f]+")]
 #[logos(error = LexError)]
 pub enum Token<'s> {
     #[token("nil")]

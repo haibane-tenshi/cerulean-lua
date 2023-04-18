@@ -13,6 +13,11 @@ fn main() -> Result<()> {
     use cerulean_lua::runtime::Runtime;
     use logos::Logos;
 
+    let logger = tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+        .finish();
+    tracing::subscriber::set_global_default(logger)?;
+
     let Cli { path } = Cli::try_parse()?;
 
     let data = std::fs::read_to_string(path)?;
