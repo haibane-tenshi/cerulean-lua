@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use decorum::Finite;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Value {
     Nil,
@@ -27,10 +29,28 @@ impl Display for Value {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+impl From<Literal> for Value {
+    fn from(value: Literal) -> Self {
+        match value {
+            Literal::Nil => Value::Nil,
+            Literal::Bool(value) => Value::Bool(value),
+            Literal::Uint(value) => Value::Uint(value),
+            Literal::Float(value) => Value::Float(value.into_inner()),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Literal {
     Nil,
     Bool(bool),
     Uint(u64),
-    Float(f64),
+    Float(Finite<f64>),
+}
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let t: Value = Into::into(*self);
+        write!(f, "{t}")
+    }
 }

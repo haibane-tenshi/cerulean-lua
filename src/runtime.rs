@@ -29,7 +29,7 @@ impl Runtime {
             Return => ControlFlow::Break(()),
             LoadConstant(index) => {
                 let constant = *self.chunk.get_constant(index).ok_or(RuntimeError)?;
-                self.stack.push(constant);
+                self.stack.push(constant.into());
 
                 ControlFlow::Continue(())
             }

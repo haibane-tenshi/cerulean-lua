@@ -2,14 +2,23 @@ use std::fmt::Display;
 
 use rle_vec::RleVec;
 
-use crate::value::Value;
+use crate::value::Literal;
 
 pub type Index = u32;
 
 #[derive(Debug, Copy, Clone)]
+pub struct ConstId(pub Index);
+
+impl Display for ConstId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum OpCode {
     Return,
-    LoadConstant(Index),
+    LoadConstant(ConstId),
 }
 
 impl Display for OpCode {
@@ -28,13 +37,13 @@ impl Display for OpCode {
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub codes: Vec<OpCode>,
-    pub constants: Vec<Value>,
+    pub constants: Vec<Literal>,
     pub lines: RleVec<u32>,
 }
 
 impl Chunk {
-    pub fn get_constant(&self, index: Index) -> Option<&Value> {
-        let index: usize = index.try_into().ok()?;
+    pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
+        let index: usize = index.0.try_into().ok()?;
         self.constants.get(index)
     }
 }

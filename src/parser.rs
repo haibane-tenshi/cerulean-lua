@@ -1,8 +1,35 @@
+use std::collections::HashMap;
+
 use crate::lex::Token;
-use crate::opcode::Chunk;
+use crate::opcode::{Chunk, ConstId};
 use crate::value::Literal;
 
 pub struct Error;
+
+#[derive(Debug, Default)]
+struct ConstStorage {
+    constants: Vec<Literal>,
+    backlinks: HashMap<Literal, ConstId>,
+}
+
+impl ConstStorage {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn insert(&mut self, value: Literal) -> ConstId {
+        *self.backlinks.entry(value).or_insert_with(|| {
+            let index = self.constants.len().try_into().unwrap();
+            self.constants.push(value);
+
+            ConstId(index)
+        })
+    }
+
+    pub fn resolve(self) -> Vec<Literal> {
+        self.constants
+    }
+}
 
 fn next<'a, 's>(s: &'a [Token<'s>]) -> Result<(Token<'s>, &'a [Token<'s>]), Error> {
     let (token, s) = s.split_first().ok_or(Error)?;
@@ -13,7 +40,10 @@ pub fn chunk(s: &[Token]) -> Result<Chunk, Error> {
     todo!()
 }
 
-fn literal<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], Literal), Error> {
+fn literal<'a, 's>(
+    s: &'a [Token<'s>],
+    const_storage: &mut ConstStorage,
+) -> Result<(&'a [Token<'s>], ConstId), Error> {
     use crate::lex::Number;
 
     let (token, s) = next(s)?;
@@ -27,5 +57,7 @@ fn literal<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], Literal), Err
         _ => return Err(Error),
     };
 
-    Ok((s, literal))
+    let id = const_storage.insert(literal);
+
+    Ok((s, id))
 }

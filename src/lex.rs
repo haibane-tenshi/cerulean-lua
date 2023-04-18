@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use decorum::Finite;
 use logos::Logos;
 
 #[derive(Debug, Copy, Clone, PartialEq, Logos)]
@@ -188,7 +189,7 @@ pub enum Token<'s> {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Number {
     Uint(u64),
-    Float(f64),
+    Float(Finite<f64>),
 }
 
 impl FromStr for Number {
@@ -283,21 +284,21 @@ impl FromStr for Number {
                 if let Ok(value) = parse_with_options::<_, _, BASE_16_EXPBASE_10>(s, &OPTIONS_INT) {
                     Number::Uint(value)
                 } else if let Ok(value) =
-                    parse_with_options::<_, _, BASE_16_EXPBASE_10>(s, &OPTIONS_FLOAT_E)
+                    parse_with_options::<f64, _, BASE_16_EXPBASE_10>(s, &OPTIONS_FLOAT_E)
                 {
-                    Number::Float(value)
+                    Number::Float(value.try_into().unwrap())
                 } else if let Ok(value) =
-                    parse_with_options::<_, _, BASE_16_EXPBASE_10>(s, &OPTIONS_FLOAT_E2)
+                    parse_with_options::<f64, _, BASE_16_EXPBASE_10>(s, &OPTIONS_FLOAT_E2)
                 {
-                    Number::Float(value)
+                    Number::Float(value.try_into().unwrap())
                 } else if let Ok(value) =
-                    parse_with_options::<_, _, BASE_16_EXPBASE_2>(s, &OPTIONS_FLOAT_P)
+                    parse_with_options::<f64, _, BASE_16_EXPBASE_2>(s, &OPTIONS_FLOAT_P)
                 {
-                    Number::Float(value)
+                    Number::Float(value.try_into().unwrap())
                 } else if let Ok(value) =
-                    parse_with_options::<_, _, BASE_16_EXPBASE_2>(s, &OPTIONS_FLOAT_P2)
+                    parse_with_options::<f64, _, BASE_16_EXPBASE_2>(s, &OPTIONS_FLOAT_P2)
                 {
-                    Number::Float(value)
+                    Number::Float(value.try_into().unwrap())
                 } else {
                     return Err(());
                 }
@@ -305,11 +306,13 @@ impl FromStr for Number {
             None => {
                 if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &OPTIONS_INT) {
                     Number::Uint(value)
-                } else if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &OPTIONS_FLOAT_E) {
-                    Number::Float(value)
-                } else if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &OPTIONS_FLOAT_E2)
+                } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &OPTIONS_FLOAT_E)
                 {
-                    Number::Float(value)
+                    Number::Float(value.try_into().unwrap())
+                } else if let Ok(value) =
+                    parse_with_options::<f64, _, BASE_10>(s, &OPTIONS_FLOAT_E2)
+                {
+                    Number::Float(value.try_into().unwrap())
                 } else {
                     return Err(());
                 }
