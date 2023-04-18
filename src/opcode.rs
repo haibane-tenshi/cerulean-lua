@@ -19,6 +19,7 @@ impl Display for ConstId {
 pub enum OpCode {
     Return,
     LoadConstant(ConstId),
+    UnaryOp(UnaryOp),
     BinaryOp(BinaryOp),
 }
 
@@ -29,7 +30,23 @@ impl Display for OpCode {
         let s = match *self {
             Return => "Return".to_string(),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
+            UnaryOp(op) => format!("{:<10} [{op}]", "UnaryOp"),
             BinaryOp(op) => format!("{:<10} [{op}]", "BinOp"),
+        };
+
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UnaryOp {
+    Neg,
+}
+
+impl Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match *self {
+            UnaryOp::Neg => '-',
         };
 
         write!(f, "{s}")
@@ -121,6 +138,7 @@ impl Display for Chunk {
 
                     write!(f, " {constant}")?;
                 }
+                UnaryOp(_) => (),
                 BinaryOp(_) => (),
             }
 

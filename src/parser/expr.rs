@@ -1,6 +1,6 @@
 use super::{next, ParseError, Storages};
 use crate::lex::Token;
-use crate::opcode::BinaryOp;
+use crate::opcode::{BinaryOp, UnaryOp};
 
 fn literal<'a, 's>(
     s: &'a [Token<'s>],
@@ -41,7 +41,18 @@ fn expr_bp<'a, 's>(
 ) -> Result<(&'a [Token<'s>], ()), ParseError> {
     use crate::opcode::OpCode;
 
-    let (mut s, ()) = expr_atom(s, storages)?;
+    let mut s = if let Ok((s, op)) = unary_op(s) {
+        let ((), rhs_bp) = prefix_binding_power(op);
+        let (s, ()) = expr_bp(s, rhs_bp, storages)?;
+
+        storages.codes.push(OpCode::UnaryOp(UnaryOp::Neg));
+
+        s
+    } else {
+        let (s, ()) = expr_atom(s, storages)?;
+
+        s
+    };
 
     loop {
         let Ok((ns, op)) = bin_op(s) else {
@@ -69,6 +80,17 @@ fn expr_atom<'a, 's>(
     literal(s, storages)
 }
 
+fn unary_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], UnaryOp), ParseError> {
+    let (token, s) = next(s)?;
+
+    let op = match token {
+        Token::Minus => UnaryOp::Neg,
+        _ => return Err(ParseError),
+    };
+
+    Ok((s, op))
+}
+
 fn bin_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], BinaryOp), ParseError> {
     let (token, s) = next(s)?;
 
@@ -86,12 +108,18 @@ fn bin_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], BinaryOp), Par
     Ok((s, op))
 }
 
-pub fn infix_binding_power(op: BinaryOp) -> (u64, u64) {
+fn infix_binding_power(op: BinaryOp) -> (u64, u64) {
     use BinaryOp::*;
 
     match op {
         Add | Sub => (19, 20),
         Mul | Div | FloorDiv | Rem => (21, 22),
         Exp => (25, 26),
+    }
+}
+
+fn prefix_binding_power(op: UnaryOp) -> ((), u64) {
+    match op {
+        UnaryOp::Neg => ((), 24),
     }
 }

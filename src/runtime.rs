@@ -41,8 +41,8 @@ impl Runtime {
     }
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
-        use crate::opcode::BinaryOp;
         use crate::opcode::OpCode::*;
+        use crate::opcode::{BinaryOp, UnaryOp};
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(()))
@@ -53,6 +53,23 @@ impl Runtime {
             LoadConstant(index) => {
                 let constant = *self.chunk.get_constant(index).ok_or(RuntimeError)?;
                 self.stack.push(constant.into());
+
+                ControlFlow::Continue(())
+            }
+            UnaryOp(op) => {
+                let val = self.stack.pop().ok_or(RuntimeError)?;
+
+                let r = match val {
+                    Value::Int(val) => match op {
+                        UnaryOp::Neg => Value::Int(-val),
+                    },
+                    Value::Float(val) => match op {
+                        UnaryOp::Neg => Value::Float(-val),
+                    },
+                    _ => return Err(RuntimeError),
+                };
+
+                self.stack.push(r);
 
                 ControlFlow::Continue(())
             }
