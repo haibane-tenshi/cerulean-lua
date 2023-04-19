@@ -1,8 +1,11 @@
-use super::{LexParseError, NextToken, ParseError, Storages};
+use super::{ChunkTracker, LexParseError, NextToken, ParseError};
 use crate::lex::{Lexer, Token};
 use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
-fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
+fn literal<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Number;
     use crate::opcode::OpCode;
     use crate::value::Literal;
@@ -19,40 +22,65 @@ fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, (
         _ => return Err(ParseError.into()),
     };
 
-    let id = storage.constants.insert(literal);
-    storage.codes.push(OpCode::LoadConstant(id));
+    // Stack effect: push 1
+    let id = tracker.constants.insert(literal);
+    tracker.codes.push(OpCode::LoadConstant(id));
+    tracker.stack.push();
+
+    Ok((s, ()))
+}
+
+fn variable<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+
+    let token = s.next_token()?;
+
+    let ident = match token {
+        Token::Ident(ident) => ident,
+        _ => return Err(ParseError.into()),
+    };
+
+    let slot = tracker.stack.lookup_slot(ident).ok_or(ParseError)?;
+
+    // Stack effect: push 1
+    tracker.codes.push(OpCode::LoadStack(slot));
+    tracker.stack.push();
 
     Ok((s, ()))
 }
 
 pub(super) fn expr<'s>(
     s: Lexer<'s>,
-    storages: &mut Storages,
+    tracker: &mut ChunkTracker,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    expr_bp(s, 0, storages)
+    expr_bp(s, 0, tracker)
 }
 
 fn expr_bp<'s>(
     s: Lexer<'s>,
     min_bp: u64,
-    storages: &mut Storages,
+    tracker: &mut ChunkTracker,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::opcode::OpCode;
 
     let mut s = if let Ok((s, op)) = prefix_op(s.clone()) {
         let ((), rhs_bp) = op.binding_power();
-        let (s, ()) = expr_bp(s, rhs_bp, storages)?;
+        let (s, ()) = expr_bp(s, rhs_bp, tracker)?;
 
         let opcode = match op {
             Prefix::Ari(op) => OpCode::AriUnaOp(op),
             Prefix::Bit(op) => OpCode::BitUnaOp(op),
         };
 
-        storages.codes.push(opcode);
+        // Stack effect: pop 1 -> push 1
+        tracker.codes.push(opcode);
 
         s
     } else {
-        let (s, ()) = expr_atom(s, storages)?;
+        let (s, ()) = expr_atom(s, tracker)?;
 
         s
     };
@@ -68,7 +96,7 @@ fn expr_bp<'s>(
             break;
         }
 
-        (s, _) = expr_bp(ns, rhs_bp, storages).map_err(LexParseError::eof_into_err)?;
+        (s, _) = expr_bp(ns, rhs_bp, tracker).map_err(LexParseError::eof_into_err)?;
 
         let opcode = match op {
             Infix::Ari(op) => OpCode::AriBinOp(op),
@@ -77,14 +105,25 @@ fn expr_bp<'s>(
             Infix::Str(op) => OpCode::StrBinOp(op),
         };
 
-        storages.codes.push(opcode)
+        // Stack effect: pop 2 -> push 1
+        tracker.codes.push(opcode);
+        tracker.stack.pop();
     }
 
     Ok((s, ()))
 }
 
-fn expr_atom<'s>(s: Lexer<'s>, storages: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
-    literal(s, storages)
+fn expr_atom<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    if let Ok(r) = literal(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = variable(s, tracker) {
+        Ok(r)
+    } else {
+        Err(ParseError.into())
+    }
 }
 
 fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {

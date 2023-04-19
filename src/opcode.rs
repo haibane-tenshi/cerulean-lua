@@ -9,6 +9,9 @@ pub type Index = u32;
 #[derive(Debug, Copy, Clone)]
 pub struct ConstId(pub Index);
 
+#[derive(Debug, Copy, Clone)]
+pub struct StackSlot(pub Index);
+
 impl Display for ConstId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -19,6 +22,7 @@ impl Display for ConstId {
 pub enum OpCode {
     Return,
     LoadConstant(ConstId),
+    LoadStack(StackSlot),
     AriUnaOp(AriUnaOp),
     AriBinOp(AriBinOp),
     BitUnaOp(BitUnaOp),
@@ -34,6 +38,7 @@ impl Display for OpCode {
         let s = match *self {
             Return => "Return".to_string(),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
+            LoadStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "LoadStack"),
             AriUnaOp(op) => format!("{:<10} [{op}]", "AriUnaOp"),
             AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),
             BitUnaOp(op) => format!("{:<10} [{op}]", "BitUnaOp"),
@@ -224,6 +229,7 @@ impl Display for Chunk {
 
                     write!(f, " {constant}")?;
                 }
+                LoadStack(_) => (),
                 AriUnaOp(_) => (),
                 AriBinOp(_) => (),
                 BitUnaOp(_) => (),

@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt::Display;
 
-use crate::opcode::{Chunk, OpCode};
+use crate::opcode::{Chunk, OpCode, StackSlot};
 use crate::value::Value;
 
 pub type ControlFlow = std::ops::ControlFlow<()>;
@@ -53,6 +53,12 @@ impl Runtime {
             LoadConstant(index) => {
                 let constant = self.chunk.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
+
+                ControlFlow::Continue(())
+            }
+            LoadStack(slot) => {
+                let value = self.load_stack(slot).ok_or(RuntimeError)?.clone();
+                self.stack.push(value);
 
                 ControlFlow::Continue(())
             }
@@ -238,5 +244,10 @@ impl Runtime {
         self.ip += 1;
 
         Some(r)
+    }
+
+    pub fn load_stack(&mut self, slot: StackSlot) -> Option<&Value> {
+        let index: usize = slot.0.try_into().ok()?;
+        self.stack.get(index)
     }
 }
