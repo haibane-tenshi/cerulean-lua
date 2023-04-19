@@ -107,10 +107,10 @@ pub enum Token<'s> {
     Pipe,
 
     #[token("<<")]
-    LeftShift,
+    DoubleAngL,
 
     #[token(">>")]
-    RightShift,
+    DoubleAngR,
 
     #[token("//")]
     DoubleSlash,

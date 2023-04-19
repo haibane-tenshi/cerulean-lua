@@ -1,6 +1,6 @@
 use super::{LexParseError, NextToken, ParseError, Storages};
 use crate::lex::{Lexer, Token};
-use crate::opcode::{AriBinOp, AriUnaOp, BitUnaOp};
+use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp};
 
 fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Number;
@@ -57,11 +57,11 @@ fn expr_bp<'s>(
     };
 
     loop {
-        let Ok((ns, op)) = bin_op(s.clone()) else {
+        let Ok((ns, op)) = infix_op(s.clone()) else {
             break
         };
 
-        let (lhs_bp, rhs_bp) = infix_binding_power(op);
+        let (lhs_bp, rhs_bp) = op.binding_power();
 
         if lhs_bp < min_bp {
             break;
@@ -69,7 +69,12 @@ fn expr_bp<'s>(
 
         (s, _) = expr_bp(ns, rhs_bp, storages).map_err(LexParseError::eof_into_err)?;
 
-        storages.codes.push(OpCode::AriBinOp(op))
+        let opcode = match op {
+            Infix::AriBinOp(op) => OpCode::AriBinOp(op),
+            Infix::BitBinOp(op) => OpCode::BitBinOp(op),
+        };
+
+        storages.codes.push(opcode)
     }
 
     Ok((s, ()))
@@ -91,17 +96,22 @@ fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
     Ok((s, op))
 }
 
-fn bin_op(mut s: Lexer) -> Result<(Lexer, AriBinOp), LexParseError> {
+fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
     let token = s.next_token()?;
 
     let op = match token {
-        Token::Plus => AriBinOp::Add,
-        Token::Minus => AriBinOp::Sub,
-        Token::Asterisk => AriBinOp::Mul,
-        Token::Slash => AriBinOp::Div,
-        Token::DoubleSlash => AriBinOp::FloorDiv,
-        Token::Percent => AriBinOp::Rem,
-        Token::Caret => AriBinOp::Exp,
+        Token::Plus => Infix::AriBinOp(AriBinOp::Add),
+        Token::Minus => Infix::AriBinOp(AriBinOp::Sub),
+        Token::Asterisk => Infix::AriBinOp(AriBinOp::Mul),
+        Token::Slash => Infix::AriBinOp(AriBinOp::Div),
+        Token::DoubleSlash => Infix::AriBinOp(AriBinOp::FloorDiv),
+        Token::Percent => Infix::AriBinOp(AriBinOp::Rem),
+        Token::Caret => Infix::AriBinOp(AriBinOp::Exp),
+        Token::Ampersand => Infix::BitBinOp(BitBinOp::And),
+        Token::Pipe => Infix::BitBinOp(BitBinOp::Or),
+        Token::Tilde => Infix::BitBinOp(BitBinOp::Xor),
+        Token::DoubleAngL => Infix::BitBinOp(BitBinOp::ShL),
+        Token::DoubleAngR => Infix::BitBinOp(BitBinOp::ShR),
         _ => return Err(ParseError.into()),
     };
 
@@ -123,12 +133,34 @@ impl Prefix {
     }
 }
 
-fn infix_binding_power(op: AriBinOp) -> (u64, u64) {
-    use AriBinOp::*;
+#[derive(Debug, Copy, Clone)]
+enum Infix {
+    AriBinOp(AriBinOp),
+    BitBinOp(BitBinOp),
+}
 
-    match op {
-        Add | Sub => (19, 20),
-        Mul | Div | FloorDiv | Rem => (21, 22),
-        Exp => (25, 26),
+impl Infix {
+    fn binding_power(self) -> (u64, u64) {
+        match self {
+            Infix::AriBinOp(op) => {
+                use AriBinOp::*;
+
+                match op {
+                    Add | Sub => (19, 20),
+                    Mul | Div | FloorDiv | Rem => (21, 22),
+                    Exp => (25, 26),
+                }
+            }
+            Infix::BitBinOp(op) => {
+                use BitBinOp::*;
+
+                match op {
+                    Or => (7, 8),
+                    Xor => (9, 10),
+                    And => (11, 12),
+                    ShL | ShR => (13, 14),
+                }
+            }
+        }
     }
 }

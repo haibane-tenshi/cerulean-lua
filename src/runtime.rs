@@ -42,7 +42,7 @@ impl Runtime {
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::opcode::OpCode::*;
-        use crate::opcode::{AriBinOp, AriUnaOp, BitUnaOp};
+        use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp};
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(()))
@@ -118,6 +118,47 @@ impl Runtime {
                 let r = match val {
                     Value::Int(val) => match op {
                         BitUnaOp::Not => Value::Int(!val),
+                    },
+                    _ => return Err(RuntimeError),
+                };
+
+                self.stack.push(r);
+
+                ControlFlow::Continue(())
+            }
+            BitBinOp(op) => {
+                let rhs = self.stack.pop().ok_or(RuntimeError)?;
+                let lhs = self.stack.pop().ok_or(RuntimeError)?;
+
+                let r = match (lhs, rhs) {
+                    (Value::Int(lhs), Value::Int(rhs)) => match op {
+                        BitBinOp::And => Value::Int(lhs & rhs),
+                        BitBinOp::Or => Value::Int(lhs | rhs),
+                        BitBinOp::Xor => Value::Int(lhs ^ rhs),
+                        BitBinOp::ShL => {
+                            let r = if let Ok(rhs) = rhs.try_into() {
+                                lhs.checked_shl(rhs).unwrap_or_default()
+                            } else if let Ok(rhs) = (-rhs).try_into() {
+                                let lhs = lhs as u64;
+                                lhs.checked_shr(rhs).unwrap_or_default() as i64
+                            } else {
+                                0
+                            };
+
+                            Value::Int(r)
+                        }
+                        BitBinOp::ShR => {
+                            let r = if let Ok(rhs) = rhs.try_into() {
+                                let lhs = lhs as u64;
+                                lhs.checked_shr(rhs).unwrap_or_default() as i64
+                            } else if let Ok(rhs) = (-rhs).try_into() {
+                                lhs.checked_shl(rhs).unwrap_or_default()
+                            } else {
+                                0
+                            };
+
+                            Value::Int(r)
+                        }
                     },
                     _ => return Err(RuntimeError),
                 };
