@@ -1,6 +1,6 @@
 use super::{LexParseError, NextToken, ParseError, Storages};
 use crate::lex::{Lexer, Token};
-use crate::opcode::{BinaryOp, UnaryOp};
+use crate::opcode::{AriBinOp, AriUnaOp};
 
 fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Number;
@@ -42,7 +42,7 @@ fn expr_bp<'s>(
         let ((), rhs_bp) = prefix_binding_power(op);
         let (s, ()) = expr_bp(s, rhs_bp, storages)?;
 
-        storages.codes.push(OpCode::UnaryOp(UnaryOp::Neg));
+        storages.codes.push(OpCode::AriUnaOp(AriUnaOp::Neg));
 
         s
     } else {
@@ -64,7 +64,7 @@ fn expr_bp<'s>(
 
         (s, _) = expr_bp(ns, rhs_bp, storages).map_err(LexParseError::eof_into_err)?;
 
-        storages.codes.push(OpCode::BinaryOp(op))
+        storages.codes.push(OpCode::AriBinOp(op))
     }
 
     Ok((s, ()))
@@ -74,36 +74,36 @@ fn expr_atom<'s>(s: Lexer<'s>, storages: &mut Storages) -> Result<(Lexer<'s>, ()
     literal(s, storages)
 }
 
-fn unary_op(mut s: Lexer) -> Result<(Lexer, UnaryOp), LexParseError> {
+fn unary_op(mut s: Lexer) -> Result<(Lexer, AriUnaOp), LexParseError> {
     let token = s.next_token()?;
 
     let op = match token {
-        Token::Minus => UnaryOp::Neg,
+        Token::Minus => AriUnaOp::Neg,
         _ => return Err(ParseError.into()),
     };
 
     Ok((s, op))
 }
 
-fn bin_op(mut s: Lexer) -> Result<(Lexer, BinaryOp), LexParseError> {
+fn bin_op(mut s: Lexer) -> Result<(Lexer, AriBinOp), LexParseError> {
     let token = s.next_token()?;
 
     let op = match token {
-        Token::Plus => BinaryOp::Add,
-        Token::Minus => BinaryOp::Sub,
-        Token::Asterisk => BinaryOp::Mul,
-        Token::Slash => BinaryOp::Div,
-        Token::DoubleSlash => BinaryOp::FloorDiv,
-        Token::Percent => BinaryOp::Rem,
-        Token::Caret => BinaryOp::Exp,
+        Token::Plus => AriBinOp::Add,
+        Token::Minus => AriBinOp::Sub,
+        Token::Asterisk => AriBinOp::Mul,
+        Token::Slash => AriBinOp::Div,
+        Token::DoubleSlash => AriBinOp::FloorDiv,
+        Token::Percent => AriBinOp::Rem,
+        Token::Caret => AriBinOp::Exp,
         _ => return Err(ParseError.into()),
     };
 
     Ok((s, op))
 }
 
-fn infix_binding_power(op: BinaryOp) -> (u64, u64) {
-    use BinaryOp::*;
+fn infix_binding_power(op: AriBinOp) -> (u64, u64) {
+    use AriBinOp::*;
 
     match op {
         Add | Sub => (19, 20),
@@ -112,8 +112,8 @@ fn infix_binding_power(op: BinaryOp) -> (u64, u64) {
     }
 }
 
-fn prefix_binding_power(op: UnaryOp) -> ((), u64) {
+fn prefix_binding_power(op: AriUnaOp) -> ((), u64) {
     match op {
-        UnaryOp::Neg => ((), 24),
+        AriUnaOp::Neg => ((), 24),
     }
 }

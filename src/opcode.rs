@@ -19,8 +19,8 @@ impl Display for ConstId {
 pub enum OpCode {
     Return,
     LoadConstant(ConstId),
-    UnaryOp(UnaryOp),
-    BinaryOp(BinaryOp),
+    AriUnaOp(AriUnaOp),
+    AriBinOp(AriBinOp),
 }
 
 impl Display for OpCode {
@@ -30,8 +30,8 @@ impl Display for OpCode {
         let s = match *self {
             Return => "Return".to_string(),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
-            UnaryOp(op) => format!("{:<10} [{op}]", "UnaryOp"),
-            BinaryOp(op) => format!("{:<10} [{op}]", "BinOp"),
+            AriUnaOp(op) => format!("{:<10} [{op}]", "AriUnaOp"),
+            AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),
         };
 
         write!(f, "{s}")
@@ -39,14 +39,14 @@ impl Display for OpCode {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum UnaryOp {
+pub enum AriUnaOp {
     Neg,
 }
 
-impl Display for UnaryOp {
+impl Display for AriUnaOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match *self {
-            UnaryOp::Neg => '-',
+            AriUnaOp::Neg => '-',
         };
 
         write!(f, "{s}")
@@ -54,7 +54,7 @@ impl Display for UnaryOp {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum BinaryOp {
+pub enum AriBinOp {
     Add,
     Sub,
     Mul,
@@ -64,9 +64,9 @@ pub enum BinaryOp {
     Exp,
 }
 
-impl Display for BinaryOp {
+impl Display for AriBinOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use BinaryOp::*;
+        use AriBinOp::*;
 
         let s = match *self {
             Add => "+",
@@ -138,8 +138,8 @@ impl Display for Chunk {
 
                     write!(f, " {constant}")?;
                 }
-                UnaryOp(_) => (),
-                BinaryOp(_) => (),
+                AriUnaOp(_) => (),
+                AriBinOp(_) => (),
             }
 
             writeln!(f)?;

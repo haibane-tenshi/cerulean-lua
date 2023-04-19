@@ -42,7 +42,7 @@ impl Runtime {
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::opcode::OpCode::*;
-        use crate::opcode::{BinaryOp, UnaryOp};
+        use crate::opcode::{AriBinOp, AriUnaOp};
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(()))
@@ -56,15 +56,15 @@ impl Runtime {
 
                 ControlFlow::Continue(())
             }
-            UnaryOp(op) => {
+            AriUnaOp(op) => {
                 let val = self.stack.pop().ok_or(RuntimeError)?;
 
                 let r = match val {
                     Value::Int(val) => match op {
-                        UnaryOp::Neg => Value::Int(-val),
+                        AriUnaOp::Neg => Value::Int(-val),
                     },
                     Value::Float(val) => match op {
-                        UnaryOp::Neg => Value::Float(-val),
+                        AriUnaOp::Neg => Value::Float(-val),
                     },
                     _ => return Err(RuntimeError),
                 };
@@ -73,37 +73,37 @@ impl Runtime {
 
                 ControlFlow::Continue(())
             }
-            BinaryOp(op) => {
+            AriBinOp(op) => {
                 let rhs = self.stack.pop().ok_or(RuntimeError)?;
                 let lhs = self.stack.pop().ok_or(RuntimeError)?;
 
                 let r = match (lhs, rhs) {
                     (Value::Int(lhs), Value::Int(rhs)) => match op {
-                        BinaryOp::Add => Value::Int(lhs.wrapping_add(rhs)),
-                        BinaryOp::Sub => Value::Int(lhs.wrapping_sub(rhs)),
-                        BinaryOp::Mul => Value::Int(lhs.wrapping_mul(rhs)),
-                        BinaryOp::Rem => Value::Int(lhs.rem_euclid(rhs)),
-                        BinaryOp::Div => {
+                        AriBinOp::Add => Value::Int(lhs.wrapping_add(rhs)),
+                        AriBinOp::Sub => Value::Int(lhs.wrapping_sub(rhs)),
+                        AriBinOp::Mul => Value::Int(lhs.wrapping_mul(rhs)),
+                        AriBinOp::Rem => Value::Int(lhs.rem_euclid(rhs)),
+                        AriBinOp::Div => {
                             let r = (lhs as f64) / (rhs as f64);
                             Value::Float(r)
                         }
-                        BinaryOp::FloorDiv => {
+                        AriBinOp::FloorDiv => {
                             let r = ((lhs as f64) / (rhs as f64)).floor();
                             Value::Float(r)
                         }
-                        BinaryOp::Exp => {
+                        AriBinOp::Exp => {
                             let r = (lhs as f64).powf(rhs as f64);
                             Value::Float(r)
                         }
                     },
                     (Value::Float(lhs), Value::Float(rhs)) => match op {
-                        BinaryOp::Add => Value::Float(lhs + rhs),
-                        BinaryOp::Sub => Value::Float(lhs - rhs),
-                        BinaryOp::Mul => Value::Float(lhs * rhs),
-                        BinaryOp::Div => Value::Float(lhs / rhs),
-                        BinaryOp::FloorDiv => Value::Float((lhs / rhs).floor()),
-                        BinaryOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
-                        BinaryOp::Exp => Value::Float(lhs.powf(rhs)),
+                        AriBinOp::Add => Value::Float(lhs + rhs),
+                        AriBinOp::Sub => Value::Float(lhs - rhs),
+                        AriBinOp::Mul => Value::Float(lhs * rhs),
+                        AriBinOp::Div => Value::Float(lhs / rhs),
+                        AriBinOp::FloorDiv => Value::Float((lhs / rhs).floor()),
+                        AriBinOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
+                        AriBinOp::Exp => Value::Float(lhs.powf(rhs)),
                     },
                     _ => return Err(RuntimeError),
                 };
