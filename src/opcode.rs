@@ -23,6 +23,7 @@ pub enum OpCode {
     AriBinOp(AriBinOp),
     BitUnaOp(BitUnaOp),
     BitBinOp(BitBinOp),
+    RelBinOp(RelBinOp),
 }
 
 impl Display for OpCode {
@@ -36,6 +37,7 @@ impl Display for OpCode {
             AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),
             BitUnaOp(op) => format!("{:<10} [{op}]", "BitUnaOp"),
             BitBinOp(op) => format!("{:<10} [{op}]", "BitBinOp"),
+            RelBinOp(op) => format!("{:<10} [{op}]", "RelBinOp"),
         };
 
         write!(f, "{s}")
@@ -124,6 +126,31 @@ impl Display for BitBinOp {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum RelBinOp {
+    Eq,
+    Neq,
+    Le,
+    Lt,
+    Ge,
+    Gt,
+}
+
+impl Display for RelBinOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match *self {
+            RelBinOp::Eq => "==",
+            RelBinOp::Neq => "~=",
+            RelBinOp::Le => "<",
+            RelBinOp::Lt => "<=",
+            RelBinOp::Ge => ">",
+            RelBinOp::Gt => ">=",
+        };
+
+        write!(f, "{s}")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub codes: Vec<OpCode>,
@@ -184,6 +211,7 @@ impl Display for Chunk {
                 AriBinOp(_) => (),
                 BitUnaOp(_) => (),
                 BitBinOp(_) => (),
+                RelBinOp(_) => (),
             }
 
             writeln!(f)?;

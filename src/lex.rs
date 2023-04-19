@@ -116,22 +116,22 @@ pub enum Token<'s> {
     DoubleSlash,
 
     #[token("==")]
-    Equal,
+    DoubleEqual,
 
     #[token("~=")]
-    NotEqual,
+    TildeEqual,
 
     #[token("<=")]
-    LessThanOrEqual,
+    AngLEqual,
 
     #[token(">=")]
-    GreaterThanOrEqual,
+    AngREqual,
 
     #[token("<")]
-    Less,
+    AngL,
 
     #[token(">")]
-    Greater,
+    AngR,
 
     #[token("=")]
     Assign,

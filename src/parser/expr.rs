@@ -1,6 +1,6 @@
 use super::{LexParseError, NextToken, ParseError, Storages};
 use crate::lex::{Lexer, Token};
-use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp};
+use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp};
 
 fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Number;
@@ -43,8 +43,8 @@ fn expr_bp<'s>(
         let (s, ()) = expr_bp(s, rhs_bp, storages)?;
 
         let opcode = match op {
-            Prefix::AriUnaOp(op) => OpCode::AriUnaOp(op),
-            Prefix::BitUnaOp(op) => OpCode::BitUnaOp(op),
+            Prefix::Ari(op) => OpCode::AriUnaOp(op),
+            Prefix::Bit(op) => OpCode::BitUnaOp(op),
         };
 
         storages.codes.push(opcode);
@@ -70,8 +70,9 @@ fn expr_bp<'s>(
         (s, _) = expr_bp(ns, rhs_bp, storages).map_err(LexParseError::eof_into_err)?;
 
         let opcode = match op {
-            Infix::AriBinOp(op) => OpCode::AriBinOp(op),
-            Infix::BitBinOp(op) => OpCode::BitBinOp(op),
+            Infix::Ari(op) => OpCode::AriBinOp(op),
+            Infix::Bit(op) => OpCode::BitBinOp(op),
+            Infix::Rel(op) => OpCode::RelBinOp(op),
         };
 
         storages.codes.push(opcode)
@@ -88,8 +89,8 @@ fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
     let token = s.next_token()?;
 
     let op = match token {
-        Token::Minus => Prefix::AriUnaOp(AriUnaOp::Neg),
-        Token::Tilde => Prefix::BitUnaOp(BitUnaOp::Not),
+        Token::Minus => Prefix::Ari(AriUnaOp::Neg),
+        Token::Tilde => Prefix::Bit(BitUnaOp::Not),
         _ => return Err(ParseError.into()),
     };
 
@@ -100,18 +101,24 @@ fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
     let token = s.next_token()?;
 
     let op = match token {
-        Token::Plus => Infix::AriBinOp(AriBinOp::Add),
-        Token::Minus => Infix::AriBinOp(AriBinOp::Sub),
-        Token::Asterisk => Infix::AriBinOp(AriBinOp::Mul),
-        Token::Slash => Infix::AriBinOp(AriBinOp::Div),
-        Token::DoubleSlash => Infix::AriBinOp(AriBinOp::FloorDiv),
-        Token::Percent => Infix::AriBinOp(AriBinOp::Rem),
-        Token::Caret => Infix::AriBinOp(AriBinOp::Exp),
-        Token::Ampersand => Infix::BitBinOp(BitBinOp::And),
-        Token::Pipe => Infix::BitBinOp(BitBinOp::Or),
-        Token::Tilde => Infix::BitBinOp(BitBinOp::Xor),
-        Token::DoubleAngL => Infix::BitBinOp(BitBinOp::ShL),
-        Token::DoubleAngR => Infix::BitBinOp(BitBinOp::ShR),
+        Token::Plus => Infix::Ari(AriBinOp::Add),
+        Token::Minus => Infix::Ari(AriBinOp::Sub),
+        Token::Asterisk => Infix::Ari(AriBinOp::Mul),
+        Token::Slash => Infix::Ari(AriBinOp::Div),
+        Token::DoubleSlash => Infix::Ari(AriBinOp::FloorDiv),
+        Token::Percent => Infix::Ari(AriBinOp::Rem),
+        Token::Caret => Infix::Ari(AriBinOp::Exp),
+        Token::Ampersand => Infix::Bit(BitBinOp::And),
+        Token::Pipe => Infix::Bit(BitBinOp::Or),
+        Token::Tilde => Infix::Bit(BitBinOp::Xor),
+        Token::DoubleAngL => Infix::Bit(BitBinOp::ShL),
+        Token::DoubleAngR => Infix::Bit(BitBinOp::ShR),
+        Token::DoubleEqual => Infix::Rel(RelBinOp::Eq),
+        Token::TildeEqual => Infix::Rel(RelBinOp::Neq),
+        Token::AngL => Infix::Rel(RelBinOp::Le),
+        Token::AngLEqual => Infix::Rel(RelBinOp::Lt),
+        Token::AngR => Infix::Rel(RelBinOp::Ge),
+        Token::AngREqual => Infix::Rel(RelBinOp::Gt),
         _ => return Err(ParseError.into()),
     };
 
@@ -120,29 +127,30 @@ fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
 
 #[derive(Debug, Copy, Clone)]
 enum Prefix {
-    AriUnaOp(AriUnaOp),
-    BitUnaOp(BitUnaOp),
+    Ari(AriUnaOp),
+    Bit(BitUnaOp),
 }
 
 impl Prefix {
     fn binding_power(self) -> ((), u64) {
         match self {
-            Prefix::AriUnaOp(AriUnaOp::Neg) => ((), 24),
-            Prefix::BitUnaOp(BitUnaOp::Not) => ((), 24),
+            Prefix::Ari(AriUnaOp::Neg) => ((), 24),
+            Prefix::Bit(BitUnaOp::Not) => ((), 24),
         }
     }
 }
 
 #[derive(Debug, Copy, Clone)]
 enum Infix {
-    AriBinOp(AriBinOp),
-    BitBinOp(BitBinOp),
+    Ari(AriBinOp),
+    Bit(BitBinOp),
+    Rel(RelBinOp),
 }
 
 impl Infix {
     fn binding_power(self) -> (u64, u64) {
         match self {
-            Infix::AriBinOp(op) => {
+            Infix::Ari(op) => {
                 use AriBinOp::*;
 
                 match op {
@@ -151,7 +159,7 @@ impl Infix {
                     Exp => (25, 26),
                 }
             }
-            Infix::BitBinOp(op) => {
+            Infix::Bit(op) => {
                 use BitBinOp::*;
 
                 match op {
@@ -161,6 +169,7 @@ impl Infix {
                     ShL | ShR => (13, 14),
                 }
             }
+            Infix::Rel(_) => (5, 6),
         }
     }
 }
