@@ -51,7 +51,7 @@ impl Runtime {
         let r = match code {
             Return => ControlFlow::Break(()),
             LoadConstant(index) => {
-                let constant = *self.chunk.get_constant(index).ok_or(RuntimeError)?;
+                let constant = self.chunk.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
 
                 ControlFlow::Continue(())

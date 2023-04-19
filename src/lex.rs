@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use decorum::Finite;
@@ -6,7 +7,7 @@ use thiserror::Error;
 
 pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Logos)]
+#[derive(Debug, Clone, PartialEq, Logos)]
 #[logos(skip r"[ \t\r\n\f]+")]
 #[logos(error = LexError)]
 pub enum Token<'s> {
@@ -178,9 +179,9 @@ pub enum Token<'s> {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'s str),
 
-    #[regex(r#""(([\\].)|.)*""#)]
-    #[regex(r#"'(([\\].)|.)*'"#)]
-    ShortLiteralString(&'s str),
+    #[regex("\"(([\\\\](\r\n|.))|[^\"\\\\\r\n])*\"", |lex| unescape(&lex.slice()[1..lex.slice().len()-1]))]
+    #[regex("'(([\\\\](\r\n|.))|[^'\\\\\r\n])*'", |lex| unescape(&lex.slice()[1..lex.slice().len()-1]))]
+    ShortLiteralString(Cow<'s, str>),
 
     #[regex("[0-9]+(.[0-9]+)?([eE][+-]?[0-9]+)?", |lex| lex.slice().parse())]
     #[regex("0[xX][0-9a-fA-F]+([.][0-9a-fA-F]+)?(([eE]|[pP])[+-]?[0-9a-fA-F]+)?", |lex| lex.slice().parse())]
@@ -325,6 +326,75 @@ impl FromStr for Number {
 
         Ok(r)
     }
+}
+
+pub fn unescape(mut s: &str) -> Result<Cow<str>, LexError> {
+    if !s.contains('\\') {
+        return Ok(s.into());
+    }
+
+    let mut r = String::with_capacity(s.len());
+
+    while let Some(i) = s.find('\\') {
+        r += &s[..i];
+        s = &s[i..];
+
+        let mut iter = s.char_indices();
+        let _ = iter.next();
+        let (_, c) = iter.next().ok_or(LexError)?;
+
+        let unescaped = {
+            let code = match c {
+                'a' => Some(0x07),
+                'b' => Some(0x08),
+                'f' => Some(0x0c),
+                'r' => Some(0x0d),
+                't' => Some(0x09),
+                'v' => Some(0x0b),
+                'n' => Some(0x0a),
+                '\\' => Some(0x5c),
+                '"' => Some(0x22),
+                '\'' => Some(0x27),
+                '\n' => Some(0x0a),
+                '\r' => {
+                    let r = (&mut iter)
+                        .peekable()
+                        .next_if(|&(_, c)| c == '\n')
+                        .map(|_| 0x0a)
+                        .ok_or(LexError)?;
+
+                    Some(r)
+                }
+                'z' => {
+                    while (&mut iter)
+                        .peekable()
+                        .next_if(|(_, c)| c.is_whitespace())
+                        .is_some()
+                    {}
+
+                    None
+                }
+                _ => return Err(LexError),
+            };
+
+            code.map(|code| char::from_u32(code).ok_or(LexError))
+                .transpose()?
+        };
+
+        if let Some(c) = unescaped {
+            r.push(c);
+        }
+
+        s = if let Some((i, _)) = iter.next() {
+            &s[i..]
+        } else {
+            ""
+        };
+    }
+
+    r += s;
+
+    Ok(r.into())
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Error)]

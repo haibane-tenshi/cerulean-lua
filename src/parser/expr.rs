@@ -15,6 +15,7 @@ fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, (
         Token::False => Literal::Bool(false),
         Token::Numeral(Number::Int(value)) => Literal::Int(value),
         Token::Numeral(Number::Float(value)) => Literal::Float(value),
+        Token::ShortLiteralString(value) => Literal::String(value.to_string()),
         _ => return Err(ParseError.into()),
     };
 

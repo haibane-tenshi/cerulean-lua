@@ -9,27 +9,30 @@ pub enum Type {
     Bool,
     Int,
     Float,
+    String,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Nil,
     Bool(bool),
     Int(i64),
     Float(f64),
+    String(String),
 }
 
 impl Value {
-    pub fn is_falsey(self) -> bool {
+    pub fn is_falsey(&self) -> bool {
         matches!(self, Value::Nil | Value::Bool(false))
     }
 
-    pub fn type_(self) -> Type {
+    pub fn type_(&self) -> Type {
         match self {
             Value::Nil => Type::Nil,
             Value::Bool(_) => Type::Bool,
             Value::Int(_) => Type::Int,
             Value::Float(_) => Type::Float,
+            Value::String(_) => Type::String,
         }
     }
 }
@@ -43,6 +46,7 @@ impl PartialOrd for Value {
             (Bool(lhs), Bool(rhs)) => Some(lhs.cmp(rhs)),
             (Int(lhs), Int(rhs)) => Some(lhs.cmp(rhs)),
             (Float(lhs), Float(rhs)) => lhs.partial_cmp(rhs),
+            (String(lhs), String(rhs)) => Some(lhs.cmp(rhs)),
             _ => None,
         }
     }
@@ -52,11 +56,12 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
 
-        match *self {
+        match self {
             Nil => write!(f, "nil"),
             Bool(v) => write!(f, "{v}"),
             Int(v) => write!(f, "{v}_i64"),
             Float(v) => write!(f, "{v}_f64"),
+            String(v) => write!(f, "{v:?}"),
         }
     }
 }
@@ -68,21 +73,23 @@ impl From<Literal> for Value {
             Literal::Bool(value) => Value::Bool(value),
             Literal::Int(value) => Value::Int(value),
             Literal::Float(value) => Value::Float(value.into_inner()),
+            Literal::String(value) => Value::String(value),
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Literal {
     Nil,
     Bool(bool),
     Int(i64),
     Float(Finite<f64>),
+    String(String),
 }
 
 impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let t: Value = Into::into(*self);
+        let t: Value = Into::into(self.clone());
         write!(f, "{t}")
     }
 }

@@ -61,7 +61,7 @@ struct ConstStorage {
 
 impl ConstStorage {
     pub fn insert(&mut self, value: Literal) -> ConstId {
-        *self.backlinks.entry(value).or_insert_with(|| {
+        *self.backlinks.entry(value.clone()).or_insert_with(|| {
             let index = self.constants.len().try_into().unwrap();
             self.constants.push(value);
 
