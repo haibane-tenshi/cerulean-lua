@@ -1,6 +1,6 @@
 use super::{LexParseError, NextToken, ParseError, Storages};
 use crate::lex::{Lexer, Token};
-use crate::opcode::{AriBinOp, AriUnaOp};
+use crate::opcode::{AriBinOp, AriUnaOp, BitUnaOp};
 
 fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Number;
@@ -38,11 +38,16 @@ fn expr_bp<'s>(
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::opcode::OpCode;
 
-    let mut s = if let Ok((s, op)) = unary_op(s.clone()) {
-        let ((), rhs_bp) = prefix_binding_power(op);
+    let mut s = if let Ok((s, op)) = prefix_op(s.clone()) {
+        let ((), rhs_bp) = op.binding_power();
         let (s, ()) = expr_bp(s, rhs_bp, storages)?;
 
-        storages.codes.push(OpCode::AriUnaOp(AriUnaOp::Neg));
+        let opcode = match op {
+            Prefix::AriUnaOp(op) => OpCode::AriUnaOp(op),
+            Prefix::BitUnaOp(op) => OpCode::BitUnaOp(op),
+        };
+
+        storages.codes.push(opcode);
 
         s
     } else {
@@ -74,11 +79,12 @@ fn expr_atom<'s>(s: Lexer<'s>, storages: &mut Storages) -> Result<(Lexer<'s>, ()
     literal(s, storages)
 }
 
-fn unary_op(mut s: Lexer) -> Result<(Lexer, AriUnaOp), LexParseError> {
+fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
     let token = s.next_token()?;
 
     let op = match token {
-        Token::Minus => AriUnaOp::Neg,
+        Token::Minus => Prefix::AriUnaOp(AriUnaOp::Neg),
+        Token::Tilde => Prefix::BitUnaOp(BitUnaOp::Not),
         _ => return Err(ParseError.into()),
     };
 
@@ -102,6 +108,21 @@ fn bin_op(mut s: Lexer) -> Result<(Lexer, AriBinOp), LexParseError> {
     Ok((s, op))
 }
 
+#[derive(Debug, Copy, Clone)]
+enum Prefix {
+    AriUnaOp(AriUnaOp),
+    BitUnaOp(BitUnaOp),
+}
+
+impl Prefix {
+    fn binding_power(self) -> ((), u64) {
+        match self {
+            Prefix::AriUnaOp(AriUnaOp::Neg) => ((), 24),
+            Prefix::BitUnaOp(BitUnaOp::Not) => ((), 24),
+        }
+    }
+}
+
 fn infix_binding_power(op: AriBinOp) -> (u64, u64) {
     use AriBinOp::*;
 
@@ -109,11 +130,5 @@ fn infix_binding_power(op: AriBinOp) -> (u64, u64) {
         Add | Sub => (19, 20),
         Mul | Div | FloorDiv | Rem => (21, 22),
         Exp => (25, 26),
-    }
-}
-
-fn prefix_binding_power(op: AriUnaOp) -> ((), u64) {
-    match op {
-        AriUnaOp::Neg => ((), 24),
     }
 }

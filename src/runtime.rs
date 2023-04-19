@@ -42,7 +42,7 @@ impl Runtime {
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::opcode::OpCode::*;
-        use crate::opcode::{AriBinOp, AriUnaOp};
+        use crate::opcode::{AriBinOp, AriUnaOp, BitUnaOp};
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(()))
@@ -104,6 +104,20 @@ impl Runtime {
                         AriBinOp::FloorDiv => Value::Float((lhs / rhs).floor()),
                         AriBinOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
                         AriBinOp::Exp => Value::Float(lhs.powf(rhs)),
+                    },
+                    _ => return Err(RuntimeError),
+                };
+
+                self.stack.push(r);
+
+                ControlFlow::Continue(())
+            }
+            BitUnaOp(op) => {
+                let val = self.stack.pop().ok_or(RuntimeError)?;
+
+                let r = match val {
+                    Value::Int(val) => match op {
+                        BitUnaOp::Not => Value::Int(!val),
                     },
                     _ => return Err(RuntimeError),
                 };

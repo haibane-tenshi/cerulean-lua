@@ -21,6 +21,7 @@ pub enum OpCode {
     LoadConstant(ConstId),
     AriUnaOp(AriUnaOp),
     AriBinOp(AriBinOp),
+    BitUnaOp(BitUnaOp),
 }
 
 impl Display for OpCode {
@@ -32,6 +33,7 @@ impl Display for OpCode {
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
             AriUnaOp(op) => format!("{:<10} [{op}]", "AriUnaOp"),
             AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),
+            BitUnaOp(op) => format!("{:<10} [{op}]", "BitUnaOp"),
         };
 
         write!(f, "{s}")
@@ -76,6 +78,21 @@ impl Display for AriBinOp {
             FloorDiv => "//",
             Rem => "%",
             Exp => "^",
+        };
+
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum BitUnaOp {
+    Not,
+}
+
+impl Display for BitUnaOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match *self {
+            BitUnaOp::Not => "~",
         };
 
         write!(f, "{s}")
@@ -140,6 +157,7 @@ impl Display for Chunk {
                 }
                 AriUnaOp(_) => (),
                 AriBinOp(_) => (),
+                BitUnaOp(_) => (),
             }
 
             writeln!(f)?;
