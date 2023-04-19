@@ -17,9 +17,29 @@ impl Display for RuntimeError {
 
 impl Error for RuntimeError {}
 
+#[derive(Debug, Default)]
+struct Stack {
+    stack: Vec<Value>,
+}
+
+impl Stack {
+    pub fn push(&mut self, value: Value) {
+        self.stack.push(value)
+    }
+
+    pub fn pop(&mut self) -> Option<Value> {
+        self.stack.pop()
+    }
+
+    pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
+        let index: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
+        self.stack.get(index).ok_or(RuntimeError)
+    }
+}
+
 pub struct Runtime {
     chunk: Chunk,
-    stack: Vec<Value>,
+    stack: Stack,
     ip: usize,
 }
 
@@ -57,7 +77,7 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             LoadStack(slot) => {
-                let value = self.load_stack(slot).ok_or(RuntimeError)?.clone();
+                let value = self.stack.get(slot)?.clone();
                 self.stack.push(value);
 
                 ControlFlow::Continue(())
@@ -244,10 +264,5 @@ impl Runtime {
         self.ip += 1;
 
         Some(r)
-    }
-
-    pub fn load_stack(&mut self, slot: StackSlot) -> Option<&Value> {
-        let index: usize = slot.0.try_into().ok()?;
-        self.stack.get(index)
     }
 }
