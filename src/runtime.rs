@@ -42,7 +42,7 @@ impl Runtime {
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::opcode::OpCode::*;
-        use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp};
+        use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(()))
@@ -205,6 +205,21 @@ impl Runtime {
                 };
 
                 self.stack.push(Value::Bool(r));
+
+                ControlFlow::Continue(())
+            }
+            StrBinOp(op) => {
+                let rhs = self.stack.pop().ok_or(RuntimeError)?;
+                let lhs = self.stack.pop().ok_or(RuntimeError)?;
+
+                let r = match (lhs, rhs) {
+                    (Value::String(lhs), Value::String(rhs)) => match op {
+                        StrBinOp::Concat => Value::String(lhs + &rhs),
+                    },
+                    _ => return Err(RuntimeError),
+                };
+
+                self.stack.push(r);
 
                 ControlFlow::Continue(())
             }

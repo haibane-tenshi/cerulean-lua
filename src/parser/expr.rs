@@ -1,6 +1,6 @@
 use super::{LexParseError, NextToken, ParseError, Storages};
 use crate::lex::{Lexer, Token};
-use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp};
+use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
 fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Number;
@@ -74,6 +74,7 @@ fn expr_bp<'s>(
             Infix::Ari(op) => OpCode::AriBinOp(op),
             Infix::Bit(op) => OpCode::BitBinOp(op),
             Infix::Rel(op) => OpCode::RelBinOp(op),
+            Infix::Str(op) => OpCode::StrBinOp(op),
         };
 
         storages.codes.push(opcode)
@@ -120,6 +121,7 @@ fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
         Token::AngLEqual => Infix::Rel(RelBinOp::Lt),
         Token::AngR => Infix::Rel(RelBinOp::Ge),
         Token::AngREqual => Infix::Rel(RelBinOp::Gt),
+        Token::DoubleDot => Infix::Str(StrBinOp::Concat),
         _ => return Err(ParseError.into()),
     };
 
@@ -146,6 +148,7 @@ enum Infix {
     Ari(AriBinOp),
     Bit(BitBinOp),
     Rel(RelBinOp),
+    Str(StrBinOp),
 }
 
 impl Infix {
@@ -171,6 +174,7 @@ impl Infix {
                 }
             }
             Infix::Rel(_) => (5, 6),
+            Infix::Str(_) => (15, 16),
         }
     }
 }
