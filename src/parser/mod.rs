@@ -78,6 +78,7 @@ impl ConstTracker {
 struct StackTracker<'s> {
     stack: Vec<Option<&'s str>>,
     backlinks: HashMap<&'s str, Vec<StackSlot>>,
+    frames: Vec<usize>,
 }
 
 impl<'s> StackTracker<'s> {
@@ -118,6 +119,21 @@ impl<'s> StackTracker<'s> {
     pub fn lookup_slot(&self, name: &str) -> Option<StackSlot> {
         self.backlinks.get(name).and_then(|bl| bl.last()).copied()
     }
+
+    pub fn push_frame(&mut self) {
+        self.frames.push(self.stack.len());
+    }
+
+    pub fn pop_frame(&mut self) -> Option<u32> {
+        let index = self.frames.pop()?;
+        let count = self.stack.len().checked_sub(index)?.try_into().ok()?;
+
+        for _ in 0..count {
+            self.pop();
+        }
+
+        Some(count)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -133,15 +149,12 @@ impl<'s> ChunkTracker<'s> {
     }
 }
 
-pub fn chunk(mut s: Lexer) -> Result<Chunk, LexParseError> {
+pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
     let mut storages = ChunkTracker::empty();
 
-    loop {
-        s = match assignment(s, &mut storages) {
-            Ok((s, ())) => s,
-            Err(LexParseError::Eof) => break,
-            Err(err) => return Err(err),
-        };
+    match block(s, &mut storages) {
+        Ok(_) | Err(LexParseError::Eof) => (),
+        Err(err) => return Err(err),
     }
 
     let ChunkTracker {
@@ -161,9 +174,83 @@ pub fn chunk(mut s: Lexer) -> Result<Chunk, LexParseError> {
     Ok(chunk)
 }
 
+fn block<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    tracker.stack.push_frame();
+
+    loop {
+        s = match statement(s, tracker) {
+            Ok((s, ())) => s,
+            Err(LexParseError::Eof) => {
+                use logos::Logos;
+
+                s = Token::lexer("");
+                break;
+            }
+            Err(err) => return Err(err),
+        };
+    }
+
+    let extra_stack = tracker.stack.pop_frame().unwrap();
+
+    // Remove excessive temporaries upon exiting block.
+    if let Ok(extra_stack) = extra_stack.try_into() {
+        tracker.codes.push(OpCode::PopStack(extra_stack))
+    }
+
+    Ok((s, ()))
+}
+
+fn statement<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    let r = if let Ok(r) = semicolon(s.clone()) {
+        Ok(r)
+    } else if let Ok(r) = assignment(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = do_end(s.clone(), tracker) {
+        Ok(r)
+    } else {
+        let mut s = s;
+        let _ = s.next_token()?;
+        Err(ParseError.into())
+    };
+
+    r
+}
+
+fn semicolon(mut s: Lexer) -> Result<(Lexer, ()), LexParseError> {
+    match s.next_token()? {
+        Token::Semicolon => Ok((s, ())),
+        _ => Err(ParseError.into()),
+    }
+}
+
+fn do_end<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    match s.next_token()? {
+        Token::Do => (),
+        _ => return Err(ParseError.into()),
+    };
+
+    let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    match s.next_required_token()? {
+        Token::End => (),
+        _ => return Err(ParseError.into()),
+    };
+
+    Ok((s, ()))
+}
+
 fn assignment<'s>(
     mut s: Lexer<'s>,
-    storages: &mut ChunkTracker<'s>,
+    tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     let tokens = [
         s.next_token()?,
@@ -176,10 +263,10 @@ fn assignment<'s>(
         _ => return Err(ParseError.into()),
     };
 
-    let (s, ()) = expr::expr(s, storages).map_err(LexParseError::eof_into_err)?;
+    let (s, ()) = expr::expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
-    storages.stack.pop();
-    storages.stack.push_named(ident);
+    tracker.stack.pop();
+    tracker.stack.push_named(ident);
 
     Ok((s, ()))
 }

@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::num::NonZeroU32;
 
 use rle_vec::RleVec;
 
@@ -23,6 +24,7 @@ pub enum OpCode {
     Return,
     LoadConstant(ConstId),
     LoadStack(StackSlot),
+    PopStack(NonZeroU32),
     AriUnaOp(AriUnaOp),
     AriBinOp(AriBinOp),
     BitUnaOp(BitUnaOp),
@@ -39,6 +41,7 @@ impl Display for OpCode {
             Return => "Return".to_string(),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
             LoadStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "LoadStack"),
+            PopStack(count) => format!("{:<10} [{count:>3}]", "PopStack"),
             AriUnaOp(op) => format!("{:<10} [{op}]", "AriUnaOp"),
             AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),
             BitUnaOp(op) => format!("{:<10} [{op}]", "BitUnaOp"),
@@ -230,6 +233,7 @@ impl Display for Chunk {
                     write!(f, " {constant}")?;
                 }
                 LoadStack(_) => (),
+                PopStack(_) => (),
                 AriUnaOp(_) => (),
                 AriBinOp(_) => (),
                 BitUnaOp(_) => (),

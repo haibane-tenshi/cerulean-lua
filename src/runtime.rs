@@ -31,6 +31,14 @@ impl Stack {
         self.stack.pop()
     }
 
+    pub fn pop_many(&mut self, count: u32) -> Result<(), RuntimeError> {
+        let count: usize = count.try_into().map_err(|_| RuntimeError)?;
+        let len = self.stack.len().checked_sub(count).ok_or(RuntimeError)?;
+        self.stack.truncate(len);
+
+        Ok(())
+    }
+
     pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
         let index: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
         self.stack.get(index).ok_or(RuntimeError)
@@ -79,6 +87,11 @@ impl Runtime {
             LoadStack(slot) => {
                 let value = self.stack.get(slot)?.clone();
                 self.stack.push(value);
+
+                ControlFlow::Continue(())
+            }
+            PopStack(count) => {
+                self.stack.pop_many(count.into())?;
 
                 ControlFlow::Continue(())
             }
