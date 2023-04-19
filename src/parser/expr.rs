@@ -1,16 +1,13 @@
-use super::{next, ParseError, Storages};
-use crate::lex::Token;
+use super::{LexParseError, NextToken, ParseError, Storages};
+use crate::lex::{Lexer, Token};
 use crate::opcode::{BinaryOp, UnaryOp};
 
-fn literal<'a, 's>(
-    s: &'a [Token<'s>],
-    storage: &mut Storages,
-) -> Result<(&'a [Token<'s>], ()), ParseError> {
+fn literal<'s>(mut s: Lexer<'s>, storage: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Number;
     use crate::opcode::OpCode;
     use crate::value::Literal;
 
-    let (token, s) = next(s)?;
+    let token = s.next_token()?;
 
     let literal = match token {
         Token::Nil => Literal::Nil,
@@ -18,7 +15,7 @@ fn literal<'a, 's>(
         Token::False => Literal::Bool(false),
         Token::Numeral(Number::Int(value)) => Literal::Int(value),
         Token::Numeral(Number::Float(value)) => Literal::Float(value),
-        _ => return Err(ParseError),
+        _ => return Err(ParseError.into()),
     };
 
     let id = storage.constants.insert(literal);
@@ -27,21 +24,21 @@ fn literal<'a, 's>(
     Ok((s, ()))
 }
 
-pub(super) fn expr<'a, 's>(
-    s: &'a [Token<'s>],
+pub(super) fn expr<'s>(
+    s: Lexer<'s>,
     storages: &mut Storages,
-) -> Result<(&'a [Token<'s>], ()), ParseError> {
+) -> Result<(Lexer<'s>, ()), LexParseError> {
     expr_bp(s, 0, storages)
 }
 
-fn expr_bp<'a, 's>(
-    s: &'a [Token<'s>],
+fn expr_bp<'s>(
+    s: Lexer<'s>,
     min_bp: u64,
     storages: &mut Storages,
-) -> Result<(&'a [Token<'s>], ()), ParseError> {
+) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::opcode::OpCode;
 
-    let mut s = if let Ok((s, op)) = unary_op(s) {
+    let mut s = if let Ok((s, op)) = unary_op(s.clone()) {
         let ((), rhs_bp) = prefix_binding_power(op);
         let (s, ()) = expr_bp(s, rhs_bp, storages)?;
 
@@ -55,7 +52,7 @@ fn expr_bp<'a, 's>(
     };
 
     loop {
-        let Ok((ns, op)) = bin_op(s) else {
+        let Ok((ns, op)) = bin_op(s.clone()) else {
             break
         };
 
@@ -65,7 +62,7 @@ fn expr_bp<'a, 's>(
             break;
         }
 
-        (s, _) = expr_bp(ns, rhs_bp, storages)?;
+        (s, _) = expr_bp(ns, rhs_bp, storages).map_err(LexParseError::eof_into_err)?;
 
         storages.codes.push(OpCode::BinaryOp(op))
     }
@@ -73,26 +70,23 @@ fn expr_bp<'a, 's>(
     Ok((s, ()))
 }
 
-fn expr_atom<'a, 's>(
-    s: &'a [Token<'s>],
-    storages: &mut Storages,
-) -> Result<(&'a [Token<'s>], ()), ParseError> {
+fn expr_atom<'s>(s: Lexer<'s>, storages: &mut Storages) -> Result<(Lexer<'s>, ()), LexParseError> {
     literal(s, storages)
 }
 
-fn unary_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], UnaryOp), ParseError> {
-    let (token, s) = next(s)?;
+fn unary_op(mut s: Lexer) -> Result<(Lexer, UnaryOp), LexParseError> {
+    let token = s.next_token()?;
 
     let op = match token {
         Token::Minus => UnaryOp::Neg,
-        _ => return Err(ParseError),
+        _ => return Err(ParseError.into()),
     };
 
     Ok((s, op))
 }
 
-fn bin_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], BinaryOp), ParseError> {
-    let (token, s) = next(s)?;
+fn bin_op(mut s: Lexer) -> Result<(Lexer, BinaryOp), LexParseError> {
+    let token = s.next_token()?;
 
     let op = match token {
         Token::Plus => BinaryOp::Add,
@@ -102,7 +96,7 @@ fn bin_op<'a, 's>(s: &'a [Token<'s>]) -> Result<(&'a [Token<'s>], BinaryOp), Par
         Token::DoubleSlash => BinaryOp::FloorDiv,
         Token::Percent => BinaryOp::Rem,
         Token::Caret => BinaryOp::Exp,
-        _ => return Err(ParseError),
+        _ => return Err(ParseError.into()),
     };
 
     Ok((s, op))

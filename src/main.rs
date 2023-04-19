@@ -21,8 +21,8 @@ fn main() -> Result<()> {
     let Cli { path } = Cli::try_parse()?;
 
     let data = std::fs::read_to_string(path)?;
-    let tokens: Vec<_> = Token::lexer(&data).collect::<Result<_, _>>()?;
-    let chunk = cerulean_lua::parser::chunk(&tokens)?;
+    let lexer = Token::lexer(&data);
+    let chunk = cerulean_lua::parser::chunk(lexer)?;
 
     let mut runtime = Runtime::new(chunk);
 

@@ -1,23 +1,57 @@
 mod expr;
 
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::Display;
 
-use crate::lex::Token;
+use thiserror::Error;
+
+use crate::lex::{LexError, Lexer, Token};
 use crate::opcode::{Chunk, ConstId, OpCode};
 use crate::value::Literal;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("parsing error")]
 pub struct ParseError;
 
-impl Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "parsing error")
+#[derive(Debug, Error)]
+pub enum LexParseError {
+    #[error(transparent)]
+    Lex(#[from] LexError),
+
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+
+    #[error("reached end of input")]
+    Eof,
+}
+
+impl LexParseError {
+    pub fn eof_into_err(self) -> Self {
+        match self {
+            LexParseError::Eof => LexParseError::Parse(ParseError),
+            t => t,
+        }
     }
 }
 
-impl Error for ParseError {}
+trait NextToken {
+    type Token;
+
+    fn next_token(&mut self) -> Result<Self::Token, LexParseError>;
+
+    fn next_required_token(&mut self) -> Result<Self::Token, LexParseError> {
+        self.next_token().map_err(LexParseError::eof_into_err)
+    }
+}
+
+impl<'s> NextToken for Lexer<'s> {
+    type Token = Token<'s>;
+
+    fn next_token(&mut self) -> Result<Self::Token, LexParseError> {
+        let r = self.next().ok_or(LexParseError::Eof)??;
+
+        Ok(r)
+    }
+}
 
 #[derive(Debug, Default)]
 struct ConstStorage {
@@ -46,16 +80,15 @@ struct Storages {
     codes: Vec<OpCode>,
 }
 
-fn next<'a, 's>(s: &'a [Token<'s>]) -> Result<(Token<'s>, &'a [Token<'s>]), ParseError> {
-    let (token, s) = s.split_first().ok_or(ParseError)?;
-    Ok((*token, s))
-}
-
-pub fn chunk(mut s: &[Token]) -> Result<Chunk, ParseError> {
+pub fn chunk(mut s: Lexer) -> Result<Chunk, LexParseError> {
     let mut storages = Storages::default();
 
-    while !s.is_empty() {
-        (s, _) = assignment(s, &mut storages)?;
+    loop {
+        s = match assignment(s, &mut storages) {
+            Ok((s, ())) => s,
+            Err(LexParseError::Eof) => break,
+            Err(err) => return Err(err),
+        };
     }
 
     let Storages { codes, constants } = storages;
@@ -71,16 +104,22 @@ pub fn chunk(mut s: &[Token]) -> Result<Chunk, ParseError> {
     Ok(chunk)
 }
 
-fn assignment<'a, 's>(
-    s: &'a [Token<'s>],
+fn assignment<'s>(
+    mut s: Lexer<'s>,
     storages: &mut Storages,
-) -> Result<(&'a [Token<'s>], ()), ParseError> {
-    let (_, s) = match s {
-        [Token::Local, Token::Ident(ident), Token::Assign, rest @ ..] => (ident, rest),
-        _ => return Err(ParseError),
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    let tokens = [
+        s.next_token()?,
+        s.next_required_token()?,
+        s.next_required_token()?,
+    ];
+
+    let _ = match tokens.as_slice() {
+        [Token::Local, Token::Ident(ident), Token::Assign] => ident,
+        _ => return Err(ParseError.into()),
     };
 
-    let (s, ()) = expr::expr(s, storages)?;
+    let (s, ()) = expr::expr(s, storages).map_err(LexParseError::eof_into_err)?;
 
     Ok((s, ()))
 }

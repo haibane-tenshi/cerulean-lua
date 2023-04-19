@@ -1,9 +1,10 @@
-use std::error::Error;
-use std::fmt::Display;
 use std::str::FromStr;
 
 use decorum::Finite;
 use logos::Logos;
+use thiserror::Error;
+
+pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Logos)]
 #[logos(skip r"[ \t\r\n\f]+")]
@@ -326,13 +327,6 @@ impl FromStr for Number {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Error)]
+#[error("lexing error")]
 pub struct LexError;
-
-impl Display for LexError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "lexing error")
-    }
-}
-
-impl Error for LexError {}
