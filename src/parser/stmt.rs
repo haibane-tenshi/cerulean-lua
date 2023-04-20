@@ -56,24 +56,62 @@ fn do_end<'s>(
 }
 
 fn assignment<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    let tokens = [
-        s.next_token()?,
-        s.next_required_token()?,
-        s.next_required_token()?,
-    ];
+    use crate::opcode::OpCode;
 
-    let ident = match tokens.as_slice() {
-        [Token::Local, Token::Ident(ident), Token::Assign] => ident,
-        _ => return Err(ParseError.into()),
+    let (mut s, local) = {
+        let maybe_local = |mut s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+            match s.next_token()? {
+                Token::Local => (),
+                _ => return Err(ParseError.into()),
+            }
+
+            Ok((s, ()))
+        };
+
+        match maybe_local(s.clone()) {
+            Ok((s, ())) => (s, Some(())),
+            Err(_) => (s, None),
+        }
     };
+
+    let ident = {
+        let ident = s.next_token().map_err(|err| {
+            if local.is_some() {
+                err.eof_into_err()
+            } else {
+                err
+            }
+        })?;
+
+        match ident {
+            Token::Ident(ident) => ident,
+            _ => return Err(ParseError.into()),
+        }
+    };
+
+    match s.next_required_token()? {
+        Token::Assign => (),
+        _ => return Err(ParseError.into()),
+    }
 
     let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     tracker.stack.pop();
-    tracker.stack.push_named(ident);
+
+    match local {
+        Some(()) => {
+            // If we have local keyword, introduce new local variable.
+            tracker.stack.push_named(ident);
+        }
+        None => {
+            // Otherwise try to store it inside known variable.
+            let slot = tracker.stack.lookup_slot(ident).ok_or(ParseError)?;
+            tracker.codes.push(OpCode::StoreStack(slot));
+        }
+    }
 
     Ok((s, ()))
 }
