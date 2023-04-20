@@ -138,10 +138,37 @@ impl<'s> StackTracker<'s> {
 }
 
 #[derive(Debug, Default)]
+struct OpCodeTracker {
+    codes: Vec<OpCode>,
+}
+
+impl OpCodeTracker {
+    pub fn next(&self) -> u32 {
+        self.codes.len().try_into().unwrap()
+    }
+
+    pub fn push(&mut self, opcode: OpCode) -> u32 {
+        let index = self.next();
+        self.codes.push(opcode);
+
+        index
+    }
+
+    pub fn get_mut(&mut self, index: u32) -> Option<&mut OpCode> {
+        let index: usize = index.try_into().ok()?;
+        self.codes.get_mut(index)
+    }
+
+    pub fn resolve(self) -> Vec<OpCode> {
+        self.codes
+    }
+}
+
+#[derive(Debug, Default)]
 struct ChunkTracker<'s> {
     constants: ConstTracker,
     stack: StackTracker<'s>,
-    codes: Vec<OpCode>,
+    codes: OpCodeTracker,
 }
 
 impl<'s> ChunkTracker<'s> {
@@ -168,6 +195,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
         stack: _,
     } = storages;
 
+    let codes = codes.resolve();
     let constants = constants.resolve();
 
     let chunk = Chunk {
@@ -196,7 +224,7 @@ fn block<'s>(
 
     // Remove excessive temporaries upon exiting block.
     if let Ok(extra_stack) = extra_stack.try_into() {
-        tracker.codes.push(OpCode::PopStack(extra_stack))
+        tracker.codes.push(OpCode::PopStack(extra_stack));
     }
 
     Ok((s, ()))

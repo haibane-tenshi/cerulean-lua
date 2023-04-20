@@ -1,5 +1,7 @@
 use crate::lex::{Lexer, Token};
 
+use super::block;
+use super::expr::expr;
 use super::{ChunkTracker, LexParseError, NextToken, ParseError};
 
 pub(super) fn statement<'s>(
@@ -11,6 +13,8 @@ pub(super) fn statement<'s>(
     } else if let Ok(r) = assignment(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = do_end(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = if_then(s.clone(), tracker) {
         Ok(r)
     } else {
         let mut s = s;
@@ -37,7 +41,7 @@ fn do_end<'s>(
         _ => return Err(ParseError.into()),
     };
 
-    let (mut s, ()) = super::block(s, tracker).map_err(LexParseError::eof_into_err)?;
+    let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     match s.next_required_token()? {
         Token::End => (),
@@ -62,10 +66,121 @@ fn assignment<'s>(
         _ => return Err(ParseError.into()),
     };
 
-    let (s, ()) = super::expr::expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+    let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     tracker.stack.pop();
     tracker.stack.push_named(ident);
+
+    Ok((s, ()))
+}
+
+fn if_then<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+
+    fn backpatch_to_current(index: u32, tracker: &mut ChunkTracker) {
+        let target = tracker.codes.next();
+        let new_offset = target - index - 1;
+        match tracker.codes.get_mut(index) {
+            Some(OpCode::JumpIf { offset, .. }) => {
+                *offset = new_offset;
+            }
+            Some(OpCode::Jump { offset }) => *offset = new_offset,
+            _ => unreachable!(),
+        };
+    }
+
+    match s.next_token()? {
+        Token::If => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    match s.next_required_token()? {
+        Token::Then => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let mut to_end = Vec::new();
+
+    let mut to_next_block = tracker.codes.push(OpCode::JumpIf {
+        cond: false,
+        offset: 0,
+    });
+    tracker.stack.pop();
+
+    let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    loop {
+        let Ok(ns) = (|mut s: Lexer<'s>| -> Result<Lexer<'s>, LexParseError> {
+            match s.next_token()? {
+                Token::ElseIf => (),
+                _ => return Err(ParseError.into()),
+            }
+
+            // Finish off the previous block.
+            // This needs to jump to the very end of `if` statement.
+            let to_patch = tracker.codes.push(OpCode::Jump {offset: 0});
+            to_end.push(to_patch);
+
+            backpatch_to_current(to_next_block, tracker);
+
+            let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+            to_next_block = tracker.codes.push(OpCode::JumpIf {
+                cond: false,
+                offset: 0,
+            });
+            tracker.stack.pop();
+
+            match s.next_required_token()? {
+                Token::Then => (),
+                _ => return Err(ParseError.into()),
+            }
+
+            let (s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+            Ok(s)
+        })(s.clone()) else {
+            break
+        };
+
+        s = ns;
+    }
+
+    let mut s = (|mut s: Lexer<'s>| -> Result<Lexer<'s>, LexParseError> {
+        match s.next_token()? {
+            Token::Else => (),
+            _ => return Err(ParseError.into()),
+        }
+
+        to_next_block = {
+            let r = tracker.codes.push(OpCode::Jump { offset: 0 });
+            backpatch_to_current(to_next_block, tracker);
+
+            r
+        };
+
+        let (s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+        Ok(s)
+    })(s.clone())
+    .ok()
+    .unwrap_or(s);
+
+    match s.next_required_token()? {
+        Token::End => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    // Backpatch the last jump instruction and block ends.
+    backpatch_to_current(to_next_block, tracker);
+    for index in to_end {
+        backpatch_to_current(index, tracker);
+    }
 
     Ok((s, ()))
 }
