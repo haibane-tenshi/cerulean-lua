@@ -278,6 +278,22 @@ impl Runtime {
 
                 ControlFlow::Continue(())
             }
+            Loop { offset } => {
+                let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
+                self.ip = self.ip.checked_sub(offset).ok_or(RuntimeError)?;
+
+                ControlFlow::Continue(())
+            }
+            LoopIf { cond, offset } => {
+                let value = self.stack.pop().ok_or(RuntimeError)?;
+
+                if value.as_boolish() == cond {
+                    let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
+                    self.ip = self.ip.checked_sub(offset).ok_or(RuntimeError)?;
+                }
+
+                ControlFlow::Continue(())
+            }
         };
 
         tracing::trace!(stack = ?self.stack, "executed opcode");
