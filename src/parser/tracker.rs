@@ -140,6 +140,8 @@ impl<'s> ChunkTracker<'s> {
     }
 
     pub fn resolve(self) -> Chunk {
+        use crate::opcode::Function;
+
         let ChunkTracker {
             codes,
             constants,
@@ -149,10 +151,14 @@ impl<'s> ChunkTracker<'s> {
         let codes = codes.resolve();
         let constants = constants.resolve();
 
-        Chunk {
+        let fun = Function {
             codes,
-            constants,
             lines: Default::default(),
+        };
+
+        Chunk {
+            functions: vec![fun],
+            constants,
         }
     }
 

@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     let lexer = Token::lexer(&data);
     let chunk = cerulean_lua::parser::chunk(lexer)?;
 
-    let mut runtime = Runtime::new(chunk);
+    let mut runtime = Runtime::new(&chunk);
 
     runtime.run()?;
 

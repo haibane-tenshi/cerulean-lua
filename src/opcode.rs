@@ -188,9 +188,8 @@ impl Display for StrBinOp {
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
-    pub codes: Vec<OpCode>,
+    pub functions: Vec<Function>,
     pub constants: Vec<Literal>,
-    pub lines: RleVec<u32>,
 }
 
 impl Chunk {
@@ -204,6 +203,31 @@ impl Display for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "== chunk ==")?;
 
+        writeln!(f, "==constant table==")?;
+        for (i, literal) in self.constants.iter().enumerate() {
+            writeln!(f, "[{i:03}] {literal}")?;
+        }
+
+        writeln!(f)?;
+
+        writeln!(f, "==function table==")?;
+        for (i, fun) in self.functions.iter().enumerate() {
+            writeln!(f, "  function slot [{i:3}]")?;
+            write!(f, "{fun}")?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Function {
+    pub codes: Vec<OpCode>,
+    pub lines: RleVec<u32>,
+}
+
+impl Display for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         #[derive(Copy, Clone)]
         enum LineNumber {
             Explicit(u32),
@@ -222,42 +246,13 @@ impl Display for Chunk {
         );
 
         for ((i, code), line) in iter {
-            use OpCode::*;
-
             let line = match line {
                 Some(LineNumber::Explicit(n)) => n.to_string(),
                 Some(LineNumber::Repeat) => "|".to_string(),
                 None => "?".to_string(),
             };
 
-            write!(f, "{i:04} {line:>3} {code}")?;
-
-            match code {
-                Return => (),
-                LoadConstant(index) => {
-                    let constant = self
-                        .get_constant(index)
-                        .map(|t| t.to_string())
-                        .unwrap_or_else(|| "<FAILED TO RESOLVE CONSTANT>".to_string());
-
-                    write!(f, " {constant}")?;
-                }
-                LoadStack(_) => (),
-                StoreStack(_) => (),
-                PopStack(_) => (),
-                AriUnaOp(_) => (),
-                AriBinOp(_) => (),
-                BitUnaOp(_) => (),
-                BitBinOp(_) => (),
-                RelBinOp(_) => (),
-                StrBinOp(_) => (),
-                Jump { .. } => (),
-                JumpIf { .. } => (),
-                Loop { .. } => (),
-                LoopIf { .. } => (),
-            }
-
-            writeln!(f)?;
+            writeln!(f, "{i:04} {line:>3} {code}")?;
         }
 
         Ok(())

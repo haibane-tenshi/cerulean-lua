@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::fmt::Display;
 
-use crate::opcode::{Chunk, OpCode, StackSlot};
-use crate::value::Value;
+use crate::opcode::{Chunk, ConstId, OpCode, StackSlot};
+use crate::value::{Literal, Value};
 
 pub type ControlFlow = std::ops::ControlFlow<()>;
 
@@ -20,6 +20,7 @@ impl Error for RuntimeError {}
 #[derive(Debug, Default)]
 struct Stack {
     stack: Vec<Value>,
+    protected_size: usize,
 }
 
 impl Stack {
@@ -27,52 +28,77 @@ impl Stack {
         self.stack.push(value)
     }
 
-    pub fn pop(&mut self) -> Option<Value> {
-        self.stack.pop()
+    pub fn pop(&mut self) -> Result<Value, RuntimeError> {
+        if self.stack.len() <= self.protected_size {
+            return Err(RuntimeError);
+        }
+
+        self.stack.pop().ok_or(RuntimeError)
     }
 
     pub fn pop_many(&mut self, count: u32) -> Result<(), RuntimeError> {
         let count: usize = count.try_into().map_err(|_| RuntimeError)?;
         let len = self.stack.len().checked_sub(count).ok_or(RuntimeError)?;
+
+        if len < self.protected_size {
+            return Err(RuntimeError);
+        }
+
         self.stack.truncate(len);
 
         Ok(())
     }
 
     pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
-        let index: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
+        let offset: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
+        let index = self.protected_size + offset;
         self.stack.get(index).ok_or(RuntimeError)
     }
 
     pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value, RuntimeError> {
-        let index: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
+        let offset: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
+        let index = self.protected_size + offset;
         self.stack.get_mut(index).ok_or(RuntimeError)
     }
-}
 
-pub struct Runtime {
-    chunk: Chunk,
-    stack: Stack,
-    ip: usize,
-}
-
-impl Runtime {
-    pub fn new(chunk: Chunk) -> Self {
-        tracing::trace!(chunk = %chunk, "constructed runtime");
-
-        Runtime {
-            chunk,
-            stack: Default::default(),
-            ip: 0,
+    pub fn set_protected_size(&mut self, protected_size: usize) -> Result<(), RuntimeError> {
+        if self.stack.len() < protected_size {
+            return Err(RuntimeError);
         }
-    }
 
-    pub fn run(&mut self) -> Result<(), RuntimeError> {
-        while let ControlFlow::Continue(()) = self.step()? {}
+        self.protected_size = protected_size;
 
         Ok(())
     }
 
+    pub fn protect(&mut self) -> usize {
+        self.protected_size = self.stack.len();
+        self.protected_size
+    }
+}
+
+#[derive(Debug, Default)]
+struct Frame<'chunk> {
+    constants: &'chunk [Literal],
+    codes: &'chunk [OpCode],
+    ip: usize,
+    stack_start: usize,
+}
+
+impl<'chunk> Frame<'chunk> {
+    pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
+        let index: usize = index.0.try_into().ok()?;
+        self.constants.get(index)
+    }
+}
+
+#[derive(Debug, Default)]
+struct CurrentFrame<'chunk> {
+    frame: Frame<'chunk>,
+    stack: Stack,
+}
+
+impl<'chunk> CurrentFrame<'chunk> {
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::opcode::OpCode::*;
         use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
@@ -84,7 +110,7 @@ impl Runtime {
         let r = match code {
             Return => ControlFlow::Break(()),
             LoadConstant(index) => {
-                let constant = self.chunk.get_constant(index).ok_or(RuntimeError)?.clone();
+                let constant = self.frame.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
 
                 ControlFlow::Continue(())
@@ -96,7 +122,7 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             StoreStack(slot) => {
-                let value = self.stack.pop().ok_or(RuntimeError)?;
+                let value = self.stack.pop()?;
                 let slot = self.stack.get_mut(slot)?;
 
                 *slot = value;
@@ -109,7 +135,7 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             AriUnaOp(op) => {
-                let val = self.stack.pop().ok_or(RuntimeError)?;
+                let val = self.stack.pop()?;
 
                 let r = match val {
                     Value::Int(val) => match op {
@@ -126,8 +152,8 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             AriBinOp(op) => {
-                let rhs = self.stack.pop().ok_or(RuntimeError)?;
-                let lhs = self.stack.pop().ok_or(RuntimeError)?;
+                let rhs = self.stack.pop()?;
+                let lhs = self.stack.pop()?;
 
                 let r = match (lhs, rhs) {
                     (Value::Int(lhs), Value::Int(rhs)) => match op {
@@ -165,7 +191,7 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             BitUnaOp(op) => {
-                let val = self.stack.pop().ok_or(RuntimeError)?;
+                let val = self.stack.pop()?;
 
                 let r = match val {
                     Value::Int(val) => match op {
@@ -179,8 +205,8 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             BitBinOp(op) => {
-                let rhs = self.stack.pop().ok_or(RuntimeError)?;
-                let lhs = self.stack.pop().ok_or(RuntimeError)?;
+                let rhs = self.stack.pop()?;
+                let lhs = self.stack.pop()?;
 
                 let r = match (lhs, rhs) {
                     (Value::Int(lhs), Value::Int(rhs)) => match op {
@@ -220,8 +246,8 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             RelBinOp(op) => {
-                let rhs = self.stack.pop().ok_or(RuntimeError)?;
-                let lhs = self.stack.pop().ok_or(RuntimeError)?;
+                let rhs = self.stack.pop()?;
+                let lhs = self.stack.pop()?;
 
                 let r = match op {
                     RelBinOp::Eq => lhs == rhs,
@@ -261,8 +287,8 @@ impl Runtime {
                 ControlFlow::Continue(())
             }
             StrBinOp(op) => {
-                let rhs = self.stack.pop().ok_or(RuntimeError)?;
-                let lhs = self.stack.pop().ok_or(RuntimeError)?;
+                let rhs = self.stack.pop()?;
+                let lhs = self.stack.pop()?;
 
                 let r = match (lhs, rhs) {
                     (Value::String(lhs), Value::String(rhs)) => match op {
@@ -277,32 +303,32 @@ impl Runtime {
             }
             Jump { offset } => {
                 let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
-                self.ip += offset;
+                self.frame.ip += offset;
 
                 ControlFlow::Continue(())
             }
             JumpIf { cond, offset } => {
-                let value = self.stack.pop().ok_or(RuntimeError)?;
+                let value = self.stack.pop()?;
 
                 if value.as_boolish() == cond {
                     let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
-                    self.ip += offset;
+                    self.frame.ip += offset;
                 }
 
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
                 let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
-                self.ip = self.ip.checked_sub(offset).ok_or(RuntimeError)?;
+                self.frame.ip = self.frame.ip.checked_sub(offset).ok_or(RuntimeError)?;
 
                 ControlFlow::Continue(())
             }
             LoopIf { cond, offset } => {
-                let value = self.stack.pop().ok_or(RuntimeError)?;
+                let value = self.stack.pop()?;
 
                 if value.as_boolish() == cond {
                     let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
-                    self.ip = self.ip.checked_sub(offset).ok_or(RuntimeError)?;
+                    self.frame.ip = self.frame.ip.checked_sub(offset).ok_or(RuntimeError)?;
                 }
 
                 ControlFlow::Continue(())
@@ -315,12 +341,72 @@ impl Runtime {
     }
 
     pub fn next_code(&mut self) -> Option<OpCode> {
-        let r = *self.chunk.codes.get(self.ip)?;
+        let r = *self.frame.codes.get(self.frame.ip)?;
 
-        tracing::trace!(ip = self.ip, opcode = %r, "next opcode");
+        tracing::trace!(ip = self.frame.ip, opcode = %r, "next opcode");
 
-        self.ip += 1;
+        self.frame.ip += 1;
 
         Some(r)
+    }
+
+    pub fn push(&mut self, frame: Frame<'chunk>) -> Result<(), RuntimeError> {
+        self.frame = frame;
+        self.stack.set_protected_size(self.frame.stack_start)
+    }
+}
+
+pub struct Runtime<'chunk> {
+    chunk: &'chunk Chunk,
+    suspended: Vec<Frame<'chunk>>,
+    current: CurrentFrame<'chunk>,
+}
+
+impl<'chunk> Runtime<'chunk> {
+    pub fn new(chunk: &'chunk Chunk) -> Self {
+        tracing::trace!(chunk = %chunk, "constructed runtime");
+
+        let codes = chunk
+            .functions
+            .first()
+            .map(|fun| fun.codes.as_slice())
+            .unwrap_or_default();
+
+        let frame = Frame {
+            constants: &chunk.constants,
+            codes,
+            ip: 0,
+            stack_start: 0,
+        };
+
+        let current = CurrentFrame {
+            frame,
+            stack: Default::default(),
+        };
+
+        Runtime {
+            chunk,
+            suspended: Default::default(),
+            current,
+        }
+    }
+
+    pub fn run(&mut self) -> Result<(), RuntimeError> {
+        loop {
+            if let ControlFlow::Break(()) = self.current.step()? {
+                let Some(frame) = self.suspended.pop() else {
+                    // If we hit an early return from script, that leaves us pointing at
+                    // some arbitrary instructions immediately after.
+                    // If the user attempts to resume execution it can lead to bogged state.
+                    // To prevent that push in a dummy (empty) frame.
+                    self.current.push(Default::default())?;
+                    break
+                };
+
+                self.current.push(frame)?;
+            }
+        }
+
+        Ok(())
     }
 }
