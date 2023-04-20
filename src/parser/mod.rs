@@ -153,7 +153,11 @@ pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
     let mut storages = ChunkTracker::empty();
 
     match block(s, &mut storages) {
-        Ok(_) | Err(LexParseError::Eof) => (),
+        Ok((mut s, ())) => match s.next_token() {
+            Err(LexParseError::Eof) => (),
+            _ => return Err(ParseError.into()),
+        },
+        Err(LexParseError::Eof) => (),
         Err(err) => return Err(err),
     }
 
@@ -181,15 +185,9 @@ fn block<'s>(
     tracker.stack.push_frame();
 
     loop {
-        s = match statement(s, tracker) {
+        s = match statement(s.clone(), tracker) {
             Ok((s, ())) => s,
-            Err(LexParseError::Eof) => {
-                use logos::Logos;
-
-                s = Token::lexer("");
-                break;
-            }
-            Err(err) => return Err(err),
+            Err(_) => break,
         };
     }
 
