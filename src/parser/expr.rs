@@ -1,4 +1,5 @@
-use super::{ChunkTracker, LexParseError, NextToken, ParseError};
+use super::tracker::ChunkTracker;
+use super::{LexParseError, NextToken, ParseError};
 use crate::lex::{Lexer, Token};
 use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
@@ -22,10 +23,8 @@ fn literal<'s>(
         _ => return Err(ParseError.into()),
     };
 
-    // Stack effect: push 1
-    let id = tracker.constants.insert(literal);
-    tracker.codes.push(OpCode::LoadConstant(id));
-    tracker.stack.push();
+    let id = tracker.insert_literal(literal);
+    tracker.push(OpCode::LoadConstant(id));
 
     Ok((s, ()))
 }
@@ -43,11 +42,8 @@ fn variable<'s>(
         _ => return Err(ParseError.into()),
     };
 
-    let slot = tracker.stack.lookup_slot(ident).ok_or(ParseError)?;
-
-    // Stack effect: push 1
-    tracker.codes.push(OpCode::LoadStack(slot));
-    tracker.stack.push();
+    let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
+    tracker.push(OpCode::LoadStack(slot));
 
     Ok((s, ()))
 }
@@ -75,8 +71,7 @@ fn expr_bp<'s>(
             Prefix::Bit(op) => OpCode::BitUnaOp(op),
         };
 
-        // Stack effect: pop 1 -> push 1
-        tracker.codes.push(opcode);
+        tracker.push(opcode);
 
         s
     } else {
@@ -106,8 +101,7 @@ fn expr_bp<'s>(
         };
 
         // Stack effect: pop 2 -> push 1
-        tracker.codes.push(opcode);
-        tracker.stack.pop();
+        tracker.push(opcode);
     }
 
     Ok((s, ()))

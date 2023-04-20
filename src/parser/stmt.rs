@@ -1,8 +1,9 @@
 use crate::lex::{Lexer, Token};
 
 use super::expr::expr;
+use super::tracker::{ChunkTracker, InstrId};
 use super::{block, inner_block};
-use super::{ChunkTracker, LexParseError, NextToken, ParseError};
+use super::{LexParseError, NextToken, ParseError};
 
 pub(super) fn statement<'s>(
     s: Lexer<'s>,
@@ -99,29 +100,27 @@ fn assignment<'s>(
 
     let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
-    tracker.stack.pop();
-
     match local {
         Some(()) => {
             // If we have local keyword, introduce new local variable.
-            tracker.stack.push_named(ident);
+            tracker.name_local(ident);
         }
         None => {
             // Otherwise try to store it inside known variable.
-            let slot = tracker.stack.lookup_slot(ident).ok_or(ParseError)?;
-            tracker.codes.push(OpCode::StoreStack(slot));
+            let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
+            tracker.push(OpCode::StoreStack(slot));
         }
     }
 
     Ok((s, ()))
 }
 
-fn backpatch_to_current(index: u32, tracker: &mut ChunkTracker) {
+fn backpatch_to_current(index: InstrId, tracker: &mut ChunkTracker) {
     use crate::opcode::OpCode;
 
-    let target = tracker.codes.next();
-    let new_offset = target - index - 1;
-    match tracker.codes.get_mut(index) {
+    let target = tracker.next_instr();
+    let new_offset = target.0 - index.0 - 1;
+    match tracker.get_mut(index) {
         Some(OpCode::JumpIf { offset, .. }) => {
             *offset = new_offset;
         }
@@ -150,11 +149,10 @@ fn if_then<'s>(
 
     let mut to_end = Vec::new();
 
-    let mut to_next_block = tracker.codes.push(OpCode::JumpIf {
+    let mut to_next_block = tracker.push(OpCode::JumpIf {
         cond: false,
         offset: 0,
     });
-    tracker.stack.pop();
 
     let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -167,18 +165,17 @@ fn if_then<'s>(
 
             // Finish off the previous block.
             // This needs to jump to the very end of `if` statement.
-            let to_patch = tracker.codes.push(OpCode::Jump {offset: 0});
+            let to_patch = tracker.push(OpCode::Jump {offset: 0});
             to_end.push(to_patch);
 
             backpatch_to_current(to_next_block, tracker);
 
             let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
-            to_next_block = tracker.codes.push(OpCode::JumpIf {
+            to_next_block = tracker.push(OpCode::JumpIf {
                 cond: false,
                 offset: 0,
             });
-            tracker.stack.pop();
 
             match s.next_required_token()? {
                 Token::Then => (),
@@ -202,7 +199,7 @@ fn if_then<'s>(
         }
 
         to_next_block = {
-            let r = tracker.codes.push(OpCode::Jump { offset: 0 });
+            let r = tracker.push(OpCode::Jump { offset: 0 });
             backpatch_to_current(to_next_block, tracker);
 
             r
@@ -240,7 +237,7 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let start = tracker.codes.next();
+    let start = tracker.next_instr();
 
     let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -249,11 +246,10 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let cond = tracker.codes.push(OpCode::JumpIf {
+    let cond = tracker.push(OpCode::JumpIf {
         cond: false,
         offset: 0,
     });
-    tracker.stack.pop();
 
     let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -262,8 +258,7 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let offset = tracker.codes.next() - start + 1;
-    tracker.codes.push(OpCode::Loop { offset });
+    tracker.push_loop_to(start);
     backpatch_to_current(cond, tracker);
 
     Ok((s, ()))
@@ -280,8 +275,8 @@ fn repeat_until<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.stack.push_frame();
-    let start = tracker.codes.next();
+    tracker.push_frame();
+    let start = tracker.next_instr();
 
     let (mut s, ()) = inner_block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -295,29 +290,17 @@ fn repeat_until<'s>(
     // Handle controls of this loop.
 
     // Jump to cleanup code when condition is true.
-    let to_end = tracker.codes.push(OpCode::JumpIf {
+    let to_end = tracker.push(OpCode::JumpIf {
         cond: true,
         offset: 0,
     });
-    tracker.stack.pop();
 
-    let count = tracker.stack.pop_frame().unwrap();
-    let pop_frame = count.try_into().ok().map(OpCode::PopStack);
-
-    // Otherwise cleanup stack and loop to start.
-    if let Some(opcode) = pop_frame {
-        tracker.codes.push(opcode);
-    }
-
-    let offset = tracker.codes.next() - start + 1;
-    tracker.codes.push(OpCode::Loop { offset });
+    tracker.pop_ghost_frame().unwrap();
+    tracker.push_loop_to(start);
 
     // Cleanup stack after loop is exited.
     backpatch_to_current(to_end, tracker);
-
-    if let Some(opcode) = pop_frame {
-        tracker.codes.push(opcode);
-    }
+    tracker.pop_frame().unwrap();
 
     Ok((s, ()))
 }

@@ -1,13 +1,12 @@
 mod expr;
 mod stmt;
-
-use std::collections::HashMap;
+mod tracker;
 
 use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, Token};
-use crate::opcode::{Chunk, ConstId, OpCode, StackSlot};
-use crate::value::Literal;
+use crate::opcode::Chunk;
+use tracker::ChunkTracker;
 
 #[derive(Debug, Error)]
 #[error("parsing error")]
@@ -54,133 +53,10 @@ impl<'s> NextToken for Lexer<'s> {
     }
 }
 
-#[derive(Debug, Default)]
-struct ConstTracker {
-    constants: Vec<Literal>,
-    backlinks: HashMap<Literal, ConstId>,
-}
-
-impl ConstTracker {
-    pub fn insert(&mut self, value: Literal) -> ConstId {
-        *self.backlinks.entry(value.clone()).or_insert_with(|| {
-            let index = self.constants.len().try_into().unwrap();
-            self.constants.push(value);
-
-            ConstId(index)
-        })
-    }
-
-    pub fn resolve(self) -> Vec<Literal> {
-        self.constants
-    }
-}
-
-#[derive(Debug, Default)]
-struct StackTracker<'s> {
-    stack: Vec<Option<&'s str>>,
-    backlinks: HashMap<&'s str, Vec<StackSlot>>,
-    frames: Vec<usize>,
-}
-
-impl<'s> StackTracker<'s> {
-    pub fn push(&mut self) -> StackSlot {
-        let index = self.stack.len().try_into().unwrap();
-        self.stack.push(None);
-
-        StackSlot(index)
-    }
-
-    pub fn push_named(&mut self, name: &'s str) -> StackSlot {
-        let index = self.stack.len().try_into().unwrap();
-        self.stack.push(Some(name));
-
-        let r = StackSlot(index);
-
-        self.backlinks.entry(name).or_default().push(r);
-
-        r
-    }
-
-    pub fn pop(&mut self) {
-        let Some(Some(name)) = self.stack.pop() else {
-            return
-        };
-
-        let Some(backlink) = self.backlinks.get_mut(&name) else {
-            return
-        };
-
-        backlink.pop();
-
-        if backlink.is_empty() {
-            self.backlinks.remove(&name);
-        }
-    }
-
-    pub fn lookup_slot(&self, name: &str) -> Option<StackSlot> {
-        self.backlinks.get(name).and_then(|bl| bl.last()).copied()
-    }
-
-    pub fn push_frame(&mut self) {
-        self.frames.push(self.stack.len());
-    }
-
-    pub fn pop_frame(&mut self) -> Option<u32> {
-        let index = self.frames.pop()?;
-        let count = self.stack.len().checked_sub(index)?.try_into().ok()?;
-
-        for _ in 0..count {
-            self.pop();
-        }
-
-        Some(count)
-    }
-}
-
-#[derive(Debug, Default)]
-struct OpCodeTracker {
-    codes: Vec<OpCode>,
-}
-
-impl OpCodeTracker {
-    pub fn next(&self) -> u32 {
-        self.codes.len().try_into().unwrap()
-    }
-
-    pub fn push(&mut self, opcode: OpCode) -> u32 {
-        let index = self.next();
-        self.codes.push(opcode);
-
-        index
-    }
-
-    pub fn get_mut(&mut self, index: u32) -> Option<&mut OpCode> {
-        let index: usize = index.try_into().ok()?;
-        self.codes.get_mut(index)
-    }
-
-    pub fn resolve(self) -> Vec<OpCode> {
-        self.codes
-    }
-}
-
-#[derive(Debug, Default)]
-struct ChunkTracker<'s> {
-    constants: ConstTracker,
-    stack: StackTracker<'s>,
-    codes: OpCodeTracker,
-}
-
-impl<'s> ChunkTracker<'s> {
-    pub fn empty() -> Self {
-        Default::default()
-    }
-}
-
 pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
-    let mut storages = ChunkTracker::empty();
+    let mut tracker = ChunkTracker::empty();
 
-    match block(s, &mut storages) {
+    match block(s, &mut tracker) {
         Ok((mut s, ())) => match s.next_token() {
             Err(LexParseError::Eof) => (),
             _ => return Err(ParseError.into()),
@@ -189,20 +65,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
         Err(err) => return Err(err),
     }
 
-    let ChunkTracker {
-        codes,
-        constants,
-        stack: _,
-    } = storages;
-
-    let codes = codes.resolve();
-    let constants = constants.resolve();
-
-    let chunk = Chunk {
-        codes,
-        constants,
-        lines: Default::default(),
-    };
+    let chunk = tracker.resolve();
 
     Ok(chunk)
 }
@@ -211,16 +74,11 @@ fn block<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    tracker.stack.push_frame();
+    tracker.push_frame();
 
     let r = inner_block(s, tracker);
 
-    let extra_stack = tracker.stack.pop_frame().unwrap();
-
-    // Remove excessive temporaries upon exiting block.
-    if let Ok(extra_stack) = extra_stack.try_into() {
-        tracker.codes.push(OpCode::PopStack(extra_stack));
-    }
+    tracker.pop_frame().unwrap();
 
     r
 }
