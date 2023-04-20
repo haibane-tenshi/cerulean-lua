@@ -43,6 +43,11 @@ impl Stack {
         let index: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
         self.stack.get(index).ok_or(RuntimeError)
     }
+
+    pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value, RuntimeError> {
+        let index: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
+        self.stack.get_mut(index).ok_or(RuntimeError)
+    }
 }
 
 pub struct Runtime {
@@ -87,6 +92,14 @@ impl Runtime {
             LoadStack(slot) => {
                 let value = self.stack.get(slot)?.clone();
                 self.stack.push(value);
+
+                ControlFlow::Continue(())
+            }
+            StoreStack(slot) => {
+                let value = self.stack.pop().ok_or(RuntimeError)?;
+                let slot = self.stack.get_mut(slot)?;
+
+                *slot = value;
 
                 ControlFlow::Continue(())
             }

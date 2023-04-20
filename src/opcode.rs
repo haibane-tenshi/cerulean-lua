@@ -24,6 +24,7 @@ pub enum OpCode {
     Return,
     LoadConstant(ConstId),
     LoadStack(StackSlot),
+    StoreStack(StackSlot),
     PopStack(NonZeroU32),
     AriUnaOp(AriUnaOp),
     AriBinOp(AriBinOp),
@@ -45,6 +46,7 @@ impl Display for OpCode {
             Return => "Return".to_string(),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
             LoadStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "LoadStack"),
+            StoreStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "StoreStack"),
             PopStack(count) => format!("{:<10} [{count:>3}]", "PopStack"),
             AriUnaOp(op) => format!("{:<10} [{op}]", "AriUnaOp"),
             AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),
@@ -241,6 +243,7 @@ impl Display for Chunk {
                     write!(f, " {constant}")?;
                 }
                 LoadStack(_) => (),
+                StoreStack(_) => (),
                 PopStack(_) => (),
                 AriUnaOp(_) => (),
                 AriBinOp(_) => (),
