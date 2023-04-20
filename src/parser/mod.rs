@@ -208,23 +208,32 @@ pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
 }
 
 fn block<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     tracker.stack.push_frame();
 
-    loop {
-        s = match stmt::statement(s.clone(), tracker) {
-            Ok((s, ())) => s,
-            Err(_) => break,
-        };
-    }
+    let r = inner_block(s, tracker);
 
     let extra_stack = tracker.stack.pop_frame().unwrap();
 
     // Remove excessive temporaries upon exiting block.
     if let Ok(extra_stack) = extra_stack.try_into() {
         tracker.codes.push(OpCode::PopStack(extra_stack));
+    }
+
+    r
+}
+
+fn inner_block<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    loop {
+        s = match stmt::statement(s.clone(), tracker) {
+            Ok((s, ())) => s,
+            Err(_) => break,
+        };
     }
 
     Ok((s, ()))

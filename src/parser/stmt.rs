@@ -1,7 +1,7 @@
 use crate::lex::{Lexer, Token};
 
-use super::block;
 use super::expr::expr;
+use super::{block, inner_block};
 use super::{ChunkTracker, LexParseError, NextToken, ParseError};
 
 pub(super) fn statement<'s>(
@@ -17,6 +17,8 @@ pub(super) fn statement<'s>(
     } else if let Ok(r) = if_then(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = while_do(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = repeat_until(s.clone(), tracker) {
         Ok(r)
     } else {
         let mut s = s;
@@ -225,6 +227,59 @@ fn while_do<'s>(
     let offset = tracker.codes.next() - start + 1;
     tracker.codes.push(OpCode::Loop { offset });
     backpatch_to_current(cond, tracker);
+
+    Ok((s, ()))
+}
+
+fn repeat_until<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+
+    match s.next_token()? {
+        Token::Repeat => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    tracker.stack.push_frame();
+    let start = tracker.codes.next();
+
+    let (mut s, ()) = inner_block(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    match s.next_required_token()? {
+        Token::Until => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    // Handle controls of this loop.
+
+    // Jump to cleanup code when condition is true.
+    let to_end = tracker.codes.push(OpCode::JumpIf {
+        cond: true,
+        offset: 0,
+    });
+    tracker.stack.pop();
+
+    let count = tracker.stack.pop_frame().unwrap();
+    let pop_frame = count.try_into().ok().map(OpCode::PopStack);
+
+    // Otherwise cleanup stack and loop to start.
+    if let Some(opcode) = pop_frame {
+        tracker.codes.push(opcode);
+    }
+
+    let offset = tracker.codes.next() - start + 1;
+    tracker.codes.push(OpCode::Loop { offset });
+
+    // Cleanup stack after loop is exited.
+    backpatch_to_current(to_end, tracker);
+
+    if let Some(opcode) = pop_frame {
+        tracker.codes.push(opcode);
+    }
 
     Ok((s, ()))
 }
