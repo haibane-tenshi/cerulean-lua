@@ -31,6 +31,8 @@ pub enum OpCode {
     BitBinOp(BitBinOp),
     RelBinOp(RelBinOp),
     StrBinOp(StrBinOp),
+    Jump { offset: u32 },
+    JumpIf { cond: bool, offset: u32 },
 }
 
 impl Display for OpCode {
@@ -48,6 +50,8 @@ impl Display for OpCode {
             BitBinOp(op) => format!("{:<10} [{op}]", "BitBinOp"),
             RelBinOp(op) => format!("{:<10} [{op}]", "RelBinOp"),
             StrBinOp(op) => format!("{:<10} [{op}]", "StrBinOp"),
+            Jump { offset } => format!("{:<10} [{offset:>3}]", "Jump"),
+            JumpIf { cond, offset } => format!("{:<10} [{cond:>5}] [{offset:>3}]", "JumpIf"),
         };
 
         write!(f, "{s}")
@@ -240,6 +244,8 @@ impl Display for Chunk {
                 BitBinOp(_) => (),
                 RelBinOp(_) => (),
                 StrBinOp(_) => (),
+                Jump { .. } => (),
+                JumpIf { .. } => (),
             }
 
             writeln!(f)?;
