@@ -50,7 +50,7 @@ fn variable<'s>(
 
 fn function<'s>(
     mut s: Lexer<'s>,
-    tracker: &mut ChunkTracker,
+    tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     match s.next_token()? {
         Token::Function => (),

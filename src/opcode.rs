@@ -19,7 +19,7 @@ impl Display for ConstId {
 #[derive(Debug, Copy, Clone)]
 pub struct StackSlot(pub Index);
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionId(pub Index);
 
 #[derive(Debug, Copy, Clone)]

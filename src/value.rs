@@ -3,6 +3,8 @@ use std::fmt::Display;
 
 use decorum::Finite;
 
+use crate::opcode::FunctionId;
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Type {
     Nil,
@@ -10,6 +12,7 @@ pub enum Type {
     Int,
     Float,
     String,
+    Function,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +22,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     String(String),
+    Function(FunctionId),
 }
 
 impl Value {
@@ -33,6 +37,7 @@ impl Value {
             Value::Int(_) => Type::Int,
             Value::Float(_) => Type::Float,
             Value::String(_) => Type::String,
+            Value::Function(_) => Type::Function,
         }
     }
 }
@@ -47,6 +52,7 @@ impl PartialOrd for Value {
             (Int(lhs), Int(rhs)) => Some(lhs.cmp(rhs)),
             (Float(lhs), Float(rhs)) => lhs.partial_cmp(rhs),
             (String(lhs), String(rhs)) => Some(lhs.cmp(rhs)),
+            (Function(lhs), Function(rhs)) => None,
             _ => None,
         }
     }
@@ -62,6 +68,7 @@ impl Display for Value {
             Int(v) => write!(f, "{v}_i64"),
             Float(v) => write!(f, "{v}_f64"),
             String(v) => write!(f, "{v:?}"),
+            Function(v) => write!(f, "{v:?}"),
         }
     }
 }
@@ -74,6 +81,7 @@ impl From<Literal> for Value {
             Literal::Int(value) => Value::Int(value),
             Literal::Float(value) => Value::Float(value.into_inner()),
             Literal::String(value) => Value::String(value),
+            Literal::Function(value) => Value::Function(value),
         }
     }
 }
@@ -85,6 +93,7 @@ pub enum Literal {
     Int(i64),
     Float(Finite<f64>),
     String(String),
+    Function(FunctionId),
 }
 
 impl Display for Literal {
