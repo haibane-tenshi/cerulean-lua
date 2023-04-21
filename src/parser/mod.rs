@@ -119,10 +119,10 @@ fn func_body<'s>(
 
         tracker.push_stack(Some(ident));
 
-        loop {
-            match s.next_token() {
-                Ok(Token::Comma) => (),
-                _ => break,
+        let mut next_ident = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
+            match s.next_token()? {
+                Token::Comma => (),
+                _ => return Err(ParseError.into()),
             }
 
             let ident = match s.next_required_token()? {
@@ -131,6 +131,15 @@ fn func_body<'s>(
             };
 
             tracker.push_stack(Some(ident));
+
+            Ok(s)
+        };
+
+        loop {
+            s = match next_ident(s.clone()) {
+                Ok(s) => s,
+                Err(_) => break,
+            };
         }
 
         Ok((s, ()))
