@@ -52,6 +52,9 @@ fn function<'s>(
     mut s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+    use crate::value::Literal;
+
     match s.next_token()? {
         Token::Function => (),
         _ => return Err(ParseError.into()),
@@ -59,14 +62,15 @@ fn function<'s>(
 
     let (s, func_id) = func_body(s, tracker).map_err(LexParseError::eof_into_err)?;
 
-    todo!();
+    let const_id = tracker.insert_literal(Literal::Function(func_id));
+    tracker.push(OpCode::LoadConstant(const_id));
 
     Ok((s, ()))
 }
 
 pub(super) fn expr<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker,
+    tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     expr_bp(s, 0, tracker)
 }
@@ -74,7 +78,7 @@ pub(super) fn expr<'s>(
 fn expr_bp<'s>(
     s: Lexer<'s>,
     min_bp: u64,
-    tracker: &mut ChunkTracker,
+    tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::opcode::OpCode;
 
@@ -125,11 +129,13 @@ fn expr_bp<'s>(
 
 fn expr_atom<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker,
+    tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     if let Ok(r) = literal(s.clone(), tracker) {
         Ok(r)
-    } else if let Ok(r) = variable(s, tracker) {
+    } else if let Ok(r) = variable(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = function(s, tracker) {
         Ok(r)
     } else {
         Err(ParseError.into())
