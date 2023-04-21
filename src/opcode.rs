@@ -24,6 +24,7 @@ pub struct FunctionId(pub Index);
 
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
+    Invoke(StackSlot),
     Return,
     LoadConstant(ConstId),
     LoadStack(StackSlot),
@@ -46,6 +47,7 @@ impl Display for OpCode {
         use OpCode::*;
 
         let s = match *self {
+            Invoke(StackSlot(index)) => format!("{:<10} [{index:>3}]", "Invoke"),
             Return => "Return".to_string(),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
             LoadStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "LoadStack"),
@@ -199,6 +201,11 @@ impl Chunk {
     pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
         let index: usize = index.0.try_into().ok()?;
         self.constants.get(index)
+    }
+
+    pub fn get_function(&self, index: FunctionId) -> Option<&Function> {
+        let index: usize = index.0.try_into().ok()?;
+        self.functions.get(index)
     }
 }
 

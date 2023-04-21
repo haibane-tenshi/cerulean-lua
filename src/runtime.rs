@@ -1,10 +1,15 @@
 use std::error::Error;
 use std::fmt::Display;
 
-use crate::opcode::{Chunk, ConstId, OpCode, StackSlot};
+use crate::opcode::{Chunk, ConstId, FunctionId, OpCode, StackSlot};
 use crate::value::{Literal, Value};
 
-pub type ControlFlow = std::ops::ControlFlow<()>;
+pub type ControlFlow = std::ops::ControlFlow<ControlFrame>;
+
+pub enum ControlFrame {
+    Return,
+    Invoke(FunctionId, StackSlot),
+}
 
 #[derive(Debug)]
 pub struct RuntimeError;
@@ -24,6 +29,13 @@ struct Stack {
 }
 
 impl Stack {
+    fn index(&self, slot: StackSlot) -> Result<usize, RuntimeError> {
+        let offset: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
+        let index = self.protected_size + offset;
+
+        Ok(index)
+    }
+
     pub fn push(&mut self, value: Value) {
         self.stack.push(value)
     }
@@ -50,14 +62,12 @@ impl Stack {
     }
 
     pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
-        let offset: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
-        let index = self.protected_size + offset;
+        let index = self.index(slot)?;
         self.stack.get(index).ok_or(RuntimeError)
     }
 
     pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value, RuntimeError> {
-        let offset: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
-        let index = self.protected_size + offset;
+        let index = self.index(slot)?;
         self.stack.get_mut(index).ok_or(RuntimeError)
     }
 
@@ -71,9 +81,9 @@ impl Stack {
         Ok(())
     }
 
-    pub fn protect(&mut self) -> usize {
-        self.protected_size = self.stack.len();
-        self.protected_size
+    pub fn protect_from(&mut self, slot: StackSlot) -> Result<usize, RuntimeError> {
+        self.protected_size = self.index(slot)?;
+        Ok(self.protected_size)
     }
 }
 
@@ -104,11 +114,19 @@ impl<'chunk> CurrentFrame<'chunk> {
         use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
         let Some(code) = self.next_code() else {
-            return Ok(ControlFlow::Break(()))
+            return Ok(ControlFlow::Break(ControlFrame::Return))
         };
 
         let r = match code {
-            Return => ControlFlow::Break(()),
+            Invoke(slot) => {
+                let func_id = match self.stack.get(slot) {
+                    Ok(Value::Function(func_id)) => *func_id,
+                    _ => return Err(RuntimeError),
+                };
+
+                ControlFlow::Break(ControlFrame::Invoke(func_id, slot))
+            }
+            Return => ControlFlow::Break(ControlFrame::Return),
             LoadConstant(index) => {
                 let constant = self.frame.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
@@ -393,17 +411,35 @@ impl<'chunk> Runtime<'chunk> {
 
     pub fn run(&mut self) -> Result<(), RuntimeError> {
         loop {
-            if let ControlFlow::Break(()) = self.current.step()? {
-                let Some(frame) = self.suspended.pop() else {
-                    // If we hit an early return from script, that leaves us pointing at
-                    // some arbitrary instructions immediately after.
-                    // If the user attempts to resume execution it can lead to bogged state.
-                    // To prevent that push in a dummy (empty) frame.
-                    self.current.push(Default::default())?;
-                    break
-                };
+            match self.current.step()? {
+                ControlFlow::Break(ControlFrame::Return) => {
+                    let Some(frame) = self.suspended.pop() else {
+                        // If we hit an early return from script, that leaves us pointing at
+                        // some arbitrary instructions immediately after.
+                        // If the user attempts to resume execution it can lead to bogged state.
+                        // To prevent that push in a dummy (empty) frame.
+                        self.current.push(Default::default())?;
+                        break
+                    };
 
-                self.current.push(frame)?;
+                    self.current.push(frame)?;
+                }
+                ControlFlow::Break(ControlFrame::Invoke(func_id, slot)) => {
+                    let codes = &self.chunk.get_function(func_id).ok_or(RuntimeError)?.codes;
+                    let constants = &self.chunk.constants;
+                    let stack_start = self.current.stack.protect_from(slot)?;
+
+                    let mut frame = Frame {
+                        codes,
+                        constants,
+                        ip: 0,
+                        stack_start,
+                    };
+
+                    std::mem::swap(&mut frame, &mut self.current.frame);
+                    self.suspended.push(frame);
+                }
+                ControlFlow::Continue(()) => (),
             }
         }
 
