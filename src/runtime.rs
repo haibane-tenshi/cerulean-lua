@@ -169,11 +169,6 @@ impl<'chunk> CurrentFrame<'chunk> {
 
                 ControlFlow::Continue(())
             }
-            PopStack(count) => {
-                self.stack.pop_many(count.into())?;
-
-                ControlFlow::Continue(())
-            }
             AriUnaOp(op) => {
                 let val = self.stack.pop()?;
 

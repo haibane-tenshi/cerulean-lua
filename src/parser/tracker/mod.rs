@@ -146,9 +146,6 @@ impl<'s> ChunkTracker<'s> {
             AdjustStack(slot) => {
                 self.stack.adjust_to(slot).unwrap();
             }
-            PopStack(count) => {
-                todo!()
-            }
             AriUnaOp(_) | BitUnaOp(_) => (),
             AriBinOp(_) | BitBinOp(_) | RelBinOp(_) | StrBinOp(_) => {
                 self.stack.pop().unwrap();
