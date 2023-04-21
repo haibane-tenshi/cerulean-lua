@@ -49,10 +49,10 @@ impl OpCodeTracker {
         index
     }
 
-    pub fn get(&self, index: InstrId) -> Option<&OpCode> {
-        let index: usize = index.0.try_into().ok()?;
-        self.codes.get(index)
-    }
+    // pub fn get(&self, index: InstrId) -> Option<&OpCode> {
+    //     let index: usize = index.0.try_into().ok()?;
+    //     self.codes.get(index)
+    // }
 
     pub fn get_mut(&mut self, index: InstrId) -> Option<&mut OpCode> {
         let index: usize = index.0.try_into().ok()?;
@@ -120,9 +120,9 @@ impl<'s> ChunkTracker<'s> {
             .unwrap_or(InstrId(0))
     }
 
-    pub fn get(&self, index: InstrId) -> Option<&OpCode> {
-        self.suspended.last()?.get(index)
-    }
+    // pub fn get(&self, index: InstrId) -> Option<&OpCode> {
+    //     self.suspended.last()?.get(index)
+    // }
 
     pub fn get_mut(&mut self, index: InstrId) -> Option<&mut OpCode> {
         self.suspended.last_mut()?.get_mut(index)

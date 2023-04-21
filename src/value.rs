@@ -52,7 +52,7 @@ impl PartialOrd for Value {
             (Int(lhs), Int(rhs)) => Some(lhs.cmp(rhs)),
             (Float(lhs), Float(rhs)) => lhs.partial_cmp(rhs),
             (String(lhs), String(rhs)) => Some(lhs.cmp(rhs)),
-            (Function(lhs), Function(rhs)) => None,
+            (Function(_), Function(_)) => None,
             _ => None,
         }
     }

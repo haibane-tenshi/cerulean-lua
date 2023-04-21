@@ -48,19 +48,6 @@ impl Stack {
         self.stack.pop().ok_or(RuntimeError)
     }
 
-    pub fn pop_many(&mut self, count: u32) -> Result<(), RuntimeError> {
-        let count: usize = count.try_into().map_err(|_| RuntimeError)?;
-        let len = self.stack.len().checked_sub(count).ok_or(RuntimeError)?;
-
-        if len < self.protected_size {
-            return Err(RuntimeError);
-        }
-
-        self.stack.truncate(len);
-
-        Ok(())
-    }
-
     pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
         let index = self.index(slot)?;
         self.stack.get(index).ok_or(RuntimeError)
