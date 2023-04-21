@@ -135,7 +135,9 @@ impl<'s> ChunkTracker<'s> {
 
         // Keep stack state consistent
         match opcode {
-            Invoke(_) => todo!(),
+            Invoke(slot) => {
+                self.stack.adjust_to(slot).unwrap();
+            }
             Return => (),
             LoadConstant(_) | LoadStack(_) => {
                 self.stack.push(None);

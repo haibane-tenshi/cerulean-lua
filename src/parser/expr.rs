@@ -68,6 +68,44 @@ fn function<'s>(
     Ok((s, ()))
 }
 
+fn function_call<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+
+    let ident = match s.next_token()? {
+        Token::Ident(ident) => ident,
+        _ => return Err(ParseError.into()),
+    };
+
+    let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
+    tracker.push(OpCode::LoadStack(slot));
+
+    let invoke_target = tracker.top().unwrap();
+
+    match s.next_required_token()? {
+        Token::ParL => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    loop {
+        s = match expr(s.clone(), tracker) {
+            Ok((s, ())) => s,
+            _ => break,
+        }
+    }
+
+    match s.next_required_token()? {
+        Token::ParR => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    tracker.push(OpCode::Invoke(invoke_target));
+
+    Ok((s, ()))
+}
+
 pub(super) fn expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
@@ -132,6 +170,9 @@ fn expr_atom<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     if let Ok(r) = literal(s.clone(), tracker) {
+        Ok(r)
+        // Order matters: beginning of function call can look like a variable.
+    } else if let Ok(r) = function_call(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = variable(s.clone(), tracker) {
         Ok(r)
