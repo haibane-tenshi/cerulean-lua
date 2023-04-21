@@ -16,7 +16,7 @@ impl Display for ConstId {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct StackSlot(pub Index);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

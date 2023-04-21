@@ -99,6 +99,10 @@ impl<'s> StackTracker<'s> {
         self.index_to_slot(index)
     }
 
+    pub fn next(&self) -> StackSlot {
+        self.index_to_slot(self.stack.len()).unwrap()
+    }
+
     pub fn lookup_local(&self, name: &str) -> Option<StackSlot> {
         let index = self.backlinks.get(name)?;
         self.index_to_slot(index)
@@ -108,7 +112,7 @@ impl<'s> StackTracker<'s> {
         self.blocks.push(self.stack.len());
     }
 
-    pub fn pop_block(&mut self) -> Result<u32, StackStateError> {
+    pub fn pop_block(&mut self) -> Result<StackSlot, StackStateError> {
         // Blocks outside current frame need to be protected.
         if let Some(&block) = self.blocks.last() {
             if block < self.frame_base() {
@@ -117,14 +121,14 @@ impl<'s> StackTracker<'s> {
         }
 
         let index = self.blocks.pop().ok_or(StackStateError::MissingBlock)?;
-        let count = self.stack.len().checked_sub(index).unwrap_or_default();
-
         self.adjust_to_height(index)?;
 
-        Ok(count.try_into().unwrap())
+        let slot = self.index_to_slot(index).unwrap();
+
+        Ok(slot)
     }
 
-    pub fn pop_ghost_block(&mut self) -> Result<u32, StackStateError> {
+    pub fn pop_ghost_block(&mut self) -> Result<StackSlot, StackStateError> {
         let &block = self.blocks.last().ok_or(StackStateError::MissingBlock)?;
 
         // Blocks outside current frame need to be protected.
@@ -132,15 +136,9 @@ impl<'s> StackTracker<'s> {
             return Err(StackStateError::BoundaryViolation);
         }
 
-        let count = self
-            .stack
-            .len()
-            .checked_sub(block)
-            .unwrap_or_default()
-            .try_into()
-            .unwrap();
+        let slot = self.index_to_slot(block).unwrap();
 
-        Ok(count)
+        Ok(slot)
     }
 
     pub fn push_frame(&mut self) {
@@ -148,15 +146,12 @@ impl<'s> StackTracker<'s> {
         self.push_block();
     }
 
-    pub fn pop_frame(&mut self) -> Result<u32, StackStateError> {
-        let mut count = 0;
-        while let Ok(block) = self.pop_block() {
-            count += block;
-        }
+    pub fn pop_frame(&mut self) -> Result<StackSlot, StackStateError> {
+        while self.pop_block().is_ok() {}
 
         self.frames.pop().ok_or(StackStateError::MissingFrame)?;
 
-        Ok(count)
+        Ok(StackSlot(0))
     }
 }
 

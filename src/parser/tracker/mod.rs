@@ -2,8 +2,6 @@ mod stack;
 
 use std::collections::HashMap;
 
-use thiserror::Error;
-
 use crate::opcode::{Chunk, ConstId, Function, FunctionId, OpCode, StackSlot};
 use crate::value::Literal;
 
@@ -176,30 +174,32 @@ impl<'s> ChunkTracker<'s> {
     }
 
     pub fn pop_block(&mut self) -> Result<(), StackStateError> {
-        let count = self.stack.pop_block()?;
+        let current = self.stack.next();
+        let slot = self.stack.pop_block()?;
 
         // Remove excessive temporaries upon exiting frame.
-        if let Ok(extra_stack) = count.try_into() {
+        if slot < current {
             // Use raw push: we already popped temporaries off the stack.
             self.suspended
                 .last_mut()
                 .unwrap()
-                .push(OpCode::PopStack(extra_stack));
+                .push(OpCode::AdjustStack(slot));
         }
 
         Ok(())
     }
 
     pub fn pop_ghost_block(&mut self) -> Result<(), StackStateError> {
-        let count = self.stack.pop_ghost_block()?;
+        let current = self.stack.next();
+        let slot = self.stack.pop_ghost_block()?;
 
         // Remove excessive temporaries upon exiting frame.
-        if let Ok(extra_stack) = count.try_into() {
+        if slot < current {
             // Use raw push: we already popped temporaries off the stack.
             self.suspended
                 .last_mut()
                 .unwrap()
-                .push(OpCode::PopStack(extra_stack));
+                .push(OpCode::AdjustStack(slot));
         }
 
         Ok(())
@@ -228,9 +228,10 @@ impl<'s> ChunkTracker<'s> {
     pub fn pop_frame(&mut self, height: u32) -> Result<FunctionId, StackStateError> {
         let mut opcodes = self.suspended.pop().ok_or(StackStateError::MissingFrame)?;
 
-        let count = self.stack.pop_frame()?;
-        if let Ok(count) = count.try_into() {
-            opcodes.push(OpCode::PopStack(count));
+        let current = self.stack.next();
+        let slot = self.stack.pop_frame()?;
+        if slot < current {
+            opcodes.push(OpCode::AdjustStack(slot));
         }
 
         let fun = opcodes.resolve(height);

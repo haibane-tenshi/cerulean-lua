@@ -94,10 +94,10 @@ impl Stack {
 
         match requested_height.cmp(&self.stack.len()) {
             Ordering::Equal => (),
-            Ordering::Less => self
+            Ordering::Greater => self
                 .stack
                 .extend(std::iter::repeat(Value::Nil).take(requested_height - self.stack.len())),
-            Ordering::Greater => {
+            Ordering::Less => {
                 self.stack.truncate(requested_height);
             }
         }
