@@ -35,9 +35,7 @@ fn variable<'s>(
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::opcode::OpCode;
 
-    let token = s.next_token()?;
-
-    let ident = match token {
+    let ident = match s.next_token()? {
         Token::Ident(ident) => ident,
         _ => return Err(ParseError.into()),
     };
@@ -69,18 +67,12 @@ fn function<'s>(
 }
 
 fn function_call<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::OpCode;
+    use crate::opcode::{OpCode, StackSlot};
 
-    let ident = match s.next_token()? {
-        Token::Ident(ident) => ident,
-        _ => return Err(ParseError.into()),
-    };
-
-    let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
-    tracker.push(OpCode::LoadStack(slot));
+    let (mut s, ()) = variable(s, tracker)?;
 
     let invoke_target = tracker.top().unwrap();
 
@@ -102,6 +94,7 @@ fn function_call<'s>(
     }
 
     tracker.push(OpCode::Invoke(invoke_target));
+    tracker.push(OpCode::AdjustStack(StackSlot(invoke_target.0 + 1)));
 
     Ok((s, ()))
 }

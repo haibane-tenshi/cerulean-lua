@@ -49,14 +49,25 @@ impl<'s> StackTracker<'s> {
     }
 
     fn adjust_to_height(&mut self, height: usize) -> Result<(), StackStateError> {
+        use std::cmp::Ordering;
+
         if height < self.block_base() {
             return Err(StackStateError::BoundaryViolation);
         }
 
-        let names = self.stack.drain(height..).flatten();
+        match height.cmp(&self.stack.len()) {
+            Ordering::Equal => (),
+            Ordering::Less => {
+                let names = self.stack.drain(height..).flatten();
 
-        for name in names {
-            self.backlinks.pop(name);
+                for name in names {
+                    self.backlinks.pop(name);
+                }
+            }
+            Ordering::Greater => {
+                self.stack
+                    .extend(std::iter::repeat(None).take(height - self.stack.len()));
+            }
         }
 
         Ok(())
