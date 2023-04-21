@@ -57,23 +57,13 @@ impl<'s> StackTracker<'s> {
         self.frames.last().copied().unwrap_or_default()
     }
 
-    pub fn push(&mut self) -> StackSlot {
-        let index = self.stack.len();
-        let base = self.frame_base();
-        self.stack.push(None);
+    pub fn push(&mut self, name: Option<&'s str>) -> StackSlot {
+        let slot = self.stack.len();
+        self.stack.push(name);
 
-        let slot = (index - base).try_into().unwrap();
-
-        StackSlot(slot)
-    }
-
-    pub fn push_named(&mut self, name: &'s str) -> StackSlot {
-        let index = self.stack.len();
-        let base = self.frame_base();
-        self.stack.push(Some(name));
-
-        let slot = index - base;
-        self.backlinks.entry(name).or_default().push(slot);
+        if let Some(name) = name {
+            self.backlinks.entry(name).or_default().push(slot);
+        }
 
         StackSlot(slot.try_into().unwrap())
     }
@@ -202,7 +192,7 @@ impl OpCodeTracker {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct ChunkTracker<'s> {
     finalized: Vec<Function>,
     suspended: Vec<OpCodeTracker>,
@@ -217,15 +207,26 @@ impl<'s> ChunkTracker<'s> {
 
     pub fn resolve(self) -> Result<Chunk, ()> {
         let ChunkTracker {
-            finalized,
-            suspended,
+            mut finalized,
+            mut suspended,
             constants,
             stack: _,
         } = self;
 
-        if !suspended.is_empty() {
-            return Err(());
-        }
+        let script = {
+            let script = suspended.pop().ok_or(())?;
+
+            if !suspended.is_empty() {
+                return Err(());
+            }
+
+            Function {
+                codes: script.resolve(),
+                lines: Default::default(),
+            }
+        };
+
+        *finalized.get_mut(0).unwrap() = script;
 
         let constants = constants.resolve();
 
@@ -259,7 +260,7 @@ impl<'s> ChunkTracker<'s> {
         match opcode {
             Return => (),
             LoadConstant(_) | LoadStack(_) => {
-                self.stack.push();
+                self.stack.push(None);
             }
             StoreStack(_) => {
                 self.stack.pop().unwrap();
@@ -327,7 +328,7 @@ impl<'s> ChunkTracker<'s> {
 
     pub fn name_local(&mut self, ident: &'s str) -> Result<(), StackStateError> {
         self.stack.pop()?;
-        self.stack.push_named(ident);
+        self.stack.push(Some(ident));
 
         Ok(())
     }
@@ -357,9 +358,19 @@ impl<'s> ChunkTracker<'s> {
     }
 
     pub fn push_stack(&mut self, name: Option<&'s str>) -> StackSlot {
-        match name {
-            Some(name) => self.stack.push_named(name),
-            None => self.stack.push(),
+        self.stack.push(name)
+    }
+}
+
+impl<'s> Default for ChunkTracker<'s> {
+    fn default() -> Self {
+        // 0th slot is the entry point.
+        // Reserve it for the script itself.
+        ChunkTracker {
+            finalized: vec![Default::default()],
+            suspended: vec![Default::default()],
+            constants: Default::default(),
+            stack: Default::default(),
         }
     }
 }
