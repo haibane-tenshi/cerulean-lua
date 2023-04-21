@@ -1,9 +1,13 @@
+mod stack;
+
 use std::collections::HashMap;
 
 use thiserror::Error;
 
 use crate::opcode::{Chunk, ConstId, Function, FunctionId, OpCode, StackSlot};
 use crate::value::Literal;
+
+use stack::{StackStateError, StackTracker};
 
 #[derive(Debug, Copy, Clone)]
 pub(super) struct InstrId(pub u32);
@@ -26,136 +30,6 @@ impl ConstTracker {
 
     pub fn resolve(self) -> Vec<Literal> {
         self.constants
-    }
-}
-
-#[derive(Debug, Error)]
-pub(super) enum StackStateError {
-    #[error("attempted to modify stack behind protected boundary")]
-    BoundaryViolation,
-
-    #[error("temporary doesn't exist")]
-    MissingTemporary,
-
-    #[error("block doesn't exist")]
-    MissingBlock,
-
-    #[error("frame doesn't exist")]
-    MissingFrame,
-}
-
-#[derive(Debug, Default)]
-struct StackTracker<'s> {
-    stack: Vec<Option<&'s str>>,
-    backlinks: HashMap<&'s str, Vec<usize>>,
-    blocks: Vec<usize>,
-    frames: Vec<usize>,
-}
-
-impl<'s> StackTracker<'s> {
-    fn frame_base(&self) -> usize {
-        self.frames.last().copied().unwrap_or_default()
-    }
-
-    pub fn push(&mut self, name: Option<&'s str>) -> StackSlot {
-        let slot = self.stack.len();
-        self.stack.push(name);
-
-        if let Some(name) = name {
-            self.backlinks.entry(name).or_default().push(slot);
-        }
-
-        StackSlot(slot.try_into().unwrap())
-    }
-
-    pub fn pop(&mut self) -> Result<(), StackStateError> {
-        if self.stack.len() < self.frame_base() {
-            return Err(StackStateError::BoundaryViolation);
-        }
-
-        let Some(name) = self.stack.pop().ok_or(StackStateError::MissingTemporary)? else {
-            return Ok(())
-        };
-
-        let Some(backlink) = self.backlinks.get_mut(&name) else {
-            return Ok(())
-        };
-
-        backlink.pop();
-
-        if backlink.is_empty() {
-            self.backlinks.remove(&name);
-        }
-
-        Ok(())
-    }
-
-    pub fn lookup_local(&self, name: &str) -> Option<StackSlot> {
-        let slot = self.backlinks.get(name).and_then(|bl| bl.last()).copied()?;
-
-        // For now, don't return upvalues.
-        let base = self.frame_base();
-        slot.checked_sub(base).map(|slot| {
-            let slot = slot.try_into().unwrap();
-            StackSlot(slot)
-        })
-    }
-
-    pub fn push_block(&mut self) {
-        self.blocks.push(self.stack.len());
-    }
-
-    pub fn pop_block(&mut self) -> Result<u32, StackStateError> {
-        // Blocks outside current frame need to be protected.
-        if let Some(&block) = self.blocks.last() {
-            if block < self.frame_base() {
-                return Err(StackStateError::BoundaryViolation);
-            }
-        }
-
-        let index = self.blocks.pop().ok_or(StackStateError::MissingBlock)?;
-
-        let count = self.stack.len().checked_sub(index).unwrap_or_default();
-        for _ in 0..count {
-            self.pop()?;
-        }
-
-        Ok(count.try_into().unwrap())
-    }
-
-    pub fn pop_ghost_block(&mut self) -> Result<u32, StackStateError> {
-        let &block = self.blocks.last().ok_or(StackStateError::MissingBlock)?;
-
-        // Blocks outside current frame need to be protected.
-        if block < self.frame_base() {
-            return Err(StackStateError::BoundaryViolation);
-        }
-
-        let count = self
-            .stack
-            .len()
-            .checked_sub(block)
-            .unwrap_or_default()
-            .try_into()
-            .unwrap();
-
-        Ok(count)
-    }
-
-    pub fn push_frame(&mut self) {
-        self.frames.push(self.stack.len());
-        self.push_block();
-    }
-
-    pub fn pop_frame(&mut self) -> Result<u32, StackStateError> {
-        let mut count = 0;
-        while let Ok(block) = self.pop_block() {
-            count += block;
-        }
-
-        self.frames.pop().ok_or(StackStateError::MissingFrame)?;
-
-        Ok(count)
     }
 }
 
@@ -281,6 +155,10 @@ impl<'s> ChunkTracker<'s> {
         }
 
         self.suspended.last_mut().unwrap().push(opcode)
+    }
+
+    pub fn top(&self) -> Option<StackSlot> {
+        self.stack.top()
     }
 
     pub fn push_loop_to(&mut self, target: InstrId) -> InstrId {
