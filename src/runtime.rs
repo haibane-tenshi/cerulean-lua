@@ -85,6 +85,23 @@ impl Stack {
         self.protected_size = self.index(slot)?;
         Ok(self.protected_size)
     }
+
+    pub fn adjust_height(&mut self, height: u32) {
+        use std::cmp::Ordering;
+
+        let height: usize = height.try_into().unwrap();
+        let requested_height = self.protected_size + height;
+
+        match requested_height.cmp(&self.stack.len()) {
+            Ordering::Equal => (),
+            Ordering::Less => self
+                .stack
+                .extend(std::iter::repeat(Value::Nil).take(requested_height - self.stack.len())),
+            Ordering::Greater => {
+                self.stack.truncate(requested_height);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -425,9 +442,11 @@ impl<'chunk> Runtime<'chunk> {
                     self.current.push(frame)?;
                 }
                 ControlFlow::Break(ControlFrame::Invoke(func_id, slot)) => {
-                    let codes = &self.chunk.get_function(func_id).ok_or(RuntimeError)?.codes;
+                    let func = self.chunk.get_function(func_id).ok_or(RuntimeError)?;
+                    let codes = &func.codes;
                     let constants = &self.chunk.constants;
                     let stack_start = self.current.stack.protect_from(slot)?;
+                    self.current.stack.adjust_height(func.height);
 
                     let mut frame = Frame {
                         codes,

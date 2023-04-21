@@ -187,8 +187,14 @@ impl OpCodeTracker {
         self.codes.get_mut(index)
     }
 
-    pub fn resolve(self) -> Vec<OpCode> {
-        self.codes
+    pub fn resolve(self, height: u32) -> Function {
+        let OpCodeTracker { codes } = self;
+
+        Function {
+            codes,
+            lines: Default::default(),
+            height,
+        }
     }
 }
 
@@ -220,10 +226,7 @@ impl<'s> ChunkTracker<'s> {
                 return Err(());
             }
 
-            Function {
-                codes: script.resolve(),
-                lines: Default::default(),
-            }
+            script.resolve(0)
         };
 
         *finalized.get_mut(0).unwrap() = script;
@@ -339,7 +342,7 @@ impl<'s> ChunkTracker<'s> {
         self.suspended.push(Default::default());
     }
 
-    pub fn pop_frame(&mut self) -> Result<FunctionId, StackStateError> {
+    pub fn pop_frame(&mut self, height: u32) -> Result<FunctionId, StackStateError> {
         let mut opcodes = self.suspended.pop().ok_or(StackStateError::MissingFrame)?;
 
         let count = self.stack.pop_frame()?;
@@ -347,10 +350,7 @@ impl<'s> ChunkTracker<'s> {
             opcodes.push(OpCode::PopStack(count));
         }
 
-        let fun = Function {
-            codes: opcodes.resolve(),
-            lines: Default::default(),
-        };
+        let fun = opcodes.resolve(height);
 
         let id = FunctionId(self.finalized.len().try_into().unwrap());
         self.finalized.push(fun);

@@ -234,6 +234,7 @@ impl Display for Chunk {
 pub struct Function {
     pub codes: Vec<OpCode>,
     pub lines: RleVec<u32>,
+    pub height: u32,
 }
 
 impl Display for Function {
@@ -243,6 +244,8 @@ impl Display for Function {
             Explicit(u32),
             Repeat,
         }
+
+        writeln!(f, "initial stack: {}", self.height)?;
 
         let iter = self.codes.iter().copied().enumerate().zip(
             self.lines

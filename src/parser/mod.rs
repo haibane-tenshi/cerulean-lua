@@ -112,12 +112,14 @@ fn func_body<'s>(
     tracker.push_stack(None);
 
     let mut parlist = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
+        let mut count = 0;
+
         let ident = match s.next_token()? {
             Token::Ident(ident) => ident,
             _ => return Err(ParseError.into()),
         };
-
         tracker.push_stack(Some(ident));
+        count += 1;
 
         let mut next_ident = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
             match s.next_token()? {
@@ -129,8 +131,8 @@ fn func_body<'s>(
                 Token::Ident(ident) => ident,
                 _ => return Err(ParseError.into()),
             };
-
             tracker.push_stack(Some(ident));
+            count += 1;
 
             Ok(s)
         };
@@ -142,13 +144,15 @@ fn func_body<'s>(
             };
         }
 
-        Ok((s, ()))
+        Ok((s, count))
     };
 
-    let mut s = match parlist(s.clone()) {
-        Ok((s, ())) => s,
-        Err(_) => s,
+    let (mut s, param_count) = match parlist(s.clone()) {
+        Ok((s, count)) => (s, count),
+        Err(_) => (s, 0),
     };
+    // An extra stack slot is taken by function pointer itself.
+    let height = param_count + 1;
 
     match s.next_required_token()? {
         Token::ParR => (),
@@ -163,7 +167,7 @@ fn func_body<'s>(
     }
 
     // Finish function
-    let func_id = tracker.pop_frame().map_err(|_| ParseError)?;
+    let func_id = tracker.pop_frame(height).map_err(|_| ParseError)?;
 
     Ok((s, func_id))
 }
