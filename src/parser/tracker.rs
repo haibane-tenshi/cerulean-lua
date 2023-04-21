@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::opcode::{Chunk, ConstId, OpCode, StackSlot};
+use thiserror::Error;
+
+use crate::opcode::{Chunk, ConstId, Function, OpCode, StackSlot};
 use crate::value::Literal;
 
 #[derive(Debug, Copy, Clone)]
@@ -27,39 +29,66 @@ impl ConstTracker {
     }
 }
 
+#[derive(Debug, Error)]
+pub(super) enum StackStateError {
+    #[error("attempted to modify stack behind protected boundary")]
+    BoundaryViolation,
+
+    #[error("temporary doesn't exist")]
+    MissingTemporary,
+
+    #[error("block doesn't exist")]
+    MissingBlock,
+
+    #[error("frame doesn't exist")]
+    MissingFrame,
+}
+
 #[derive(Debug, Default)]
 struct StackTracker<'s> {
     stack: Vec<Option<&'s str>>,
-    backlinks: HashMap<&'s str, Vec<StackSlot>>,
+    backlinks: HashMap<&'s str, Vec<usize>>,
+    blocks: Vec<usize>,
     frames: Vec<usize>,
 }
 
 impl<'s> StackTracker<'s> {
+    fn frame_base(&self) -> usize {
+        self.frames.last().copied().unwrap_or_default()
+    }
+
     pub fn push(&mut self) -> StackSlot {
-        let index = self.stack.len().try_into().unwrap();
+        let index = self.stack.len();
+        let base = self.frame_base();
         self.stack.push(None);
 
-        StackSlot(index)
+        let slot = (index - base).try_into().unwrap();
+
+        StackSlot(slot)
     }
 
     pub fn push_named(&mut self, name: &'s str) -> StackSlot {
-        let index = self.stack.len().try_into().unwrap();
+        let index = self.stack.len();
+        let base = self.frame_base();
         self.stack.push(Some(name));
 
-        let r = StackSlot(index);
+        let slot = index - base;
+        self.backlinks.entry(name).or_default().push(slot);
 
-        self.backlinks.entry(name).or_default().push(r);
-
-        r
+        StackSlot(slot.try_into().unwrap())
     }
 
-    pub fn pop(&mut self) {
-        let Some(Some(name)) = self.stack.pop() else {
-            return
+    pub fn pop(&mut self) -> Result<(), StackStateError> {
+        if self.stack.len() < self.frame_base() {
+            return Err(StackStateError::BoundaryViolation);
+        }
+
+        let Some(name) = self.stack.pop().ok_or(StackStateError::MissingTemporary)? else {
+            return Ok(())
         };
 
         let Some(backlink) = self.backlinks.get_mut(&name) else {
-            return
+            return Ok(())
         };
 
         backlink.pop();
@@ -67,30 +96,75 @@ impl<'s> StackTracker<'s> {
         if backlink.is_empty() {
             self.backlinks.remove(&name);
         }
+
+        Ok(())
     }
 
     pub fn lookup_local(&self, name: &str) -> Option<StackSlot> {
-        self.backlinks.get(name).and_then(|bl| bl.last()).copied()
+        let slot = self.backlinks.get(name).and_then(|bl| bl.last()).copied()?;
+
+        // For now, don't return upvalues.
+        let base = self.frame_base();
+        slot.checked_sub(base).map(|slot| {
+            let slot = slot.try_into().unwrap();
+            StackSlot(slot)
+        })
+    }
+
+    pub fn push_block(&mut self) {
+        self.blocks.push(self.stack.len());
+    }
+
+    pub fn pop_block(&mut self) -> Result<u32, StackStateError> {
+        // Blocks outside current frame need to be protected.
+        if let Some(&block) = self.blocks.last() {
+            if block < self.frame_base() {
+                return Err(StackStateError::BoundaryViolation);
+            }
+        }
+
+        let index = self.blocks.pop().ok_or(StackStateError::MissingBlock)?;
+
+        let count = self.stack.len().checked_sub(index).unwrap_or_default();
+        for _ in 0..count {
+            self.pop()?;
+        }
+
+        Ok(count.try_into().unwrap())
+    }
+
+    pub fn pop_ghost_block(&mut self) -> Result<u32, StackStateError> {
+        let &block = self.blocks.last().ok_or(StackStateError::MissingBlock)?;
+
+        // Blocks outside current frame need to be protected.
+        if block < self.frame_base() {
+            return Err(StackStateError::BoundaryViolation);
+        }
+
+        let count = self
+            .stack
+            .len()
+            .checked_sub(block)
+            .unwrap_or_default()
+            .try_into()
+            .unwrap();
+
+        Ok(count)
     }
 
     pub fn push_frame(&mut self) {
-        self.frames.push(self.stack.len());
+        self.frames.push(self.stack.len())
     }
 
-    pub fn pop_frame(&mut self) -> Option<u32> {
-        let index = self.frames.pop()?;
-        let count = self.stack.len().checked_sub(index)?.try_into().ok()?;
-
-        for _ in 0..count {
-            self.pop();
+    pub fn pop_frame(&mut self) -> Result<u32, StackStateError> {
+        let mut count = 0;
+        while let Ok(block) = self.pop_block() {
+            count += block;
         }
 
-        Some(count)
-    }
+        self.frames.pop().ok_or(StackStateError::MissingFrame)?;
 
-    pub fn pop_ghost_frame(&mut self) -> Option<u32> {
-        let &index = self.frames.last()?;
-        self.stack.len().checked_sub(index)?.try_into().ok()
+        Ok(count)
     }
 }
 
@@ -129,9 +203,10 @@ impl OpCodeTracker {
 
 #[derive(Debug, Default)]
 pub(super) struct ChunkTracker<'s> {
+    finalized: Vec<Function>,
+    suspended: Vec<OpCodeTracker>,
     constants: ConstTracker,
     stack: StackTracker<'s>,
-    codes: OpCodeTracker,
 }
 
 impl<'s> ChunkTracker<'s> {
@@ -139,39 +214,41 @@ impl<'s> ChunkTracker<'s> {
         Default::default()
     }
 
-    pub fn resolve(self) -> Chunk {
-        use crate::opcode::Function;
-
+    pub fn resolve(self) -> Result<Chunk, ()> {
         let ChunkTracker {
-            codes,
+            finalized,
+            suspended,
             constants,
             stack: _,
         } = self;
 
-        let codes = codes.resolve();
+        if !suspended.is_empty() {
+            return Err(());
+        }
+
         let constants = constants.resolve();
 
-        let fun = Function {
-            codes,
-            lines: Default::default(),
+        let r = Chunk {
+            functions: finalized,
+            constants,
         };
 
-        Chunk {
-            functions: vec![fun],
-            constants,
-        }
+        Ok(r)
     }
 
     pub fn next_instr(&self) -> InstrId {
-        self.codes.next()
+        self.suspended
+            .last()
+            .map(|opcodes| opcodes.next())
+            .unwrap_or(InstrId(0))
     }
 
     pub fn get(&self, index: InstrId) -> Option<&OpCode> {
-        self.codes.get(index)
+        self.suspended.last()?.get(index)
     }
 
     pub fn get_mut(&mut self, index: InstrId) -> Option<&mut OpCode> {
-        self.codes.get_mut(index)
+        self.suspended.last_mut()?.get_mut(index)
     }
 
     pub fn push(&mut self, opcode: OpCode) -> InstrId {
@@ -183,19 +260,21 @@ impl<'s> ChunkTracker<'s> {
             LoadConstant(_) | LoadStack(_) => {
                 self.stack.push();
             }
-            StoreStack(_) => self.stack.pop(),
+            StoreStack(_) => {
+                self.stack.pop().unwrap();
+            }
             PopStack(count) => {
                 todo!()
             }
             AriUnaOp(_) | BitUnaOp(_) => (),
             AriBinOp(_) | BitBinOp(_) | RelBinOp(_) | StrBinOp(_) => {
-                self.stack.pop();
+                self.stack.pop().unwrap();
             }
             Jump { .. } | Loop { .. } => (),
-            JumpIf { .. } | LoopIf { .. } => self.stack.pop(),
+            JumpIf { .. } | LoopIf { .. } => self.stack.pop().unwrap(),
         }
 
-        self.codes.push(opcode)
+        self.suspended.last_mut().unwrap().push(opcode)
     }
 
     pub fn push_loop_to(&mut self, target: InstrId) -> InstrId {
@@ -203,29 +282,35 @@ impl<'s> ChunkTracker<'s> {
         self.push(OpCode::Loop { offset })
     }
 
-    pub fn push_frame(&mut self) {
-        self.stack.push_frame()
+    pub fn push_block(&mut self) {
+        self.stack.push_block()
     }
 
-    pub fn pop_frame(&mut self) -> Result<(), ()> {
-        let count = self.stack.pop_frame().ok_or(())?;
+    pub fn pop_block(&mut self) -> Result<(), StackStateError> {
+        let count = self.stack.pop_block()?;
 
         // Remove excessive temporaries upon exiting frame.
         if let Ok(extra_stack) = count.try_into() {
             // Use raw push: we already popped temporaries off the stack.
-            self.codes.push(OpCode::PopStack(extra_stack));
+            self.suspended
+                .last_mut()
+                .unwrap()
+                .push(OpCode::PopStack(extra_stack));
         }
 
         Ok(())
     }
 
-    pub fn pop_ghost_frame(&mut self) -> Result<(), ()> {
-        let count = self.stack.pop_ghost_frame().ok_or(())?;
+    pub fn pop_ghost_block(&mut self) -> Result<(), StackStateError> {
+        let count = self.stack.pop_ghost_block()?;
 
         // Remove excessive temporaries upon exiting frame.
         if let Ok(extra_stack) = count.try_into() {
             // Use raw push: we already popped temporaries off the stack.
-            self.codes.push(OpCode::PopStack(extra_stack));
+            self.suspended
+                .last_mut()
+                .unwrap()
+                .push(OpCode::PopStack(extra_stack));
         }
 
         Ok(())
@@ -239,8 +324,33 @@ impl<'s> ChunkTracker<'s> {
         self.stack.lookup_local(ident)
     }
 
-    pub fn name_local(&mut self, ident: &'s str) {
-        self.stack.pop();
+    pub fn name_local(&mut self, ident: &'s str) -> Result<(), StackStateError> {
+        self.stack.pop()?;
         self.stack.push_named(ident);
+
+        Ok(())
+    }
+
+    pub fn push_frame(&mut self) {
+        self.stack.push_frame();
+        self.suspended.push(Default::default());
+    }
+
+    pub fn pop_frame(&mut self) -> Result<(), StackStateError> {
+        let mut opcodes = self.suspended.pop().ok_or(StackStateError::MissingFrame)?;
+
+        let count = self.stack.pop_frame()?;
+        if let Ok(count) = count.try_into() {
+            opcodes.push(OpCode::PopStack(count));
+        }
+
+        let fun = Function {
+            codes: opcodes.resolve(),
+            lines: Default::default(),
+        };
+
+        self.finalized.push(fun);
+
+        Ok(())
     }
 }

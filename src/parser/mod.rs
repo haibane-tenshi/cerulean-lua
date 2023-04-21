@@ -65,20 +65,18 @@ pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
         Err(err) => return Err(err),
     }
 
-    let chunk = tracker.resolve();
-
-    Ok(chunk)
+    tracker.resolve().map_err(|_| ParseError.into())
 }
 
 fn block<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    tracker.push_frame();
+    tracker.push_block();
 
     let r = inner_block(s, tracker);
 
-    tracker.pop_frame().unwrap();
+    tracker.pop_block().unwrap();
 
     r
 }

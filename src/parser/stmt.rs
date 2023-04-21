@@ -103,7 +103,7 @@ fn assignment<'s>(
     match local {
         Some(()) => {
             // If we have local keyword, introduce new local variable.
-            tracker.name_local(ident);
+            tracker.name_local(ident).map_err(|_| ParseError)?;
         }
         None => {
             // Otherwise try to store it inside known variable.
@@ -275,7 +275,7 @@ fn repeat_until<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.push_frame();
+    tracker.push_block();
     let start = tracker.next_instr();
 
     let (mut s, ()) = inner_block(s, tracker).map_err(LexParseError::eof_into_err)?;
@@ -295,12 +295,12 @@ fn repeat_until<'s>(
         offset: 0,
     });
 
-    tracker.pop_ghost_frame().unwrap();
+    tracker.pop_ghost_block().unwrap();
     tracker.push_loop_to(start);
 
     // Cleanup stack after loop is exited.
     backpatch_to_current(to_end, tracker);
-    tracker.pop_frame().unwrap();
+    tracker.pop_block().unwrap();
 
     Ok((s, ()))
 }
