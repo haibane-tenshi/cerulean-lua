@@ -29,6 +29,8 @@ pub enum OpCode {
     LoadConstant(ConstId),
     LoadStack(StackSlot),
     StoreStack(StackSlot),
+    AdjustStack(StackSlot),
+    #[deprecated]
     PopStack(NonZeroU32),
     AriUnaOp(AriUnaOp),
     AriBinOp(AriBinOp),
@@ -36,10 +38,20 @@ pub enum OpCode {
     BitBinOp(BitBinOp),
     RelBinOp(RelBinOp),
     StrBinOp(StrBinOp),
-    Jump { offset: u32 },
-    JumpIf { cond: bool, offset: u32 },
-    Loop { offset: u32 },
-    LoopIf { cond: bool, offset: u32 },
+    Jump {
+        offset: u32,
+    },
+    JumpIf {
+        cond: bool,
+        offset: u32,
+    },
+    Loop {
+        offset: u32,
+    },
+    LoopIf {
+        cond: bool,
+        offset: u32,
+    },
 }
 
 impl Display for OpCode {
@@ -52,6 +64,7 @@ impl Display for OpCode {
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
             LoadStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "LoadStack"),
             StoreStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "StoreStack"),
+            AdjustStack(StackSlot(height)) => format!("{:<10} [{height:>3}]", "AdjustStack"),
             PopStack(count) => format!("{:<10} [{count:>3}]", "PopStack"),
             AriUnaOp(op) => format!("{:<10} [{op}]", "AriUnaOp"),
             AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),

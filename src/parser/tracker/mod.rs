@@ -145,6 +145,9 @@ impl<'s> ChunkTracker<'s> {
             StoreStack(_) => {
                 self.stack.pop().unwrap();
             }
+            AdjustStack(slot) => {
+                self.stack.adjust_to(slot).unwrap();
+            }
             PopStack(count) => {
                 todo!()
             }

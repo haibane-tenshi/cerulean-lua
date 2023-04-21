@@ -164,6 +164,11 @@ impl<'chunk> CurrentFrame<'chunk> {
 
                 ControlFlow::Continue(())
             }
+            AdjustStack(StackSlot(height)) => {
+                self.stack.adjust_height(height);
+
+                ControlFlow::Continue(())
+            }
             PopStack(count) => {
                 self.stack.pop_many(count.into())?;
 
