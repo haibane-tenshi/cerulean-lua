@@ -5,7 +5,7 @@ mod tracker;
 use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, Token};
-use crate::opcode::Chunk;
+use crate::opcode::{Chunk, FunctionId};
 use tracker::ChunkTracker;
 
 #[derive(Debug, Error)]
@@ -93,4 +93,68 @@ fn inner_block<'s>(
     }
 
     Ok((s, ()))
+}
+
+fn func_body<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, FunctionId), LexParseError> {
+    match s.next_token()? {
+        Token::ParL => (),
+        _ => return Err(ParseError.into()),
+    };
+
+    // Start function
+    tracker.push_frame();
+
+    // Currently this slot contains pointer to function itself.
+    // In the future we will put environment here instead.
+    tracker.push_stack(None);
+
+    let mut parlist = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
+        let ident = match s.next_token()? {
+            Token::Ident(ident) => ident,
+            _ => return Err(ParseError.into()),
+        };
+
+        tracker.push_stack(Some(ident));
+
+        loop {
+            match s.next_token() {
+                Ok(Token::Comma) => (),
+                _ => break,
+            }
+
+            let ident = match s.next_required_token()? {
+                Token::Ident(ident) => ident,
+                _ => return Err(ParseError.into()),
+            };
+
+            tracker.push_stack(Some(ident));
+        }
+
+        Ok((s, ()))
+    };
+
+    let mut s = match parlist(s.clone()) {
+        Ok((s, ())) => s,
+        Err(_) => s,
+    };
+
+    match s.next_required_token()? {
+        Token::ParR => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    match s.next_required_token()? {
+        Token::End => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    // Finish function
+    let func_id = tracker.pop_frame().map_err(|_| ParseError)?;
+
+    Ok((s, func_id))
 }

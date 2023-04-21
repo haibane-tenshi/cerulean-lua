@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::opcode::{Chunk, ConstId, Function, OpCode, StackSlot};
+use crate::opcode::{Chunk, ConstId, Function, FunctionId, OpCode, StackSlot};
 use crate::value::Literal;
 
 #[derive(Debug, Copy, Clone)]
@@ -153,7 +153,8 @@ impl<'s> StackTracker<'s> {
     }
 
     pub fn push_frame(&mut self) {
-        self.frames.push(self.stack.len())
+        self.frames.push(self.stack.len());
+        self.push_block();
     }
 
     pub fn pop_frame(&mut self) -> Result<u32, StackStateError> {
@@ -336,7 +337,7 @@ impl<'s> ChunkTracker<'s> {
         self.suspended.push(Default::default());
     }
 
-    pub fn pop_frame(&mut self) -> Result<(), StackStateError> {
+    pub fn pop_frame(&mut self) -> Result<FunctionId, StackStateError> {
         let mut opcodes = self.suspended.pop().ok_or(StackStateError::MissingFrame)?;
 
         let count = self.stack.pop_frame()?;
@@ -349,8 +350,16 @@ impl<'s> ChunkTracker<'s> {
             lines: Default::default(),
         };
 
+        let id = FunctionId(self.finalized.len().try_into().unwrap());
         self.finalized.push(fun);
 
-        Ok(())
+        Ok(id)
+    }
+
+    pub fn push_stack(&mut self, name: Option<&'s str>) -> StackSlot {
+        match name {
+            Some(name) => self.stack.push_named(name),
+            None => self.stack.push(),
+        }
     }
 }

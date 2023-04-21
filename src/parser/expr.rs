@@ -1,5 +1,5 @@
 use super::tracker::ChunkTracker;
-use super::{LexParseError, NextToken, ParseError};
+use super::{func_body, LexParseError, NextToken, ParseError};
 use crate::lex::{Lexer, Token};
 use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
@@ -44,6 +44,22 @@ fn variable<'s>(
 
     let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
     tracker.push(OpCode::LoadStack(slot));
+
+    Ok((s, ()))
+}
+
+fn function<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    match s.next_token()? {
+        Token::Function => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let (s, func_id) = func_body(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    todo!();
 
     Ok((s, ()))
 }
