@@ -24,7 +24,7 @@ fn literal<'s>(
     };
 
     let id = tracker.insert_literal(literal);
-    tracker.push(OpCode::LoadConstant(id));
+    tracker.emit(OpCode::LoadConstant(id));
 
     Ok((s, ()))
 }
@@ -44,7 +44,7 @@ fn function<'s>(
     let (s, func_id) = func_body(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     let const_id = tracker.insert_literal(Literal::Function(func_id));
-    tracker.push(OpCode::LoadConstant(const_id));
+    tracker.emit(OpCode::LoadConstant(const_id));
 
     Ok((s, ()))
 }
@@ -72,7 +72,7 @@ fn expr_bp<'s>(
             Prefix::Bit(op) => OpCode::BitUnaOp(op),
         };
 
-        tracker.push(opcode);
+        tracker.emit(opcode);
 
         s
     } else {
@@ -102,7 +102,7 @@ fn expr_bp<'s>(
         };
 
         // Stack effect: pop 2 -> push 1
-        tracker.push(opcode);
+        tracker.emit(opcode);
     }
 
     Ok((s, ()))

@@ -42,7 +42,7 @@ impl OpCodeTracker {
         InstrId(n)
     }
 
-    pub fn push(&mut self, opcode: OpCode) -> InstrId {
+    pub fn emit(&mut self, opcode: OpCode) -> InstrId {
         let index = self.next();
         self.codes.push(opcode);
 
@@ -128,7 +128,7 @@ impl<'s> ChunkTracker<'s> {
         self.suspended.last_mut()?.get_mut(index)
     }
 
-    pub fn push(&mut self, opcode: OpCode) -> InstrId {
+    pub fn emit(&mut self, opcode: OpCode) -> InstrId {
         use OpCode::*;
 
         // Keep stack state consistent
@@ -154,16 +154,16 @@ impl<'s> ChunkTracker<'s> {
             JumpIf { .. } | LoopIf { .. } => self.stack.pop().unwrap(),
         }
 
-        self.suspended.last_mut().unwrap().push(opcode)
+        self.suspended.last_mut().unwrap().emit(opcode)
     }
 
-    pub fn top(&self) -> Option<StackSlot> {
+    pub fn stack_top(&self) -> StackSlot {
         self.stack.top()
     }
 
-    pub fn push_loop_to(&mut self, target: InstrId) -> InstrId {
+    pub fn emit_loop_to(&mut self, target: InstrId) -> InstrId {
         let offset = self.next_instr().0 - target.0 + 1;
-        self.push(OpCode::Loop { offset })
+        self.emit(OpCode::Loop { offset })
     }
 
     pub fn push_block(&mut self) {
@@ -176,11 +176,11 @@ impl<'s> ChunkTracker<'s> {
 
         // Remove excessive temporaries upon exiting frame.
         if slot < current {
-            // Use raw push: we already popped temporaries off the stack.
+            // Use raw emit: we already popped temporaries off the stack.
             self.suspended
                 .last_mut()
                 .unwrap()
-                .push(OpCode::AdjustStack(slot));
+                .emit(OpCode::AdjustStack(slot));
         }
 
         Ok(())
@@ -192,11 +192,11 @@ impl<'s> ChunkTracker<'s> {
 
         // Remove excessive temporaries upon exiting frame.
         if slot < current {
-            // Use raw push: we already popped temporaries off the stack.
+            // Use raw emit: we already popped temporaries off the stack.
             self.suspended
                 .last_mut()
                 .unwrap()
-                .push(OpCode::AdjustStack(slot));
+                .emit(OpCode::AdjustStack(slot));
         }
 
         Ok(())
@@ -228,7 +228,7 @@ impl<'s> ChunkTracker<'s> {
         let current = self.stack.next();
         let slot = self.stack.pop_frame()?;
         if slot < current {
-            opcodes.push(OpCode::AdjustStack(slot));
+            opcodes.emit(OpCode::AdjustStack(slot));
         }
 
         let fun = opcodes.resolve(height);

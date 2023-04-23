@@ -108,7 +108,7 @@ fn assignment<'s>(
         None => {
             // Otherwise try to store it inside known variable.
             let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
-            tracker.push(OpCode::StoreStack(slot));
+            tracker.emit(OpCode::StoreStack(slot));
         }
     }
 
@@ -149,7 +149,7 @@ fn if_then<'s>(
 
     let mut to_end = Vec::new();
 
-    let mut to_next_block = tracker.push(OpCode::JumpIf {
+    let mut to_next_block = tracker.emit(OpCode::JumpIf {
         cond: false,
         offset: 0,
     });
@@ -165,14 +165,14 @@ fn if_then<'s>(
 
             // Finish off the previous block.
             // This needs to jump to the very end of `if` statement.
-            let to_patch = tracker.push(OpCode::Jump {offset: 0});
+            let to_patch = tracker.emit(OpCode::Jump {offset: 0});
             to_end.push(to_patch);
 
             backpatch_to_current(to_next_block, tracker);
 
             let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
-            to_next_block = tracker.push(OpCode::JumpIf {
+            to_next_block = tracker.emit(OpCode::JumpIf {
                 cond: false,
                 offset: 0,
             });
@@ -199,7 +199,7 @@ fn if_then<'s>(
         }
 
         to_next_block = {
-            let r = tracker.push(OpCode::Jump { offset: 0 });
+            let r = tracker.emit(OpCode::Jump { offset: 0 });
             backpatch_to_current(to_next_block, tracker);
 
             r
@@ -246,7 +246,7 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let cond = tracker.push(OpCode::JumpIf {
+    let cond = tracker.emit(OpCode::JumpIf {
         cond: false,
         offset: 0,
     });
@@ -258,7 +258,7 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.push_loop_to(start);
+    tracker.emit_loop_to(start);
     backpatch_to_current(cond, tracker);
 
     Ok((s, ()))
@@ -290,13 +290,13 @@ fn repeat_until<'s>(
     // Handle controls of this loop.
 
     // Jump to cleanup code when condition is true.
-    let to_end = tracker.push(OpCode::JumpIf {
+    let to_end = tracker.emit(OpCode::JumpIf {
         cond: true,
         offset: 0,
     });
 
     tracker.pop_ghost_block().unwrap();
-    tracker.push_loop_to(start);
+    tracker.emit_loop_to(start);
 
     // Cleanup stack after loop is exited.
     backpatch_to_current(to_end, tracker);
@@ -310,14 +310,14 @@ pub(super) fn return_<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use super::expr_list;
-    use crate::opcode::{OpCode, StackSlot};
+    use crate::opcode::OpCode;
 
     match s.next_token()? {
         Token::Return => (),
         _ => return Err(ParseError.into()),
     }
 
-    let slot = StackSlot(tracker.top().unwrap().0 + 1);
+    let slot = tracker.stack_top();
 
     let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -327,7 +327,7 @@ pub(super) fn return_<'s>(
     })(s.clone())
     .unwrap_or(s);
 
-    tracker.push(OpCode::Return(slot));
+    tracker.emit(OpCode::Return(slot));
 
     Ok((s, ()))
 }

@@ -101,13 +101,8 @@ impl<'s> StackTracker<'s> {
         Ok(())
     }
 
-    pub fn top(&self) -> Option<StackSlot> {
-        if self.stack.len() < self.frame_base() {
-            return None;
-        }
-
-        let index = self.stack.len().checked_sub(1)?;
-        self.index_to_slot(index)
+    pub fn top(&self) -> StackSlot {
+        self.index_to_slot(self.stack.len()).unwrap()
     }
 
     pub fn next(&self) -> StackSlot {

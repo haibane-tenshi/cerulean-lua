@@ -18,6 +18,13 @@ impl Display for ConstId {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct StackSlot(pub Index);
 
+impl StackSlot {
+    pub(crate) fn prev(self) -> Option<Self> {
+        let index = self.0.checked_sub(1)?;
+        Some(StackSlot(index))
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionId(pub Index);
 

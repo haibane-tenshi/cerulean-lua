@@ -14,7 +14,7 @@ fn variable<'s>(
     };
 
     let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
-    tracker.push(OpCode::LoadStack(slot));
+    tracker.emit(OpCode::LoadStack(slot));
 
     Ok((s, ()))
 }
@@ -44,7 +44,7 @@ fn func_args<'s>(
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::opcode::{OpCode, StackSlot};
 
-    let invoke_target = tracker.top().unwrap();
+    let invoke_target = tracker.stack_top().prev().unwrap();
 
     match s.next_required_token()? {
         Token::ParL => (),
@@ -63,8 +63,8 @@ fn func_args<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.push(OpCode::Invoke(invoke_target));
-    tracker.push(OpCode::AdjustStack(StackSlot(invoke_target.0 + 1)));
+    tracker.emit(OpCode::Invoke(invoke_target));
+    tracker.emit(OpCode::AdjustStack(StackSlot(invoke_target.0 + 1)));
 
     Ok((s, ()))
 }
