@@ -321,6 +321,12 @@ pub(super) fn return_<'s>(
 
     let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
 
+    let s = (|mut s: Lexer<'s>| match s.next_token().ok()? {
+        Token::Semicolon => Some(s),
+        _ => None,
+    })(s.clone())
+    .unwrap_or(s);
+
     tracker.push(OpCode::Return(slot));
 
     Ok((s, ()))
