@@ -1,5 +1,5 @@
 use super::tracker::ChunkTracker;
-use super::{func_body, LexParseError, NextToken, ParseError};
+use super::{func_body, prefix_expr, LexParseError, NextToken, ParseError};
 use crate::lex::{Lexer, Token};
 use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
@@ -29,23 +29,6 @@ fn literal<'s>(
     Ok((s, ()))
 }
 
-fn variable<'s>(
-    mut s: Lexer<'s>,
-    tracker: &mut ChunkTracker,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::OpCode;
-
-    let ident = match s.next_token()? {
-        Token::Ident(ident) => ident,
-        _ => return Err(ParseError.into()),
-    };
-
-    let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
-    tracker.push(OpCode::LoadStack(slot));
-
-    Ok((s, ()))
-}
-
 fn function<'s>(
     mut s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
@@ -66,35 +49,21 @@ fn function<'s>(
     Ok((s, ()))
 }
 
-fn function_call<'s>(
-    s: Lexer<'s>,
+pub(super) fn par_expr<'s>(
+    mut s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::{OpCode, StackSlot};
-
-    let (mut s, ()) = variable(s, tracker)?;
-
-    let invoke_target = tracker.top().unwrap();
-
-    match s.next_required_token()? {
+    match s.next_token()? {
         Token::ParL => (),
         _ => return Err(ParseError.into()),
     }
 
-    loop {
-        s = match expr(s.clone(), tracker) {
-            Ok((s, ())) => s,
-            _ => break,
-        }
-    }
+    let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     match s.next_required_token()? {
         Token::ParR => (),
         _ => return Err(ParseError.into()),
     }
-
-    tracker.push(OpCode::Invoke(invoke_target));
-    tracker.push(OpCode::AdjustStack(StackSlot(invoke_target.0 + 1)));
 
     Ok((s, ()))
 }
@@ -126,7 +95,7 @@ fn expr_bp<'s>(
 
         s
     } else {
-        let (s, ()) = expr_atom(s, tracker)?;
+        let (s, ()) = atom(s, tracker)?;
 
         s
     };
@@ -158,16 +127,13 @@ fn expr_bp<'s>(
     Ok((s, ()))
 }
 
-fn expr_atom<'s>(
+fn atom<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     if let Ok(r) = literal(s.clone(), tracker) {
         Ok(r)
-        // Order matters: beginning of function call can look like a variable.
-    } else if let Ok(r) = function_call(s.clone(), tracker) {
-        Ok(r)
-    } else if let Ok(r) = variable(s.clone(), tracker) {
+    } else if let Ok(r) = prefix_expr(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = function(s, tracker) {
         Ok(r)

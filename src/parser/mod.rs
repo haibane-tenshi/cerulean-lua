@@ -1,4 +1,5 @@
 mod expr;
+mod prefix_expr;
 mod stmt;
 mod tracker;
 
@@ -7,6 +8,9 @@ use thiserror::Error;
 use crate::lex::{LexError, Lexer, Token};
 use crate::opcode::{Chunk, FunctionId};
 use tracker::ChunkTracker;
+
+use expr::{expr, par_expr};
+use prefix_expr::prefix_expr;
 
 #[derive(Debug, Error)]
 #[error("parsing error")]
