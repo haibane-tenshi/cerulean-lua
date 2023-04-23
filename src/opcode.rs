@@ -23,6 +23,10 @@ impl StackSlot {
         let index = self.0.checked_sub(1)?;
         Some(StackSlot(index))
     }
+
+    pub(crate) fn next(self) -> Self {
+        StackSlot(self.0 + 1)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

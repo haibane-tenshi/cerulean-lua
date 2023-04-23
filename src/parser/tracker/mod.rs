@@ -135,10 +135,11 @@ impl<'s> ChunkTracker<'s> {
         match opcode {
             Invoke(slot) => {
                 self.stack.adjust_to(slot).unwrap();
+                self.stack.make_variadic();
             }
             Return(_) => (),
             LoadConstant(_) | LoadStack(_) => {
-                self.stack.push(None);
+                self.stack.push(None).unwrap();
             }
             StoreStack(_) => {
                 self.stack.pop().unwrap();
@@ -157,7 +158,7 @@ impl<'s> ChunkTracker<'s> {
         self.suspended.last_mut().unwrap().emit(opcode)
     }
 
-    pub fn stack_top(&self) -> StackSlot {
+    pub fn stack_top(&self) -> Result<StackSlot, StackStateError> {
         self.stack.top()
     }
 
@@ -166,16 +167,34 @@ impl<'s> ChunkTracker<'s> {
         self.emit(OpCode::Loop { offset })
     }
 
-    pub fn push_block(&mut self) {
+    pub fn emit_adjust_to(&mut self, slot: StackSlot) -> Result<Option<InstrId>, StackStateError> {
+        let needs_adjustment = self.stack.adjust_to(slot)?;
+
+        let instr_id = if needs_adjustment {
+            let instr_id = self
+                .suspended
+                .last_mut()
+                .unwrap()
+                .emit(OpCode::AdjustStack(slot));
+
+            Some(instr_id)
+        } else {
+            None
+        };
+
+        Ok(instr_id)
+    }
+
+    pub fn push_block(&mut self) -> Result<(), StackStateError> {
         self.stack.push_block()
     }
 
     pub fn pop_block(&mut self) -> Result<(), StackStateError> {
-        let current = self.stack.next();
+        let current = self.stack.top()?;
         let slot = self.stack.pop_block()?;
 
         // Remove excessive temporaries upon exiting frame.
-        if slot < current {
+        if slot <= current {
             // Use raw emit: we already popped temporaries off the stack.
             self.suspended
                 .last_mut()
@@ -187,11 +206,11 @@ impl<'s> ChunkTracker<'s> {
     }
 
     pub fn pop_ghost_block(&mut self) -> Result<(), StackStateError> {
-        let current = self.stack.next();
+        let current = self.stack.top()?;
         let slot = self.stack.pop_ghost_block()?;
 
         // Remove excessive temporaries upon exiting frame.
-        if slot < current {
+        if slot <= current {
             // Use raw emit: we already popped temporaries off the stack.
             self.suspended
                 .last_mut()
@@ -212,22 +231,24 @@ impl<'s> ChunkTracker<'s> {
 
     pub fn name_local(&mut self, ident: &'s str) -> Result<(), StackStateError> {
         self.stack.pop()?;
-        self.stack.push(Some(ident));
+        self.stack.push(Some(ident)).unwrap();
 
         Ok(())
     }
 
-    pub fn push_frame(&mut self) {
-        self.stack.push_frame();
+    pub fn push_frame(&mut self) -> Result<(), StackStateError> {
+        self.stack.push_frame()?;
         self.suspended.push(Default::default());
+
+        Ok(())
     }
 
     pub fn pop_frame(&mut self, height: u32) -> Result<FunctionId, StackStateError> {
         let mut opcodes = self.suspended.pop().ok_or(StackStateError::MissingFrame)?;
 
-        let current = self.stack.next();
+        let current = self.stack.top()?;
         let slot = self.stack.pop_frame()?;
-        if slot < current {
+        if slot <= current {
             opcodes.emit(OpCode::AdjustStack(slot));
         }
 
@@ -239,7 +260,7 @@ impl<'s> ChunkTracker<'s> {
         Ok(id)
     }
 
-    pub fn push_stack(&mut self, name: Option<&'s str>) -> StackSlot {
+    pub fn push_stack(&mut self, name: Option<&'s str>) -> Result<StackSlot, StackStateError> {
         self.stack.push(name)
     }
 }

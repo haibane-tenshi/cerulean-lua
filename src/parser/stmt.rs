@@ -98,7 +98,9 @@ fn assignment<'s>(
         _ => return Err(ParseError.into()),
     }
 
+    let top = tracker.stack_top().unwrap();
     let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+    tracker.emit_adjust_to(top.next()).unwrap();
 
     match local {
         Some(()) => {
@@ -275,7 +277,7 @@ fn repeat_until<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.push_block();
+    tracker.push_block().unwrap();
     let start = tracker.next_instr();
 
     let (mut s, ()) = inner_block(s, tracker).map_err(LexParseError::eof_into_err)?;
@@ -317,7 +319,7 @@ pub(super) fn return_<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let slot = tracker.stack_top();
+    let slot = tracker.stack_top().unwrap();
 
     let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
 

@@ -77,7 +77,7 @@ fn block<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    tracker.push_block();
+    tracker.push_block().unwrap();
 
     let r = inner_block(s, tracker);
 
@@ -159,11 +159,11 @@ fn func_body<'s>(
     };
 
     // Start function
-    tracker.push_frame();
+    tracker.push_frame().unwrap();
 
     // Currently this slot contains pointer to function itself.
     // In the future we will put environment here instead.
-    tracker.push_stack(None);
+    tracker.push_stack(None).unwrap();
 
     let mut parlist = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
         let mut count = 0;
@@ -172,7 +172,7 @@ fn func_body<'s>(
             Token::Ident(ident) => ident,
             _ => return Err(ParseError.into()),
         };
-        tracker.push_stack(Some(ident));
+        tracker.push_stack(Some(ident)).unwrap();
         count += 1;
 
         let mut next_ident = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
@@ -185,7 +185,7 @@ fn func_body<'s>(
                 Token::Ident(ident) => ident,
                 _ => return Err(ParseError.into()),
             };
-            tracker.push_stack(Some(ident));
+            tracker.push_stack(Some(ident)).unwrap();
             count += 1;
 
             Ok(s)

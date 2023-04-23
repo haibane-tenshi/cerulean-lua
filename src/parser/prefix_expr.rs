@@ -42,14 +42,14 @@ fn func_args<'s>(
     mut s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::{OpCode, StackSlot};
-
-    let invoke_target = tracker.stack_top().prev().unwrap();
+    use crate::opcode::OpCode;
 
     match s.next_required_token()? {
         Token::ParL => (),
         _ => return Err(ParseError.into()),
     }
+
+    let invoke_target = tracker.stack_top().unwrap().prev().unwrap();
 
     loop {
         s = match expr(s.clone(), tracker) {
@@ -64,7 +64,6 @@ fn func_args<'s>(
     }
 
     tracker.emit(OpCode::Invoke(invoke_target));
-    tracker.emit(OpCode::AdjustStack(StackSlot(invoke_target.0 + 1)));
 
     Ok((s, ()))
 }

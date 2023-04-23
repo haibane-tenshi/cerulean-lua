@@ -17,10 +17,15 @@ pub enum StackStateError {
 
     #[error("frame doesn't exist")]
     MissingFrame,
+
+    #[error("there is no statically known upper bound on the stack")]
+    VariadicStack,
 }
 
 #[derive(Debug, Default)]
 pub struct StackTracker<'s> {
+    /// Implies there is an unknowable number of local variables residing on top of known stack.
+    variadic: bool,
     stack: Vec<Option<&'s str>>,
     backlinks: Backlinks<'s>,
     blocks: Vec<usize>,
@@ -48,37 +53,49 @@ impl<'s> StackTracker<'s> {
         Some(StackSlot(slot))
     }
 
-    fn adjust_to_height(&mut self, height: usize) -> Result<(), StackStateError> {
+    fn adjust_to_height(&mut self, height: usize) -> Result<bool, StackStateError> {
         use std::cmp::Ordering;
 
         if height < self.block_base() {
             return Err(StackStateError::BoundaryViolation);
         }
 
-        match height.cmp(&self.stack.len()) {
-            Ordering::Equal => (),
+        let adjusted = match height.cmp(&self.stack.len()) {
+            Ordering::Equal => false,
             Ordering::Less => {
                 let names = self.stack.drain(height..).flatten();
 
                 for name in names {
                     self.backlinks.pop(name);
                 }
+
+                true
             }
             Ordering::Greater => {
                 self.stack
                     .extend(std::iter::repeat(None).take(height - self.stack.len()));
-            }
-        }
 
-        Ok(())
+                true
+            }
+        };
+
+        let adjusted = adjusted || self.variadic;
+        self.variadic = false;
+
+        Ok(adjusted)
     }
 
-    pub fn adjust_to(&mut self, slot: StackSlot) -> Result<(), StackStateError> {
+    pub fn adjust_to(&mut self, slot: StackSlot) -> Result<bool, StackStateError> {
         let height = self.slot_to_index(slot);
         self.adjust_to_height(height)
     }
 
-    pub fn push(&mut self, name: Option<&'s str>) -> StackSlot {
+    pub fn make_variadic(&mut self) {
+        self.variadic = true;
+    }
+
+    pub fn push(&mut self, name: Option<&'s str>) -> Result<StackSlot, StackStateError> {
+        let slot = self.top()?;
         let index = self.stack.len();
         self.stack.push(name);
 
@@ -86,10 +103,14 @@ impl<'s> StackTracker<'s> {
             self.backlinks.add(name, index);
         }
 
-        self.index_to_slot(index).unwrap()
+        Ok(slot)
     }
 
     pub fn pop(&mut self) -> Result<(), StackStateError> {
+        if self.variadic {
+            return Err(StackStateError::VariadicStack);
+        }
+
         if self.stack.len() < self.frame_base() {
             return Err(StackStateError::BoundaryViolation);
         }
@@ -101,12 +122,13 @@ impl<'s> StackTracker<'s> {
         Ok(())
     }
 
-    pub fn top(&self) -> StackSlot {
-        self.index_to_slot(self.stack.len()).unwrap()
-    }
+    pub fn top(&self) -> Result<StackSlot, StackStateError> {
+        if self.variadic {
+            return Err(StackStateError::VariadicStack);
+        }
 
-    pub fn next(&self) -> StackSlot {
-        self.index_to_slot(self.stack.len()).unwrap()
+        let slot = self.index_to_slot(self.stack.len()).unwrap();
+        Ok(slot)
     }
 
     pub fn lookup_local(&self, name: &str) -> Option<StackSlot> {
@@ -114,8 +136,14 @@ impl<'s> StackTracker<'s> {
         self.index_to_slot(index)
     }
 
-    pub fn push_block(&mut self) {
+    pub fn push_block(&mut self) -> Result<(), StackStateError> {
+        if self.variadic {
+            return Err(StackStateError::VariadicStack);
+        }
+
         self.blocks.push(self.stack.len());
+
+        Ok(())
     }
 
     pub fn pop_block(&mut self) -> Result<StackSlot, StackStateError> {
@@ -147,9 +175,13 @@ impl<'s> StackTracker<'s> {
         Ok(slot)
     }
 
-    pub fn push_frame(&mut self) {
+    pub fn push_frame(&mut self) -> Result<(), StackStateError> {
+        if self.variadic {
+            return Err(StackStateError::VariadicStack);
+        }
+
         self.frames.push(self.stack.len());
-        self.push_block();
+        self.push_block()
     }
 
     pub fn pop_frame(&mut self) -> Result<StackSlot, StackStateError> {
