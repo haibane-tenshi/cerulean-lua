@@ -24,7 +24,7 @@ pub struct FunctionId(pub Index);
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
     Invoke(StackSlot),
-    Return,
+    Return(StackSlot),
     LoadConstant(ConstId),
     LoadStack(StackSlot),
     StoreStack(StackSlot),
@@ -47,7 +47,7 @@ impl Display for OpCode {
 
         let s = match *self {
             Invoke(StackSlot(index)) => format!("{:<10} [{index:>3}]", "Invoke"),
-            Return => "Return".to_string(),
+            Return(StackSlot(index)) => format!("{:<10} [{index:>3}]", "Return"),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
             LoadStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "LoadStack"),
             StoreStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "StoreStack"),

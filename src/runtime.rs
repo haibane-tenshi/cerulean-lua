@@ -7,7 +7,7 @@ use crate::value::{Literal, Value};
 pub type ControlFlow = std::ops::ControlFlow<ControlFrame>;
 
 pub enum ControlFrame {
-    Return,
+    Return(StackSlot),
     Invoke(FunctionId, StackSlot),
 }
 
@@ -46,6 +46,13 @@ impl Stack {
         }
 
         self.stack.pop().ok_or(RuntimeError)
+    }
+
+    pub fn top(&mut self) -> StackSlot {
+        let offset = self.stack.len() - self.protected_size;
+        let offset = offset.try_into().unwrap();
+
+        StackSlot(offset)
     }
 
     pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
@@ -89,6 +96,13 @@ impl Stack {
             }
         }
     }
+
+    pub fn drop_under(&mut self, slot: StackSlot) -> Result<(), RuntimeError> {
+        let height = self.index(slot)?;
+        self.stack.drain(self.protected_size..height);
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -118,7 +132,7 @@ impl<'chunk> CurrentFrame<'chunk> {
         use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
         let Some(code) = self.next_code() else {
-            return Ok(ControlFlow::Break(ControlFrame::Return))
+            return Ok(ControlFlow::Break(ControlFrame::Return(self.stack.top())))
         };
 
         let r = match code {
@@ -130,7 +144,7 @@ impl<'chunk> CurrentFrame<'chunk> {
 
                 ControlFlow::Break(ControlFrame::Invoke(func_id, slot))
             }
-            Return => ControlFlow::Break(ControlFrame::Return),
+            Return(slot) => ControlFlow::Break(ControlFrame::Return(slot)),
             LoadConstant(index) => {
                 let constant = self.frame.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
@@ -416,7 +430,9 @@ impl<'chunk> Runtime<'chunk> {
     pub fn run(&mut self) -> Result<(), RuntimeError> {
         loop {
             match self.current.step()? {
-                ControlFlow::Break(ControlFrame::Return) => {
+                ControlFlow::Break(ControlFrame::Return(slot)) => {
+                    self.current.stack.drop_under(slot)?;
+
                     let Some(frame) = self.suspended.pop() else {
                         // If we hit an early return from script, that leaves us pointing at
                         // some arbitrary instructions immediately after.

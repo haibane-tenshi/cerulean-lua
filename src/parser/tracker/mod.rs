@@ -136,7 +136,7 @@ impl<'s> ChunkTracker<'s> {
             Invoke(slot) => {
                 self.stack.adjust_to(slot).unwrap();
             }
-            Return => (),
+            Return(_) => (),
             LoadConstant(_) | LoadStack(_) => {
                 self.stack.push(None);
             }
