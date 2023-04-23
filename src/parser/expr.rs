@@ -49,25 +49,6 @@ fn function<'s>(
     Ok((s, ()))
 }
 
-pub(super) fn par_expr<'s>(
-    mut s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    match s.next_token()? {
-        Token::ParL => (),
-        _ => return Err(ParseError.into()),
-    }
-
-    let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-    match s.next_required_token()? {
-        Token::ParR => (),
-        _ => return Err(ParseError.into()),
-    }
-
-    Ok((s, ()))
-}
-
 pub(super) fn expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,

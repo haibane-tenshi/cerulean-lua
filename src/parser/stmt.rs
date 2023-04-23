@@ -304,3 +304,24 @@ fn repeat_until<'s>(
 
     Ok((s, ()))
 }
+
+pub(super) fn return_<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use super::expr_list;
+    use crate::opcode::{OpCode, StackSlot};
+
+    match s.next_token()? {
+        Token::Return => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let slot = StackSlot(tracker.top().unwrap().0 + 1);
+
+    let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    tracker.push(OpCode::Return(slot));
+
+    Ok((s, ()))
+}

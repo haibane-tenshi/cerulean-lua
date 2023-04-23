@@ -432,6 +432,7 @@ impl<'chunk> Runtime<'chunk> {
             match self.current.step()? {
                 ControlFlow::Break(ControlFrame::Return(slot)) => {
                     self.current.stack.drop_under(slot)?;
+                    tracing::trace!(stack = ?self.current.stack, "adjusted stack upon function return");
 
                     let Some(frame) = self.suspended.pop() else {
                         // If we hit an early return from script, that leaves us pointing at

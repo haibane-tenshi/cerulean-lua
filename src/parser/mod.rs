@@ -9,8 +9,9 @@ use crate::lex::{LexError, Lexer, Token};
 use crate::opcode::{Chunk, FunctionId};
 use tracker::ChunkTracker;
 
-use expr::{expr, par_expr};
+use expr::expr;
 use prefix_expr::prefix_expr;
+use stmt::{return_, statement};
 
 #[derive(Debug, Error)]
 #[error("parsing error")]
@@ -90,10 +91,59 @@ fn inner_block<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     loop {
-        s = match stmt::statement(s.clone(), tracker) {
+        s = match statement(s.clone(), tracker) {
             Ok((s, ())) => s,
             Err(_) => break,
         };
+    }
+
+    let s = match return_(s.clone(), tracker) {
+        Ok((s, ())) => s,
+        Err(_) => s,
+    };
+
+    Ok((s, ()))
+}
+
+fn par_expr<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    match s.next_token()? {
+        Token::ParL => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+
+    match s.next_required_token()? {
+        Token::ParR => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    Ok((s, ()))
+}
+
+fn expr_list<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    let (mut s, ()) = expr(s, tracker)?;
+
+    let mut next_part = |mut s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+        match s.next_token()? {
+            Token::Comma => (),
+            _ => return Err(ParseError.into()),
+        }
+
+        expr(s, tracker).map_err(LexParseError::eof_into_err)
+    };
+
+    loop {
+        s = match next_part(s.clone()) {
+            Ok((s, ())) => s,
+            Err(_) => break,
+        }
     }
 
     Ok((s, ()))
