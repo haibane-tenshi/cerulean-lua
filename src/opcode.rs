@@ -1,13 +1,31 @@
 use std::fmt::Display;
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use rle_vec::RleVec;
 
+use crate::index_vec::{ExceededIndexError, ExceededUsizeError, IndexVec};
 use crate::value::Literal;
 
 pub type Index = u32;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ConstId(pub Index);
+
+impl TryFrom<usize> for ConstId {
+    type Error = ExceededIndexError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        value.try_into().map_err(|_| ExceededIndexError)
+    }
+}
+
+impl TryFrom<ConstId> for usize {
+    type Error = ExceededUsizeError;
+
+    fn try_from(value: ConstId) -> Result<Self, Self::Error> {
+        value.try_into().map_err(|_| ExceededUsizeError)
+    }
+}
 
 impl Display for ConstId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -32,6 +50,96 @@ impl StackSlot {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionId(pub Index);
 
+impl TryFrom<usize> for FunctionId {
+    type Error = ExceededIndexError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        value.try_into().map_err(|_| ExceededIndexError)
+    }
+}
+
+impl TryFrom<FunctionId> for usize {
+    type Error = ExceededUsizeError;
+
+    fn try_from(value: FunctionId) -> Result<Self, Self::Error> {
+        value.try_into().map_err(|_| ExceededUsizeError)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
+pub struct InstrId(pub u32);
+
+impl InstrId {
+    pub fn checked_sub(self, rhs: InstrOffset) -> Option<Self> {
+        let val = self.0.checked_sub(rhs.0)?;
+        Some(InstrId(val))
+    }
+}
+
+impl TryFrom<usize> for InstrId {
+    type Error = ExceededIndexError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        value.try_into().map_err(|_| ExceededIndexError)
+    }
+}
+
+impl TryFrom<InstrId> for usize {
+    type Error = ExceededUsizeError;
+
+    fn try_from(value: InstrId) -> Result<Self, Self::Error> {
+        value.try_into().map_err(|_| ExceededUsizeError)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct InstrOffset(pub u32);
+
+impl AddAssign<u32> for InstrId {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs;
+    }
+}
+
+impl Add<u32> for InstrId {
+    type Output = Self;
+
+    fn add(mut self, rhs: u32) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl AddAssign<InstrOffset> for InstrId {
+    fn add_assign(&mut self, rhs: InstrOffset) {
+        self.0 += rhs.0
+    }
+}
+
+impl Add<InstrOffset> for InstrId {
+    type Output = Self;
+
+    fn add(mut self, rhs: InstrOffset) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl SubAssign<InstrOffset> for InstrId {
+    fn sub_assign(&mut self, rhs: InstrOffset) {
+        self.0 -= rhs.0
+    }
+}
+
+impl Sub<InstrOffset> for InstrId {
+    type Output = Self;
+
+    fn sub(mut self, rhs: InstrOffset) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
     Invoke(StackSlot),
@@ -46,10 +154,10 @@ pub enum OpCode {
     BitBinOp(BitBinOp),
     RelBinOp(RelBinOp),
     StrBinOp(StrBinOp),
-    Jump { offset: u32 },
-    JumpIf { cond: bool, offset: u32 },
-    Loop { offset: u32 },
-    LoopIf { cond: bool, offset: u32 },
+    Jump { offset: InstrOffset },
+    JumpIf { cond: bool, offset: InstrOffset },
+    Loop { offset: InstrOffset },
+    LoopIf { cond: bool, offset: InstrOffset },
 }
 
 impl Display for OpCode {
@@ -69,10 +177,10 @@ impl Display for OpCode {
             BitBinOp(op) => format!("{:<10} [{op}]", "BitBinOp"),
             RelBinOp(op) => format!("{:<10} [{op}]", "RelBinOp"),
             StrBinOp(op) => format!("{:<10} [{op}]", "StrBinOp"),
-            Jump { offset } => format!("{:<10} [{offset:>3}]", "Jump"),
-            JumpIf { cond, offset } => format!("{:<10} [{cond:>5}] [{offset:>3}]", "JumpIf"),
-            Loop { offset } => format!("{:<10} [{offset:>3}]", "Loop"),
-            LoopIf { cond, offset } => format!("{:<10} [{cond:>5}] [{offset:>3}]", "LoopIf"),
+            Jump { offset } => format!("{:<10} [{:>3}]", "Jump", offset.0),
+            JumpIf { cond, offset } => format!("{:<10} [{cond:>5}] [{:>3}]", "JumpIf", offset.0),
+            Loop { offset } => format!("{:<10} [{:>3}]", "Loop", offset.0),
+            LoopIf { cond, offset } => format!("{:<10} [{cond:>5}] [{:>3}]", "LoopIf", offset.0),
         };
 
         write!(f, "{s}")
@@ -203,18 +311,16 @@ impl Display for StrBinOp {
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
-    pub functions: Vec<Function>,
-    pub constants: Vec<Literal>,
+    pub functions: IndexVec<FunctionId, Function>,
+    pub constants: IndexVec<ConstId, Literal>,
 }
 
 impl Chunk {
     pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
-        let index: usize = index.0.try_into().ok()?;
         self.constants.get(index)
     }
 
     pub fn get_function(&self, index: FunctionId) -> Option<&Function> {
-        let index: usize = index.0.try_into().ok()?;
         self.functions.get(index)
     }
 }
@@ -242,7 +348,7 @@ impl Display for Chunk {
 
 #[derive(Debug, Clone, Default)]
 pub struct Function {
-    pub codes: Vec<OpCode>,
+    pub codes: IndexVec<InstrId, OpCode>,
     pub lines: RleVec<u32>,
     pub height: u32,
 }

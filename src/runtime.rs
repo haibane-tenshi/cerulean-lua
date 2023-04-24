@@ -1,7 +1,8 @@
 use std::error::Error;
 use std::fmt::Display;
 
-use crate::opcode::{Chunk, ConstId, FunctionId, OpCode, StackSlot};
+use crate::index_vec::IndexSlice;
+use crate::opcode::{Chunk, ConstId, FunctionId, InstrId, OpCode, StackSlot};
 use crate::value::{Literal, Value};
 
 pub type ControlFlow = std::ops::ControlFlow<ControlFrame>;
@@ -107,15 +108,14 @@ impl Stack {
 
 #[derive(Debug, Default)]
 struct Frame<'chunk> {
-    constants: &'chunk [Literal],
-    codes: &'chunk [OpCode],
-    ip: usize,
+    constants: &'chunk IndexSlice<ConstId, Literal>,
+    codes: &'chunk IndexSlice<InstrId, OpCode>,
+    ip: InstrId,
     stack_start: usize,
 }
 
 impl<'chunk> Frame<'chunk> {
     pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
-        let index: usize = index.0.try_into().ok()?;
         self.constants.get(index)
     }
 }
@@ -338,7 +338,6 @@ impl<'chunk> CurrentFrame<'chunk> {
                 ControlFlow::Continue(())
             }
             Jump { offset } => {
-                let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
                 self.frame.ip += offset;
 
                 ControlFlow::Continue(())
@@ -347,14 +346,12 @@ impl<'chunk> CurrentFrame<'chunk> {
                 let value = self.stack.pop()?;
 
                 if value.as_boolish() == cond {
-                    let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
                     self.frame.ip += offset;
                 }
 
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
-                let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
                 self.frame.ip = self.frame.ip.checked_sub(offset).ok_or(RuntimeError)?;
 
                 ControlFlow::Continue(())
@@ -363,7 +360,6 @@ impl<'chunk> CurrentFrame<'chunk> {
                 let value = self.stack.pop()?;
 
                 if value.as_boolish() == cond {
-                    let offset: usize = offset.try_into().map_err(|_| RuntimeError)?;
                     self.frame.ip = self.frame.ip.checked_sub(offset).ok_or(RuntimeError)?;
                 }
 
@@ -379,7 +375,7 @@ impl<'chunk> CurrentFrame<'chunk> {
     pub fn next_code(&mut self) -> Option<OpCode> {
         let r = *self.frame.codes.get(self.frame.ip)?;
 
-        tracing::trace!(ip = self.frame.ip, opcode = %r, "next opcode");
+        tracing::trace!(ip = self.frame.ip.0, opcode = %r, "next opcode");
 
         self.frame.ip += 1;
 
@@ -411,7 +407,7 @@ impl<'chunk> Runtime<'chunk> {
         let frame = Frame {
             constants: &chunk.constants,
             codes,
-            ip: 0,
+            ip: Default::default(),
             stack_start: 0,
         };
 
@@ -455,7 +451,7 @@ impl<'chunk> Runtime<'chunk> {
                     let mut frame = Frame {
                         codes,
                         constants,
-                        ip: 0,
+                        ip: Default::default(),
                         stack_start,
                     };
 
