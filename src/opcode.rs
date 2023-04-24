@@ -70,9 +70,14 @@ impl TryFrom<FunctionId> for usize {
 pub struct InstrId(pub u32);
 
 impl InstrId {
-    pub fn checked_sub(self, rhs: InstrOffset) -> Option<Self> {
+    pub fn checked_sub_offset(self, rhs: InstrOffset) -> Option<Self> {
         let val = self.0.checked_sub(rhs.0)?;
         Some(InstrId(val))
+    }
+
+    pub fn checked_sub(self, rhs: InstrId) -> Option<InstrOffset> {
+        let offset = self.0.checked_sub(rhs.0)?;
+        Some(InstrOffset(offset))
     }
 }
 
@@ -136,6 +141,30 @@ impl Sub<InstrOffset> for InstrId {
 
     fn sub(mut self, rhs: InstrOffset) -> Self::Output {
         self -= rhs;
+        self
+    }
+}
+
+impl Sub for InstrId {
+    type Output = InstrOffset;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let offset = self.0 - rhs.0;
+        InstrOffset(offset)
+    }
+}
+
+impl AddAssign<u32> for InstrOffset {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs;
+    }
+}
+
+impl Add<u32> for InstrOffset {
+    type Output = Self;
+
+    fn add(mut self, rhs: u32) -> Self::Output {
+        self += rhs;
         self
     }
 }

@@ -352,7 +352,11 @@ impl<'chunk> CurrentFrame<'chunk> {
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
-                self.frame.ip = self.frame.ip.checked_sub(offset).ok_or(RuntimeError)?;
+                self.frame.ip = self
+                    .frame
+                    .ip
+                    .checked_sub_offset(offset)
+                    .ok_or(RuntimeError)?;
 
                 ControlFlow::Continue(())
             }
@@ -360,7 +364,11 @@ impl<'chunk> CurrentFrame<'chunk> {
                 let value = self.stack.pop()?;
 
                 if value.as_boolish() == cond {
-                    self.frame.ip = self.frame.ip.checked_sub(offset).ok_or(RuntimeError)?;
+                    self.frame.ip = self
+                        .frame
+                        .ip
+                        .checked_sub_offset(offset)
+                        .ok_or(RuntimeError)?;
                 }
 
                 ControlFlow::Continue(())

@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
@@ -78,6 +79,21 @@ impl<Index, T> DerefMut for IndexVec<Index, T> {
     }
 }
 
+impl<Index, T> IntoIterator for IndexVec<Index, T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<Index, T> FromIterator<T> for IndexVec<Index, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        IndexVec(iter.into_iter().collect(), PhantomData)
+    }
+}
+
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct IndexSlice<Index, T>(PhantomData<Index>, [T]);
@@ -118,6 +134,25 @@ where
 
     pub fn iter(&self) -> std::slice::Iter<T> {
         self.1.iter()
+    }
+}
+
+impl<Index, T> IndexSlice<Index, T>
+where
+    Index: TryFrom<usize> + TryInto<usize>,
+    <Index as TryFrom<usize>>::Error: Debug,
+{
+    pub fn indexed_iter(
+        &self,
+    ) -> Result<impl Iterator<Item = (Index, &T)> + DoubleEndedIterator, ExceededIndexError> {
+        let _ = self.len()?;
+
+        let iter = self.iter().enumerate().map(|(i, t)| {
+            let index = i.try_into().unwrap();
+            (index, t)
+        });
+
+        Ok(iter)
     }
 }
 
