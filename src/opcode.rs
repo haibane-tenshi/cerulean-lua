@@ -15,7 +15,8 @@ impl TryFrom<usize> for ConstId {
     type Error = ExceededIndexError;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
-        value.try_into().map_err(|_| ExceededIndexError)
+        let inner = value.try_into().map_err(|_| ExceededIndexError)?;
+        Ok(ConstId(inner))
     }
 }
 
@@ -23,7 +24,7 @@ impl TryFrom<ConstId> for usize {
     type Error = ExceededUsizeError;
 
     fn try_from(value: ConstId) -> Result<Self, Self::Error> {
-        value.try_into().map_err(|_| ExceededUsizeError)
+        value.0.try_into().map_err(|_| ExceededUsizeError)
     }
 }
 
@@ -54,7 +55,8 @@ impl TryFrom<usize> for FunctionId {
     type Error = ExceededIndexError;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
-        value.try_into().map_err(|_| ExceededIndexError)
+        let inner = value.try_into().map_err(|_| ExceededIndexError)?;
+        Ok(FunctionId(inner))
     }
 }
 
@@ -62,7 +64,7 @@ impl TryFrom<FunctionId> for usize {
     type Error = ExceededUsizeError;
 
     fn try_from(value: FunctionId) -> Result<Self, Self::Error> {
-        value.try_into().map_err(|_| ExceededUsizeError)
+        value.0.try_into().map_err(|_| ExceededUsizeError)
     }
 }
 
@@ -85,7 +87,8 @@ impl TryFrom<usize> for InstrId {
     type Error = ExceededIndexError;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
-        value.try_into().map_err(|_| ExceededIndexError)
+        let inner = value.try_into().map_err(|_| ExceededIndexError)?;
+        Ok(InstrId(inner))
     }
 }
 
@@ -93,7 +96,7 @@ impl TryFrom<InstrId> for usize {
     type Error = ExceededUsizeError;
 
     fn try_from(value: InstrId) -> Result<Self, Self::Error> {
-        value.try_into().map_err(|_| ExceededUsizeError)
+        value.0.try_into().map_err(|_| ExceededUsizeError)
     }
 }
 
