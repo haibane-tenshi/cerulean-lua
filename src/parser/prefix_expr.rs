@@ -1,5 +1,5 @@
 use super::tracker::ChunkTracker;
-use super::{expr, par_expr, LexParseError, NextToken, ParseError};
+use super::{expr_list, par_expr, LexParseError, NextToken, ParseError};
 use crate::lex::{Lexer, Token};
 
 fn variable<'s>(
@@ -51,12 +51,10 @@ fn func_args<'s>(
 
     let invoke_target = tracker.current()?.stack_top().unwrap().prev().unwrap();
 
-    loop {
-        s = match expr(s.clone(), tracker) {
-            Ok((s, ())) => s,
-            _ => break,
-        }
-    }
+    s = match expr_list(s.clone(), tracker) {
+        Ok((s, ())) => s,
+        _ => s,
+    };
 
     match s.next_required_token()? {
         Token::ParR => (),

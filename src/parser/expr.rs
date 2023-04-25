@@ -1,5 +1,5 @@
 use super::tracker::ChunkTracker;
-use super::{func_body, prefix_expr, LexParseError, NextToken, ParseError};
+use super::{expr_adjusted_to_1, func_body, prefix_expr, LexParseError, NextToken, ParseError};
 use crate::lex::{Lexer, Token};
 use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
 
@@ -81,9 +81,8 @@ fn table<'s>(
 
                 tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
 
-                let top = tracker.current()?.stack_top()?.next();
-                let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
-                tracker.current_mut()?.emit_adjust_to(top)?;
+                let (mut s, ()) =
+                    expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
                 match s.next_required_token()? {
                     Token::BracketR => (),
@@ -95,9 +94,8 @@ fn table<'s>(
                     _ => return Err(ParseError.into()),
                 }
 
-                let top = top.next();
-                let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
-                tracker.current_mut()?.emit_adjust_to(top)?;
+                let (s, ()) =
+                    expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
                 tracker.current_mut()?.emit(OpCode::TabSet)?;
 
@@ -124,9 +122,8 @@ fn table<'s>(
                     _ => return Err(ParseError.into()),
                 }
 
-                let top = tracker.current()?.stack_top()?.next();
-                let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
-                tracker.current_mut()?.emit_adjust_to(top)?;
+                let (s, ()) =
+                    expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
                 tracker.current_mut()?.emit(OpCode::TabSet)?;
 
@@ -137,8 +134,7 @@ fn table<'s>(
                              tracker: &mut ChunkTracker<'s>|
              -> Result<(Lexer<'s>, ()), LexParseError> {
                 let start = tracker.current()?.stack_top()?;
-                let r = expr(s, tracker)?;
-                tracker.current_mut()?.emit_adjust_to(start.next())?;
+                let r = expr_adjusted_to_1(s, tracker)?;
 
                 tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
 

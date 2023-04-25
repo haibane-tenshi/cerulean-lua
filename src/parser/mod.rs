@@ -156,6 +156,17 @@ fn inner_block<'s>(
     Ok((s, ()))
 }
 
+fn expr_adjusted_to_1<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    let mark = tracker.current()?.stack_top()?.next();
+    let r = expr(s, tracker)?;
+    tracker.current_mut()?.emit_adjust_to(mark)?;
+
+    Ok(r)
+}
+
 fn par_expr<'s>(
     mut s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
@@ -165,10 +176,7 @@ fn par_expr<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let mark = tracker.current()?.stack_top()?;
-    let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
-    // Parenthesised expressions are adjusted to 1.
-    tracker.current_mut()?.emit_adjust_to(mark.next())?;
+    let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     match s.next_required_token()? {
         Token::ParR => (),

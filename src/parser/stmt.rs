@@ -1,9 +1,8 @@
 use crate::lex::{Lexer, Token};
 use crate::opcode::InstrId;
 
-use super::expr::expr;
 use super::tracker::ChunkTracker;
-use super::{block, inner_block};
+use super::{block, expr_adjusted_to_1, inner_block};
 use super::{LexParseError, NextToken, ParseError};
 
 pub(super) fn statement<'s>(
@@ -99,9 +98,7 @@ fn assignment<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let top = tracker.current_mut()?.stack_top()?;
-    let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
-    tracker.current_mut()?.emit_adjust_to(top.next())?;
+    let (s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     match local {
         Some(()) => {
@@ -145,7 +142,7 @@ fn if_then<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+    let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     match s.next_required_token()? {
         Token::Then => (),
@@ -175,7 +172,7 @@ fn if_then<'s>(
 
             backpatch_to_current(to_next_block, tracker)?;
 
-            let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+            let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
             to_next_block = tracker.current_mut()?.emit(OpCode::JumpIf {
                 cond: false,
@@ -246,7 +243,7 @@ fn while_do<'s>(
 
     let start = tracker.current_mut()?.next_instr()?;
 
-    let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+    let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     match s.next_required_token()? {
         Token::Do => (),
@@ -292,7 +289,7 @@ fn repeat_until<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+    let (s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     // Handle controls of this loop.
 
