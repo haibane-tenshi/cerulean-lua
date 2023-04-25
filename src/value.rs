@@ -4,6 +4,7 @@ use std::fmt::Display;
 use decorum::Finite;
 
 use crate::opcode::FunctionId;
+use crate::table::TableRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Type {
@@ -13,6 +14,7 @@ pub enum Type {
     Float,
     String,
     Function,
+    Table,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -24,6 +26,7 @@ pub enum Value {
     Float(f64),
     String(String),
     Function(FunctionId),
+    Table(TableRef),
 }
 
 impl Value {
@@ -39,6 +42,7 @@ impl Value {
             Value::Float(_) => Type::Float,
             Value::String(_) => Type::String,
             Value::Function(_) => Type::Function,
+            Value::Table(_) => Type::Table,
         }
     }
 }
@@ -54,6 +58,7 @@ impl PartialOrd for Value {
             (Float(lhs), Float(rhs)) => lhs.partial_cmp(rhs),
             (String(lhs), String(rhs)) => Some(lhs.cmp(rhs)),
             (Function(_), Function(_)) => None,
+            (Table(_), Table(_)) => None,
             _ => None,
         }
     }
@@ -70,6 +75,7 @@ impl Display for Value {
             Float(v) => write!(f, "{v}_f64"),
             String(v) => write!(f, "{v:?}"),
             Function(v) => write!(f, "{v:?}"),
+            Table(v) => write!(f, "table [{v:?}]"),
         }
     }
 }

@@ -1,11 +1,14 @@
+use std::cell::{BorrowError, BorrowMutError, Ref, RefCell, RefMut};
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::rc::Rc;
 
 use ordered_float::NotNan;
 use thiserror::Error;
 
 use crate::value::Value;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Table {
     data: HashMap<KeyValue, Value>,
 }
@@ -30,6 +33,7 @@ pub enum KeyValue {
     Int(i64),
     Float(NotNan<f64>),
     String(String),
+    Table(TableRef),
 }
 
 #[derive(Debug, Error)]
@@ -48,6 +52,7 @@ impl TryFrom<Value> for KeyValue {
                 KeyValue::Float(t)
             }
             Value::String(t) => KeyValue::String(t),
+            Value::Table(t) => KeyValue::Table(t),
             Value::Nil | Value::Function(_) => return Err(InvalidTableKeyError),
         };
 
@@ -62,6 +67,38 @@ impl From<KeyValue> for Value {
             KeyValue::Int(t) => Value::Int(t),
             KeyValue::Float(t) => Value::Float(t.into_inner()),
             KeyValue::String(t) => Value::String(t),
+            KeyValue::Table(t) => Value::Table(t),
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TableRef(Rc<RefCell<Table>>);
+
+impl TableRef {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn borrow(&self) -> Result<Ref<Table>, BorrowError> {
+        self.0.try_borrow()
+    }
+
+    pub fn borrow_mut(&self) -> Result<RefMut<Table>, BorrowMutError> {
+        self.0.try_borrow_mut()
+    }
+}
+
+impl PartialEq for TableRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for TableRef {}
+
+impl Hash for TableRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.0).hash(state)
     }
 }
