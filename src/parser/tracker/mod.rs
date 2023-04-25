@@ -11,8 +11,8 @@ use crate::value::Literal;
 
 use const_::ConstTracker;
 pub use const_::ExceededConstIdError;
-pub use function::EmitError;
 use function::FunctionTracker;
+pub use function::{BackpatchError, EmitError};
 pub use opcode::ExceededInstrIdError;
 use opcode::OpCodeTracker;
 pub use stack::StackStateError;
@@ -34,6 +34,9 @@ pub enum Error {
 
     #[error(transparent)]
     Emit(#[from] EmitError),
+
+    #[error(transparent)]
+    Backpatch(#[from] BackpatchError),
 
     #[error(transparent)]
     StackState(#[from] StackStateError),

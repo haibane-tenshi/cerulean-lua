@@ -49,6 +49,10 @@ impl Stack {
         self.stack.pop().ok_or(RuntimeError)
     }
 
+    pub fn last(&self) -> Result<&Value, RuntimeError> {
+        self.stack.last().ok_or(RuntimeError)
+    }
+
     pub fn top(&mut self) -> StackSlot {
         let offset = self.stack.len() - self.protected_size;
         let offset = offset.try_into().unwrap();
@@ -344,7 +348,7 @@ impl<'chunk> CurrentFrame<'chunk> {
                 ControlFlow::Continue(())
             }
             JumpIf { cond, offset } => {
-                let value = self.stack.pop()?;
+                let value = self.stack.last()?;
 
                 if value.as_boolish() == cond {
                     self.frame.ip += offset;
@@ -362,7 +366,7 @@ impl<'chunk> CurrentFrame<'chunk> {
                 ControlFlow::Continue(())
             }
             LoopIf { cond, offset } => {
-                let value = self.stack.pop()?;
+                let value = self.stack.last()?;
 
                 if value.as_boolish() == cond {
                     self.frame.ip = self

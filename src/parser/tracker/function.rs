@@ -5,6 +5,15 @@ use crate::opcode::{Function, InstrId, OpCode, StackSlot};
 use super::{ExceededInstrIdError, OpCodeTracker, StackStateError, StackTracker};
 
 #[derive(Debug, Error)]
+pub enum BackpatchError {
+    #[error(transparent)]
+    InstrId(#[from] ExceededInstrIdError),
+
+    #[error("there is no instruction under this index")]
+    IndexOutOfBounds,
+}
+
+#[derive(Debug, Error)]
 pub enum EmitError {
     #[error("reached erroneous stack state")]
     Stack(#[from] StackStateError),
@@ -56,7 +65,7 @@ impl<'s> FunctionTracker<'s> {
                 self.stack.pop()?;
             }
             Jump { .. } | Loop { .. } => (),
-            JumpIf { .. } | LoopIf { .. } => self.stack.pop()?,
+            JumpIf { .. } | LoopIf { .. } => (),
             TabCreate => {
                 self.stack.push(None)?;
             }
@@ -98,6 +107,24 @@ impl<'s> FunctionTracker<'s> {
         };
 
         Ok(instr_id)
+    }
+
+    pub fn backpatch_to_next(&mut self, index: InstrId) -> Result<(), BackpatchError> {
+        let target = self.next_instr()?;
+        let new_offset = target
+            .checked_sub(index + 1)
+            .ok_or(BackpatchError::IndexOutOfBounds)?;
+        match self.get_mut(index) {
+            Some(OpCode::JumpIf { offset, .. })
+            | Some(OpCode::Jump { offset })
+            | Some(OpCode::Loop { offset })
+            | Some(OpCode::LoopIf { offset, .. }) => {
+                *offset = new_offset;
+
+                Ok(())
+            }
+            _ => Err(BackpatchError::IndexOutOfBounds),
+        }
     }
 
     pub fn push_block(&mut self) -> Result<(), StackStateError> {

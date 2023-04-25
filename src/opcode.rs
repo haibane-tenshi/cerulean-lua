@@ -48,6 +48,21 @@ impl StackSlot {
     }
 }
 
+impl AddAssign<u32> for StackSlot {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs;
+    }
+}
+
+impl Add<u32> for StackSlot {
+    type Output = Self;
+
+    fn add(mut self, rhs: u32) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionId(pub Index);
 

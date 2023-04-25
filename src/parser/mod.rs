@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::lex::{LexError, Lexer, Token};
 use crate::opcode::{Chunk, FunctionId};
 use tracker::{
-    ChunkTracker, EmitError, Error as CodegenError, ExceededConstIdError, ExceededFnIdError,
-    ExceededInstrIdError, FinishFnError, NoActiveFnError, StackStateError,
+    BackpatchError, ChunkTracker, EmitError, Error as CodegenError, ExceededConstIdError,
+    ExceededFnIdError, ExceededInstrIdError, FinishFnError, NoActiveFnError, StackStateError,
 };
 
 use expr::expr;
@@ -82,6 +82,12 @@ impl From<ExceededFnIdError> for LexParseError {
 
 impl From<FinishFnError> for LexParseError {
     fn from(value: FinishFnError) -> Self {
+        LexParseError::Codegen(value.into())
+    }
+}
+
+impl From<BackpatchError> for LexParseError {
+    fn from(value: BackpatchError) -> Self {
         LexParseError::Codegen(value.into())
     }
 }
