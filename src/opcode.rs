@@ -97,7 +97,7 @@ impl TryFrom<InstrId> for usize {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
 pub struct InstrOffset(pub u32);
 
 impl AddAssign<u32> for InstrId {

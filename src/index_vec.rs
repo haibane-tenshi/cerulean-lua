@@ -4,8 +4,6 @@ use std::ops::{Deref, DerefMut};
 
 use thiserror::Error;
 
-pub type VecU32<T> = IndexVec<u32, T>;
-
 #[derive(Debug, Error)]
 #[error("usize value cannot be represented as index")]
 pub struct ExceededIndexError;
@@ -59,9 +57,9 @@ impl<Index, T> From<Vec<T>> for IndexVec<Index, T> {
     }
 }
 
-impl<Index, T> Into<Vec<T>> for IndexVec<Index, T> {
-    fn into(self) -> Vec<T> {
-        self.0
+impl<Index, T> From<IndexVec<Index, T>> for Vec<T> {
+    fn from(val: IndexVec<Index, T>) -> Self {
+        val.0
     }
 }
 

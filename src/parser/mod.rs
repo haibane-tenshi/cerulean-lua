@@ -7,7 +7,10 @@ use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, Token};
 use crate::opcode::{Chunk, FunctionId};
-use tracker::ChunkTracker;
+use tracker::{
+    ChunkTracker, EmitError, Error as CodegenError, ExceededConstIdError, ExceededFnIdError,
+    ExceededInstrIdError, NoActiveFnError, StackStateError,
+};
 
 use expr::expr;
 use prefix_expr::prefix_expr;
@@ -25,6 +28,9 @@ pub enum LexParseError {
     #[error(transparent)]
     Parse(#[from] ParseError),
 
+    #[error("failed to generate code")]
+    Codegen(#[from] CodegenError),
+
     #[error("reached end of input")]
     Eof,
 }
@@ -35,6 +41,42 @@ impl LexParseError {
             LexParseError::Eof => LexParseError::Parse(ParseError),
             t => t,
         }
+    }
+}
+
+impl From<ExceededConstIdError> for LexParseError {
+    fn from(value: ExceededConstIdError) -> Self {
+        LexParseError::Codegen(value.into())
+    }
+}
+
+impl From<NoActiveFnError> for LexParseError {
+    fn from(value: NoActiveFnError) -> Self {
+        LexParseError::Codegen(value.into())
+    }
+}
+
+impl From<EmitError> for LexParseError {
+    fn from(value: EmitError) -> Self {
+        LexParseError::Codegen(value.into())
+    }
+}
+
+impl From<StackStateError> for LexParseError {
+    fn from(value: StackStateError) -> Self {
+        LexParseError::Codegen(value.into())
+    }
+}
+
+impl From<ExceededInstrIdError> for LexParseError {
+    fn from(value: ExceededInstrIdError) -> Self {
+        LexParseError::Codegen(value.into())
+    }
+}
+
+impl From<ExceededFnIdError> for LexParseError {
+    fn from(value: ExceededFnIdError) -> Self {
+        LexParseError::Codegen(value.into())
     }
 }
 
@@ -77,11 +119,11 @@ fn block<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    tracker.push_block().unwrap();
+    tracker.current_mut()?.push_block()?;
 
     let r = inner_block(s, tracker);
 
-    tracker.pop_block().unwrap();
+    tracker.current_mut()?.pop_block()?;
 
     r
 }
@@ -159,11 +201,11 @@ fn func_body<'s>(
     };
 
     // Start function
-    tracker.push_frame().unwrap();
+    tracker.start_fn()?;
 
     // Currently this slot contains pointer to function itself.
     // In the future we will put environment here instead.
-    tracker.push_stack(None).unwrap();
+    tracker.current_mut()?.push_stack(None)?;
 
     let mut parlist = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
         let mut count = 0;
@@ -172,7 +214,7 @@ fn func_body<'s>(
             Token::Ident(ident) => ident,
             _ => return Err(ParseError.into()),
         };
-        tracker.push_stack(Some(ident)).unwrap();
+        tracker.current_mut()?.push_stack(Some(ident))?;
         count += 1;
 
         let mut next_ident = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
@@ -185,7 +227,7 @@ fn func_body<'s>(
                 Token::Ident(ident) => ident,
                 _ => return Err(ParseError.into()),
             };
-            tracker.push_stack(Some(ident)).unwrap();
+            tracker.current_mut()?.push_stack(Some(ident))?;
             count += 1;
 
             Ok(s)
@@ -221,7 +263,7 @@ fn func_body<'s>(
     }
 
     // Finish function
-    let func_id = tracker.pop_frame(height).map_err(|_| ParseError)?;
+    let func_id = tracker.finish_fn(height).map_err(|_| ParseError)?;
 
     Ok((s, func_id))
 }

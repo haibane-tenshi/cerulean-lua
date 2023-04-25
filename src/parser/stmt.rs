@@ -1,7 +1,8 @@
 use crate::lex::{Lexer, Token};
+use crate::opcode::InstrId;
 
 use super::expr::expr;
-use super::tracker::{ChunkTracker, InstrId};
+use super::tracker::ChunkTracker;
 use super::{block, inner_block};
 use super::{LexParseError, NextToken, ParseError};
 
@@ -98,37 +99,39 @@ fn assignment<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let top = tracker.stack_top().unwrap();
+    let top = tracker.current_mut()?.stack_top()?;
     let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
-    tracker.emit_adjust_to(top.next()).unwrap();
+    tracker.current_mut()?.emit_adjust_to(top.next())?;
 
     match local {
         Some(()) => {
             // If we have local keyword, introduce new local variable.
-            tracker.name_local(ident).map_err(|_| ParseError)?;
+            tracker.current_mut()?.name_local(ident)?;
         }
         None => {
             // Otherwise try to store it inside known variable.
             let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
-            tracker.emit(OpCode::StoreStack(slot));
+            tracker.current_mut()?.emit(OpCode::StoreStack(slot))?;
         }
     }
 
     Ok((s, ()))
 }
 
-fn backpatch_to_current(index: InstrId, tracker: &mut ChunkTracker) {
+fn backpatch_to_current(index: InstrId, tracker: &mut ChunkTracker) -> Result<(), LexParseError> {
     use crate::opcode::OpCode;
 
-    let target = tracker.next_instr();
-    let new_offset = target.0 - index.0 - 1;
-    match tracker.get_mut(index) {
+    let target = tracker.current_mut()?.next_instr()?;
+    let new_offset = target.checked_sub(index + 1).unwrap();
+    match tracker.current_mut()?.get_mut(index) {
         Some(OpCode::JumpIf { offset, .. }) => {
             *offset = new_offset;
         }
         Some(OpCode::Jump { offset }) => *offset = new_offset,
         _ => unreachable!(),
     };
+
+    Ok(())
 }
 
 fn if_then<'s>(
@@ -151,10 +154,10 @@ fn if_then<'s>(
 
     let mut to_end = Vec::new();
 
-    let mut to_next_block = tracker.emit(OpCode::JumpIf {
+    let mut to_next_block = tracker.current_mut()?.emit(OpCode::JumpIf {
         cond: false,
-        offset: 0,
-    });
+        offset: Default::default(),
+    })?;
 
     let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -167,17 +170,17 @@ fn if_then<'s>(
 
             // Finish off the previous block.
             // This needs to jump to the very end of `if` statement.
-            let to_patch = tracker.emit(OpCode::Jump {offset: 0});
+            let to_patch = tracker.current_mut()?.emit(OpCode::Jump {offset: Default::default()})?;
             to_end.push(to_patch);
 
-            backpatch_to_current(to_next_block, tracker);
+            backpatch_to_current(to_next_block, tracker)?;
 
             let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
-            to_next_block = tracker.emit(OpCode::JumpIf {
+            to_next_block = tracker.current_mut()?.emit(OpCode::JumpIf {
                 cond: false,
-                offset: 0,
-            });
+                offset: Default::default(),
+            })?;
 
             match s.next_required_token()? {
                 Token::Then => (),
@@ -201,8 +204,10 @@ fn if_then<'s>(
         }
 
         to_next_block = {
-            let r = tracker.emit(OpCode::Jump { offset: 0 });
-            backpatch_to_current(to_next_block, tracker);
+            let r = tracker.current_mut()?.emit(OpCode::Jump {
+                offset: Default::default(),
+            })?;
+            backpatch_to_current(to_next_block, tracker)?;
 
             r
         };
@@ -220,9 +225,9 @@ fn if_then<'s>(
     }
 
     // Backpatch the last jump instruction and block ends.
-    backpatch_to_current(to_next_block, tracker);
+    backpatch_to_current(to_next_block, tracker)?;
     for index in to_end {
-        backpatch_to_current(index, tracker);
+        backpatch_to_current(index, tracker)?;
     }
 
     Ok((s, ()))
@@ -239,7 +244,7 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let start = tracker.next_instr();
+    let start = tracker.current_mut()?.next_instr()?;
 
     let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -248,10 +253,10 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let cond = tracker.emit(OpCode::JumpIf {
+    let cond = tracker.current_mut()?.emit(OpCode::JumpIf {
         cond: false,
-        offset: 0,
-    });
+        offset: Default::default(),
+    })?;
 
     let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -260,8 +265,8 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.emit_loop_to(start);
-    backpatch_to_current(cond, tracker);
+    tracker.current_mut()?.emit_loop_to(start)?;
+    backpatch_to_current(cond, tracker)?;
 
     Ok((s, ()))
 }
@@ -277,8 +282,8 @@ fn repeat_until<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.push_block().unwrap();
-    let start = tracker.next_instr();
+    tracker.current_mut()?.push_block()?;
+    let start = tracker.current_mut()?.next_instr()?;
 
     let (mut s, ()) = inner_block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -292,17 +297,17 @@ fn repeat_until<'s>(
     // Handle controls of this loop.
 
     // Jump to cleanup code when condition is true.
-    let to_end = tracker.emit(OpCode::JumpIf {
+    let to_end = tracker.current_mut()?.emit(OpCode::JumpIf {
         cond: true,
-        offset: 0,
-    });
+        offset: Default::default(),
+    })?;
 
-    tracker.pop_ghost_block().unwrap();
-    tracker.emit_loop_to(start);
+    tracker.current_mut()?.pop_ghost_block()?;
+    tracker.current_mut()?.emit_loop_to(start)?;
 
     // Cleanup stack after loop is exited.
-    backpatch_to_current(to_end, tracker);
-    tracker.pop_block().unwrap();
+    backpatch_to_current(to_end, tracker)?;
+    tracker.current_mut()?.pop_block()?;
 
     Ok((s, ()))
 }
@@ -319,7 +324,7 @@ pub(super) fn return_<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let slot = tracker.stack_top().unwrap();
+    let slot = tracker.current()?.stack_top()?;
 
     let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -329,7 +334,7 @@ pub(super) fn return_<'s>(
     })(s.clone())
     .unwrap_or(s);
 
-    tracker.emit(OpCode::Return(slot));
+    tracker.current_mut()?.emit(OpCode::Return(slot))?;
 
     Ok((s, ()))
 }

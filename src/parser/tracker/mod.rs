@@ -9,19 +9,48 @@ use crate::index_vec::IndexVec;
 use crate::opcode::{Chunk, ConstId, Function, FunctionId, StackSlot};
 use crate::value::Literal;
 
-use const_::{ConstTracker, ExceededConstIdError};
-use function::{EmitError, FunctionTracker};
-use opcode::{ExceededInstrIdError, OpCodeTracker};
-use stack::{StackStateError, StackTracker};
+use const_::ConstTracker;
+pub use const_::ExceededConstIdError;
+pub use function::EmitError;
+use function::FunctionTracker;
+pub use opcode::ExceededInstrIdError;
+use opcode::OpCodeTracker;
+pub use stack::StackStateError;
+use stack::StackTracker;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    ConstId(#[from] ExceededConstIdError),
+
+    #[error(transparent)]
+    InstrId(#[from] ExceededInstrIdError),
+
+    #[error(transparent)]
+    FnId(#[from] ExceededFnIdError),
+
+    #[error(transparent)]
+    NoActiveFn(#[from] NoActiveFnError),
+
+    #[error(transparent)]
+    Emit(#[from] EmitError),
+
+    #[error(transparent)]
+    StackState(#[from] StackStateError),
+}
 
 #[derive(Debug, Error)]
 #[error("exceeded indexing capacity of function ids")]
 pub struct ExceededFnIdError;
 
 #[derive(Debug, Error)]
+#[error("chunk doesn't have any unresolved functions to write to")]
+pub struct NoActiveFnError;
+
+#[derive(Debug, Error)]
 pub enum FinishFnError {
-    #[error("no unresolved functions are present")]
-    NoActiveFn,
+    #[error(transparent)]
+    NoActiveFn(#[from] NoActiveFnError),
 
     #[error("failed to resolve function")]
     FnResolve(#[from] EmitError),
@@ -75,7 +104,7 @@ impl<'s> Default for FunctionSlot<'s> {
 
 #[derive(Debug, Error)]
 #[error("encountered unresolved function in chunk")]
-struct UnresolvedFnError;
+pub struct UnresolvedFnError;
 
 #[derive(Debug, Default)]
 pub(super) struct ChunkTracker<'s> {
@@ -90,22 +119,27 @@ impl<'s> ChunkTracker<'s> {
         Default::default()
     }
 
-    pub fn current(&self) -> Option<&FunctionTracker> {
-        let r = match self.functions.get(self.current?)? {
-            FunctionSlot::InProgress(tracker) => tracker,
-            FunctionSlot::Resolved(_) => unreachable!(),
-        };
+    pub fn current(&self) -> Result<&FunctionTracker<'s>, NoActiveFnError> {
+        (|| {
+            let r = match self.functions.get(self.current?)? {
+                FunctionSlot::InProgress(tracker) => tracker,
+                FunctionSlot::Resolved(_) => unreachable!(),
+            };
 
-        Some(r)
+            Some(r)
+        })()
+        .ok_or(NoActiveFnError)
     }
 
-    pub fn current_mut(&mut self) -> Option<&mut FunctionTracker> {
-        let r = match self.functions.get_mut(self.current?)? {
+    pub fn current_mut(&mut self) -> Result<&mut FunctionTracker<'s>, NoActiveFnError> {
+        let current = self.current.ok_or(NoActiveFnError)?;
+
+        let r = match self.functions.get_mut(current).unwrap() {
             FunctionSlot::InProgress(tracker) => tracker,
             FunctionSlot::Resolved(_) => unreachable!(),
         };
 
-        Some(r)
+        Ok(r)
     }
 
     pub fn resolve(self) -> Result<Chunk, UnresolvedFnError> {
@@ -134,7 +168,7 @@ impl<'s> ChunkTracker<'s> {
     }
 
     pub fn lookup_local(&self, ident: &str) -> Option<StackSlot> {
-        self.current()?.lookup_local(ident)
+        self.current().ok()?.lookup_local(ident)
     }
 
     pub fn start_fn(&mut self) -> Result<FunctionId, ExceededFnIdError> {
@@ -144,7 +178,7 @@ impl<'s> ChunkTracker<'s> {
     }
 
     pub fn finish_fn(&mut self, height: u32) -> Result<FunctionId, FinishFnError> {
-        let fn_id = self.current.ok_or(FinishFnError::NoActiveFn)?;
+        let fn_id = self.current.ok_or(NoActiveFnError)?;
 
         let slot = self.functions.get_mut(fn_id).unwrap();
         slot.resolve(height)?;

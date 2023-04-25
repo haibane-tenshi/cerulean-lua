@@ -14,7 +14,7 @@ fn variable<'s>(
     };
 
     let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
-    tracker.emit(OpCode::LoadStack(slot));
+    tracker.current_mut()?.emit(OpCode::LoadStack(slot))?;
 
     Ok((s, ()))
 }
@@ -49,7 +49,7 @@ fn func_args<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let invoke_target = tracker.stack_top().unwrap().prev().unwrap();
+    let invoke_target = tracker.current()?.stack_top().unwrap().prev().unwrap();
 
     loop {
         s = match expr(s.clone(), tracker) {
@@ -63,7 +63,7 @@ fn func_args<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    tracker.emit(OpCode::Invoke(invoke_target));
+    tracker.current_mut()?.emit(OpCode::Invoke(invoke_target))?;
 
     Ok((s, ()))
 }
