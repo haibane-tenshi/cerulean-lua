@@ -9,7 +9,7 @@ use crate::lex::{LexError, Lexer, Token};
 use crate::opcode::{Chunk, FunctionId};
 use tracker::{
     ChunkTracker, EmitError, Error as CodegenError, ExceededConstIdError, ExceededFnIdError,
-    ExceededInstrIdError, NoActiveFnError, StackStateError,
+    ExceededInstrIdError, FinishFnError, NoActiveFnError, StackStateError,
 };
 
 use expr::expr;
@@ -80,6 +80,12 @@ impl From<ExceededFnIdError> for LexParseError {
     }
 }
 
+impl From<FinishFnError> for LexParseError {
+    fn from(value: FinishFnError) -> Self {
+        LexParseError::Codegen(value.into())
+    }
+}
+
 trait NextToken {
     type Token;
 
@@ -103,6 +109,8 @@ impl<'s> NextToken for Lexer<'s> {
 pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
     let mut tracker = ChunkTracker::empty();
 
+    tracker.start_fn()?;
+
     match block(s, &mut tracker) {
         Ok((mut s, ())) => match s.next_token() {
             Err(LexParseError::Eof) => (),
@@ -112,6 +120,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
         Err(err) => return Err(err),
     }
 
+    tracker.finish_fn(0)?;
     tracker.resolve().map_err(|_| ParseError.into())
 }
 

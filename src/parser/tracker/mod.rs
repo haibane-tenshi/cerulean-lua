@@ -39,6 +39,16 @@ pub enum Error {
     StackState(#[from] StackStateError),
 }
 
+impl From<FinishFnError> for Error {
+    fn from(value: FinishFnError) -> Self {
+        match value {
+            FinishFnError::NoActiveFn(err) => err.into(),
+            FinishFnError::FnResolve(err) => err.into(),
+            FinishFnError::FnId(err) => err.into(),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 #[error("exceeded indexing capacity of function ids")]
 pub struct ExceededFnIdError;
@@ -172,9 +182,14 @@ impl<'s> ChunkTracker<'s> {
     }
 
     pub fn start_fn(&mut self) -> Result<FunctionId, ExceededFnIdError> {
-        self.functions
+        let id = self
+            .functions
             .push(Default::default())
-            .map_err(|_| ExceededFnIdError)
+            .map_err(|_| ExceededFnIdError)?;
+
+        self.current = Some(id);
+
+        Ok(id)
     }
 
     pub fn finish_fn(&mut self, height: u32) -> Result<FunctionId, FinishFnError> {
