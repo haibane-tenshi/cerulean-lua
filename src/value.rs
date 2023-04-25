@@ -15,8 +15,9 @@ pub enum Type {
     Function,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Value {
+    #[default]
     Nil,
     Bool(bool),
     Int(i64),

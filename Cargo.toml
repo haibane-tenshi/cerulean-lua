@@ -14,6 +14,7 @@ clap = { version = "4.2.2", features = ["derive"] }
 decorum = { version = "0.3.1", default-features = false }
 lexical = { version = "6.1.1", default-features = false, features = ["parse", "parse-floats", "parse-integers", "format", "power-of-two"] }
 logos = "0.13.0"
+ordered-float = "3.7.0"
 rle_vec = "0.4.1"
 static_assertions = "1.1.0"
 thiserror = "1.0.40"
