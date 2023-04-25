@@ -165,7 +165,10 @@ fn par_expr<'s>(
         _ => return Err(ParseError.into()),
     }
 
+    let mark = tracker.current()?.stack_top()?;
     let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+    // Parenthesised expressions are adjusted to 1.
+    tracker.current_mut()?.emit_adjust_to(mark.next())?;
 
     match s.next_required_token()? {
         Token::ParR => (),
@@ -179,6 +182,7 @@ fn expr_list<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
+    let mut mark = tracker.current()?.stack_top()?;
     let (mut s, ()) = expr(s, tracker)?;
 
     let mut next_part = |mut s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
@@ -186,6 +190,10 @@ fn expr_list<'s>(
             Token::Comma => (),
             _ => return Err(ParseError.into()),
         }
+
+        // Expressions in comma lists are adjusted to 1.
+        mark = mark.next();
+        tracker.current_mut()?.emit_adjust_to(mark)?;
 
         expr(s, tracker).map_err(LexParseError::eof_into_err)
     };
