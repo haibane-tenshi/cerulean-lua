@@ -51,6 +51,162 @@ fn function<'s>(
     Ok((s, ()))
 }
 
+fn table<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+
+    match s.next_token()? {
+        Token::CurlyL => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let table_slot = tracker.current()?.stack_top()?;
+    tracker.current_mut()?.emit(OpCode::TabCreate)?;
+
+    let mut field_list = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+        let mut index = 1;
+
+        let mut field = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+            use crate::value::Literal;
+
+            let bracket = |mut s: Lexer<'s>,
+                           tracker: &mut ChunkTracker<'s>|
+             -> Result<(Lexer<'s>, ()), LexParseError> {
+                match s.next_token()? {
+                    Token::BracketL => (),
+                    _ => return Err(ParseError.into()),
+                }
+
+                tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
+
+                let top = tracker.current()?.stack_top()?.next();
+                let (mut s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+                tracker.current_mut()?.emit_adjust_to(top)?;
+
+                match s.next_required_token()? {
+                    Token::BracketR => (),
+                    _ => return Err(ParseError.into()),
+                }
+
+                match s.next_required_token()? {
+                    Token::Assign => (),
+                    _ => return Err(ParseError.into()),
+                }
+
+                let top = top.next();
+                let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+                tracker.current_mut()?.emit_adjust_to(top)?;
+
+                tracker.current_mut()?.emit(OpCode::TabSet)?;
+
+                Ok((s, ()))
+            };
+
+            let name = |mut s: Lexer<'s>,
+                        tracker: &mut ChunkTracker<'s>|
+             -> Result<(Lexer<'s>, ()), LexParseError> {
+                let ident = match s.next_token()? {
+                    Token::Ident(ident) => ident,
+                    _ => return Err(ParseError.into()),
+                };
+
+                tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
+
+                let const_id = tracker.insert_literal(Literal::String(ident.to_string()))?;
+                tracker
+                    .current_mut()?
+                    .emit(OpCode::LoadConstant(const_id))?;
+
+                match s.next_required_token()? {
+                    Token::Assign => (),
+                    _ => return Err(ParseError.into()),
+                }
+
+                let top = tracker.current()?.stack_top()?.next();
+                let (s, ()) = expr(s, tracker).map_err(LexParseError::eof_into_err)?;
+                tracker.current_mut()?.emit_adjust_to(top)?;
+
+                tracker.current_mut()?.emit(OpCode::TabSet)?;
+
+                Ok((s, ()))
+            };
+
+            let mut index = |s: Lexer<'s>,
+                             tracker: &mut ChunkTracker<'s>|
+             -> Result<(Lexer<'s>, ()), LexParseError> {
+                let start = tracker.current()?.stack_top()?;
+                let r = expr(s, tracker)?;
+                tracker.current_mut()?.emit_adjust_to(start.next())?;
+
+                tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
+
+                let const_id = tracker.insert_literal(Literal::Int(index))?;
+                tracker
+                    .current_mut()?
+                    .emit(OpCode::LoadConstant(const_id))?;
+                index += 1;
+
+                tracker.current_mut()?.emit(OpCode::LoadStack(start))?;
+                tracker.current_mut()?.emit(OpCode::TabSet)?;
+                tracker.current_mut()?.emit_adjust_to(start)?;
+
+                Ok(r)
+            };
+
+            if let Ok(r) = bracket(s.clone(), tracker) {
+                Ok(r)
+            } else if let Ok(r) = name(s.clone(), tracker) {
+                Ok(r)
+            } else if let Ok(r) = index(s, tracker) {
+                Ok(r)
+            } else {
+                Err(ParseError.into())
+            }
+        };
+
+        let field_sep = |mut s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+            match s.next_token()? {
+                Token::Comma | Token::Semicolon => (),
+                _ => return Err(ParseError.into()),
+            };
+
+            Ok((s, ()))
+        };
+
+        let (mut s, ()) = field(s)?;
+
+        let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+            let (s, ()) = field_sep(s)?;
+            field(s)
+        };
+
+        loop {
+            s = match next_part(s.clone()) {
+                Ok((s, ())) => s,
+                Err(_) => break,
+            }
+        }
+
+        let s = field_sep(s.clone()).ok().map(|(s, _)| s).unwrap_or(s);
+
+        Ok((s, ()))
+    };
+
+    let mut s = match field_list(s.clone()) {
+        Ok((s, ())) => s,
+        Err(_) => s,
+    };
+
+    match s.next_required_token()? {
+        Token::CurlyR => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    Ok((s, ()))
+}
+
 pub(super) fn expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
@@ -117,7 +273,9 @@ fn atom<'s>(
         Ok(r)
     } else if let Ok(r) = prefix_expr(s.clone(), tracker) {
         Ok(r)
-    } else if let Ok(r) = function(s, tracker) {
+    } else if let Ok(r) = function(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = table(s, tracker) {
         Ok(r)
     } else {
         Err(ParseError.into())
