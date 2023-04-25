@@ -57,6 +57,19 @@ impl<'s> FunctionTracker<'s> {
             }
             Jump { .. } | Loop { .. } => (),
             JumpIf { .. } | LoopIf { .. } => self.stack.pop()?,
+            TabCreate => {
+                self.stack.push(None)?;
+            }
+            TabGet => {
+                self.stack.pop()?;
+                self.stack.pop()?;
+                self.stack.push(None)?;
+            }
+            TabSet => {
+                self.stack.pop()?;
+                self.stack.pop()?;
+                self.stack.pop()?;
+            }
         }
 
         let id = self.opcodes.emit(opcode)?;

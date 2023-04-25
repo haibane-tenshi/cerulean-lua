@@ -190,6 +190,9 @@ pub enum OpCode {
     JumpIf { cond: bool, offset: InstrOffset },
     Loop { offset: InstrOffset },
     LoopIf { cond: bool, offset: InstrOffset },
+    TabCreate,
+    TabGet,
+    TabSet,
 }
 
 impl Display for OpCode {
@@ -213,6 +216,9 @@ impl Display for OpCode {
             JumpIf { cond, offset } => format!("{:<10} [{cond:>5}] [{:>3}]", "JumpIf", offset.0),
             Loop { offset } => format!("{:<10} [{:>3}]", "Loop", offset.0),
             LoopIf { cond, offset } => format!("{:<10} [{cond:>5}] [{:>3}]", "LoopIf", offset.0),
+            TabCreate => format!("{:<10}", "TabCreate"),
+            TabSet => format!("{:<10}", "TabSet"),
+            TabGet => format!("{:<10}", "TabGet"),
         };
 
         write!(f, "{s}")

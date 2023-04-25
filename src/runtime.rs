@@ -130,6 +130,7 @@ impl<'chunk> CurrentFrame<'chunk> {
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::opcode::OpCode::*;
         use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
+        use crate::table::TableRef;
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(ControlFrame::Return(self.stack.top())))
@@ -370,6 +371,44 @@ impl<'chunk> CurrentFrame<'chunk> {
                         .checked_sub_offset(offset)
                         .ok_or(RuntimeError)?;
                 }
+
+                ControlFlow::Continue(())
+            }
+            TabCreate => {
+                let value = TableRef::new();
+
+                self.stack.push(Value::Table(value));
+
+                ControlFlow::Continue(())
+            }
+            TabGet => {
+                let index = self.stack.pop()?;
+                let table = match self.stack.pop()? {
+                    Value::Table(t) => t,
+                    _ => return Err(RuntimeError),
+                };
+
+                let key = index.try_into().map_err(|_| RuntimeError)?;
+                let value = table.borrow().map_err(|_| RuntimeError)?.get(key);
+
+                self.stack.push(value);
+
+                ControlFlow::Continue(())
+            }
+            TabSet => {
+                let value = self.stack.pop()?;
+                let index = self.stack.pop()?;
+                let table = match self.stack.pop()? {
+                    Value::Table(t) => t,
+                    _ => return Err(RuntimeError),
+                };
+
+                let key = index.try_into().map_err(|_| RuntimeError)?;
+
+                table
+                    .borrow_mut()
+                    .map_err(|_| RuntimeError)?
+                    .set(key, value);
 
                 ControlFlow::Continue(())
             }
