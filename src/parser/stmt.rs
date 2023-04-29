@@ -115,22 +115,6 @@ fn assignment<'s>(
     Ok((s, ()))
 }
 
-fn backpatch_to_current(index: InstrId, tracker: &mut ChunkTracker) -> Result<(), LexParseError> {
-    use crate::opcode::OpCode;
-
-    let target = tracker.current_mut()?.next_instr()?;
-    let new_offset = target.checked_sub(index + 1).unwrap();
-    match tracker.current_mut()?.get_mut(index) {
-        Some(OpCode::JumpIf { offset, .. }) => {
-            *offset = new_offset;
-        }
-        Some(OpCode::Jump { offset }) => *offset = new_offset,
-        _ => unreachable!(),
-    };
-
-    Ok(())
-}
-
 fn if_then<'s>(
     mut s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
@@ -170,7 +154,7 @@ fn if_then<'s>(
             let to_patch = tracker.current_mut()?.emit(OpCode::Jump {offset: Default::default()})?;
             to_end.push(to_patch);
 
-            backpatch_to_current(to_next_block, tracker)?;
+            tracker.current_mut()?.backpatch_to_next(to_next_block)?;
 
             let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -204,7 +188,7 @@ fn if_then<'s>(
             let r = tracker.current_mut()?.emit(OpCode::Jump {
                 offset: Default::default(),
             })?;
-            backpatch_to_current(to_next_block, tracker)?;
+            tracker.current_mut()?.backpatch_to_next(to_next_block)?;
 
             r
         };
@@ -222,9 +206,10 @@ fn if_then<'s>(
     }
 
     // Backpatch the last jump instruction and block ends.
-    backpatch_to_current(to_next_block, tracker)?;
+    let current = tracker.current_mut()?;
+    current.backpatch_to_next(to_next_block)?;
     for index in to_end {
-        backpatch_to_current(index, tracker)?;
+        current.backpatch_to_next(index)?;
     }
 
     Ok((s, ()))
@@ -263,7 +248,7 @@ fn while_do<'s>(
     }
 
     tracker.current_mut()?.emit_loop_to(start)?;
-    backpatch_to_current(cond, tracker)?;
+    tracker.current_mut()?.backpatch_to_next(cond)?;
 
     Ok((s, ()))
 }
@@ -303,7 +288,7 @@ fn repeat_until<'s>(
     tracker.current_mut()?.emit_loop_to(start)?;
 
     // Cleanup stack after loop is exited.
-    backpatch_to_current(to_end, tracker)?;
+    tracker.current_mut()?.backpatch_to_next(to_end)?;
     tracker.current_mut()?.pop_block()?;
 
     Ok((s, ()))
