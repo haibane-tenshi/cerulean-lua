@@ -1,5 +1,5 @@
 use super::tracker::ChunkTracker;
-use super::{expr_list, par_expr, LexParseError, NextToken, ParseError};
+use super::{expr_adjusted_to_1, expr_list, par_expr, LexParseError, NextToken, ParseError};
 use crate::lex::{Lexer, Token};
 
 fn variable<'s>(
@@ -31,8 +31,16 @@ pub(super) fn prefix_expr<'s>(
         return Err(ParseError.into());
     };
 
-    while let Ok((ns, ())) = func_args(s.clone(), tracker) {
-        s = ns;
+    loop {
+        s = if let Ok((s, ())) = func_args(s.clone(), tracker) {
+            s
+        } else if let Ok((s, ())) = field(s.clone(), tracker) {
+            s
+        } else if let Ok((s, ())) = index(s.clone(), tracker) {
+            s
+        } else {
+            break;
+        }
     }
 
     Ok((s, ()))
@@ -62,6 +70,53 @@ fn func_args<'s>(
     }
 
     tracker.current_mut()?.emit(OpCode::Invoke(invoke_target))?;
+
+    Ok((s, ()))
+}
+
+fn field<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+    use crate::value::Literal;
+
+    match s.next_token()? {
+        Token::Dot => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let ident = match s.next_required_token()? {
+        Token::Ident(ident) => ident,
+        _ => return Err(ParseError.into()),
+    };
+
+    let const_id = tracker.insert_literal(Literal::String(ident.to_string()))?;
+    let fun = tracker.current_mut()?;
+    fun.emit(OpCode::LoadConstant(const_id))?;
+    fun.emit(OpCode::TabGet)?;
+
+    Ok((s, ()))
+}
+
+fn index<'s>(
+    mut s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::opcode::OpCode;
+
+    match s.next_token()? {
+        Token::BracketL => (),
+        _ => return Err(ParseError.into()),
+    }
+
+    let (mut s, ()) = expr_adjusted_to_1(s, tracker)?;
+    tracker.current_mut()?.emit(OpCode::TabGet)?;
+
+    match s.next_required_token()? {
+        Token::BracketR => (),
+        _ => return Err(ParseError.into()),
+    }
 
     Ok((s, ()))
 }
