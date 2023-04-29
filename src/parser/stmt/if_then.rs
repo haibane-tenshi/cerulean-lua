@@ -1,30 +1,24 @@
-use crate::lex::{Lexer, Token};
+use crate::lex::Lexer;
 
 use super::super::tracker::ChunkTracker;
-use super::{block, expr_adjusted_to_1};
-use super::{LexParseError, NextToken, ParseError};
+use crate::parser::{LexParseError, Optional, Require};
 
 pub(super) fn if_then<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::lex::Token;
     use crate::opcode::OpCode;
+    use crate::parser::{block, expr_adjusted_to_1, match_token};
 
-    match s.next_token()? {
-        Token::If => (),
-        _ => return Err(ParseError.into()),
-    }
+    let (s, ()) = match_token(s, Token::If)?;
 
     tracker.current_mut()?.push_block()?;
-    let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
-    match s.next_required_token()? {
-        Token::Then => (),
-        _ => return Err(ParseError.into()),
-    }
+    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+    let (s, ()) = match_token(s, Token::Then).require()?;
 
     let mut to_end = Vec::new();
-
     let mut to_next_block = tracker.current_mut()?.emit(OpCode::JumpIf {
         cond: false,
         offset: Default::default(),
@@ -32,47 +26,40 @@ pub(super) fn if_then<'s>(
 
     let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
 
+    let mut else_if_clause = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+        let (s, ()) = match_token(s, Token::ElseIf)?;
+
+        // Finish off the previous block.
+        // This needs to jump to the very end of `if` statement.
+        let to_patch = tracker.current_mut()?.emit(OpCode::Jump {
+            offset: Default::default(),
+        })?;
+        to_end.push(to_patch);
+
+        tracker.current_mut()?.backpatch_to_next(to_next_block)?;
+
+        let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+
+        to_next_block = tracker.current_mut()?.emit(OpCode::JumpIf {
+            cond: false,
+            offset: Default::default(),
+        })?;
+
+        let (s, ()) = match_token(s, Token::Then).require()?;
+        let (s, ()) = block(s, tracker).require()?;
+
+        Ok((s, ()))
+    };
+
     loop {
-        let Ok(ns) = (|mut s: Lexer<'s>| -> Result<Lexer<'s>, LexParseError> {
-            match s.next_token()? {
-                Token::ElseIf => (),
-                _ => return Err(ParseError.into()),
-            }
-
-            // Finish off the previous block.
-            // This needs to jump to the very end of `if` statement.
-            let to_patch = tracker.current_mut()?.emit(OpCode::Jump {offset: Default::default()})?;
-            to_end.push(to_patch);
-
-            tracker.current_mut()?.backpatch_to_next(to_next_block)?;
-
-            let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-            to_next_block = tracker.current_mut()?.emit(OpCode::JumpIf {
-                cond: false,
-                offset: Default::default(),
-            })?;
-
-            match s.next_required_token()? {
-                Token::Then => (),
-                _ => return Err(ParseError.into()),
-            }
-
-            let (s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-            Ok(s)
-        })(s.clone()) else {
-            break
+        s = match else_if_clause(s.clone()) {
+            Ok((s, ())) => s,
+            Err(_) => break,
         };
-
-        s = ns;
     }
 
-    let mut s = (|mut s: Lexer<'s>| -> Result<Lexer<'s>, LexParseError> {
-        match s.next_token()? {
-            Token::Else => (),
-            _ => return Err(ParseError.into()),
-        }
+    let mut else_clause = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+        let (s, ()) = match_token(s, Token::Else)?;
 
         to_next_block = {
             let r = tracker.current_mut()?.emit(OpCode::Jump {
@@ -83,17 +70,13 @@ pub(super) fn if_then<'s>(
             r
         };
 
-        let (s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
+        let (s, ()) = block(s, tracker).require()?;
 
-        Ok(s)
-    })(s.clone())
-    .ok()
-    .unwrap_or(s);
+        Ok((s, ()))
+    };
 
-    match s.next_required_token()? {
-        Token::End => (),
-        _ => return Err(ParseError.into()),
-    }
+    let (s, _) = else_clause(s.clone()).optional(s);
+    let (s, ()) = match_token(s, Token::End).require()?;
 
     // Backpatch the last jump instruction and block ends.
     let current = tracker.current_mut()?;

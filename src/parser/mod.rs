@@ -96,10 +96,6 @@ trait NextToken {
     type Token;
 
     fn next_token(&mut self) -> Result<Self::Token, LexParseError>;
-
-    fn next_required_token(&mut self) -> Result<Self::Token, LexParseError> {
-        self.next_token().map_err(LexParseError::eof_into_err)
-    }
 }
 
 impl<'s> NextToken for Lexer<'s> {
@@ -109,6 +105,48 @@ impl<'s> NextToken for Lexer<'s> {
         let r = self.next().ok_or(LexParseError::Eof)??;
 
         Ok(r)
+    }
+}
+
+trait Require {
+    fn require(self) -> Self;
+}
+
+impl<'s, T> Require for Result<(Lexer<'s>, T), LexParseError> {
+    fn require(self) -> Self {
+        self.map_err(LexParseError::eof_into_err)
+    }
+}
+
+trait Optional<T> {
+    type Source;
+
+    fn optional(self, source: Self::Source) -> (Self::Source, Option<T>);
+}
+
+impl<'s, T> Optional<T> for Result<(Lexer<'s>, T), LexParseError> {
+    type Source = Lexer<'s>;
+
+    fn optional(self, source: Self::Source) -> (Self::Source, Option<T>) {
+        match self {
+            Ok((s, t)) => (s, Some(t)),
+            Err(_) => (source, None),
+        }
+    }
+}
+
+fn match_token<'s>(mut s: Lexer<'s>, token: Token<'s>) -> Result<(Lexer<'s>, ()), LexParseError> {
+    if s.next_token()? == token {
+        Ok((s, ()))
+    } else {
+        Err(ParseError.into())
+    }
+}
+
+fn identifier(mut s: Lexer) -> Result<(Lexer, &str), LexParseError> {
+    match s.next_token()? {
+        Token::Ident(ident) => Ok((s, ident)),
+        _ => Err(ParseError.into()),
     }
 }
 
@@ -166,7 +204,7 @@ fn expr_adjusted_to_1<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    let mark = tracker.current()?.stack_top()?.next();
+    let mark = tracker.current()?.stack_top()? + 1;
     let r = expr(s, tracker)?;
     tracker.current_mut()?.emit_adjust_to(mark)?;
 
@@ -174,20 +212,12 @@ fn expr_adjusted_to_1<'s>(
 }
 
 fn par_expr<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    match s.next_token()? {
-        Token::ParL => (),
-        _ => return Err(ParseError.into()),
-    }
-
-    let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-    match s.next_required_token()? {
-        Token::ParR => (),
-        _ => return Err(ParseError.into()),
-    }
+    let (s, ()) = match_token(s, Token::ParL)?;
+    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+    let (s, ()) = match_token(s, Token::ParR).require()?;
 
     Ok((s, ()))
 }
@@ -197,19 +227,17 @@ fn expr_list<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     let mut mark = tracker.current()?.stack_top()?;
+
     let (mut s, ()) = expr(s, tracker)?;
 
-    let mut next_part = |mut s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-        match s.next_token()? {
-            Token::Comma => (),
-            _ => return Err(ParseError.into()),
-        }
+    let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
+        let (s, ()) = match_token(s, Token::Comma)?;
 
-        // Expressions in comma lists are adjusted to 1.
-        mark = mark.next();
+        // Expressions inside comma lists are adjusted to 1.
+        mark += 1;
         tracker.current_mut()?.emit_adjust_to(mark)?;
 
-        expr(s, tracker).map_err(LexParseError::eof_into_err)
+        expr(s, tracker).require()
     };
 
     loop {
@@ -223,13 +251,10 @@ fn expr_list<'s>(
 }
 
 fn func_body<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, FunctionId), LexParseError> {
-    match s.next_token()? {
-        Token::ParL => (),
-        _ => return Err(ParseError.into()),
-    };
+    let (s, ()) = match_token(s, Token::ParL)?;
 
     // Start function
     tracker.start_fn()?;
@@ -238,26 +263,17 @@ fn func_body<'s>(
     // In the future we will put environment here instead.
     tracker.current_mut()?.push_stack(None)?;
 
-    let mut parlist = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
+    let mut parlist = |s: Lexer<'s>| -> Result<_, LexParseError> {
         let mut count = 0;
 
-        let ident = match s.next_token()? {
-            Token::Ident(ident) => ident,
-            _ => return Err(ParseError.into()),
-        };
+        let (mut s, ident) = identifier(s)?;
         tracker.current_mut()?.push_stack(Some(ident))?;
         count += 1;
 
-        let mut next_ident = |mut s: Lexer<'s>| -> Result<_, LexParseError> {
-            match s.next_token()? {
-                Token::Comma => (),
-                _ => return Err(ParseError.into()),
-            }
+        let mut next_ident = |s: Lexer<'s>| -> Result<_, LexParseError> {
+            let (s, ()) = match_token(s, Token::Comma)?;
+            let (s, ident) = identifier(s).require()?;
 
-            let ident = match s.next_required_token()? {
-                Token::Ident(ident) => ident,
-                _ => return Err(ParseError.into()),
-            };
             tracker.current_mut()?.push_stack(Some(ident))?;
             count += 1;
 
@@ -274,24 +290,15 @@ fn func_body<'s>(
         Ok((s, count))
     };
 
-    let (mut s, param_count) = match parlist(s.clone()) {
-        Ok((s, count)) => (s, count),
-        Err(_) => (s, 0),
-    };
+    let (s, param_count) = parlist(s.clone()).optional(s);
+    let param_count = param_count.unwrap_or(0);
+
     // An extra stack slot is taken by function pointer itself.
     let height = param_count + 1;
 
-    match s.next_required_token()? {
-        Token::ParR => (),
-        _ => return Err(ParseError.into()),
-    }
-
-    let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-    match s.next_required_token()? {
-        Token::End => (),
-        _ => return Err(ParseError.into()),
-    }
+    let (s, ()) = match_token(s, Token::ParR).require()?;
+    let (s, ()) = block(s, tracker).require()?;
+    let (s, ()) = match_token(s, Token::End).require()?;
 
     // Finish function
     let func_id = tracker.finish_fn(height).map_err(|_| ParseError)?;

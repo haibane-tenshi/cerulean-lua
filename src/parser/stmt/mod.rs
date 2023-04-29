@@ -4,11 +4,11 @@ mod local_assignment;
 mod repeat_until;
 mod while_do;
 
-use crate::lex::{Lexer, Token};
+use crate::lex::Lexer;
 
+use super::block;
 use super::tracker::ChunkTracker;
-use super::{block, expr_adjusted_to_1, inner_block};
-use super::{LexParseError, NextToken, ParseError};
+use crate::parser::{LexParseError, Optional, Require};
 
 use assignment::assignment;
 use if_then::if_then;
@@ -20,6 +20,8 @@ pub(super) fn statement<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::parser::{NextToken, ParseError};
+
     if let Ok(r) = semicolon(s.clone()) {
         Ok(r)
     } else if let Ok(r) = do_end(s.clone(), tracker) {
@@ -41,53 +43,42 @@ pub(super) fn statement<'s>(
     }
 }
 
-fn semicolon(mut s: Lexer) -> Result<(Lexer, ()), LexParseError> {
-    match s.next_token()? {
-        Token::Semicolon => Ok((s, ())),
-        _ => Err(ParseError.into()),
-    }
+fn semicolon(s: Lexer) -> Result<(Lexer, ()), LexParseError> {
+    use crate::lex::Token;
+    use crate::parser::match_token;
+
+    match_token(s, Token::Semicolon)
 }
 
 fn do_end<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    match s.next_token()? {
-        Token::Do => (),
-        _ => return Err(ParseError.into()),
-    };
+    use crate::lex::Token;
+    use crate::parser::match_token;
 
-    let (mut s, ()) = block(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-    match s.next_required_token()? {
-        Token::End => (),
-        _ => return Err(ParseError.into()),
-    };
+    let (s, ()) = match_token(s, Token::Do)?;
+    let (s, ()) = block(s, tracker).require()?;
+    let (s, ()) = match_token(s, Token::End).require()?;
 
     Ok((s, ()))
 }
 
 pub(super) fn return_<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use super::expr_list;
+    use crate::lex::Token;
     use crate::opcode::OpCode;
+    use crate::parser::match_token;
 
-    match s.next_token()? {
-        Token::Return => (),
-        _ => return Err(ParseError.into()),
-    }
+    let (s, ()) = match_token(s, Token::Return)?;
 
     let slot = tracker.current()?.stack_top()?;
 
     let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-    let s = (|mut s: Lexer<'s>| match s.next_token().ok()? {
-        Token::Semicolon => Some(s),
-        _ => None,
-    })(s.clone())
-    .unwrap_or(s);
+    let (s, _) = match_token(s.clone(), Token::Semicolon).optional(s);
 
     tracker.current_mut()?.emit(OpCode::Return(slot))?;
 

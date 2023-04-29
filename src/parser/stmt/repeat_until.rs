@@ -1,33 +1,26 @@
-use crate::lex::{Lexer, Token};
+use crate::lex::Lexer;
 
 use super::super::tracker::ChunkTracker;
-use super::{expr_adjusted_to_1, inner_block};
-use super::{LexParseError, NextToken, ParseError};
+use crate::parser::{LexParseError, Require};
 
 pub(super) fn repeat_until<'s>(
-    mut s: Lexer<'s>,
+    s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::lex::Token;
     use crate::opcode::OpCode;
+    use crate::parser::{expr_adjusted_to_1, inner_block, match_token};
 
-    match s.next_token()? {
-        Token::Repeat => (),
-        _ => return Err(ParseError.into()),
-    }
+    let (s, ()) = match_token(s, Token::Repeat)?;
 
     let current = tracker.current_mut()?;
     let start = current.next_instr()?;
     let stack_start = current.stack_top()?;
-    tracker.current_mut()?.push_block()?;
+    current.push_block()?;
 
-    let (mut s, ()) = inner_block(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-    match s.next_required_token()? {
-        Token::Until => (),
-        _ => return Err(ParseError.into()),
-    }
-
-    let (s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
+    let (s, ()) = inner_block(s, tracker).require()?;
+    let (s, ()) = match_token(s, Token::Until).require()?;
+    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
 
     // Handle controls of this loop.
     // Jump to cleanup code when condition is true.
