@@ -126,6 +126,7 @@ fn if_then<'s>(
         _ => return Err(ParseError.into()),
     }
 
+    tracker.current_mut()?.push_block()?;
     let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     match s.next_required_token()? {
@@ -212,6 +213,9 @@ fn if_then<'s>(
         current.backpatch_to_next(index)?;
     }
 
+    // Clean up stack if needed.
+    tracker.current_mut()?.pop_block()?;
+
     Ok((s, ()))
 }
 
@@ -226,7 +230,8 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
-    let start = tracker.current_mut()?.next_instr()?;
+    let stack_top = tracker.current()?.stack_top()?;
+    let start = tracker.current()?.next_instr()?;
 
     let (mut s, ()) = expr_adjusted_to_1(s, tracker).map_err(LexParseError::eof_into_err)?;
 
@@ -247,8 +252,14 @@ fn while_do<'s>(
         _ => return Err(ParseError.into()),
     }
 
+    tracker.current_mut()?.emit_adjust_to(stack_top)?;
     tracker.current_mut()?.emit_loop_to(start)?;
     tracker.current_mut()?.backpatch_to_next(cond)?;
+
+    // Jump if leaves condition on stack, let's fix it.
+    tracker
+        .current_mut()?
+        .emit(OpCode::AdjustStack(stack_top))?;
 
     Ok((s, ()))
 }
