@@ -144,19 +144,6 @@ impl<'s> FunctionTracker<'s> {
         Ok(())
     }
 
-    pub fn pop_ghost_block(&mut self) -> Result<(), EmitError> {
-        let current = self.stack.top()?;
-        let slot = self.stack.pop_ghost_block()?;
-
-        // Remove excessive temporaries upon exiting frame.
-        if slot <= current {
-            // Use raw emit: we already popped temporaries off the stack.
-            self.opcodes.emit(OpCode::AdjustStack(slot))?;
-        }
-
-        Ok(())
-    }
-
     pub fn push_stack(&mut self, name: Option<&'s str>) -> Result<StackSlot, StackStateError> {
         self.stack.push(name)
     }

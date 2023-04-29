@@ -32,12 +32,11 @@ pub struct StackTracker<'s> {
     stack: Vec<Option<&'s str>>,
     backlinks: Backlinks<'s>,
     blocks: Vec<usize>,
-    frames: Vec<usize>,
 }
 
 impl<'s> StackTracker<'s> {
     fn frame_base(&self) -> usize {
-        self.frames.last().copied().unwrap_or_default()
+        0
     }
 
     fn block_base(&self) -> usize {
@@ -163,36 +162,6 @@ impl<'s> StackTracker<'s> {
         let slot = self.index_to_slot(index).unwrap();
 
         Ok(slot)
-    }
-
-    pub fn pop_ghost_block(&mut self) -> Result<StackSlot, StackStateError> {
-        let &block = self.blocks.last().ok_or(StackStateError::MissingBlock)?;
-
-        // Blocks outside current frame need to be protected.
-        if block < self.frame_base() {
-            return Err(StackStateError::BoundaryViolation);
-        }
-
-        let slot = self.index_to_slot(block).unwrap();
-
-        Ok(slot)
-    }
-
-    pub fn push_frame(&mut self) -> Result<(), StackStateError> {
-        if self.variadic {
-            return Err(StackStateError::VariadicStack);
-        }
-
-        self.frames.push(self.stack.len());
-        self.push_block()
-    }
-
-    pub fn pop_frame(&mut self) -> Result<StackSlot, StackStateError> {
-        while self.pop_block().is_ok() {}
-
-        self.frames.pop().ok_or(StackStateError::MissingFrame)?;
-
-        Ok(StackSlot(0))
     }
 
     pub fn name_local(&mut self, slot: StackSlot, name: &'s str) -> Result<(), StackStateError> {
