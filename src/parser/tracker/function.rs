@@ -165,11 +165,8 @@ impl<'s> FunctionTracker<'s> {
         self.stack.lookup_local(ident)
     }
 
-    pub fn name_local(&mut self, ident: &'s str) -> Result<(), StackStateError> {
-        self.stack.pop()?;
-        self.stack.push(Some(ident))?;
-
-        Ok(())
+    pub fn name_local(&mut self, slot: StackSlot, ident: &'s str) -> Result<(), StackStateError> {
+        self.stack.name_local(slot, ident)
     }
 
     pub fn resolve(mut self, height: u32) -> Result<Function, (EmitError, Self)> {

@@ -20,6 +20,9 @@ pub enum StackStateError {
 
     #[error("there is no statically known upper bound on the stack")]
     VariadicStack,
+
+    #[error("temporary already have a name")]
+    NameAlias,
 }
 
 #[derive(Debug, Default)]
@@ -190,6 +193,23 @@ impl<'s> StackTracker<'s> {
         self.frames.pop().ok_or(StackStateError::MissingFrame)?;
 
         Ok(StackSlot(0))
+    }
+
+    pub fn name_local(&mut self, slot: StackSlot, name: &'s str) -> Result<(), StackStateError> {
+        let index = self.slot_to_index(slot);
+        let place = self
+            .stack
+            .get_mut(index)
+            .ok_or(StackStateError::MissingTemporary)?;
+
+        if place.is_some() {
+            return Err(StackStateError::NameAlias);
+        }
+
+        *place = Some(name);
+        self.backlinks.add(name, index);
+
+        Ok(())
     }
 }
 
