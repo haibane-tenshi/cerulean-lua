@@ -1,4 +1,5 @@
 mod assignment;
+mod generic_for;
 mod if_then;
 mod local_assignment;
 mod local_function;
@@ -13,6 +14,7 @@ use crate::parser::{LexParseError, Optional, Require};
 use crate::tracker::ChunkTracker;
 
 use assignment::assignment;
+use generic_for::generic_for;
 use if_then::if_then;
 use local_assignment::local_assignment;
 use local_function::local_function;
@@ -37,6 +39,8 @@ pub(super) fn statement<'s>(
     } else if let Ok(r) = repeat_until(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = numerical_for(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = generic_for(s.clone(), tracker) {
         Ok(r)
         // Note: parsing order of local declarations matters.
         // Assignments only emit anything after finding the right side

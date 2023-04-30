@@ -205,15 +205,23 @@ fn inner_block<'s>(
     Ok((s, ()))
 }
 
-fn expr_adjusted_to_1<'s>(
+fn expr_adjusted_to<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
+    count: u32,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    let mark = tracker.current()?.stack_top()? + 1;
+    let mark = tracker.current()?.stack_top()? + count;
     let r = expr(s, tracker)?;
     tracker.current_mut()?.emit_adjust_to(mark)?;
 
     Ok(r)
+}
+
+fn expr_adjusted_to_1<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    expr_adjusted_to(s, tracker, 1)
 }
 
 fn par_expr<'s>(
@@ -253,6 +261,18 @@ fn expr_list<'s>(
     }
 
     Ok((s, ()))
+}
+
+fn expr_list_adjusted_to<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+    count: u32,
+) -> Result<(Lexer<'s>, ()), LexParseError> {
+    let mark = tracker.current()?.stack_top()? + count;
+    let r = expr_list(s, tracker)?;
+    tracker.current_mut()?.emit_adjust_to(mark)?;
+
+    Ok(r)
 }
 
 fn func_body<'s>(
