@@ -11,7 +11,7 @@ use crate::value::Literal;
 
 use const_::ConstTracker;
 pub use const_::ExceededConstIdError;
-use function::FunctionTracker;
+pub(crate) use function::FunctionTracker;
 pub use function::{BackpatchError, EmitError};
 pub use opcode::ExceededInstrIdError;
 use opcode::OpCodeTracker;

@@ -2,6 +2,7 @@ mod assignment;
 mod if_then;
 mod local_assignment;
 mod local_function;
+mod numerical_for;
 mod repeat_until;
 mod while_do;
 
@@ -15,6 +16,7 @@ use assignment::assignment;
 use if_then::if_then;
 use local_assignment::local_assignment;
 use local_function::local_function;
+use numerical_for::numerical_for;
 use repeat_until::repeat_until;
 use while_do::while_do;
 
@@ -33,6 +35,8 @@ pub(super) fn statement<'s>(
     } else if let Ok(r) = while_do(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = repeat_until(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = numerical_for(s.clone(), tracker) {
         Ok(r)
         // Note: parsing order of local declarations matters.
         // Assignments only emit anything after finding the right side

@@ -46,6 +46,9 @@ impl<'s> FunctionTracker<'s> {
 
         // Keep stack state consistent
         match opcode {
+            Panic => {
+                // We leave current scope since panic can only be caught on function boundary.
+            }
             Invoke(slot) => {
                 self.stack.adjust_to(slot)?;
                 self.stack.make_variadic();
