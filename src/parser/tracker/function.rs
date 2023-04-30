@@ -86,6 +86,10 @@ impl<'s> FunctionTracker<'s> {
         Ok(id)
     }
 
+    pub fn emit_raw(&mut self, opcode: OpCode) -> Result<InstrId, EmitError> {
+        self.opcodes.emit(opcode).map_err(Into::into)
+    }
+
     pub fn stack_top(&self) -> Result<StackSlot, StackStateError> {
         self.stack.top()
     }

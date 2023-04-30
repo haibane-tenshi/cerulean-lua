@@ -1,6 +1,7 @@
 mod assignment;
 mod if_then;
 mod local_assignment;
+mod local_function;
 mod repeat_until;
 mod while_do;
 
@@ -13,6 +14,7 @@ use crate::parser::{LexParseError, Optional, Require};
 use assignment::assignment;
 use if_then::if_then;
 use local_assignment::local_assignment;
+use local_function::local_function;
 use repeat_until::repeat_until;
 use while_do::while_do;
 
@@ -32,7 +34,13 @@ pub(super) fn statement<'s>(
         Ok(r)
     } else if let Ok(r) = repeat_until(s.clone(), tracker) {
         Ok(r)
+        // Note: parsing order of local declarations matters.
+        // Assignments only emit anything after finding the right side
+        // (and at this point we 100% know it is correct branch).
+        // Functions, however, modify stack before seeing function body.
     } else if let Ok(r) = local_assignment(s.clone(), tracker) {
+        Ok(r)
+    } else if let Ok(r) = local_function(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = assignment(s.clone(), tracker) {
         Ok(r)
