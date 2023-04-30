@@ -141,6 +141,7 @@ impl<'chunk> CurrentFrame<'chunk> {
         };
 
         let r = match code {
+            Panic => return Err(RuntimeError),
             Invoke(slot) => {
                 let func_id = match self.stack.get(slot) {
                     Ok(Value::Function(func_id)) => *func_id,
@@ -293,28 +294,28 @@ impl<'chunk> CurrentFrame<'chunk> {
                 let r = match op {
                     RelBinOp::Eq => lhs == rhs,
                     RelBinOp::Neq => lhs != rhs,
-                    RelBinOp::Le => {
+                    RelBinOp::Lt => {
                         if lhs.type_() == rhs.type_() {
                             lhs < rhs
                         } else {
                             return Err(RuntimeError);
                         }
                     }
-                    RelBinOp::Lt => {
+                    RelBinOp::Le => {
                         if lhs.type_() == rhs.type_() {
                             lhs <= rhs
                         } else {
                             return Err(RuntimeError);
                         }
                     }
-                    RelBinOp::Ge => {
+                    RelBinOp::Gt => {
                         if lhs.type_() == rhs.type_() {
                             lhs > rhs
                         } else {
                             return Err(RuntimeError);
                         }
                     }
-                    RelBinOp::Gt => {
+                    RelBinOp::Ge => {
                         if lhs.type_() == rhs.type_() {
                             lhs >= rhs
                         } else {

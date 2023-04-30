@@ -185,6 +185,7 @@ impl Add<u32> for InstrOffset {
 
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
+    Panic,
     Invoke(StackSlot),
     Return(StackSlot),
     LoadConstant(ConstId),
@@ -211,6 +212,7 @@ impl Display for OpCode {
         use OpCode::*;
 
         let s = match *self {
+            Panic => format!("{:<10}", "Panic"),
             Invoke(StackSlot(index)) => format!("{:<10} [{index:>3}]", "Invoke"),
             Return(StackSlot(index)) => format!("{:<10} [{index:>3}]", "Return"),
             LoadConstant(ConstId(index)) => format!("{:<10} [{index:>3}]", "LoadConst"),
