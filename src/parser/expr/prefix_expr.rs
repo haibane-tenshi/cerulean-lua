@@ -1,6 +1,6 @@
-use super::tracker::ChunkTracker;
-use super::{LexParseError, Optional, Require};
 use crate::lex::Lexer;
+use crate::parser::tracker::ChunkTracker;
+use crate::parser::{LexParseError, Optional, Require};
 
 fn variable<'s>(
     s: Lexer<'s>,
@@ -16,7 +16,7 @@ fn variable<'s>(
     Ok((s, ()))
 }
 
-pub(super) fn prefix_expr<'s>(
+pub(in crate::parser) fn prefix_expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {

@@ -1,5 +1,6 @@
 mod function;
 mod literal;
+pub mod prefix_expr;
 mod table;
 
 use super::tracker::ChunkTracker;
@@ -9,6 +10,7 @@ use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, InstrId, OpCode, Rel
 
 use function::function;
 use literal::literal;
+use prefix_expr::prefix_expr;
 use table::table;
 
 enum OpCodeOrJump {
@@ -121,7 +123,7 @@ fn atom<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{prefix_expr, ParseError};
+    use crate::parser::ParseError;
 
     if let Ok(r) = literal(s.clone(), tracker) {
         Ok(r)
