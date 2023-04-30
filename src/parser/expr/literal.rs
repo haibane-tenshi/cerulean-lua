@@ -1,6 +1,6 @@
 use super::{LexParseError, NextToken};
 use crate::lex::Lexer;
-use crate::parser::tracker::ChunkTracker;
+use crate::tracker::ChunkTracker;
 
 pub(super) fn literal<'s>(
     mut s: Lexer<'s>,

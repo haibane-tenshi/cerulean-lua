@@ -1,6 +1,6 @@
 use crate::lex::Lexer;
-use crate::parser::tracker::ChunkTracker;
 use crate::parser::{LexParseError, Require};
+use crate::tracker::ChunkTracker;
 
 pub(super) fn local_function<'s>(
     s: Lexer<'s>,

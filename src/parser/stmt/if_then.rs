@@ -1,7 +1,7 @@
 use crate::lex::Lexer;
 
-use super::super::tracker::ChunkTracker;
 use crate::parser::{LexParseError, Optional, Require};
+use crate::tracker::ChunkTracker;
 
 pub(super) fn if_then<'s>(
     s: Lexer<'s>,

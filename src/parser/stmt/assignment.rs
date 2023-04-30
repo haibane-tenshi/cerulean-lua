@@ -1,7 +1,7 @@
 use crate::lex::Lexer;
 
-use super::super::tracker::ChunkTracker;
 use crate::parser::{LexParseError, Require};
+use crate::tracker::ChunkTracker;
 
 pub(super) fn assignment<'s>(
     s: Lexer<'s>,

@@ -152,7 +152,7 @@ impl<'s> FunctionTracker<'s> {
         self.stack.push(name)
     }
 
-    pub(super) fn lookup_local(&self, ident: &str) -> Option<StackSlot> {
+    pub(crate) fn lookup_local(&self, ident: &str) -> Option<StackSlot> {
         self.stack.lookup_local(ident)
     }
 

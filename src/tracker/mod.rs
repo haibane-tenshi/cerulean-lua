@@ -120,7 +120,7 @@ impl<'s> Default for FunctionSlot<'s> {
 pub struct UnresolvedFnError;
 
 #[derive(Debug, Default)]
-pub(super) struct ChunkTracker<'s> {
+pub(crate) struct ChunkTracker<'s> {
     functions: IndexVec<FunctionId, FunctionSlot<'s>>,
     constants: ConstTracker,
     // Invariant: points at the latest in-progress function slot.

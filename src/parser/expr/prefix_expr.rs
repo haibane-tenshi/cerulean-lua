@@ -1,6 +1,6 @@
 use crate::lex::Lexer;
-use crate::parser::tracker::ChunkTracker;
 use crate::parser::{LexParseError, Optional, Require};
+use crate::tracker::ChunkTracker;
 
 fn variable<'s>(
     s: Lexer<'s>,

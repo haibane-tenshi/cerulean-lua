@@ -3,10 +3,10 @@ mod literal;
 pub mod prefix_expr;
 mod table;
 
-use super::tracker::ChunkTracker;
 use super::{LexParseError, NextToken, Optional, Require};
 use crate::lex::Lexer;
 use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, InstrId, OpCode, RelBinOp, StrBinOp};
+use crate::tracker::ChunkTracker;
 
 use function::function;
 use literal::literal;

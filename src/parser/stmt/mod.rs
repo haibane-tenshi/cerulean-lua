@@ -8,8 +8,8 @@ mod while_do;
 use crate::lex::Lexer;
 
 use super::block;
-use super::tracker::ChunkTracker;
 use crate::parser::{LexParseError, Optional, Require};
+use crate::tracker::ChunkTracker;
 
 use assignment::assignment;
 use if_then::if_then;

@@ -1,12 +1,11 @@
 mod expr;
 mod stmt;
-mod tracker;
 
 use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, Token};
 use crate::opcode::{Chunk, FunctionId};
-use tracker::{
+use crate::tracker::{
     BackpatchError, ChunkTracker, EmitError, Error as CodegenError, ExceededConstIdError,
     ExceededFnIdError, ExceededInstrIdError, FinishFnError, NoActiveFnError, StackStateError,
 };
