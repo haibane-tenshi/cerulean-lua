@@ -1,171 +1,15 @@
+mod function;
+mod literal;
+mod table;
+
 use super::tracker::ChunkTracker;
 use super::{LexParseError, NextToken, Optional, Require};
 use crate::lex::Lexer;
 use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, InstrId, OpCode, RelBinOp, StrBinOp};
 
-fn literal<'s>(
-    mut s: Lexer<'s>,
-    tracker: &mut ChunkTracker,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::{Number, Token};
-    use crate::parser::ParseError;
-    use crate::value::Literal;
-
-    let literal = match s.next_token()? {
-        Token::Nil => Literal::Nil,
-        Token::True => Literal::Bool(true),
-        Token::False => Literal::Bool(false),
-        Token::Numeral(Number::Int(value)) => Literal::Int(value),
-        Token::Numeral(Number::Float(value)) => Literal::Float(value),
-        Token::ShortLiteralString(value) => Literal::String(value.to_string()),
-        _ => return Err(ParseError.into()),
-    };
-
-    let id = tracker.insert_literal(literal)?;
-    tracker.current_mut()?.emit(OpCode::LoadConstant(id))?;
-
-    Ok((s, ()))
-}
-
-fn function<'s>(
-    s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::parser::{func_body, match_token};
-    use crate::value::Literal;
-
-    let (s, ()) = match_token(s, Token::Function)?;
-    let (s, func_id) = func_body(s, tracker).require()?;
-
-    let const_id = tracker.insert_literal(Literal::Function(func_id))?;
-    tracker
-        .current_mut()?
-        .emit(OpCode::LoadConstant(const_id))?;
-
-    Ok((s, ()))
-}
-
-fn table<'s>(
-    s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::parser::{expr_adjusted_to_1, identifier, match_token, ParseError};
-
-    let (s, ()) = match_token(s, Token::CurlyL)?;
-
-    let table_slot = tracker.current()?.stack_top()?;
-    tracker.current_mut()?.emit(OpCode::TabCreate)?;
-
-    let mut field_list = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-        let mut index = 1;
-
-        let mut field = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-            use crate::value::Literal;
-
-            let bracket = |s: Lexer<'s>,
-                           tracker: &mut ChunkTracker<'s>|
-             -> Result<(Lexer<'s>, ()), LexParseError> {
-                let (s, ()) = match_token(s, Token::BracketL)?;
-
-                tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
-
-                let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
-                let (s, ()) = match_token(s, Token::BracketR).require()?;
-                let (s, ()) = match_token(s, Token::Assign).require()?;
-                let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
-
-                tracker.current_mut()?.emit(OpCode::TabSet)?;
-
-                Ok((s, ()))
-            };
-
-            let name = |s: Lexer<'s>,
-                        tracker: &mut ChunkTracker<'s>|
-             -> Result<(Lexer<'s>, ()), LexParseError> {
-                let (s, ident) = identifier(s)?;
-
-                tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
-
-                let const_id = tracker.insert_literal(Literal::String(ident.to_string()))?;
-                tracker
-                    .current_mut()?
-                    .emit(OpCode::LoadConstant(const_id))?;
-
-                let (s, ()) = match_token(s, Token::Assign).require()?;
-                let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
-
-                tracker.current_mut()?.emit(OpCode::TabSet)?;
-
-                Ok((s, ()))
-            };
-
-            let mut index = |s: Lexer<'s>,
-                             tracker: &mut ChunkTracker<'s>|
-             -> Result<(Lexer<'s>, ()), LexParseError> {
-                let start = tracker.current()?.stack_top()?;
-                let r = expr_adjusted_to_1(s, tracker)?;
-
-                tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
-
-                let const_id = tracker.insert_literal(Literal::Int(index))?;
-                tracker
-                    .current_mut()?
-                    .emit(OpCode::LoadConstant(const_id))?;
-                index += 1;
-
-                tracker.current_mut()?.emit(OpCode::LoadStack(start))?;
-                tracker.current_mut()?.emit(OpCode::TabSet)?;
-                tracker.current_mut()?.emit_adjust_to(start)?;
-
-                Ok(r)
-            };
-
-            if let Ok(r) = bracket(s.clone(), tracker) {
-                Ok(r)
-            } else if let Ok(r) = name(s.clone(), tracker) {
-                Ok(r)
-            } else if let Ok(r) = index(s, tracker) {
-                Ok(r)
-            } else {
-                Err(ParseError.into())
-            }
-        };
-
-        let field_sep = |mut s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-            match s.next_token()? {
-                Token::Comma | Token::Semicolon => (),
-                _ => return Err(ParseError.into()),
-            };
-
-            Ok((s, ()))
-        };
-
-        let (mut s, ()) = field(s)?;
-
-        let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-            let (s, ()) = field_sep(s)?;
-            field(s)
-        };
-
-        loop {
-            s = match next_part(s.clone()) {
-                Ok((s, ())) => s,
-                Err(_) => break,
-            }
-        }
-
-        let (s, _) = field_sep(s.clone()).optional(s);
-
-        Ok((s, ()))
-    };
-
-    let (s, _) = field_list(s.clone()).optional(s);
-    let (s, ()) = match_token(s, Token::CurlyR)?;
-
-    Ok((s, ()))
-}
+use function::function;
+use literal::literal;
+use table::table;
 
 enum OpCodeOrJump {
     OpCode(OpCode),
@@ -176,10 +20,10 @@ pub(super) fn expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    expr_bp(s, 0, tracker)
+    expr_impl(s, 0, tracker)
 }
 
-fn expr_bp<'s>(
+fn expr_impl<'s>(
     s: Lexer<'s>,
     min_bp: u64,
     tracker: &mut ChunkTracker<'s>,
@@ -190,7 +34,7 @@ fn expr_bp<'s>(
 
     let mut s = if let Ok((s, op)) = prefix_op(s.clone()) {
         let ((), rhs_bp) = op.binding_power();
-        let (s, ()) = expr_bp(s, rhs_bp, tracker)?;
+        let (s, ()) = expr_impl(s, rhs_bp, tracker)?;
 
         let opcode = match op {
             Prefix::Ari(op) => OpCode::AriUnaOp(op),
@@ -252,7 +96,7 @@ fn expr_bp<'s>(
         };
 
         let rhs_top = tracker.current()?.stack_top()? + 1;
-        (s, _) = expr_bp(ns, rhs_bp, tracker).map_err(LexParseError::eof_into_err)?;
+        (s, _) = expr_impl(ns, rhs_bp, tracker).map_err(LexParseError::eof_into_err)?;
 
         // Adjust right operand.
         tracker.current_mut()?.emit_adjust_to(rhs_top)?;
