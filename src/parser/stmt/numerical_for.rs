@@ -34,7 +34,7 @@ pub(super) fn numerical_for<'s, 'a>(
     let (s, ident) = identifier(s).require()?;
     let (s, ()) = match_token(s, Token::Assign).require()?;
 
-    tracker.current_mut()?.push_block()?;
+    let outer = tracker.current_mut()?.start_block()?;
 
     let loop_var = tracker.current()?.stack_top()?;
     let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
@@ -75,7 +75,7 @@ pub(super) fn numerical_for<'s, 'a>(
 
         let current = tracker.current_mut()?;
 
-        current.push_block()?;
+        let zero_check = current.start_block()?;
 
         current.emit(OpCode::LoadStack(step))?;
         current.emit(OpCode::LoadConstant(zero))?;
@@ -91,7 +91,7 @@ pub(super) fn numerical_for<'s, 'a>(
 
         // Happy path.
         current.backpatch_to_next(jump)?;
-        current.pop_block()?;
+        current.finish_block(zero_check)?;
     }
 
     let current = tracker.current_mut()?;
@@ -149,7 +149,7 @@ pub(super) fn numerical_for<'s, 'a>(
     // Clean up the stack.
     current.backpatch_to_next(to_end_pos)?;
     current.backpatch_to_next(to_end_neg)?;
-    current.pop_block()?;
+    current.finish_block(outer)?;
 
     Ok((s, ()))
 }

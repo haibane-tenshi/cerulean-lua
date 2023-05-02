@@ -25,6 +25,9 @@ pub enum StackStateError {
     NameAlias,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct BlockId(usize);
+
 #[derive(Debug, Default)]
 pub struct StackTracker<'s> {
     /// Implies there is an unknowable number of local variables residing on top of known stack.
@@ -35,22 +38,16 @@ pub struct StackTracker<'s> {
 }
 
 impl<'s> StackTracker<'s> {
-    fn frame_base(&self) -> usize {
-        0
-    }
-
     fn block_base(&self) -> usize {
         self.blocks.last().copied().unwrap_or_default()
     }
 
     fn slot_to_index(&self, slot: StackSlot) -> usize {
-        let offset: usize = slot.0.try_into().unwrap();
-        self.frame_base() + offset
+        slot.0.try_into().unwrap()
     }
 
     fn index_to_slot(&self, index: usize) -> Option<StackSlot> {
-        let offset = index.checked_sub(self.frame_base())?;
-        let slot = offset.try_into().unwrap();
+        let slot = index.try_into().ok()?;
 
         Some(StackSlot(slot))
     }
@@ -113,10 +110,6 @@ impl<'s> StackTracker<'s> {
             return Err(StackStateError::VariadicStack);
         }
 
-        if self.stack.len() < self.frame_base() {
-            return Err(StackStateError::BoundaryViolation);
-        }
-
         if let Some(name) = self.stack.pop().ok_or(StackStateError::MissingTemporary)? {
             self.backlinks.pop(name);
         }
@@ -138,28 +131,23 @@ impl<'s> StackTracker<'s> {
         self.index_to_slot(index)
     }
 
-    pub fn push_block(&mut self) -> Result<(), StackStateError> {
+    pub fn start_block(&mut self) -> Result<BlockId, StackStateError> {
         if self.variadic {
             return Err(StackStateError::VariadicStack);
         }
 
+        let id = BlockId(self.blocks.len());
         self.blocks.push(self.stack.len());
 
-        Ok(())
+        Ok(id)
     }
 
-    pub fn pop_block(&mut self) -> Result<StackSlot, StackStateError> {
-        // Blocks outside current frame need to be protected.
-        if let Some(&block) = self.blocks.last() {
-            if block < self.frame_base() {
-                return Err(StackStateError::BoundaryViolation);
-            }
-        }
+    pub fn finish_block(&mut self, id: BlockId) -> Result<StackSlot, StackStateError> {
+        let height = *self.blocks.get(id.0).ok_or(StackStateError::MissingBlock)?;
+        self.adjust_to_height(height)?;
+        self.blocks.truncate(id.0);
 
-        let index = self.blocks.pop().ok_or(StackStateError::MissingBlock)?;
-        self.adjust_to_height(index)?;
-
-        let slot = self.index_to_slot(index).unwrap();
+        let slot = self.index_to_slot(height).unwrap();
 
         Ok(slot)
     }

@@ -16,7 +16,7 @@ pub(super) fn while_do<'s>(
     let current = tracker.current_mut()?;
     let stack_top = current.stack_top()?;
     let start = current.next_instr()?;
-    current.push_block()?;
+    let inner = current.start_block()?;
 
     let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
     let (s, ()) = match_token(s, Token::Do).require()?;
@@ -30,7 +30,7 @@ pub(super) fn while_do<'s>(
     let (s, ()) = match_token(s, Token::End).require()?;
 
     let current = tracker.current_mut()?;
-    current.pop_block()?;
+    current.finish_block(inner)?;
     current.emit_loop_to(start)?;
 
     // Loop exit branch.

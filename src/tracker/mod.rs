@@ -15,8 +15,8 @@ pub(crate) use function::FunctionTracker;
 pub use function::{BackpatchError, EmitError};
 pub use opcode::ExceededInstrIdError;
 use opcode::OpCodeTracker;
-pub use stack::StackStateError;
 use stack::StackTracker;
+pub use stack::{BlockId, StackStateError};
 
 #[derive(Debug, Error)]
 pub enum Error {

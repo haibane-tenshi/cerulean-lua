@@ -16,7 +16,7 @@ pub(super) fn repeat_until<'s>(
     let current = tracker.current_mut()?;
     let start = current.next_instr()?;
     let stack_start = current.stack_top()?;
-    current.push_block()?;
+    let inner = current.start_block()?;
 
     let (s, ()) = inner_block(s, tracker).require()?;
     let (s, ()) = match_token(s, Token::Until).require()?;
@@ -30,7 +30,7 @@ pub(super) fn repeat_until<'s>(
     })?;
 
     let current = tracker.current_mut()?;
-    current.pop_block()?;
+    current.finish_block(inner)?;
     current.emit_loop_to(start)?;
 
     // Cleanup after loop is exited.

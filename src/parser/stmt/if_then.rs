@@ -13,7 +13,7 @@ pub(super) fn if_then<'s>(
 
     let (s, ()) = match_token(s, Token::If)?;
 
-    tracker.current_mut()?.push_block()?;
+    let outer = tracker.current_mut()?.start_block()?;
 
     let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
     let (s, ()) = match_token(s, Token::Then).require()?;
@@ -85,8 +85,8 @@ pub(super) fn if_then<'s>(
         current.backpatch_to_next(index)?;
     }
 
-    // Clean up stack if needed.
-    current.pop_block()?;
+    // Clean up stack.
+    current.finish_block(outer)?;
 
     Ok((s, ()))
 }

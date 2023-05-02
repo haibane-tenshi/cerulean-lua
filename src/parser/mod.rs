@@ -177,11 +177,11 @@ fn block<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    tracker.current_mut()?.push_block()?;
+    let block = tracker.current_mut()?.start_block()?;
 
     let r = inner_block(s, tracker);
 
-    tracker.current_mut()?.pop_block()?;
+    tracker.current_mut()?.finish_block(block)?;
 
     r
 }

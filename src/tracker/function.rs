@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::opcode::{Function, InstrId, OpCode, StackSlot};
 
-use super::{ExceededInstrIdError, OpCodeTracker, StackStateError, StackTracker};
+use super::{BlockId, ExceededInstrIdError, OpCodeTracker, StackStateError, StackTracker};
 
 #[derive(Debug, Error)]
 pub enum BackpatchError {
@@ -134,21 +134,21 @@ impl<'s> FunctionTracker<'s> {
         }
     }
 
-    pub fn push_block(&mut self) -> Result<(), StackStateError> {
-        self.stack.push_block()
+    pub fn start_block(&mut self) -> Result<BlockId, StackStateError> {
+        self.stack.start_block()
     }
 
-    pub fn pop_block(&mut self) -> Result<(), EmitError> {
+    pub fn finish_block(&mut self, block: BlockId) -> Result<StackSlot, EmitError> {
         let current = self.stack.top()?;
-        let slot = self.stack.pop_block()?;
+        let slot = self.stack.finish_block(block)?;
 
         // Remove excessive temporaries upon exiting frame.
-        if slot <= current {
+        if slot < current {
             // Use raw emit: we already popped temporaries off the stack.
-            self.opcodes.emit(OpCode::AdjustStack(slot))?;
+            self.emit_raw(OpCode::AdjustStack(slot))?;
         }
 
-        Ok(())
+        Ok(slot)
     }
 
     pub fn push_stack(&mut self, name: Option<&'s str>) -> Result<StackSlot, StackStateError> {
