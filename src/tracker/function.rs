@@ -42,55 +42,56 @@ impl<'s> FunctionTracker<'s> {
     }
 
     pub fn emit(&mut self, opcode: OpCode) -> Result<InstrId, EmitError> {
+        self.emit_raw(opcode, true)
+    }
+
+    pub fn emit_raw(&mut self, opcode: OpCode, adjust_stack: bool) -> Result<InstrId, EmitError> {
         use OpCode::*;
 
-        // Keep stack state consistent
-        match opcode {
-            Panic => {
-                // We leave current scope since panic can only be caught on function boundary.
-            }
-            Invoke(slot) => {
-                self.stack.adjust_to(slot)?;
-                self.stack.make_variadic();
-            }
-            Return(_) => (),
-            LoadConstant(_) | LoadStack(_) => {
-                self.stack.push(None)?;
-            }
-            StoreStack(_) => {
-                self.stack.pop()?;
-            }
-            AdjustStack(slot) => {
-                self.stack.adjust_to(slot)?;
-            }
-            AriUnaOp(_) | BitUnaOp(_) => (),
-            AriBinOp(_) | BitBinOp(_) | RelBinOp(_) | StrBinOp(_) => {
-                self.stack.pop()?;
-            }
-            Jump { .. } | Loop { .. } => (),
-            JumpIf { .. } | LoopIf { .. } => (),
-            TabCreate => {
-                self.stack.push(None)?;
-            }
-            TabGet => {
-                self.stack.pop()?;
-                self.stack.pop()?;
-                self.stack.push(None)?;
-            }
-            TabSet => {
-                self.stack.pop()?;
-                self.stack.pop()?;
-                self.stack.pop()?;
+        if adjust_stack {
+            match opcode {
+                Panic => {
+                    // We leave current scope since panic can only be caught on function boundary.
+                }
+                Invoke(slot) => {
+                    self.stack.adjust_to(slot)?;
+                    self.stack.make_variadic();
+                }
+                Return(_) => (),
+                LoadConstant(_) | LoadStack(_) => {
+                    self.stack.push(None)?;
+                }
+                StoreStack(_) => {
+                    self.stack.pop()?;
+                }
+                AdjustStack(slot) => {
+                    self.stack.adjust_to(slot)?;
+                }
+                AriUnaOp(_) | BitUnaOp(_) => (),
+                AriBinOp(_) | BitBinOp(_) | RelBinOp(_) | StrBinOp(_) => {
+                    self.stack.pop()?;
+                }
+                Jump { .. } | Loop { .. } => (),
+                JumpIf { .. } | LoopIf { .. } => (),
+                TabCreate => {
+                    self.stack.push(None)?;
+                }
+                TabGet => {
+                    self.stack.pop()?;
+                    self.stack.pop()?;
+                    self.stack.push(None)?;
+                }
+                TabSet => {
+                    self.stack.pop()?;
+                    self.stack.pop()?;
+                    self.stack.pop()?;
+                }
             }
         }
 
         let id = self.opcodes.emit(opcode)?;
 
         Ok(id)
-    }
-
-    pub fn emit_raw(&mut self, opcode: OpCode) -> Result<InstrId, EmitError> {
-        self.opcodes.emit(opcode).map_err(Into::into)
     }
 
     pub fn stack_top(&self) -> Result<StackSlot, StackStateError> {
@@ -145,7 +146,7 @@ impl<'s> FunctionTracker<'s> {
         // Remove excessive temporaries upon exiting frame.
         if slot < current {
             // Use raw emit: we already popped temporaries off the stack.
-            self.emit_raw(OpCode::AdjustStack(slot))?;
+            self.emit_raw(OpCode::AdjustStack(slot), false)?;
         }
 
         Ok(slot)

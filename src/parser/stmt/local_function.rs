@@ -27,7 +27,7 @@ pub(super) fn local_function<'s>(
     let current = tracker.current_mut()?;
 
     // Stack is already adjusted, we just need to silently write to correct slot here.
-    current.emit_raw(OpCode::LoadConstant(const_id))?;
+    current.emit_raw(OpCode::LoadConstant(const_id), false)?;
 
     Ok((s, ()))
 }
