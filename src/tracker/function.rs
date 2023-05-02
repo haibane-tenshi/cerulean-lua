@@ -111,7 +111,7 @@ impl<'s> FunctionTracker<'s> {
         self.emit(OpCode::Loop { offset })
     }
 
-    pub fn emit_jump_to(
+    pub fn emit_jump_to_end_of(
         &mut self,
         target: BlockId,
         cond: Option<bool>,

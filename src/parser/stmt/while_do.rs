@@ -8,23 +8,21 @@ pub(super) fn while_do<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::{block, expr_adjusted_to_1, match_token};
 
     let (s, ()) = match_token(s, Token::While)?;
 
     let current = tracker.current_mut()?;
-    let stack_top = current.stack_top()?;
     let start = current.next_instr()?;
+    let outer = current.start_block()?;
     let inner = current.start_block()?;
 
     let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
     let (s, ()) = match_token(s, Token::Do).require()?;
 
-    let cond = tracker.current_mut()?.emit(OpCode::JumpIf {
-        cond: false,
-        offset: Default::default(),
-    })?;
+    tracker
+        .current_mut()?
+        .emit_jump_to_end_of(outer, Some(false))?;
 
     let (s, ()) = block(s, tracker).require()?;
     let (s, ()) = match_token(s, Token::End).require()?;
@@ -32,12 +30,7 @@ pub(super) fn while_do<'s>(
     let current = tracker.current_mut()?;
     current.finish_block(inner)?;
     current.emit_loop_to(start)?;
-
-    // Loop exit branch.
-    current.backpatch_to_next(cond)?;
-
-    // JumpIf leaves condition on stack, let's fix it.
-    current.emit(OpCode::AdjustStack(stack_top))?;
+    current.finish_block(outer)?;
 
     Ok((s, ()))
 }

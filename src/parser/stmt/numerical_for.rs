@@ -80,57 +80,43 @@ pub(super) fn numerical_for<'s, 'a>(
         current.emit(OpCode::LoadStack(step))?;
         current.emit(OpCode::LoadConstant(zero))?;
         current.emit(OpCode::RelBinOp(RelBinOp::Eq))?;
-        let jump = current.emit(OpCode::JumpIf {
-            cond: false,
-            offset: Default::default(),
-        })?;
+        current.emit_jump_to_end_of(zero_check, Some(false))?;
 
         // Panic path.
         current.emit(OpCode::LoadConstant(error_msg))?;
         current.emit(OpCode::Panic)?;
 
         // Happy path.
-        current.backpatch_to_next(jump)?;
         current.finish_block(zero_check)?;
     }
 
     let current = tracker.current_mut()?;
     let start = current.next_instr()?;
-    let stack_start = current.stack_top()?;
+    let controls = current.start_block()?;
+    let positive_step = current.start_block()?;
 
     step.load(current)?;
     current.emit(OpCode::LoadConstant(zero))?;
     current.emit(OpCode::RelBinOp(RelBinOp::Gt))?;
-    let neg_step_jump = current.emit(OpCode::JumpIf {
-        cond: false,
-        offset: Default::default(),
-    })?;
+    current.emit_jump_to_end_of(positive_step, Some(false))?;
 
     // Path: positive step.
     current.emit(OpCode::LoadStack(loop_var))?;
     current.emit(OpCode::LoadStack(limit))?;
     current.emit(OpCode::RelBinOp(RelBinOp::Le))?;
-    let to_end_pos = current.emit(OpCode::JumpIf {
-        cond: false,
-        offset: Default::default(),
-    })?;
-    let to_block = current.emit(OpCode::Jump {
-        offset: Default::default(),
-    })?;
+    current.emit_jump_to_end_of(outer, Some(false))?;
+    current.emit_jump_to_end_of(controls, None)?;
+
+    current.finish_block(positive_step)?;
 
     // Path: negative step.
     // We assume total ordering for the variable.
-    current.backpatch_to_next(neg_step_jump)?;
     current.emit(OpCode::LoadStack(loop_var))?;
     current.emit(OpCode::LoadStack(limit))?;
     current.emit(OpCode::RelBinOp(RelBinOp::Ge))?;
-    let to_end_neg = current.emit(OpCode::JumpIf {
-        cond: false,
-        offset: Default::default(),
-    })?;
+    current.emit_jump_to_end_of(outer, Some(false))?;
 
-    current.backpatch_to_next(to_block)?;
-    current.emit(OpCode::AdjustStack(stack_start))?;
+    current.finish_block(controls)?;
 
     let (s, ()) = match_token(s, Token::Do).require()?;
     let (s, ()) = block(s, tracker).require()?;
@@ -143,12 +129,9 @@ pub(super) fn numerical_for<'s, 'a>(
     step.load(current)?;
     current.emit(OpCode::AriBinOp(AriBinOp::Add))?;
     current.emit(OpCode::StoreStack(loop_var))?;
-
     current.emit_loop_to(start)?;
 
-    // Clean up the stack.
-    current.backpatch_to_next(to_end_pos)?;
-    current.backpatch_to_next(to_end_neg)?;
+    // Clean up.
     current.finish_block(outer)?;
 
     Ok((s, ()))

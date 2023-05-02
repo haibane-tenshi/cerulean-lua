@@ -15,7 +15,7 @@ pub(super) fn generic_for<'s>(
     let (s, names) = name_list(s).require()?;
     let (s, ()) = match_token(s, Token::In).require()?;
 
-    let outer_block = tracker.current_mut()?.start_block()?;
+    let outer = tracker.current_mut()?.start_block()?;
 
     let top = tracker.current()?.stack_top()?;
     let (s, ()) = expr_list_adjusted_to(s, tracker, 4).require()?;
@@ -31,7 +31,7 @@ pub(super) fn generic_for<'s>(
     let new_control = current.stack_top()?;
     let start = current.next_instr()?;
 
-    let condition_block = current.start_block()?;
+    let inner = current.start_block()?;
 
     current.emit(OpCode::LoadStack(iter))?;
     current.emit(OpCode::LoadStack(state))?;
@@ -41,17 +41,17 @@ pub(super) fn generic_for<'s>(
     let count: u32 = names.len().try_into().unwrap();
     current.emit_adjust_to(new_control + count)?;
 
+    let condition = current.start_block()?;
+
     current.emit(OpCode::LoadStack(new_control))?;
     current.emit(OpCode::LoadConstant(nil))?;
     current.emit(OpCode::RelBinOp(RelBinOp::Eq))?;
-    let to_end = current.emit(OpCode::JumpIf {
-        cond: true,
-        offset: Default::default(),
-    })?;
+    current.emit_jump_to_end_of(outer, Some(true))?;
 
     current.emit(OpCode::LoadStack(new_control))?;
     current.emit(OpCode::StoreStack(control))?;
-    current.emit_adjust_to(new_control + count)?;
+
+    current.finish_block(condition)?;
 
     // Assign names
     for (name, slot) in names.into_iter().zip((new_control.0..).map(StackSlot)) {
@@ -64,10 +64,9 @@ pub(super) fn generic_for<'s>(
 
     let current = tracker.current_mut()?;
 
-    current.finish_block(condition_block)?;
+    current.finish_block(inner)?;
     current.emit_loop_to(start)?;
-    current.backpatch_to_next(to_end)?;
-    current.finish_block(outer_block)?;
+    current.finish_block(outer)?;
 
     Ok((s, ()))
 }
