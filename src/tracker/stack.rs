@@ -144,8 +144,8 @@ impl<'s> StackTracker<'s> {
 
     pub fn finish_block(&mut self, id: BlockId) -> Result<StackSlot, StackStateError> {
         let height = *self.blocks.get(id.0).ok_or(StackStateError::MissingBlock)?;
-        self.adjust_to_height(height)?;
         self.blocks.truncate(id.0);
+        self.adjust_to_height(height)?;
 
         let slot = self.index_to_slot(height).unwrap();
 
