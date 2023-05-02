@@ -183,7 +183,7 @@ pub enum Token<'s> {
     #[regex("'(([\\\\](\r\n|.))|[^'\\\\\r\n])*'", |lex| unescape(&lex.slice()[1..lex.slice().len()-1]))]
     ShortLiteralString(Cow<'s, str>),
 
-    #[regex("[0-9]+(.[0-9]+)?([eE][+-]?[0-9]+)?", |lex| lex.slice().parse())]
+    #[regex("[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?", |lex| lex.slice().parse())]
     #[regex("0[xX][0-9a-fA-F]+([.][0-9a-fA-F]+)?(([eE]|[pP])[+-]?[0-9a-fA-F]+)?", |lex| lex.slice().parse())]
     Numeral(Number),
 
