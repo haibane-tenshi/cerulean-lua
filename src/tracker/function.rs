@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::opcode::{Function, InstrId, OpCode, StackSlot};
@@ -23,9 +24,16 @@ pub enum EmitError {
 }
 
 #[derive(Debug, Default)]
+struct BackpatchData {
+    instructions: Vec<InstrId>,
+    force_adjustment: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct FunctionTracker<'s> {
     opcodes: OpCodeTracker,
     stack: StackTracker<'s>,
+    to_backpatch: BTreeMap<BlockId, BackpatchData>,
 }
 
 impl<'s> FunctionTracker<'s> {
@@ -103,6 +111,29 @@ impl<'s> FunctionTracker<'s> {
         self.emit(OpCode::Loop { offset })
     }
 
+    pub fn emit_jump_to(
+        &mut self,
+        target: BlockId,
+        cond: Option<bool>,
+    ) -> Result<InstrId, EmitError> {
+        let opcode = match cond {
+            Some(cond) => OpCode::JumpIf {
+                cond,
+                offset: Default::default(),
+            },
+            None => OpCode::Jump {
+                offset: Default::default(),
+            },
+        };
+        let instr_id = self.emit(opcode)?;
+
+        let data = self.to_backpatch.entry(target).or_default();
+        data.instructions.push(instr_id);
+        data.force_adjustment |= self.stack.needs_adjustment_to_block_base(target)?;
+
+        Ok(instr_id)
+    }
+
     pub fn emit_adjust_to(&mut self, slot: StackSlot) -> Result<Option<InstrId>, EmitError> {
         let needs_adjustment = self.stack.adjust_to(slot)?;
 
@@ -143,10 +174,40 @@ impl<'s> FunctionTracker<'s> {
         let current = self.stack.top()?;
         let slot = self.stack.finish_block(block)?;
 
-        // Remove excessive temporaries upon exiting frame.
-        if slot < current {
-            // Use raw emit: we already popped temporaries off the stack.
-            self.emit_raw(OpCode::AdjustStack(slot), false)?;
+        // Stack have to be adjusted in two cases:
+        // * current stack is above block base
+        // * there is a jump to this point originating from stack position above block base
+        let current_adjustment = slot < current;
+        let jump_adjustment = self
+            .to_backpatch
+            .range(block..)
+            .any(|data| data.1.force_adjustment);
+
+        let jump_target = if current_adjustment || jump_adjustment {
+            // Use raw emit: we already removed temporaries off the stack.
+            self.emit_raw(OpCode::AdjustStack(slot), false)?
+        } else {
+            self.next_instr()?
+        };
+
+        // Lastly we need to backpatch jumps from this block or any blocks above it.
+        let to_backpatch = self
+            .to_backpatch
+            .split_off(&block)
+            .into_values()
+            .flat_map(|data| data.instructions);
+        for index in to_backpatch {
+            let new_offset = jump_target.checked_sub(index + 1).unwrap();
+
+            match self.get_mut(index) {
+                Some(OpCode::JumpIf { offset, .. })
+                | Some(OpCode::Jump { offset })
+                | Some(OpCode::Loop { offset })
+                | Some(OpCode::LoopIf { offset, .. }) => {
+                    *offset = new_offset;
+                }
+                _ => unreachable!(),
+            }
         }
 
         Ok(slot)
@@ -169,7 +230,11 @@ impl<'s> FunctionTracker<'s> {
             return Err((e, self));
         }
 
-        let FunctionTracker { opcodes, stack: _ } = self;
+        let FunctionTracker {
+            opcodes,
+            stack: _,
+            to_backpatch: _,
+        } = self;
 
         let fun = opcodes.resolve(height);
         Ok(fun)

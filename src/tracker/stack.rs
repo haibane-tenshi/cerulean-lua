@@ -25,7 +25,7 @@ pub enum StackStateError {
     NameAlias,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct BlockId(usize);
 
 #[derive(Debug, Default)]
@@ -38,7 +38,7 @@ pub struct StackTracker<'s> {
 }
 
 impl<'s> StackTracker<'s> {
-    fn block_base(&self) -> usize {
+    fn current_block_base(&self) -> usize {
         self.blocks.last().copied().unwrap_or_default()
     }
 
@@ -55,7 +55,7 @@ impl<'s> StackTracker<'s> {
     fn adjust_to_height(&mut self, height: usize) -> Result<bool, StackStateError> {
         use std::cmp::Ordering;
 
-        if height < self.block_base() {
+        if height < self.current_block_base() {
             return Err(StackStateError::BoundaryViolation);
         }
 
@@ -150,6 +150,13 @@ impl<'s> StackTracker<'s> {
         let slot = self.index_to_slot(height).unwrap();
 
         Ok(slot)
+    }
+
+    pub fn needs_adjustment_to_block_base(&self, id: BlockId) -> Result<bool, StackStateError> {
+        let index = *self.blocks.get(id.0).ok_or(StackStateError::MissingBlock)?;
+        let r = self.variadic || index < self.stack.len();
+
+        Ok(r)
     }
 
     pub fn name_local(&mut self, slot: StackSlot, name: &'s str) -> Result<(), StackStateError> {
