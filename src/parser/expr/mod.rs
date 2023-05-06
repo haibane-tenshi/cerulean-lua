@@ -1,13 +1,11 @@
 mod function;
 mod literal;
-pub mod prefix_expr;
 mod table;
 
 use crate::parser::prelude::*;
 
 pub(in crate::parser) use function::function;
 pub(in crate::parser) use literal::literal;
-pub(in crate::parser) use prefix_expr::prefix_expr;
 pub(in crate::parser) use table::table;
 
 enum OpCodeOrJump {
@@ -120,6 +118,8 @@ fn atom<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
+    use crate::parser::prefix_expr::prefix_expr;
+
     if let Ok(r) = literal(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = prefix_expr(s.clone(), tracker) {

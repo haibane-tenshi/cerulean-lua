@@ -15,7 +15,7 @@ pub(in crate::parser) fn prefix_expr<'s>(
     Ok((s, ()))
 }
 
-pub(super) fn place<'s>(
+pub(in crate::parser) fn place<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, Place), LexParseError> {
@@ -162,7 +162,7 @@ fn args_table<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    super::table(s, tracker)
+    crate::parser::expr::table(s, tracker)
 }
 
 fn variable<'s>(
