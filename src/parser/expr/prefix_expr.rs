@@ -1,6 +1,6 @@
 use crate::lex::Lexer;
 use crate::opcode::{InstrId, StackSlot};
-use crate::parser::{LexParseError, Optional, Require};
+use crate::parser::{LexParseError, Optional, ParseError, Require};
 use crate::tracker::{ChunkTracker, EmitError, FunctionTracker};
 
 pub(super) fn prefix_expr<'s>(
@@ -17,7 +17,21 @@ pub(super) fn prefix_expr<'s>(
     Ok((s, ()))
 }
 
-enum Place {
+pub(super) fn place<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker<'s>,
+) -> Result<(Lexer<'s>, Place), LexParseError> {
+    let (s, r) = prefix_expr_impl(s, tracker)?;
+
+    if let PrefixExpr::Place(place) = r {
+        Ok((s, place))
+    } else {
+        Err(ParseError.into())
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Place {
     Temporary(StackSlot),
     TableField,
 }
@@ -46,7 +60,7 @@ fn prefix_expr_impl<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, PrefixExpr), LexParseError> {
     use crate::lex::Token;
-    use crate::parser::{par_expr, NextToken, ParseError};
+    use crate::parser::{par_expr, NextToken};
 
     let stack_top = tracker.current()?.stack_top()? + 1;
 
@@ -104,7 +118,6 @@ fn func_call<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::opcode::OpCode;
-    use crate::parser::ParseError;
 
     let invoke_target = tracker.current()?.stack_top()?.prev().unwrap();
 
@@ -166,7 +179,7 @@ fn variable<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker,
 ) -> Result<(Lexer<'s>, StackSlot), LexParseError> {
-    use crate::parser::{identifier, ParseError};
+    use crate::parser::identifier;
 
     let (s, ident) = identifier(s)?;
     let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
