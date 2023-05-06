@@ -1,11 +1,5 @@
-use thiserror::Error;
-
 use crate::index_vec::IndexVec;
-use crate::opcode::{Function, InstrId, OpCode};
-
-#[derive(Debug, Error)]
-#[error("exceeded indexing capacity of instruction ids")]
-pub struct ExceededInstrIdError;
+use crate::opcode::{Function, InstrCountError, InstrId, OpCode};
 
 #[derive(Debug, Default)]
 pub struct OpCodeTracker {
@@ -13,12 +7,12 @@ pub struct OpCodeTracker {
 }
 
 impl OpCodeTracker {
-    pub fn next(&self) -> Result<InstrId, ExceededInstrIdError> {
-        self.codes.len().map_err(|_| ExceededInstrIdError)
+    pub fn next(&self) -> InstrId {
+        self.codes.len()
     }
 
-    pub fn emit(&mut self, opcode: OpCode) -> Result<InstrId, ExceededInstrIdError> {
-        self.codes.push(opcode).map_err(|_| ExceededInstrIdError)
+    pub fn emit(&mut self, opcode: OpCode) -> Result<InstrId, InstrCountError> {
+        self.codes.push(opcode)
     }
 
     // pub fn get(&self, index: InstrId) -> Option<&OpCode> {

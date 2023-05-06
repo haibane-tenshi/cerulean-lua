@@ -85,7 +85,7 @@ pub(super) fn numerical_for<'s, 'a>(
     }
 
     let current = tracker.current_mut()?;
-    let start = current.next_instr()?;
+    let start = current.next_instr();
     let controls = current.start_block()?;
     let positive_step = current.start_block()?;
 

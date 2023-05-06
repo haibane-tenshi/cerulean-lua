@@ -24,7 +24,7 @@ pub(super) fn generic_for<'s>(
     let nil = tracker.insert_literal(Literal::Nil)?;
     let current = tracker.current_mut()?;
     let new_control = current.stack_top()?;
-    let start = current.next_instr()?;
+    let start = current.next_instr();
 
     let inner = current.start_block()?;
 

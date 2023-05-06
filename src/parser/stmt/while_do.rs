@@ -9,7 +9,7 @@ pub(super) fn while_do<'s>(
     let (s, ()) = match_token(s, Token::While)?;
 
     let current = tracker.current_mut()?;
-    let start = current.next_instr()?;
+    let start = current.next_instr();
     let outer = current.start_block()?;
     let inner = current.start_block()?;
 

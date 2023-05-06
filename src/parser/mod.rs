@@ -7,10 +7,12 @@ use std::borrow::Cow;
 use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, Token};
-use crate::opcode::{Chunk, FunctionId};
+use crate::opcode::{
+    Chunk, ConstCapacityError, FunctionCapacityError, FunctionId, InstrCountError,
+};
 use crate::tracker::{
-    BackpatchError, ChunkTracker, EmitError, Error as CodegenError, ExceededConstIdError,
-    ExceededFnIdError, ExceededInstrIdError, FinishFnError, NoActiveFnError, StackStateError,
+    BackpatchError, ChunkTracker, EmitError, Error as CodegenError, FinishFnError, NoActiveFnError,
+    StackStateError,
 };
 
 use expr::expr;
@@ -44,8 +46,8 @@ impl LexParseError {
     }
 }
 
-impl From<ExceededConstIdError> for LexParseError {
-    fn from(value: ExceededConstIdError) -> Self {
+impl From<ConstCapacityError> for LexParseError {
+    fn from(value: ConstCapacityError) -> Self {
         LexParseError::Codegen(value.into())
     }
 }
@@ -68,14 +70,14 @@ impl From<StackStateError> for LexParseError {
     }
 }
 
-impl From<ExceededInstrIdError> for LexParseError {
-    fn from(value: ExceededInstrIdError) -> Self {
+impl From<InstrCountError> for LexParseError {
+    fn from(value: InstrCountError) -> Self {
         LexParseError::Codegen(value.into())
     }
 }
 
-impl From<ExceededFnIdError> for LexParseError {
-    fn from(value: ExceededFnIdError) -> Self {
+impl From<FunctionCapacityError> for LexParseError {
+    fn from(value: FunctionCapacityError) -> Self {
         LexParseError::Codegen(value.into())
     }
 }

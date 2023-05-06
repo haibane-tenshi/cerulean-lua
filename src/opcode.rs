@@ -2,29 +2,28 @@ use std::fmt::Display;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use rle_vec::RleVec;
+use thiserror::Error;
 
-use crate::index_vec::{ExceededIndexError, ExceededUsizeError, IndexVec};
+use crate::index_vec::{Index, IndexVec};
 use crate::value::Literal;
 
-pub type Index = u32;
-
 #[derive(Debug, Copy, Clone)]
-pub struct ConstId(pub Index);
+pub struct ConstId(pub u32);
 
-impl TryFrom<usize> for ConstId {
-    type Error = ExceededIndexError;
+#[derive(Debug, Error)]
+#[error("constant count overflowed u32")]
+pub struct ConstCapacityError;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        let inner = value.try_into().map_err(|_| ExceededIndexError)?;
+impl Index for ConstId {
+    type Error = ConstCapacityError;
+
+    fn try_from(val: usize) -> Result<Self, Self::Error> {
+        let inner = val.try_into().map_err(|_| ConstCapacityError)?;
         Ok(ConstId(inner))
     }
-}
 
-impl TryFrom<ConstId> for usize {
-    type Error = ExceededUsizeError;
-
-    fn try_from(value: ConstId) -> Result<Self, Self::Error> {
-        value.0.try_into().map_err(|_| ExceededUsizeError)
+    fn into(self) -> usize {
+        self.0.try_into().expect("u32 should fit into usize")
     }
 }
 
@@ -35,7 +34,7 @@ impl Display for ConstId {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct StackSlot(pub Index);
+pub struct StackSlot(pub u32);
 
 impl StackSlot {
     pub(crate) fn prev(self) -> Option<Self> {
@@ -60,27 +59,31 @@ impl Add<u32> for StackSlot {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct FunctionId(pub Index);
+pub struct FunctionId(pub u32);
 
-impl TryFrom<usize> for FunctionId {
-    type Error = ExceededIndexError;
+#[derive(Debug, Error)]
+#[error("function count overflowed u32")]
+pub struct FunctionCapacityError;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        let inner = value.try_into().map_err(|_| ExceededIndexError)?;
+impl Index for FunctionId {
+    type Error = FunctionCapacityError;
+
+    fn try_from(val: usize) -> Result<Self, Self::Error> {
+        let inner = val.try_into().map_err(|_| FunctionCapacityError)?;
         Ok(FunctionId(inner))
     }
-}
 
-impl TryFrom<FunctionId> for usize {
-    type Error = ExceededUsizeError;
-
-    fn try_from(value: FunctionId) -> Result<Self, Self::Error> {
-        value.0.try_into().map_err(|_| ExceededUsizeError)
+    fn into(self) -> usize {
+        self.0.try_into().expect("u32 should fit into usize")
     }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
 pub struct InstrId(pub u32);
+
+#[derive(Debug, Error)]
+#[error("instruction count overflowed u32")]
+pub struct InstrCountError;
 
 impl InstrId {
     pub fn checked_sub_offset(self, rhs: InstrOffset) -> Option<Self> {
@@ -94,20 +97,16 @@ impl InstrId {
     }
 }
 
-impl TryFrom<usize> for InstrId {
-    type Error = ExceededIndexError;
+impl Index for InstrId {
+    type Error = InstrCountError;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        let inner = value.try_into().map_err(|_| ExceededIndexError)?;
+    fn try_from(val: usize) -> Result<Self, Self::Error> {
+        let inner = val.try_into().map_err(|_| InstrCountError)?;
         Ok(InstrId(inner))
     }
-}
 
-impl TryFrom<InstrId> for usize {
-    type Error = ExceededUsizeError;
-
-    fn try_from(value: InstrId) -> Result<Self, Self::Error> {
-        value.0.try_into().map_err(|_| ExceededUsizeError)
+    fn into(self) -> usize {
+        self.0.try_into().expect("u32 should fit into usize")
     }
 }
 

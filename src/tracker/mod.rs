@@ -6,14 +6,15 @@ mod stack;
 use thiserror::Error;
 
 use crate::index_vec::IndexVec;
-use crate::opcode::{Chunk, ConstId, Function, FunctionId, StackSlot};
+use crate::opcode::{
+    Chunk, ConstCapacityError, ConstId, Function, FunctionCapacityError, FunctionId,
+    InstrCountError, StackSlot,
+};
 use crate::value::Literal;
 
 use const_::ConstTracker;
-pub use const_::ExceededConstIdError;
 pub(crate) use function::FunctionTracker;
 pub use function::{BackpatchError, EmitError};
-pub use opcode::ExceededInstrIdError;
 use opcode::OpCodeTracker;
 use stack::StackTracker;
 pub use stack::{BlockId, StackStateError};
@@ -21,13 +22,13 @@ pub use stack::{BlockId, StackStateError};
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    ConstId(#[from] ExceededConstIdError),
+    ConstId(#[from] ConstCapacityError),
 
     #[error(transparent)]
-    InstrId(#[from] ExceededInstrIdError),
+    InstrId(#[from] InstrCountError),
 
     #[error(transparent)]
-    FnId(#[from] ExceededFnIdError),
+    FnId(#[from] FunctionCapacityError),
 
     #[error(transparent)]
     NoActiveFn(#[from] NoActiveFnError),
@@ -53,10 +54,6 @@ impl From<FinishFnError> for Error {
 }
 
 #[derive(Debug, Error)]
-#[error("exceeded indexing capacity of function ids")]
-pub struct ExceededFnIdError;
-
-#[derive(Debug, Error)]
 #[error("chunk doesn't have any unresolved functions to write to")]
 pub struct NoActiveFnError;
 
@@ -69,7 +66,7 @@ pub enum FinishFnError {
     FnResolve(#[from] EmitError),
 
     #[error("failed to generate function index")]
-    FnId(#[from] ExceededFnIdError),
+    FnId(#[from] FunctionCapacityError),
 }
 
 #[derive(Debug)]
@@ -165,7 +162,9 @@ impl<'s> ChunkTracker<'s> {
         let functions = functions
             .into_iter()
             .map(FunctionSlot::resolved)
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .unwrap();
         let constants = constants.resolve();
 
         let r = Chunk {
@@ -176,7 +175,7 @@ impl<'s> ChunkTracker<'s> {
         Ok(r)
     }
 
-    pub fn insert_literal(&mut self, value: Literal) -> Result<ConstId, ExceededConstIdError> {
+    pub fn insert_literal(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {
         self.constants.insert(value)
     }
 
@@ -184,11 +183,8 @@ impl<'s> ChunkTracker<'s> {
         self.current().ok()?.lookup_local(ident)
     }
 
-    pub fn start_fn(&mut self) -> Result<FunctionId, ExceededFnIdError> {
-        let id = self
-            .functions
-            .push(Default::default())
-            .map_err(|_| ExceededFnIdError)?;
+    pub fn start_fn(&mut self) -> Result<FunctionId, FunctionCapacityError> {
+        let id = self.functions.push(Default::default())?;
 
         self.current = Some(id);
 
@@ -208,7 +204,6 @@ impl<'s> ChunkTracker<'s> {
         self.current = self
             .functions
             .indexed_iter()
-            .map_err(|_| ExceededFnIdError)?
             .rev()
             .find_map(|(id, slot)| slot.is_in_progress().then_some(id));
 

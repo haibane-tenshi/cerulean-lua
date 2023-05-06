@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 use thiserror::Error;
 
-use crate::opcode::{Function, InstrId, OpCode, StackSlot};
+use crate::opcode::{Function, InstrCountError, InstrId, OpCode, StackSlot};
 
-use super::{BlockId, ExceededInstrIdError, OpCodeTracker, StackStateError, StackTracker};
+use super::{BlockId, OpCodeTracker, StackStateError, StackTracker};
 
 #[derive(Debug, Error)]
 pub enum BackpatchError {
     #[error(transparent)]
-    InstrId(#[from] ExceededInstrIdError),
+    InstrId(#[from] InstrCountError),
 
     #[error("there is no instruction under this index")]
     IndexOutOfBounds,
@@ -20,7 +20,7 @@ pub enum EmitError {
     Stack(#[from] StackStateError),
 
     #[error("failed to emit instruction")]
-    InstrId(#[from] ExceededInstrIdError),
+    InstrId(#[from] InstrCountError),
 }
 
 #[derive(Debug, Default)]
@@ -37,7 +37,7 @@ pub struct FunctionTracker<'s> {
 }
 
 impl<'s> FunctionTracker<'s> {
-    pub fn next_instr(&self) -> Result<InstrId, ExceededInstrIdError> {
+    pub fn next_instr(&self) -> InstrId {
         self.opcodes.next()
     }
 
@@ -107,7 +107,7 @@ impl<'s> FunctionTracker<'s> {
     }
 
     pub fn emit_loop_to(&mut self, target: InstrId) -> Result<InstrId, EmitError> {
-        let offset = self.next_instr()?.checked_sub(target).unwrap() + 1;
+        let offset = self.next_instr().checked_sub(target).unwrap() + 1;
         self.emit(OpCode::Loop { offset })
     }
 
@@ -149,7 +149,7 @@ impl<'s> FunctionTracker<'s> {
     }
 
     pub fn backpatch_to_next(&mut self, index: InstrId) -> Result<(), BackpatchError> {
-        let target = self.next_instr()?;
+        let target = self.next_instr();
         let new_offset = target
             .checked_sub(index + 1)
             .ok_or(BackpatchError::IndexOutOfBounds)?;
@@ -187,7 +187,7 @@ impl<'s> FunctionTracker<'s> {
             // Use raw emit: we already removed temporaries off the stack.
             self.emit_raw(OpCode::AdjustStack(slot), false)?
         } else {
-            self.next_instr()?
+            self.next_instr()
         };
 
         // Lastly we need to backpatch jumps from this block or any blocks above it.

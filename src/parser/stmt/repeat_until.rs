@@ -9,7 +9,7 @@ pub(super) fn repeat_until<'s>(
     let (s, ()) = match_token(s, Token::Repeat)?;
 
     let current = tracker.current_mut()?;
-    let start = current.next_instr()?;
+    let start = current.next_instr();
     let outer = current.start_block()?;
     let inner = current.start_block()?;
 

@@ -2,101 +2,100 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-use thiserror::Error;
+pub trait Index: Sized {
+    type Error;
 
-#[derive(Debug, Error)]
-#[error("usize value cannot be represented as index")]
-pub struct ExceededIndexError;
-
-#[derive(Debug, Error)]
-#[error("index value cannot be represented as usize")]
-pub struct ExceededUsizeError;
+    fn try_from(val: usize) -> Result<Self, Self::Error>;
+    fn into(self) -> usize;
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct IndexVec<Index, T>(Vec<T>, PhantomData<Index>);
+pub struct IndexVec<I, T>(PhantomData<I>, Vec<T>);
 
-impl<Index, T> IndexVec<Index, T> {
+impl<I, T> IndexVec<I, T> {
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn as_slice(&self) -> &IndexSlice<Index, T> {
-        IndexSlice::from_slice(self.0.as_slice())
+    pub fn as_slice(&self) -> &IndexSlice<I, T> {
+        IndexSlice::from_slice(self.1.as_slice())
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut IndexSlice<Index, T> {
-        IndexSlice::from_mut_slice(self.0.as_mut_slice())
-    }
-}
-
-impl<Index, T> IndexVec<Index, T>
-where
-    Index: TryFrom<usize> + TryInto<usize>,
-{
-    pub fn push(&mut self, value: T) -> Result<Index, ExceededIndexError> {
-        let index = self.len()?;
-        self.0.push(value);
-
-        Ok(index)
+    pub fn as_mut_slice(&mut self) -> &mut IndexSlice<I, T> {
+        IndexSlice::from_mut_slice(self.1.as_mut_slice())
     }
 
     pub fn pop(&mut self) -> Option<T> {
-        self.0.pop()
+        self.1.pop()
     }
 }
 
-impl<Index, T> Default for IndexVec<Index, T> {
+impl<I, T> IndexVec<I, T>
+where
+    I: Index,
+    <I as Index>::Error: Debug,
+{
+    pub fn push(&mut self, value: T) -> Result<I, <I as Index>::Error> {
+        let _ = I::try_from(self.1.len() + 1)?;
+        let index = self.len();
+        self.1.push(value);
+
+        Ok(index)
+    }
+}
+
+impl<I, T> Default for IndexVec<I, T> {
     fn default() -> Self {
-        IndexVec(Default::default(), PhantomData)
+        IndexVec(PhantomData, Default::default())
     }
 }
 
-impl<Index, T> From<Vec<T>> for IndexVec<Index, T> {
-    fn from(value: Vec<T>) -> Self {
-        IndexVec(value, PhantomData)
+impl<I, T> TryFrom<Vec<T>> for IndexVec<I, T>
+where
+    I: Index,
+{
+    type Error = <I as Index>::Error;
+
+    fn try_from(value: Vec<T>) -> Result<Self, Self::Error> {
+        let _ = I::try_from(value.len())?;
+        Ok(IndexVec(PhantomData, value))
     }
 }
 
-impl<Index, T> From<IndexVec<Index, T>> for Vec<T> {
-    fn from(val: IndexVec<Index, T>) -> Self {
-        val.0
+impl<I, T> From<IndexVec<I, T>> for Vec<T> {
+    fn from(val: IndexVec<I, T>) -> Self {
+        val.1
     }
 }
 
-impl<Index, T> Deref for IndexVec<Index, T> {
-    type Target = IndexSlice<Index, T>;
+impl<I, T> Deref for IndexVec<I, T> {
+    type Target = IndexSlice<I, T>;
 
     fn deref(&self) -> &Self::Target {
         self.as_slice()
     }
 }
 
-impl<Index, T> DerefMut for IndexVec<Index, T> {
+impl<I, T> DerefMut for IndexVec<I, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_mut_slice()
     }
 }
 
-impl<Index, T> IntoIterator for IndexVec<Index, T> {
+impl<I, T> IntoIterator for IndexVec<I, T> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl<Index, T> FromIterator<T> for IndexVec<Index, T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        IndexVec(iter.into_iter().collect(), PhantomData)
+        self.1.into_iter()
     }
 }
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct IndexSlice<Index, T>(PhantomData<Index>, [T]);
+pub struct IndexSlice<I, T>(PhantomData<I>, [T]);
 
-impl<Index, T> IndexSlice<Index, T> {
+impl<I, T> IndexSlice<I, T> {
     fn from_slice(slice: &[T]) -> &Self {
         // SAFETY: repr(transparent)
         unsafe { std::mem::transmute(slice) }
@@ -110,57 +109,51 @@ impl<Index, T> IndexSlice<Index, T> {
     pub fn first(&self) -> Option<&T> {
         self.1.first()
     }
-}
-
-impl<Index, T> IndexSlice<Index, T>
-where
-    Index: TryFrom<usize> + TryInto<usize>,
-{
-    pub fn get(&self, index: Index) -> Option<&T> {
-        let index = index.try_into().ok()?;
-        self.1.get(index)
-    }
-
-    pub fn get_mut(&mut self, index: Index) -> Option<&mut T> {
-        let index = index.try_into().ok()?;
-        self.1.get_mut(index)
-    }
-
-    pub fn len(&self) -> Result<Index, ExceededIndexError> {
-        self.1.len().try_into().map_err(|_| ExceededIndexError)
-    }
 
     pub fn iter(&self) -> std::slice::Iter<T> {
         self.1.iter()
     }
 }
 
-impl<Index, T> IndexSlice<Index, T>
+impl<I, T> IndexSlice<I, T>
 where
-    Index: TryFrom<usize> + TryInto<usize>,
-    <Index as TryFrom<usize>>::Error: Debug,
+    I: Index,
 {
-    pub fn indexed_iter(
-        &self,
-    ) -> Result<impl Iterator<Item = (Index, &T)> + DoubleEndedIterator, ExceededIndexError> {
-        let _ = self.len()?;
+    pub fn get(&self, index: I) -> Option<&T> {
+        let index = index.into();
+        self.1.get(index)
+    }
 
-        let iter = self.iter().enumerate().map(|(i, t)| {
-            let index = i.try_into().unwrap();
-            (index, t)
-        });
-
-        Ok(iter)
+    pub fn get_mut(&mut self, index: I) -> Option<&mut T> {
+        let index = index.into();
+        self.1.get_mut(index)
     }
 }
 
-impl<Index, T> Default for &IndexSlice<Index, T> {
+impl<I, T> IndexSlice<I, T>
+where
+    I: Index,
+    <I as Index>::Error: Debug,
+{
+    pub fn len(&self) -> I {
+        Index::try_from(self.1.len()).expect("length should fit into index type")
+    }
+
+    pub fn indexed_iter(&self) -> impl Iterator<Item = (I, &T)> + DoubleEndedIterator {
+        self.iter().enumerate().map(|(i, t)| {
+            let index = Index::try_from(i).expect("length should fit into index type");
+            (index, t)
+        })
+    }
+}
+
+impl<I, T> Default for &IndexSlice<I, T> {
     fn default() -> Self {
         IndexSlice::from_slice(Default::default())
     }
 }
 
-impl<Index, T> Default for &mut IndexSlice<Index, T> {
+impl<I, T> Default for &mut IndexSlice<I, T> {
     fn default() -> Self {
         IndexSlice::from_mut_slice(Default::default())
     }
