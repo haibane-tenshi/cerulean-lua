@@ -1,48 +1,102 @@
 use crate::lex::Lexer;
+use crate::opcode::{InstrId, StackSlot};
 use crate::parser::{LexParseError, Optional, Require};
-use crate::tracker::ChunkTracker;
+use crate::tracker::{ChunkTracker, EmitError, FunctionTracker};
 
-fn variable<'s>(
+pub(super) fn prefix_expr<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker,
+    tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::OpCode;
-    use crate::parser::{identifier, ParseError};
+    let (s, r) = prefix_expr_impl(s, tracker)?;
 
-    let (s, ident) = identifier(s)?;
-    let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
-    tracker.current_mut()?.emit(OpCode::LoadStack(slot))?;
+    // Eagerly evaluate place.
+    if let PrefixExpr::Place(place) = r {
+        place.eval(tracker.current_mut()?)?;
+    }
 
     Ok((s, ()))
 }
 
-pub(in crate::parser) fn prefix_expr<'s>(
+enum Place {
+    Temporary(StackSlot),
+    TableField,
+}
+
+impl Place {
+    pub fn eval(self, tracker: &mut FunctionTracker) -> Result<InstrId, EmitError> {
+        use crate::opcode::OpCode;
+
+        let opcode = match self {
+            Place::Temporary(slot) => OpCode::LoadStack(slot),
+            Place::TableField => OpCode::TabGet,
+        };
+
+        tracker.emit(opcode)
+    }
+}
+
+enum PrefixExpr {
+    Expr,
+    Place(Place),
+    FnCall,
+}
+
+fn prefix_expr_impl<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{par_expr, ParseError};
+) -> Result<(Lexer<'s>, PrefixExpr), LexParseError> {
+    use crate::lex::Token;
+    use crate::parser::{par_expr, NextToken, ParseError};
 
-    let mut s = if let Ok((s, ())) = variable(s.clone(), tracker) {
-        s
+    let stack_top = tracker.current()?.stack_top()? + 1;
+
+    let (mut s, mut r) = if let Ok((s, slot)) = variable(s.clone(), tracker) {
+        (s, PrefixExpr::Place(Place::Temporary(slot)))
     } else if let Ok((s, ())) = par_expr(s, tracker) {
-        s
+        (s, PrefixExpr::Expr)
     } else {
         return Err(ParseError.into());
     };
 
+    #[allow(clippy::while_let_loop)]
     loop {
-        s = if let Ok((s, ())) = func_call(s.clone(), tracker) {
-            s
-        } else if let Ok((s, ())) = field(s.clone(), tracker) {
-            s
-        } else if let Ok((s, ())) = index(s.clone(), tracker) {
-            s
-        } else {
-            break;
+        // Peek to determine if any of the follow-up expressions are expected.
+        // Note that we effectively start codegen in subparsers after encountering
+        // any of these tokens, so even if no parsers properly evaluate,
+        // we must error out anyway since we end up in bad state.
+        match s.clone().next_token() {
+            Ok(
+                Token::ParL
+                | Token::CurlyL
+                | Token::ShortLiteralString(_)
+                | Token::BracketL
+                | Token::Dot,
+            ) => (),
+            _ => break,
         }
+
+        // Evaluate place.
+        if let PrefixExpr::Place(place) = r {
+            place.eval(tracker.current_mut()?)?;
+        }
+
+        // Adjust stack.
+        // Prefix expressions (except the very last one) always evaluate to 1 value.
+        // We are reusing the same stack slot to store it.
+        tracker.current_mut()?.emit_adjust_to(stack_top)?;
+
+        (s, r) = if let Ok((s, ())) = func_call(s.clone(), tracker) {
+            (s, PrefixExpr::FnCall)
+        } else if let Ok((s, ())) = field(s.clone(), tracker) {
+            (s, PrefixExpr::Place(Place::TableField))
+        } else if let Ok((s, ())) = index(s.clone(), tracker) {
+            (s, PrefixExpr::Place(Place::TableField))
+        } else {
+            return Err(ParseError.into());
+        };
     }
 
-    Ok((s, ()))
+    Ok((s, r))
 }
 
 fn func_call<'s>(
@@ -108,6 +162,18 @@ fn args_table<'s>(
     super::table(s, tracker)
 }
 
+fn variable<'s>(
+    s: Lexer<'s>,
+    tracker: &mut ChunkTracker,
+) -> Result<(Lexer<'s>, StackSlot), LexParseError> {
+    use crate::parser::{identifier, ParseError};
+
+    let (s, ident) = identifier(s)?;
+    let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
+
+    Ok((s, slot))
+}
+
 fn field<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
@@ -123,7 +189,6 @@ fn field<'s>(
     let const_id = tracker.insert_literal(Literal::String(ident.to_string()))?;
     let fun = tracker.current_mut()?;
     fun.emit(OpCode::LoadConstant(const_id))?;
-    fun.emit(OpCode::TabGet)?;
 
     Ok((s, ()))
 }
@@ -133,14 +198,11 @@ fn index<'s>(
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::{expr_adjusted_to_1, match_token};
 
     let (s, ()) = match_token(s, Token::BracketL)?;
     let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
     let (s, ()) = match_token(s, Token::BracketR).require()?;
-
-    tracker.current_mut()?.emit(OpCode::TabGet)?;
 
     Ok((s, ()))
 }
