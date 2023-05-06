@@ -1,7 +1,5 @@
-use crate::lex::Lexer;
-use crate::opcode::{ConstId, InstrId, StackSlot};
-use crate::parser::{LexParseError, Optional, Require};
-use crate::tracker::{ChunkTracker, EmitError, FunctionTracker};
+use crate::parser::prelude::*;
+use crate::tracker::EmitError;
 
 #[derive(Debug, Copy, Clone)]
 enum StackSlotOrConstId {
@@ -11,7 +9,6 @@ enum StackSlotOrConstId {
 
 impl StackSlotOrConstId {
     fn load(self, tracker: &mut FunctionTracker) -> Result<InstrId, EmitError> {
-        use crate::opcode::OpCode;
         use StackSlotOrConstId::*;
 
         match self {
@@ -25,10 +22,7 @@ pub(super) fn numerical_for<'s, 'a>(
     s: Lexer<'s>,
     tracker: &'a mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::opcode::{AriBinOp, OpCode, RelBinOp};
     use crate::parser::{block, expr_adjusted_to_1, identifier, match_token};
-    use crate::value::Literal;
 
     let (s, ()) = match_token(s, Token::For)?;
     let (s, ident) = identifier(s).require()?;

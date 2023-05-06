@@ -1,14 +1,9 @@
-use super::{LexParseError, NextToken, Optional, Require};
-use crate::lex::Lexer;
-use crate::opcode::StackSlot;
-use crate::tracker::ChunkTracker;
+use crate::parser::prelude::*;
 
-pub(super) fn table<'s>(
+pub(in crate::parser) fn table<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::match_token;
 
     let (s, ()) = match_token(s, Token::CurlyL)?;
@@ -27,9 +22,6 @@ fn field_list<'s>(
     tracker: &mut ChunkTracker<'s>,
     table_slot: StackSlot,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::parser::ParseError;
-
     let mut next_index = 1;
 
     let mut field = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
@@ -78,8 +70,6 @@ fn bracket<'s>(
     tracker: &mut ChunkTracker<'s>,
     table_slot: StackSlot,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::{expr_adjusted_to_1, match_token};
 
     let (s, ()) = match_token(s, Token::BracketL)?;
@@ -101,10 +91,7 @@ fn name<'s>(
     tracker: &mut ChunkTracker<'s>,
     table_slot: StackSlot,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::{expr_adjusted_to_1, identifier, match_token};
-    use crate::value::Literal;
 
     let (s, ident) = identifier(s)?;
 
@@ -129,9 +116,7 @@ fn index<'s>(
     table_slot: StackSlot,
     index: i64,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::OpCode;
     use crate::parser::expr_adjusted_to_1;
-    use crate::value::Literal;
 
     let start = tracker.current()?.stack_top()?;
     let r = expr_adjusted_to_1(s, tracker)?;

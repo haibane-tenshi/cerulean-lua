@@ -1,9 +1,7 @@
-use crate::lex::Lexer;
-use crate::opcode::{InstrId, StackSlot};
-use crate::parser::{LexParseError, Optional, ParseError, Require};
-use crate::tracker::{ChunkTracker, EmitError, FunctionTracker};
+use crate::parser::prelude::*;
+use crate::tracker::EmitError;
 
-pub(super) fn prefix_expr<'s>(
+pub(in crate::parser) fn prefix_expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
@@ -38,8 +36,6 @@ pub enum Place {
 
 impl Place {
     pub fn eval(self, tracker: &mut FunctionTracker) -> Result<InstrId, EmitError> {
-        use crate::opcode::OpCode;
-
         let opcode = match self {
             Place::Temporary(slot) => OpCode::LoadStack(slot),
             Place::TableField => OpCode::TabGet,
@@ -59,8 +55,7 @@ fn prefix_expr_impl<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, PrefixExpr), LexParseError> {
-    use crate::lex::Token;
-    use crate::parser::{par_expr, NextToken};
+    use crate::parser::par_expr;
 
     let stack_top = tracker.current()?.stack_top()? + 1;
 
@@ -117,8 +112,6 @@ fn func_call<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::OpCode;
-
     let invoke_target = tracker.current()?.stack_top()?.prev().unwrap();
 
     let s = if let Ok((s, ())) = args_par_expr(s.clone(), tracker) {
@@ -140,7 +133,6 @@ fn args_par_expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
     use crate::parser::{expr_list, match_token};
 
     let (s, ()) = match_token(s, Token::ParL).require()?;
@@ -154,9 +146,7 @@ fn args_str<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::opcode::OpCode;
     use crate::parser::literal_str;
-    use crate::value::Literal;
 
     let (s, val) = literal_str(s)?;
 
@@ -191,10 +181,7 @@ fn field<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::{identifier, match_token};
-    use crate::value::Literal;
 
     let (s, ()) = match_token(s, Token::Dot)?;
     let (s, ident) = identifier(s).require()?;
@@ -210,7 +197,6 @@ fn index<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
     use crate::parser::{expr_adjusted_to_1, match_token};
 
     let (s, ()) = match_token(s, Token::BracketL)?;

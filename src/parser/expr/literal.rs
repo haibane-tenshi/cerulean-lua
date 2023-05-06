@@ -1,16 +1,9 @@
-use super::{LexParseError, NextToken};
-use crate::lex::Lexer;
-use crate::tracker::ChunkTracker;
+use crate::parser::prelude::*;
 
-pub(super) fn literal<'s>(
+pub(in crate::parser) fn literal<'s>(
     mut s: Lexer<'s>,
     tracker: &mut ChunkTracker,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::{Number, Token};
-    use crate::opcode::OpCode;
-    use crate::parser::ParseError;
-    use crate::value::Literal;
-
     let literal = match s.next_token()? {
         Token::Nil => Literal::Nil,
         Token::True => Literal::Bool(true),

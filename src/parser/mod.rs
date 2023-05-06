@@ -1,4 +1,5 @@
 mod expr;
+mod prelude;
 mod stmt;
 
 use std::borrow::Cow;

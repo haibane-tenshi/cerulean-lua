@@ -1,15 +1,10 @@
-use crate::lex::Lexer;
-use crate::parser::{LexParseError, Require};
-use crate::tracker::ChunkTracker;
+use crate::parser::prelude::*;
 
 pub(super) fn local_function<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::{func_body, identifier, match_token};
-    use crate::value::Literal;
 
     let (s, ()) = match_token(s, Token::Local)?;
     let (s, ()) = match_token(s, Token::Function).require()?;

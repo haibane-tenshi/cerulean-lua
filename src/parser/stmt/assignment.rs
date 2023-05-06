@@ -1,15 +1,10 @@
-use crate::lex::Lexer;
-
-use crate::parser::{LexParseError, Require};
-use crate::tracker::ChunkTracker;
+use crate::parser::prelude::*;
 
 pub(super) fn assignment<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::opcode::OpCode;
-    use crate::parser::{expr_adjusted_to_1, identifier, match_token, ParseError};
+    use crate::parser::{expr_adjusted_to_1, identifier, match_token};
 
     let (s, ident) = identifier(s)?;
     let (s, ()) = match_token(s, Token::Assign).require()?;

@@ -7,11 +7,7 @@ mod numerical_for;
 mod repeat_until;
 mod while_do;
 
-use crate::lex::Lexer;
-
-use super::block;
-use crate::parser::{LexParseError, Optional, Require};
-use crate::tracker::ChunkTracker;
+use crate::parser::prelude::*;
 
 use assignment::assignment;
 use generic_for::generic_for;
@@ -22,12 +18,10 @@ use numerical_for::numerical_for;
 use repeat_until::repeat_until;
 use while_do::while_do;
 
-pub(super) fn statement<'s>(
+pub(in crate::parser) fn statement<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{NextToken, ParseError};
-
     if let Ok(r) = semicolon(s.clone()) {
         Ok(r)
     } else if let Ok(r) = do_end(s.clone(), tracker) {
@@ -60,7 +54,6 @@ pub(super) fn statement<'s>(
 }
 
 fn semicolon(s: Lexer) -> Result<(Lexer, ()), LexParseError> {
-    use crate::lex::Token;
     use crate::parser::match_token;
 
     match_token(s, Token::Semicolon)
@@ -70,8 +63,7 @@ fn do_end<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::lex::Token;
-    use crate::parser::match_token;
+    use crate::parser::{block, match_token};
 
     let (s, ()) = match_token(s, Token::Do)?;
     let (s, ()) = block(s, tracker).require()?;
@@ -80,13 +72,11 @@ fn do_end<'s>(
     Ok((s, ()))
 }
 
-pub(super) fn return_<'s>(
+pub(in crate::parser) fn return_<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use super::expr_list;
-    use crate::lex::Token;
-    use crate::opcode::OpCode;
     use crate::parser::match_token;
 
     let (s, ()) = match_token(s, Token::Return)?;

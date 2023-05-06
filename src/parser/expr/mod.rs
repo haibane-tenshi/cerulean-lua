@@ -3,22 +3,19 @@ mod literal;
 pub mod prefix_expr;
 mod table;
 
-use super::{LexParseError, NextToken, Optional, Require};
-use crate::lex::Lexer;
-use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, InstrId, OpCode, RelBinOp, StrBinOp};
-use crate::tracker::ChunkTracker;
+use crate::parser::prelude::*;
 
-use function::function;
-use literal::literal;
-use prefix_expr::prefix_expr;
-use table::table;
+pub(in crate::parser) use function::function;
+pub(in crate::parser) use literal::literal;
+pub(in crate::parser) use prefix_expr::prefix_expr;
+pub(in crate::parser) use table::table;
 
 enum OpCodeOrJump {
     OpCode(OpCode),
     Jump(InstrId),
 }
 
-pub(super) fn expr<'s>(
+pub(in crate::parser) fn expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
@@ -123,8 +120,6 @@ fn atom<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::ParseError;
-
     if let Ok(r) = literal(s.clone(), tracker) {
         Ok(r)
     } else if let Ok(r) = prefix_expr(s.clone(), tracker) {
@@ -139,9 +134,6 @@ fn atom<'s>(
 }
 
 fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
-    use crate::lex::Token;
-    use crate::parser::ParseError;
-
     let op = match s.next_token()? {
         Token::Minus => Prefix::Ari(AriUnaOp::Neg),
         Token::Tilde => Prefix::Bit(BitUnaOp::Not),
@@ -152,9 +144,6 @@ fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
 }
 
 fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
-    use crate::lex::Token;
-    use crate::parser::ParseError;
-
     let op = match s.next_token()? {
         Token::Plus => Infix::Ari(AriBinOp::Add),
         Token::Minus => Infix::Ari(AriBinOp::Sub),
