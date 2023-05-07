@@ -15,7 +15,7 @@ pub(super) fn local_assignment<'s>(
     let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
 
     let current = tracker.current_mut()?;
-    let count = idents.len().try_into().unwrap();
+    let count: u32 = idents.len().try_into().unwrap();
     current.emit_adjust_to(stack_start + count)?;
 
     for (ident, slot) in idents.into_iter().zip((stack_start.0..).map(StackSlot)) {

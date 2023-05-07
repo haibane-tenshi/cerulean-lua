@@ -16,6 +16,7 @@ pub struct ConstCapacityError;
 
 impl Index for ConstId {
     type Error = ConstCapacityError;
+    const MAX: Self = ConstId(u32::MAX);
 
     fn try_from(val: usize) -> Result<Self, Self::Error> {
         let inner = val.try_into().map_err(|_| ConstCapacityError)?;
@@ -33,7 +34,7 @@ impl Display for ConstId {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 pub struct StackSlot(pub u32);
 
 impl StackSlot {
@@ -67,6 +68,7 @@ pub struct FunctionCapacityError;
 
 impl Index for FunctionId {
     type Error = FunctionCapacityError;
+    const MAX: Self = FunctionId(u32::MAX);
 
     fn try_from(val: usize) -> Result<Self, Self::Error> {
         let inner = val.try_into().map_err(|_| FunctionCapacityError)?;
@@ -99,6 +101,7 @@ impl InstrId {
 
 impl Index for InstrId {
     type Error = InstrCountError;
+    const MAX: Self = InstrId(u32::MAX);
 
     fn try_from(val: usize) -> Result<Self, Self::Error> {
         let inner = val.try_into().map_err(|_| InstrCountError)?;

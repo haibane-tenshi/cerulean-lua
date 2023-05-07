@@ -1,9 +1,10 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, RangeBounds};
 
 pub trait Index: Sized {
     type Error;
+    const MAX: Self;
 
     fn try_from(val: usize) -> Result<Self, Self::Error>;
     fn into(self) -> usize;
@@ -41,6 +42,46 @@ where
         self.1.push(value);
 
         Ok(index)
+    }
+
+    pub fn extend<Iter>(&mut self, iter: Iter) -> Result<(), <I as Index>::Error>
+    where
+        Iter: IntoIterator<Item = T>,
+    {
+        self.1.extend(iter);
+
+        match I::try_from(self.1.len()) {
+            Err(err) => {
+                self.1.truncate(I::MAX.into());
+                Err(err)
+            }
+            Ok(_) => Ok(()),
+        }
+    }
+}
+
+impl<I, T> IndexVec<I, T>
+where
+    I: Index + Clone,
+{
+    pub fn drain<R>(&mut self, range: R) -> std::vec::Drain<T>
+    where
+        R: RangeBounds<I>,
+    {
+        use std::ops::Bound;
+
+        let map_bound = |bound: Bound<&I>| -> Bound<usize> {
+            match bound {
+                Bound::Excluded(t) => Bound::Excluded(t.clone().into()),
+                Bound::Included(t) => Bound::Included(t.clone().into()),
+                Bound::Unbounded => Bound::Unbounded,
+            }
+        };
+
+        let start = map_bound(range.start_bound());
+        let end = map_bound(range.end_bound());
+
+        self.1.drain((start, end))
     }
 }
 
