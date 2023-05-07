@@ -5,6 +5,7 @@ use rle_vec::RleVec;
 use thiserror::Error;
 
 use crate::index_vec::{Index, IndexVec};
+use crate::tracker2::stack::StackOffset;
 use crate::value::Literal;
 
 #[derive(Debug, Copy, Clone)]
@@ -41,6 +42,11 @@ impl StackSlot {
     pub(crate) fn prev(self) -> Option<Self> {
         let index = self.0.checked_sub(1)?;
         Some(StackSlot(index))
+    }
+
+    pub(crate) fn checked_sub(self, rhs: Self) -> Option<StackOffset> {
+        let inner = self.0.checked_sub(rhs.0)?;
+        Some(StackOffset(inner))
     }
 }
 
