@@ -242,6 +242,10 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         self.stack.len() - self.boundary
     }
 
+    pub fn top(&self) -> StackSlot {
+        self.base + self.len()
+    }
+
     pub fn state(&self) -> StackState {
         if self.variadic {
             StackState::Variadic
