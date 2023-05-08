@@ -315,6 +315,11 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             None => NameLookup::Global,
         }
     }
+
+    pub fn finalize(self) {
+        // Do nothing for now.
+        // TODO: figure out if we can avoid readjusting stack and simply erase identifiers.
+    }
 }
 
 impl<'s, 'origin> Drop for StackView<'s, 'origin> {

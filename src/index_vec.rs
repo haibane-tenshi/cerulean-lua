@@ -58,6 +58,11 @@ where
             Ok(_) => Ok(()),
         }
     }
+
+    pub fn truncate(&mut self, index: I) {
+        let index = index.into();
+        self.1.truncate(index);
+    }
 }
 
 impl<I, T> IndexVec<I, T>
