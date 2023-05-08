@@ -4,7 +4,8 @@ pub(super) fn repeat_until<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{expr_adjusted_to_1, inner_block, match_token};
+    use crate::parser::block::inner_block;
+    use crate::parser::expr::expr_adjusted_to_1;
 
     let (s, ()) = match_token(s, Token::Repeat)?;
 

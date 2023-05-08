@@ -4,7 +4,8 @@ pub(super) fn if_then<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{block, expr_adjusted_to_1, match_token};
+    use crate::parser::block::block;
+    use crate::parser::expr::expr_adjusted_to_1;
 
     let (s, ()) = match_token(s, Token::If)?;
 

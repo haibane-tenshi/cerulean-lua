@@ -54,8 +54,6 @@ pub(in crate::parser) fn statement<'s>(
 }
 
 fn semicolon(s: Lexer) -> Result<(Lexer, ()), LexParseError> {
-    use crate::parser::match_token;
-
     match_token(s, Token::Semicolon)
 }
 
@@ -63,7 +61,7 @@ fn do_end<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{block, match_token};
+    use crate::parser::block::block;
 
     let (s, ()) = match_token(s, Token::Do)?;
     let (s, ()) = block(s, tracker).require()?;
@@ -76,8 +74,7 @@ pub(in crate::parser) fn return_<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use super::expr_list;
-    use crate::parser::match_token;
+    use super::expr::expr_list;
 
     let (s, ()) = match_token(s, Token::Return)?;
 

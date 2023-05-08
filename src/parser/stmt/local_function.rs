@@ -4,7 +4,7 @@ pub(super) fn local_function<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{func_body, identifier, match_token};
+    use crate::parser::func_def::func_body;
 
     let (s, ()) = match_token(s, Token::Local)?;
     let (s, ()) = match_token(s, Token::Function).require()?;

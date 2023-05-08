@@ -22,7 +22,8 @@ pub(super) fn numerical_for<'s, 'a>(
     s: Lexer<'s>,
     tracker: &'a mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{block, expr_adjusted_to_1, identifier, match_token};
+    use crate::parser::block::block;
+    use crate::parser::expr::expr_adjusted_to_1;
 
     let (s, ()) = match_token(s, Token::For)?;
     let (s, ident) = identifier(s).require()?;

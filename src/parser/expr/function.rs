@@ -4,7 +4,7 @@ pub(in crate::parser) fn function<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{func_body, match_token};
+    use crate::parser::func_def::func_body;
 
     let (s, ()) = match_token(s, Token::Function)?;
     let (s, func_id) = func_body(s, tracker).require()?;

@@ -4,7 +4,7 @@ pub(super) fn local_assignment<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{expr_list, match_token};
+    use crate::parser::expr::expr_list;
 
     let (s, ()) = match_token(s, Token::Local)?;
 
@@ -26,8 +26,6 @@ pub(super) fn local_assignment<'s>(
 }
 
 fn ident_list<'s>(s: Lexer<'s>) -> Result<(Lexer<'s>, Vec<&'s str>), LexParseError> {
-    use crate::parser::{identifier, match_token};
-
     let (mut s, ident) = identifier(s)?;
 
     let mut r = vec![ident];

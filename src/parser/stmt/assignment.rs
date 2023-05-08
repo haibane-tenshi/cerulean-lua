@@ -5,7 +5,7 @@ pub(super) fn assignment<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{expr_list_adjusted_to, match_token};
+    use crate::parser::expr::expr_list_adjusted_to;
 
     let outer = tracker.current_mut()?.start_block()?;
 
@@ -49,7 +49,6 @@ fn places<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, Vec<Place>), LexParseError> {
-    use crate::parser::match_token;
     use crate::parser::prefix_expr::place;
 
     let (mut s, first) = place(s, tracker)?;

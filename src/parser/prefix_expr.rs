@@ -55,7 +55,7 @@ fn prefix_expr_impl<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, PrefixExpr), LexParseError> {
-    use crate::parser::par_expr;
+    use crate::parser::expr::par_expr;
 
     let stack_top = tracker.current()?.stack_top()? + 1;
 
@@ -133,7 +133,7 @@ fn args_par_expr<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{expr_list, match_token};
+    use crate::parser::expr::expr_list;
 
     let (s, ()) = match_token(s, Token::ParL).require()?;
     let (s, _) = expr_list(s.clone(), tracker).optional(s);
@@ -146,8 +146,6 @@ fn args_str<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::literal_str;
-
     let (s, val) = literal_str(s)?;
 
     let const_id = tracker.insert_literal(Literal::String(val.into_owned()))?;
@@ -169,8 +167,6 @@ fn variable<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker,
 ) -> Result<(Lexer<'s>, StackSlot), LexParseError> {
-    use crate::parser::identifier;
-
     let (s, ident) = identifier(s)?;
     let slot = tracker.lookup_local(ident).ok_or(ParseError)?;
 
@@ -181,8 +177,6 @@ fn field<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{identifier, match_token};
-
     let (s, ()) = match_token(s, Token::Dot)?;
     let (s, ident) = identifier(s).require()?;
 
@@ -197,7 +191,7 @@ fn index<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{expr_adjusted_to_1, match_token};
+    use crate::parser::expr::expr_adjusted_to_1;
 
     let (s, ()) = match_token(s, Token::BracketL)?;
     let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;

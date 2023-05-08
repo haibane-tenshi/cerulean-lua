@@ -4,7 +4,8 @@ pub(super) fn generic_for<'s>(
     s: Lexer<'s>,
     tracker: &mut ChunkTracker<'s>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::{block, expr_list_adjusted_to, match_token};
+    use crate::parser::block::block;
+    use crate::parser::expr::expr_list_adjusted_to;
 
     let (s, ()) = match_token(s, Token::For)?;
     let (s, names) = name_list(s).require()?;
@@ -67,8 +68,6 @@ pub(super) fn generic_for<'s>(
 }
 
 fn name_list<'s>(s: Lexer<'s>) -> Result<(Lexer<'s>, Vec<&'s str>), LexParseError> {
-    use crate::parser::{identifier, match_token};
-
     let (mut s, ident) = identifier(s)?;
     let mut r = vec![ident];
 
