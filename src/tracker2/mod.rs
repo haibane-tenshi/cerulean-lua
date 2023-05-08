@@ -1,9 +1,10 @@
+pub(crate) mod const_;
 pub(crate) mod stack;
 
 use thiserror::Error;
 
 use crate::index_vec::IndexVec;
-use crate::opcode::{InstrCountError, InstrId, OpCode};
+use crate::opcode::{Function, InstrCountError, InstrId, OpCode};
 
 use stack::{BoundaryViolationError, PopError, PushError, StackView};
 
@@ -31,6 +32,28 @@ impl From<Backpatch> for Instr {
 #[derive(Debug, Default)]
 pub struct Fragment {
     opcodes: IndexVec<InstrId, Instr>,
+}
+
+impl Fragment {
+    pub fn into_function(self, height: u32) -> Function {
+        let Fragment { opcodes } = self;
+
+        let codes = opcodes
+            .into_iter()
+            .map(|instr| match instr {
+                Instr::OpCode(opcode) => opcode,
+                Instr::Unfinished(t) => match t {},
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        Function {
+            codes,
+            lines: Default::default(),
+            height,
+        }
+    }
 }
 
 #[derive(Debug)]

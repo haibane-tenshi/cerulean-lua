@@ -2,6 +2,7 @@ mod index_vec;
 pub mod lex;
 pub mod opcode;
 pub mod parser;
+mod parser2;
 pub mod runtime;
 pub mod table;
 mod tracker;
