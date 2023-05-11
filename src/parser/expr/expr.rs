@@ -7,35 +7,37 @@ enum OpCodeOrJump {
 
 pub(in crate::parser) fn expr<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    expr_impl(s, 0, tracker)
+    expr_impl(s, 0, chunk, frag)
 }
 
 fn expr_impl<'s>(
     s: Lexer<'s>,
     min_bp: u64,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     // This should always point at where the first value of previous expressions should be.
     // We need this to implement short-circuiting of `and` and `or` ops.
-    let mut top = tracker.current()?.stack_top()?;
+    let mut top = frag.stack().top()?;
 
     let mut s = if let Ok((s, op)) = prefix_op(s.clone()) {
         let ((), rhs_bp) = op.binding_power();
-        let (s, ()) = expr_impl(s, rhs_bp, tracker)?;
+        let (s, ()) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())?;
 
         let opcode = match op {
             Prefix::Ari(op) => OpCode::AriUnaOp(op),
             Prefix::Bit(op) => OpCode::BitUnaOp(op),
         };
 
-        tracker.current_mut()?.emit_adjust_to(top + 1)?;
-        tracker.current_mut()?.emit(opcode)?;
+        frag.emit_adjust_to(top + 1)?;
+        frag.emit(opcode)?;
 
         s
     } else {
-        let (s, ()) = atom(s, tracker)?;
+        let (s, ()) = atom(s, chunk, frag.new_fragment())?;
 
         s
     };
@@ -59,7 +61,7 @@ fn expr_impl<'s>(
         // It implies that we HAVE to adjust both operands to 1 value before doing op itself.
 
         // Adjust left operand.
-        tracker.current_mut()?.emit_adjust_to(top + 1)?;
+        frag.emit_adjust_to(top + 1)?;
 
         let maybe_opcode = match op {
             Infix::Ari(op) => OpCodeOrJump::OpCode(OpCode::AriBinOp(op)),
@@ -72,58 +74,73 @@ fn expr_impl<'s>(
                     Logical::And => false,
                 };
 
-                let instr_id = tracker.current_mut()?.emit(OpCode::JumpIf {
+                let instr_id = frag.emit(OpCode::JumpIf {
                     cond,
                     offset: Default::default(),
                 })?;
 
                 // Discard left operand when entering the other branch.
-                tracker.current_mut()?.emit_adjust_to(top)?;
+                frag.emit_adjust_to(top)?;
 
                 OpCodeOrJump::Jump(instr_id)
             }
         };
 
-        let rhs_top = tracker.current()?.stack_top()? + 1;
-        (s, _) = expr_impl(ns, rhs_bp, tracker).map_err(LexParseError::eof_into_err)?;
+        let rhs_top = frag.stack().top()? + 1;
+        (s, _) = expr_impl(ns, rhs_bp, chunk, frag.new_fragment())
+            .map_err(LexParseError::eof_into_err)?;
 
         // Adjust right operand.
-        tracker.current_mut()?.emit_adjust_to(rhs_top)?;
+        frag.emit_adjust_to(rhs_top)?;
 
         match maybe_opcode {
             OpCodeOrJump::OpCode(opcode) => {
-                tracker.current_mut()?.emit(opcode)?;
+                frag.emit(opcode)?;
             }
             OpCodeOrJump::Jump(index) => {
-                tracker.current_mut()?.backpatch_to_next(index)?;
+                let next_instr = frag.len();
+
+                match frag.get_mut(index) {
+                    Some(OpCode::JumpIf { offset, .. }) => {
+                        *offset = next_instr - index - 1;
+                    }
+                    _ => unreachable!(),
+                }
             }
         }
 
         // Make sure that top points at the result of current op.
-        top = tracker.current()?.stack_top()?.prev().unwrap();
+        top = frag.stack().top()?.prev().unwrap();
     }
+
+    frag.commit();
 
     Ok((s, ()))
 }
 
 fn atom<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use super::{function, literal, table};
     use crate::parser::prefix_expr::prefix_expr;
 
-    if let Ok(r) = literal(s.clone(), tracker) {
-        Ok(r)
-    } else if let Ok(r) = prefix_expr(s.clone(), tracker) {
-        Ok(r)
-    } else if let Ok(r) = function(s.clone(), tracker) {
-        Ok(r)
-    } else if let Ok(r) = table(s, tracker) {
-        Ok(r)
+    let r = if let Ok(r) = literal(s.clone(), chunk, frag.new_fragment()) {
+        r
+    } else if let Ok(r) = prefix_expr(s.clone(), chunk, frag.new_fragment()) {
+        r
+    } else if let Ok(r) = function(s.clone(), chunk, frag.new_fragment()) {
+        r
+    } else if let Ok(r) = table(s, chunk, frag.new_fragment()) {
+        r
     } else {
-        Err(ParseError.into())
-    }
+        return Err(ParseError.into());
+    };
+
+    frag.commit();
+
+    Ok(r)
 }
 
 fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {

@@ -2,25 +2,27 @@ use crate::parser::prelude::*;
 
 pub(super) fn local_assignment<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::parser::expr::expr_list;
 
     let (s, ()) = match_token(s, Token::Local)?;
 
-    let stack_start = tracker.current()?.stack_top()?;
+    let stack_start = frag.stack().top()?;
+
     let (s, idents) = ident_list(s).require()?;
     let (s, ()) = match_token(s, Token::Assign).require()?;
+    let (s, ()) = expr_list(s, chunk, frag.new_fragment()).map_err(LexParseError::eof_into_err)?;
 
-    let (s, ()) = expr_list(s, tracker).map_err(LexParseError::eof_into_err)?;
-
-    let current = tracker.current_mut()?;
     let count: u32 = idents.len().try_into().unwrap();
-    current.emit_adjust_to(stack_start + count)?;
+    frag.emit_adjust_to(stack_start + count)?;
 
     for (ident, slot) in idents.into_iter().zip((stack_start.0..).map(StackSlot)) {
-        current.name_local(slot, ident)?;
+        frag.stack_mut().give_name(slot, ident)?;
     }
+
+    frag.commit();
 
     Ok((s, ()))
 }

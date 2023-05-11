@@ -3,67 +3,67 @@ use crate::parser::prelude::*;
 
 pub(super) fn assignment<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::parser::expr::expr_list_adjusted_to;
 
-    let outer = tracker.current_mut()?.start_block()?;
-
-    let mut places_start = tracker.current()?.stack_top()?;
-    let (s, places) = places(s, tracker)?;
+    let mut places_start = frag.stack().top()?;
+    let (s, places) = places(s, chunk, frag.new_fragment())?;
     let count = places.len().try_into().unwrap();
 
     let (s, ()) = match_token(s, Token::Assign).require()?;
 
-    let expr_start = tracker.current()?.stack_top()?;
-    let (s, ()) = expr_list_adjusted_to(s, tracker, count).require()?;
-
-    let current = tracker.current_mut()?;
+    let expr_start = frag.stack().top()?;
+    let (s, ()) = expr_list_adjusted_to(s, count, chunk, frag.new_fragment()).require()?;
 
     let expr_slots = (expr_start.0..).map(StackSlot);
     for (expr_slot, place) in expr_slots.zip(places) {
         match place {
             Place::Temporary(slot) => {
-                current.emit(OpCode::LoadStack(expr_slot))?;
-                current.emit(OpCode::StoreStack(slot))?;
+                frag.emit(OpCode::LoadStack(expr_slot))?;
+                frag.emit(OpCode::StoreStack(slot))?;
             }
             Place::TableField => {
                 let table = places_start;
                 let field = places_start + 1;
                 places_start += 2;
 
-                current.emit(OpCode::LoadStack(table))?;
-                current.emit(OpCode::LoadStack(field))?;
-                current.emit(OpCode::LoadStack(expr_slot))?;
-                current.emit(OpCode::TabSet)?;
+                frag.emit(OpCode::LoadStack(table))?;
+                frag.emit(OpCode::LoadStack(field))?;
+                frag.emit(OpCode::LoadStack(expr_slot))?;
+                frag.emit(OpCode::TabSet)?;
             }
         }
     }
 
-    current.finish_block(outer)?;
+    frag.commit();
 
     Ok((s, ()))
 }
 
 fn places<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, Vec<Place>), LexParseError> {
     use crate::parser::prefix_expr::place;
 
-    let (mut s, first) = place(s, tracker)?;
+    let (mut s, first) = place(s, chunk, frag.new_fragment())?;
 
     let mut r = vec![first];
 
     let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, Place), LexParseError> {
         let (s, ()) = match_token(s, Token::Comma)?;
-        place(s, tracker).require()
+        place(s, chunk, frag.new_fragment()).require()
     };
 
     while let Ok((ns, next)) = next_part(s.clone()) {
         s = ns;
         r.push(next);
     }
+
+    frag.commit();
 
     Ok((s, r))
 }

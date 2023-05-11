@@ -2,32 +2,27 @@ use crate::parser::prelude::*;
 
 pub(super) fn while_do<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut outer_frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
 
     let (s, ()) = match_token(s, Token::While)?;
 
-    let current = tracker.current_mut()?;
-    let start = current.next_instr();
-    let outer = current.start_block()?;
-    let inner = current.start_block()?;
+    let mut frag = outer_frag.new_fragment();
 
-    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+    let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
     let (s, ()) = match_token(s, Token::Do).require()?;
 
-    tracker
-        .current_mut()?
-        .emit_jump_to_end_of(outer, Some(false))?;
+    frag.emit_jump_to(frag.id(), Some(false))?;
 
-    let (s, ()) = block(s, tracker).require()?;
+    let (s, ()) = block(s, chunk, frag.new_fragment()).require()?;
     let (s, ()) = match_token(s, Token::End).require()?;
 
-    let current = tracker.current_mut()?;
-    current.finish_block(inner)?;
-    current.emit_loop_to(start)?;
-    current.finish_block(outer)?;
+    frag.emit_loop_to()?;
+    frag.commit();
+    outer_frag.commit();
 
     Ok((s, ()))
 }

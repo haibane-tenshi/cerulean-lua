@@ -6,25 +6,25 @@ mod prefix_expr;
 mod prelude;
 mod stmt;
 
-use std::borrow::Cow;
 use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, Token};
-use crate::opcode::{
-    Chunk, ConstCapacityError, FunctionCapacityError, FunctionId, InstrCountError,
-};
-use crate::tracker::{
-    BackpatchError, ChunkTracker, EmitError, Error as CodegenError, FinishFnError, NoActiveFnError,
-    StackStateError,
+use crate::opcode::{Chunk, ConstCapacityError, FunctionCapacityError, InstrCountError};
+use crate::tracker2::fragment::EmitError;
+use crate::tracker2::stack::{
+    BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
+    VariadicStackError,
 };
 
-use expr::expr;
 use prelude::*;
-use stmt::{return_, statement};
 
 #[derive(Debug, Error)]
 #[error("parsing error")]
 pub struct ParseError;
+
+#[derive(Debug, Error)]
+#[error("codegen error")]
+pub struct CodegenError;
 
 #[derive(Debug, Error)]
 pub enum LexParseError {
@@ -50,51 +50,63 @@ impl LexParseError {
     }
 }
 
-impl From<ConstCapacityError> for LexParseError {
-    fn from(value: ConstCapacityError) -> Self {
-        LexParseError::Codegen(value.into())
+impl From<VariadicStackError> for LexParseError {
+    fn from(_: VariadicStackError) -> Self {
+        LexParseError::Codegen(CodegenError)
     }
 }
 
-impl From<NoActiveFnError> for LexParseError {
-    fn from(value: NoActiveFnError) -> Self {
-        LexParseError::Codegen(value.into())
+impl From<StackOverflowError> for LexParseError {
+    fn from(_: StackOverflowError) -> Self {
+        LexParseError::Codegen(CodegenError)
+    }
+}
+
+impl From<PushError> for LexParseError {
+    fn from(_: PushError) -> Self {
+        LexParseError::Codegen(CodegenError)
+    }
+}
+
+impl From<PopError> for LexParseError {
+    fn from(_: PopError) -> Self {
+        LexParseError::Codegen(CodegenError)
+    }
+}
+
+impl From<BoundaryViolationError> for LexParseError {
+    fn from(_: BoundaryViolationError) -> Self {
+        LexParseError::Codegen(CodegenError)
+    }
+}
+
+impl From<GiveNameError> for LexParseError {
+    fn from(_: GiveNameError) -> Self {
+        LexParseError::Codegen(CodegenError)
+    }
+}
+
+impl From<ConstCapacityError> for LexParseError {
+    fn from(_: ConstCapacityError) -> Self {
+        LexParseError::Codegen(CodegenError)
     }
 }
 
 impl From<EmitError> for LexParseError {
-    fn from(value: EmitError) -> Self {
-        LexParseError::Codegen(value.into())
-    }
-}
-
-impl From<StackStateError> for LexParseError {
-    fn from(value: StackStateError) -> Self {
-        LexParseError::Codegen(value.into())
+    fn from(_: EmitError) -> Self {
+        LexParseError::Codegen(CodegenError)
     }
 }
 
 impl From<InstrCountError> for LexParseError {
-    fn from(value: InstrCountError) -> Self {
-        LexParseError::Codegen(value.into())
+    fn from(_: InstrCountError) -> Self {
+        LexParseError::Codegen(CodegenError)
     }
 }
 
 impl From<FunctionCapacityError> for LexParseError {
-    fn from(value: FunctionCapacityError) -> Self {
-        LexParseError::Codegen(value.into())
-    }
-}
-
-impl From<FinishFnError> for LexParseError {
-    fn from(value: FinishFnError) -> Self {
-        LexParseError::Codegen(value.into())
-    }
-}
-
-impl From<BackpatchError> for LexParseError {
-    fn from(value: BackpatchError) -> Self {
-        LexParseError::Codegen(value.into())
+    fn from(_: FunctionCapacityError) -> Self {
+        LexParseError::Codegen(CodegenError)
     }
 }
 
@@ -143,12 +155,16 @@ impl<'s, T> Optional<T> for Result<(Lexer<'s>, T), LexParseError> {
 
 pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
     use crate::parser::block::block;
+    use crate::tracker2::chunk::Chunk;
+    use crate::tracker2::function::Function;
+    use crate::tracker2::stack::{Stack, StackView};
 
-    let mut tracker = ChunkTracker::empty();
+    let mut chunk = Chunk::with_script();
+    let mut script = Function::new();
+    let mut stack = Stack::new();
 
-    tracker.start_fn()?;
-
-    match block(s, &mut tracker) {
+    let fragment = Fragment::new(&mut script, StackView::new(&mut stack));
+    match block(s, &mut chunk, fragment) {
         Ok((mut s, ())) => match s.next_token() {
             Err(LexParseError::Eof) => (),
             _ => return Err(ParseError.into()),
@@ -157,6 +173,10 @@ pub fn chunk(s: Lexer) -> Result<Chunk, LexParseError> {
         Err(err) => return Err(err),
     }
 
-    tracker.finish_fn(0)?;
-    tracker.resolve().map_err(|_| ParseError.into())
+    // Put script into where runtime expects it to find.
+    let mut script = script.resolve(0);
+    std::mem::swap(chunk.functions.first_mut().unwrap(), &mut script);
+    let chunk = chunk.resolve();
+
+    Ok(chunk)
 }

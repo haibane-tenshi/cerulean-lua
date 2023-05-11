@@ -2,46 +2,41 @@ use crate::parser::prelude::*;
 
 pub(in crate::parser) fn table<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     let (s, ()) = match_token(s, Token::CurlyL)?;
 
-    let table_slot = tracker.current()?.stack_top()?;
-    tracker.current_mut()?.emit(OpCode::TabCreate)?;
+    let table_slot = frag.stack().top()?;
+    frag.emit(OpCode::TabCreate)?;
 
-    let (s, _) = field_list(s.clone(), tracker, table_slot).optional(s);
+    let (s, _) = field_list(s.clone(), table_slot, chunk, frag.new_fragment()).optional(s);
     let (s, ()) = match_token(s, Token::CurlyR)?;
+
+    frag.commit();
 
     Ok((s, ()))
 }
 
 fn field_list<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
     table_slot: StackSlot,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     let mut next_index = 1;
 
     let mut field = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-        if let Ok(r) = bracket(s.clone(), tracker, table_slot) {
+        if let Ok(r) = bracket(s.clone(), table_slot, chunk, frag.new_fragment()) {
             Ok(r)
-        } else if let Ok(r) = name(s.clone(), tracker, table_slot) {
+        } else if let Ok(r) = name(s.clone(), table_slot, chunk, frag.new_fragment()) {
             Ok(r)
-        } else if let Ok(r) = index(s, tracker, table_slot, next_index) {
+        } else if let Ok(r) = index(s, table_slot, next_index, chunk, frag.new_fragment()) {
             next_index += 1;
             Ok(r)
         } else {
             Err(ParseError.into())
         }
-    };
-
-    let field_sep = |mut s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-        match s.next_token()? {
-            Token::Comma | Token::Semicolon => (),
-            _ => return Err(ParseError.into()),
-        };
-
-        Ok((s, ()))
     };
 
     let (mut s, ()) = field(s)?;
@@ -60,75 +55,89 @@ fn field_list<'s>(
 
     let (s, _) = field_sep(s.clone()).optional(s);
 
+    frag.commit();
+
+    Ok((s, ()))
+}
+
+fn field_sep(mut s: Lexer) -> Result<(Lexer, ()), LexParseError> {
+    match s.next_token()? {
+        Token::Comma | Token::Semicolon => (),
+        _ => return Err(ParseError.into()),
+    };
+
     Ok((s, ()))
 }
 
 fn bracket<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
     table_slot: StackSlot,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::parser::expr::expr_adjusted_to_1;
 
     let (s, ()) = match_token(s, Token::BracketL)?;
 
-    tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
+    frag.emit(OpCode::LoadStack(table_slot))?;
 
-    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+    let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
     let (s, ()) = match_token(s, Token::BracketR).require()?;
     let (s, ()) = match_token(s, Token::Assign).require()?;
-    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+    let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
 
-    tracker.current_mut()?.emit(OpCode::TabSet)?;
+    frag.emit(OpCode::TabSet)?;
+    frag.commit();
 
     Ok((s, ()))
 }
 
 fn name<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
     table_slot: StackSlot,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::parser::expr::expr_adjusted_to_1;
 
     let (s, ident) = identifier(s)?;
 
-    tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
+    frag.emit(OpCode::LoadStack(table_slot))?;
 
-    let const_id = tracker.insert_literal(Literal::String(ident.to_string()))?;
-    tracker
-        .current_mut()?
-        .emit(OpCode::LoadConstant(const_id))?;
+    let const_id = chunk.constants.insert(Literal::String(ident.to_string()))?;
+    frag.emit(OpCode::LoadConstant(const_id))?;
 
     let (s, ()) = match_token(s, Token::Assign).require()?;
-    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+    let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
 
-    tracker.current_mut()?.emit(OpCode::TabSet)?;
+    frag.emit(OpCode::TabSet)?;
+    frag.commit();
 
     Ok((s, ()))
 }
 
 fn index<'s>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
     table_slot: StackSlot,
     index: i64,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::parser::expr::expr_adjusted_to_1;
 
-    let start = tracker.current()?.stack_top()?;
-    let r = expr_adjusted_to_1(s, tracker)?;
+    let start = frag.stack().top()?;
+    let r = expr_adjusted_to_1(s, chunk, frag.new_fragment())?;
 
-    tracker.current_mut()?.emit(OpCode::LoadStack(table_slot))?;
+    frag.emit(OpCode::LoadStack(table_slot))?;
 
-    let const_id = tracker.insert_literal(Literal::Int(index))?;
-    tracker
-        .current_mut()?
-        .emit(OpCode::LoadConstant(const_id))?;
+    let const_id = chunk.constants.insert(Literal::Int(index))?;
+    frag.emit(OpCode::LoadConstant(const_id))?;
 
-    tracker.current_mut()?.emit(OpCode::LoadStack(start))?;
-    tracker.current_mut()?.emit(OpCode::TabSet)?;
-    tracker.current_mut()?.emit_adjust_to(start)?;
+    frag.emit(OpCode::LoadStack(start))?;
+    frag.emit(OpCode::TabSet)?;
+    frag.emit_adjust_to(start)?;
+
+    frag.commit();
 
     Ok(r)
 }

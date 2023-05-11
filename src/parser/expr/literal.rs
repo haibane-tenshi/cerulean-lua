@@ -1,21 +1,16 @@
 use crate::parser::prelude::*;
 
 pub(in crate::parser) fn literal<'s>(
-    mut s: Lexer<'s>,
-    tracker: &mut ChunkTracker,
+    s: Lexer<'s>,
+    chunk: &mut Chunk,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    let literal = match s.next_token()? {
-        Token::Nil => Literal::Nil,
-        Token::True => Literal::Bool(true),
-        Token::False => Literal::Bool(false),
-        Token::Numeral(Number::Int(value)) => Literal::Int(value),
-        Token::Numeral(Number::Float(value)) => Literal::Float(value),
-        Token::ShortLiteralString(value) => Literal::String(value.to_string()),
-        _ => return Err(ParseError.into()),
-    };
+    let (s, literal) = crate::parser::basic::literal(s)?;
 
-    let id = tracker.insert_literal(literal)?;
-    tracker.current_mut()?.emit(OpCode::LoadConstant(id))?;
+    let id = chunk.constants.insert(literal)?;
+    frag.emit(OpCode::LoadConstant(id))?;
+
+    frag.commit();
 
     Ok((s, ()))
 }

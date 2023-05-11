@@ -1,51 +1,44 @@
 use crate::parser::prelude::*;
 
-pub(super) fn if_then<'s>(
+pub(super) fn if_then<'s, 'fun, 'stack>(
     s: Lexer<'s>,
-    tracker: &mut ChunkTracker<'s>,
+    chunk: &mut Chunk,
+    mut outer_frag: Fragment<'s, 'fun, 'stack>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
 
+    let outer = outer_frag.id();
+
     let (s, ()) = match_token(s, Token::If)?;
-
-    let outer = tracker.current_mut()?.start_block()?;
-
-    // This is a tricky bit.
-    // We start the inner block only *after* condition is evaluated.
-    // This causes expression result to be part of outer block, but not inner one.
-    // The beneficial part is that now it doesn't need to be cleaned up as part of inner block,
-    // sparing us from emitting extra AdjustStack instruction at the beginning of every branch.
-    // The downside: condition values will accumulate and persist until the end of outer block.
-    // In practice this is unlikely to ever cause problems,
-    // unless one writes *very unreasonable* chain of `elseif`s.
-    //
-    // We implement the same thing around `elseif`s.
-
-    let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
+    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).require()?;
     let (s, ()) = match_token(s, Token::Then).require()?;
 
-    let current = tracker.current_mut()?;
-    let mut inner = current.start_block()?;
-    current.emit_jump_to_end_of(inner, Some(false))?;
+    let mut frag = outer_frag.new_fragment();
+    frag.emit_jump_to(frag.id(), Some(false))?;
 
-    let (mut s, ()) = block(s, tracker).require()?;
+    let (mut s, ()) = block(s, chunk, frag.new_fragment()).require()?;
+
+    if match_token(s.clone(), Token::End).is_err() {
+        frag.emit_jump_to(outer, None)?;
+    }
+    frag.commit();
 
     let mut else_if_clause = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
         let (s, ()) = match_token(s, Token::ElseIf)?;
 
-        let current = tracker.current_mut()?;
-        current.emit_jump_to_end_of(outer, None)?;
-        current.finish_block(inner)?;
+        let mut frag = outer_frag.new_fragment();
 
-        let (s, ()) = expr_adjusted_to_1(s, tracker).require()?;
-
-        let current = tracker.current_mut()?;
-        inner = current.start_block()?;
-        current.emit_jump_to_end_of(inner, Some(false))?;
-
+        let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
         let (s, ()) = match_token(s, Token::Then).require()?;
-        let (s, ()) = block(s, tracker).require()?;
+        frag.emit_jump_to(frag.id(), Some(false))?;
+
+        let (s, ()) = block(s, chunk, frag.new_fragment()).require()?;
+
+        if match_token(s.clone(), Token::End).is_err() {
+            frag.emit_jump_to(outer, None)?;
+        }
+        frag.commit();
 
         Ok((s, ()))
     };
@@ -59,14 +52,7 @@ pub(super) fn if_then<'s>(
 
     let mut else_clause = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
         let (s, ()) = match_token(s, Token::Else)?;
-
-        let current = tracker.current_mut()?;
-        current.emit_jump_to_end_of(outer, None)?;
-        current.finish_block(inner)?;
-
-        inner = current.start_block()?;
-
-        let (s, ()) = block(s, tracker).require()?;
+        let (s, ()) = block(s, chunk, outer_frag.new_fragment()).require()?;
 
         Ok((s, ()))
     };
@@ -74,9 +60,7 @@ pub(super) fn if_then<'s>(
     let (s, _) = else_clause(s.clone()).optional(s);
     let (s, ()) = match_token(s, Token::End).require()?;
 
-    let current = tracker.current_mut()?;
-    current.finish_block(inner)?;
-    current.finish_block(outer)?;
+    outer_frag.commit();
 
     Ok((s, ()))
 }

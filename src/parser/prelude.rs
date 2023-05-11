@@ -4,7 +4,7 @@ pub(super) use crate::opcode::{
 };
 pub(super) use crate::parser::basic::*;
 pub(super) use crate::parser::{LexParseError, NextToken, Optional, ParseError, Require};
-pub(super) use crate::tracker::{ChunkTracker, FunctionTracker};
 pub(super) use crate::tracker2::chunk::Chunk;
-pub(super) use crate::tracker2::fragment::{Fragment, FragmentId};
+pub(super) use crate::tracker2::fragment::Fragment;
+pub(super) use crate::tracker2::stack::NameLookup;
 pub(super) use crate::value::Literal;
