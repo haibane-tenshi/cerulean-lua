@@ -59,7 +59,7 @@ pub fn func_body<'s, 'fun, 'stack>(
     let (s, ()) = match_token(s, Token::End).require()?;
 
     // Finish function
-    frag.commit();
+    frag.commit_scope();
     let fun = fun.resolve(height);
     let func_id = chunk.functions.push(fun)?;
 

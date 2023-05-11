@@ -126,7 +126,7 @@ pub(super) fn numerical_for<'s, 'fun, 'stack>(
 
     // Clean up.
     frag.commit();
-    outer_frag.commit();
+    outer_frag.commit_scope();
 
     Ok((s, ()))
 }

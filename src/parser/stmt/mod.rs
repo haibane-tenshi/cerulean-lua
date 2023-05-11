@@ -68,7 +68,7 @@ fn do_end<'s>(
     let (s, ()) = block(s, chunk, frag.new_fragment()).require()?;
     let (s, ()) = match_token(s, Token::End).require()?;
 
-    frag.commit();
+    frag.commit_scope();
 
     Ok((s, ()))
 }

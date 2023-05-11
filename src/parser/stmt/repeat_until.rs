@@ -18,7 +18,7 @@ pub(super) fn repeat_until<'s>(
 
     frag.emit_jump_to(frag.id(), Some(true))?;
     frag.emit_loop_to()?;
-    frag.commit();
+    frag.commit_scope();
     outer_frag.commit();
 
     Ok((s, ()))

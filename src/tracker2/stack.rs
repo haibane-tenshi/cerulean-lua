@@ -207,6 +207,7 @@ impl<'s> Backlinks<'s> {
     }
 }
 
+#[derive(Debug)]
 pub enum NameLookup {
     Local(StackSlot),
     Upvalue,
@@ -372,11 +373,12 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
     }
 
-    pub fn commit(self) {
-        // Preserve stack *height* but remove identifiers.
-        for slot in self.stack.temporaries.range_mut(self.boundary..).iter_mut() {
-            if let Some(ident) = slot.take() {
-                self.stack.backlinks.pop(ident);
+    pub fn commit(self, preserve_idents: bool) {
+        if !preserve_idents {
+            for slot in self.stack.temporaries.range_mut(self.boundary..).iter_mut() {
+                if let Some(ident) = slot.take() {
+                    self.stack.backlinks.pop(ident);
+                }
             }
         }
 

@@ -52,7 +52,7 @@ pub(super) fn generic_for<'s>(
     let (s, ()) = match_token(s, Token::End).require()?;
 
     frag.emit_loop_to()?;
-    frag.commit();
+    frag.commit_scope();
     outer_frag.commit();
 
     Ok((s, ()))

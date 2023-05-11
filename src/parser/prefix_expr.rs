@@ -50,6 +50,7 @@ impl Place {
     }
 }
 
+#[derive(Debug)]
 enum PrefixExpr {
     Expr,
     Place(Place),

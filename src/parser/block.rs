@@ -3,9 +3,12 @@ use crate::parser::prelude::*;
 pub fn block<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
-    frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    inner_block(s, chunk, frag)
+    let r = inner_block(s, chunk, frag.new_fragment())?;
+
+    frag.commit_scope();
+    Ok(r)
 }
 
 pub fn inner_block<'s>(

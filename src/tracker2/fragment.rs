@@ -171,7 +171,7 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
         Fragment { fun, stack }
     }
 
-    pub fn commit(self) {
+    fn commit_impl(self, preserve_stack: bool) {
         let Fragment { fun, mut stack } = self;
 
         let sequence_state = fun.reachable().then(|| stack.state());
@@ -187,7 +187,15 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
             stack.apply(state).unwrap();
         }
 
-        stack.commit();
+        stack.commit(preserve_stack);
+    }
+
+    pub fn commit_scope(self) {
+        self.commit_impl(false)
+    }
+
+    pub fn commit(self) {
+        self.commit_impl(true)
     }
 }
 
