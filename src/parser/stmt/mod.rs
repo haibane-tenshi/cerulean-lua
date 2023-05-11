@@ -23,31 +23,34 @@ pub(in crate::parser) fn statement<'s>(
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, ()), LexParseError> {
-    if let Ok(r) = semicolon(s.clone()) {
-        Ok(r)
+    let r = if let Ok(r) = semicolon(s.clone()) {
+        r
     } else if let Ok(r) = do_end(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = if_then(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = while_do(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = repeat_until(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = numerical_for(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = generic_for(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = local_assignment(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = local_function(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else if let Ok(r) = assignment(s.clone(), chunk, frag.new_fragment()) {
-        Ok(r)
+        r
     } else {
         let mut s = s;
         let _ = s.next_token()?;
-        Err(ParseError.into())
-    }
+        return Err(ParseError.into());
+    };
+
+    frag.commit();
+    Ok(r)
 }
 
 fn semicolon(s: Lexer) -> Result<(Lexer, ()), LexParseError> {
