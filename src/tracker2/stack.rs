@@ -317,7 +317,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
 
         let slot = self.stack.push()?;
-        let r = StackSlot::default() + (self.frame_base - slot);
+        let r = StackSlot::default() + (slot - self.frame_base);
 
         Ok(r)
     }
