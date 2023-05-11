@@ -9,7 +9,7 @@ pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 
 #[derive(Debug, Clone, Eq, PartialEq, Logos)]
 #[logos(skip r"[ \t\r\n\f]+")]
-#[logos(error = LexError)]
+#[logos(error = UnrecognizedTokenError)]
 pub enum Token<'s> {
     #[token("nil")]
     Nil,
@@ -203,7 +203,7 @@ impl<'s> RawLiteralString<'s> {
         &self.0[1..self.0.len() - 1]
     }
 
-    pub fn unescape(&self) -> Result<Cow<'s, str>, UnknownCharacterEscapeError> {
+    pub fn unescape(&self) -> Result<Cow<'s, str>, UnknownEscapeSequenceError> {
         let mut s = self.raw_value();
 
         if !s.contains('\\') {
@@ -238,7 +238,7 @@ impl<'s> RawLiteralString<'s> {
                             .peekable()
                             .next_if(|&(_, c)| c == '\n')
                             .map(|_| 0x0a)
-                            .ok_or(UnknownCharacterEscapeError)?;
+                            .ok_or(UnknownEscapeSequenceError)?;
 
                         Some(r)
                     }
@@ -251,7 +251,7 @@ impl<'s> RawLiteralString<'s> {
 
                         None
                     }
-                    _ => return Err(UnknownCharacterEscapeError),
+                    _ => return Err(UnknownEscapeSequenceError),
                 };
 
                 code.map(|code| char::from_u32(code).unwrap())
@@ -274,8 +274,9 @@ impl<'s> RawLiteralString<'s> {
     }
 }
 
-#[derive(Debug)]
-pub struct UnknownCharacterEscapeError;
+#[derive(Debug, Error)]
+#[error("encountered unknown escape sequence")]
+pub struct UnknownEscapeSequenceError;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct RawNumber<'s>(&'s str);
@@ -285,7 +286,7 @@ impl<'s> RawNumber<'s> {
         self.0
     }
 
-    pub fn parse(&self) -> Result<Number, UnknownNumberFormat> {
+    pub fn parse(&self) -> Result<Number, UnknownNumberFormatError> {
         self.0.parse()
     }
 }
@@ -297,7 +298,7 @@ pub enum Number {
 }
 
 impl FromStr for Number {
-    type Err = UnknownNumberFormat;
+    type Err = UnknownNumberFormatError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use lexical::{
@@ -404,7 +405,7 @@ impl FromStr for Number {
                 {
                     Number::Float(value.try_into().unwrap())
                 } else {
-                    return Err(UnknownNumberFormat);
+                    return Err(UnknownNumberFormatError);
                 }
             }
             None => {
@@ -418,7 +419,7 @@ impl FromStr for Number {
                 {
                     Number::Float(value.try_into().unwrap())
                 } else {
-                    return Err(UnknownNumberFormat);
+                    return Err(UnknownNumberFormatError);
                 }
             }
         };
@@ -427,9 +428,10 @@ impl FromStr for Number {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct UnknownNumberFormat;
+#[derive(Debug, Copy, Clone, Error)]
+#[error("unrecognized number format")]
+pub struct UnknownNumberFormatError;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Error)]
-#[error("lexing error")]
-pub struct LexError;
+#[error("unrecognized character sequence")]
+pub struct UnrecognizedTokenError;

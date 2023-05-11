@@ -8,7 +8,7 @@ mod stmt;
 
 use thiserror::Error;
 
-use crate::lex::{LexError, Lexer, Token};
+use crate::lex::{Lexer, Token, UnrecognizedTokenError};
 use crate::opcode::{Chunk, ConstCapacityError, FunctionCapacityError, InstrCountError};
 use crate::tracker2::fragment::EmitError;
 use crate::tracker2::stack::{
@@ -29,7 +29,7 @@ pub struct CodegenError;
 #[derive(Debug, Error)]
 pub enum LexParseError {
     #[error(transparent)]
-    Lex(#[from] LexError),
+    Lex(#[from] UnrecognizedTokenError),
 
     #[error(transparent)]
     Parse(#[from] ParseError),
