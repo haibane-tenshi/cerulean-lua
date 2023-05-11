@@ -8,6 +8,7 @@ use std::collections::HashMap;
 pub struct Function {
     opcodes: IndexVec<InstrId, OpCode>,
     jumps: HashMap<FragmentId, Vec<(InstrId, StackState)>>,
+    reachable: bool,
 }
 
 impl Function {
@@ -15,6 +16,7 @@ impl Function {
         Function {
             opcodes: Default::default(),
             jumps: Default::default(),
+            reachable: true,
         }
     }
 
@@ -22,6 +24,7 @@ impl Function {
         let Function {
             opcodes: codes,
             jumps,
+            reachable: _,
         } = self;
 
         debug_assert!(jumps.is_empty());
@@ -32,22 +35,42 @@ impl Function {
             height,
         }
     }
+
+    fn state(&self) -> InnerState {
+        InnerState {
+            start: self.opcodes.len(),
+            reachable: self.reachable,
+        }
+    }
+
+    fn apply(&mut self, state: InnerState) {
+        let InnerState { start, reachable } = state;
+
+        self.opcodes.truncate(start);
+        self.reachable = reachable;
+    }
+}
+
+#[derive(Copy, Clone)]
+struct InnerState {
+    start: InstrId,
+    reachable: bool,
 }
 
 pub(super) struct FunctionView<'fun> {
     fragment_id: FragmentId,
     fun: &'fun mut Function,
-    start: InstrId,
+    prev_state: InnerState,
 }
 
 impl<'fun> FunctionView<'fun> {
     pub fn new(fun: &'fun mut Function) -> Self {
-        let start = fun.opcodes.len();
+        let prev_state = fun.state();
 
         FunctionView {
             fragment_id: Default::default(),
             fun,
-            start,
+            prev_state,
         }
     }
 
@@ -56,7 +79,11 @@ impl<'fun> FunctionView<'fun> {
     }
 
     pub fn start(&self) -> InstrId {
-        self.start
+        self.prev_state.start
+    }
+
+    pub fn reachable(&self) -> bool {
+        self.fun.reachable
     }
 
     pub fn len(&self) -> InstrId {
@@ -76,7 +103,7 @@ impl<'fun> FunctionView<'fun> {
     }
 
     pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
-        if instr_id < self.start {
+        if instr_id < self.start() {
             return None;
         }
 
@@ -84,14 +111,14 @@ impl<'fun> FunctionView<'fun> {
     }
 
     pub fn new_block(&mut self) -> FunctionView {
-        let start = self.fun.opcodes.len();
         let fragment_id = self.fragment_id + 1;
+        let prev_state = self.fun.state();
         let fun = &mut self.fun;
 
         FunctionView {
             fragment_id,
             fun,
-            start,
+            prev_state,
         }
     }
 
@@ -99,8 +126,8 @@ impl<'fun> FunctionView<'fun> {
         let mut stack_state = None;
 
         if let Some(to_backpatch) = self.fun.jumps.remove(&self.fragment_id) {
-            let start = self.start;
-            let end = self.fun.opcodes.len();
+            let start = self.start();
+            let end = self.len();
 
             // Note: instruction pointer is moved before instruction is executed,
             // so we need to take that into account.
@@ -131,7 +158,6 @@ impl<'fun> FunctionView<'fun> {
 
 impl<'fun> Drop for FunctionView<'fun> {
     fn drop(&mut self) {
-        self.fun.opcodes.truncate(self.start);
-        self.fun.jumps.remove(&self.fragment_id);
+        self.fun.apply(self.prev_state)
     }
 }

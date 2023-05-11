@@ -174,11 +174,17 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
     pub fn commit(self) {
         let Fragment { fun, mut stack } = self;
 
+        let sequence_state = fun.reachable().then(|| stack.state());
         let jump_state = fun.commit();
 
-        if let Some(state) = jump_state {
-            let final_state = state | stack.state();
-            stack.apply(final_state).unwrap();
+        let final_state = match (sequence_state, jump_state) {
+            (Some(a), Some(b)) => Some(a | b),
+            (Some(a), _) | (_, Some(a)) => Some(a),
+            (None, None) => None,
+        };
+
+        if let Some(state) = final_state {
+            stack.apply(state).unwrap();
         }
 
         stack.commit();
