@@ -12,7 +12,7 @@ pub(super) fn local_assignment<'s>(
     let stack_start = frag.stack().top()?;
 
     let (s, idents) = ident_list(s).require()?;
-    let (s, ()) = match_token(s, Token::Assign).require()?;
+    let (s, ()) = match_token(s, Token::EqualsSign).require()?;
     let (s, ()) = expr_list(s, chunk, frag.new_fragment()).map_err(LexParseError::eof_into_err)?;
 
     let count: u32 = idents.len().try_into().unwrap();

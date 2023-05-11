@@ -30,7 +30,7 @@ pub(super) fn numerical_for<'s, 'fun, 'stack>(
 
     let (s, ()) = match_token(s, Token::For)?;
     let (s, ident) = identifier(s).require()?;
-    let (s, ()) = match_token(s, Token::Assign).require()?;
+    let (s, ()) = match_token(s, Token::EqualsSign).require()?;
 
     let loop_var = outer_frag.stack().top()?;
     let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).require()?;

@@ -78,10 +78,10 @@ pub enum Token<'s> {
     Goto,
 
     #[token("+")]
-    Plus,
+    PlusSign,
 
     #[token("-")]
-    Minus,
+    MinusSign,
 
     #[token("*")]
     Asterisk,
@@ -90,10 +90,10 @@ pub enum Token<'s> {
     Slash,
 
     #[token("%")]
-    Percent,
+    PercentSign,
 
     #[token("^")]
-    Caret,
+    Circumflex,
 
     #[token("#")]
     Hash,
@@ -108,34 +108,34 @@ pub enum Token<'s> {
     Pipe,
 
     #[token("<<")]
-    DoubleAngL,
+    DoubleAngleL,
 
     #[token(">>")]
-    DoubleAngR,
+    DoubleAngleR,
 
     #[token("//")]
     DoubleSlash,
 
     #[token("==")]
-    DoubleEqual,
+    DoubleEqualsSign,
 
     #[token("~=")]
-    TildeEqual,
+    TildeEqualsSign,
 
     #[token("<=")]
-    AngLEqual,
+    AngleLEqualsSign,
 
     #[token(">=")]
-    AngREqual,
+    AngleREqualsSign,
 
     #[token("<")]
-    AngL,
+    AngleL,
 
     #[token(">")]
-    AngR,
+    AngleR,
 
     #[token("=")]
-    Assign,
+    EqualsSign,
 
     #[token("(")]
     ParL,

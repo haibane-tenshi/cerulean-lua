@@ -83,7 +83,7 @@ fn bracket<'s>(
 
     let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
     let (s, ()) = match_token(s, Token::BracketR).require()?;
-    let (s, ()) = match_token(s, Token::Assign).require()?;
+    let (s, ()) = match_token(s, Token::EqualsSign).require()?;
     let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
 
     frag.emit(OpCode::TabSet)?;
@@ -107,7 +107,7 @@ fn name<'s>(
     let const_id = chunk.constants.insert(Literal::String(ident.to_string()))?;
     frag.emit(OpCode::LoadConstant(const_id))?;
 
-    let (s, ()) = match_token(s, Token::Assign).require()?;
+    let (s, ()) = match_token(s, Token::EqualsSign).require()?;
     let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
 
     frag.emit(OpCode::TabSet)?;

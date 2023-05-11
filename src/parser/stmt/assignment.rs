@@ -12,7 +12,7 @@ pub(super) fn assignment<'s>(
     let (s, places) = places(s, chunk, frag.new_fragment())?;
     let count = places.len().try_into().unwrap();
 
-    let (s, ()) = match_token(s, Token::Assign).require()?;
+    let (s, ()) = match_token(s, Token::EqualsSign).require()?;
 
     let expr_start = frag.stack().top()?;
     let (s, ()) = expr_list_adjusted_to(s, count, chunk, frag.new_fragment()).require()?;

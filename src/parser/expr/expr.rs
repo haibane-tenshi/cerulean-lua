@@ -145,7 +145,7 @@ fn atom<'s>(
 
 fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
     let op = match s.next_token()? {
-        Token::Minus => Prefix::Ari(AriUnaOp::Neg),
+        Token::MinusSign => Prefix::Ari(AriUnaOp::Neg),
         Token::Tilde => Prefix::Bit(BitUnaOp::Not),
         _ => return Err(ParseError.into()),
     };
@@ -155,24 +155,24 @@ fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
 
 fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
     let op = match s.next_token()? {
-        Token::Plus => Infix::Ari(AriBinOp::Add),
-        Token::Minus => Infix::Ari(AriBinOp::Sub),
+        Token::PlusSign => Infix::Ari(AriBinOp::Add),
+        Token::MinusSign => Infix::Ari(AriBinOp::Sub),
         Token::Asterisk => Infix::Ari(AriBinOp::Mul),
         Token::Slash => Infix::Ari(AriBinOp::Div),
         Token::DoubleSlash => Infix::Ari(AriBinOp::FloorDiv),
-        Token::Percent => Infix::Ari(AriBinOp::Rem),
-        Token::Caret => Infix::Ari(AriBinOp::Exp),
+        Token::PercentSign => Infix::Ari(AriBinOp::Rem),
+        Token::Circumflex => Infix::Ari(AriBinOp::Exp),
         Token::Ampersand => Infix::Bit(BitBinOp::And),
         Token::Pipe => Infix::Bit(BitBinOp::Or),
         Token::Tilde => Infix::Bit(BitBinOp::Xor),
-        Token::DoubleAngL => Infix::Bit(BitBinOp::ShL),
-        Token::DoubleAngR => Infix::Bit(BitBinOp::ShR),
-        Token::DoubleEqual => Infix::Rel(RelBinOp::Eq),
-        Token::TildeEqual => Infix::Rel(RelBinOp::Neq),
-        Token::AngL => Infix::Rel(RelBinOp::Lt),
-        Token::AngLEqual => Infix::Rel(RelBinOp::Le),
-        Token::AngR => Infix::Rel(RelBinOp::Gt),
-        Token::AngREqual => Infix::Rel(RelBinOp::Ge),
+        Token::DoubleAngleL => Infix::Bit(BitBinOp::ShL),
+        Token::DoubleAngleR => Infix::Bit(BitBinOp::ShR),
+        Token::DoubleEqualsSign => Infix::Rel(RelBinOp::Eq),
+        Token::TildeEqualsSign => Infix::Rel(RelBinOp::Neq),
+        Token::AngleL => Infix::Rel(RelBinOp::Lt),
+        Token::AngleLEqualsSign => Infix::Rel(RelBinOp::Le),
+        Token::AngleR => Infix::Rel(RelBinOp::Gt),
+        Token::AngleREqualsSign => Infix::Rel(RelBinOp::Ge),
         Token::DoubleDot => Infix::Str(StrBinOp::Concat),
         Token::Or => Infix::Logical(Logical::Or),
         Token::And => Infix::Logical(Logical::And),
