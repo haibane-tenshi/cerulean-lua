@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut, RangeBounds};
+use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 
 pub trait Index: Sized {
     type Error;
@@ -73,20 +73,7 @@ where
     where
         R: RangeBounds<I>,
     {
-        use std::ops::Bound;
-
-        let map_bound = |bound: Bound<&I>| -> Bound<usize> {
-            match bound {
-                Bound::Excluded(t) => Bound::Excluded(t.clone().into()),
-                Bound::Included(t) => Bound::Included(t.clone().into()),
-                Bound::Unbounded => Bound::Unbounded,
-            }
-        };
-
-        let start = map_bound(range.start_bound());
-        let end = map_bound(range.end_bound());
-
-        self.1.drain((start, end))
+        self.1.drain(convert_range(range))
     }
 }
 
@@ -163,6 +150,10 @@ impl<I, T> IndexSlice<I, T> {
     pub fn iter(&self) -> std::slice::Iter<T> {
         self.1.iter()
     }
+
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<T> {
+        self.1.iter_mut()
+    }
 }
 
 impl<I, T> IndexSlice<I, T>
@@ -177,6 +168,29 @@ where
     pub fn get_mut(&mut self, index: I) -> Option<&mut T> {
         let index = index.into();
         self.1.get_mut(index)
+    }
+}
+
+impl<I, T> IndexSlice<I, T>
+where
+    I: Index + Clone,
+{
+    pub fn range<R>(&self, range: R) -> &Self
+    where
+        R: RangeBounds<I>,
+    {
+        let range = convert_range(range);
+        let slice = &self.1[range];
+        Self::from_slice(slice)
+    }
+
+    pub fn range_mut<R>(&mut self, range: R) -> &mut Self
+    where
+        R: RangeBounds<I>,
+    {
+        let range = convert_range(range);
+        let slice = &mut self.1[range];
+        Self::from_mut_slice(slice)
     }
 }
 
@@ -207,4 +221,23 @@ impl<I, T> Default for &mut IndexSlice<I, T> {
     fn default() -> Self {
         IndexSlice::from_mut_slice(Default::default())
     }
+}
+
+fn convert_range<R, I>(range: R) -> (Bound<usize>, Bound<usize>)
+where
+    R: RangeBounds<I>,
+    I: Index + Clone,
+{
+    let map_bound = |bound: Bound<&I>| -> Bound<usize> {
+        match bound {
+            Bound::Excluded(t) => Bound::Excluded(t.clone().into()),
+            Bound::Included(t) => Bound::Included(t.clone().into()),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    };
+
+    let start = map_bound(range.start_bound());
+    let end = map_bound(range.end_bound());
+
+    (start, end)
 }

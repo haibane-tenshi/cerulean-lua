@@ -347,6 +347,13 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 
     pub fn commit(self) {
+        // Preserve stack *height* but remove identifiers.
+        for slot in self.stack.temporaries.range_mut(self.boundary..).iter_mut() {
+            if let Some(ident) = slot.take() {
+                self.stack.backlinks.pop(ident);
+            }
+        }
+
         std::mem::forget(self)
     }
 }
