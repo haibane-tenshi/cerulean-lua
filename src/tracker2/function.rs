@@ -1,12 +1,13 @@
 use crate::index_vec::IndexVec;
 use crate::opcode::{InstrCountError, InstrId, OpCode};
 use crate::tracker2::fragment::FragmentId;
+use crate::tracker2::stack::StackState;
 use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Function {
     opcodes: IndexVec<InstrId, OpCode>,
-    pub(super) jumps: HashMap<FragmentId, Vec<InstrId>>,
+    jumps: HashMap<FragmentId, Vec<(InstrId, StackState)>>,
 }
 
 impl Function {
@@ -66,8 +67,12 @@ impl<'fun> FunctionView<'fun> {
         self.fun.opcodes.push(opcode)
     }
 
-    pub fn register_jump(&mut self, target: FragmentId, instr: InstrId) {
-        self.fun.jumps.entry(target).or_default().push(instr);
+    pub fn register_jump(&mut self, target: FragmentId, instr: InstrId, state: StackState) {
+        self.fun
+            .jumps
+            .entry(target)
+            .or_default()
+            .push((instr, state));
     }
 
     pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
@@ -90,14 +95,16 @@ impl<'fun> FunctionView<'fun> {
         }
     }
 
-    pub fn commit(self) {
+    pub fn commit(self) -> Option<StackState> {
+        let mut stack_state = None;
+
         if let Some(to_backpatch) = self.fun.jumps.remove(&self.fragment_id) {
             let start = self.start;
             let end = self.fun.opcodes.len();
 
             // Note: instruction pointer is moved before instruction is executed,
             // so we need to take that into account.
-            for instr in to_backpatch {
+            for (instr, state) in to_backpatch {
                 match self.fun.opcodes.get_mut(instr) {
                     Some(OpCode::Jump { offset, .. } | OpCode::JumpIf { offset, .. }) => {
                         *offset = end - instr - 1;
@@ -107,11 +114,18 @@ impl<'fun> FunctionView<'fun> {
                     }
                     _ => (),
                 }
+
+                stack_state = match stack_state {
+                    Some(acc) => Some(acc | state),
+                    None => Some(state),
+                };
             }
         }
 
         // Prevent drop impls from rolling back changes.
-        std::mem::forget(self)
+        std::mem::forget(self);
+
+        stack_state
     }
 }
 

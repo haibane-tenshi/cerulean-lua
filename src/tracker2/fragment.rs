@@ -141,7 +141,7 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
         };
 
         let instr_id = self.emit(opcode)?;
-        self.fun.register_jump(target, instr_id);
+        self.fun.register_jump(target, instr_id, self.stack.state());
 
         Ok(instr_id)
     }
@@ -172,9 +172,15 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
     }
 
     pub fn commit(self) {
-        let Fragment { fun, stack } = self;
+        let Fragment { fun, mut stack } = self;
 
-        fun.commit();
+        let jump_state = fun.commit();
+
+        if let Some(state) = jump_state {
+            let final_state = state | stack.state();
+            stack.apply(final_state).unwrap();
+        }
+
         stack.commit();
     }
 }

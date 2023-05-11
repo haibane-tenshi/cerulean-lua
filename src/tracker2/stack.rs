@@ -1,7 +1,7 @@
 use crate::index_vec::{Index, IndexVec};
 use crate::opcode::StackSlot;
 use std::collections::HashMap;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, BitOr, Sub, SubAssign};
 use thiserror::Error;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
@@ -93,6 +93,19 @@ impl Add<StackOffset> for StackSlot {
 pub enum StackState {
     Variadic,
     Finite(StackSlot),
+}
+
+impl BitOr for StackState {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (StackState::Finite(lhs), StackState::Finite(rhs)) if lhs == rhs => {
+                StackState::Finite(lhs)
+            }
+            _ => StackState::Variadic,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -272,6 +285,19 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         } else {
             StackState::Finite(self.raw_top())
         }
+    }
+
+    pub fn apply(&mut self, state: StackState) -> Result<(), BoundaryViolationError> {
+        match state {
+            StackState::Variadic => {
+                self.make_variadic();
+            }
+            StackState::Finite(height) => {
+                self.adjust_to(height)?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn top(&self) -> Result<StackSlot, VariadicStackError> {
