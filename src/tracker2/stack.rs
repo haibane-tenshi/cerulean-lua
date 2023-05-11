@@ -98,6 +98,7 @@ pub enum StackState {
 #[derive(Debug, Default)]
 pub struct Stack<'s> {
     temporaries: IndexVec<GlobalStackSlot, Option<&'s str>>,
+    variadic: bool,
     backlinks: Backlinks<'s>,
 }
 
@@ -145,6 +146,8 @@ impl<'s> Stack<'s> {
 
     fn adjust_to(&mut self, slot: GlobalStackSlot) -> bool {
         use std::cmp::Ordering;
+
+        self.variadic = false;
 
         match Ord::cmp(&self.len(), &slot) {
             Ordering::Equal => false,
@@ -202,56 +205,84 @@ pub struct StackView<'s, 'origin> {
     stack: &'origin mut Stack<'s>,
     variadic: bool,
     boundary: GlobalStackSlot,
-    base: StackSlot,
+    frame_base: GlobalStackSlot,
 }
 
 impl<'s, 'origin> StackView<'s, 'origin> {
     pub fn new(stack: &'origin mut Stack<'s>) -> Self {
+        let variadic = stack.variadic;
+        let boundary = stack.len();
+        let frame_base = stack.len();
+
         StackView {
             stack,
-            variadic: false,
-            boundary: Default::default(),
-            base: Default::default(),
+            variadic,
+            boundary,
+            frame_base,
         }
     }
 
     pub fn new_block(&mut self) -> StackView<'s, '_> {
+        let variadic = self.stack.variadic;
         let boundary = self.stack.len();
-        let base = self.base + self.len();
+        let frame_base = self.frame_base;
 
         StackView {
             stack: self.stack,
-            variadic: false,
+            variadic,
             boundary,
-            base,
+            frame_base,
         }
     }
 
     pub fn new_frame(&mut self) -> StackView<'s, '_> {
         let boundary = self.stack.len();
+        let frame_base = boundary;
 
         StackView {
             stack: self.stack,
             variadic: false,
             boundary,
-            base: Default::default(),
+            frame_base,
         }
     }
 
     fn len(&self) -> StackOffset {
-        self.stack.len() - self.boundary
+        self.stack.len() - self.frame_base
     }
 
-    pub fn top(&self) -> StackSlot {
-        self.base + self.len()
+    fn slot_to_global(&self, slot: StackSlot) -> GlobalStackSlot {
+        self.frame_base + (slot.sub(StackSlot::default()))
+    }
+
+    fn slot_to_frame(&self, slot: GlobalStackSlot) -> Option<StackSlot> {
+        let offset = self.frame_base.checked_sub(slot)?;
+        let r = StackSlot::default() + offset;
+
+        Some(r)
+    }
+
+    pub(super) fn raw_top(&self) -> StackSlot {
+        StackSlot::default() + self.len()
     }
 
     pub fn state(&self) -> StackState {
-        if self.variadic {
+        if self.stack.variadic {
             StackState::Variadic
         } else {
-            StackState::Finite(self.base + self.len())
+            StackState::Finite(self.raw_top())
         }
+    }
+
+    pub fn top(&self) -> Result<StackSlot, VariadicStackError> {
+        match self.state() {
+            StackState::Finite(top) => Ok(top),
+            StackState::Variadic => Err(VariadicStackError),
+        }
+    }
+
+    pub fn boundary(&self) -> StackSlot {
+        self.slot_to_frame(self.boundary).unwrap()
     }
 
     pub fn push(&mut self) -> Result<StackSlot, PushError> {
@@ -260,7 +291,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
 
         let slot = self.stack.push()?;
-        let r = self.base + (slot - self.boundary);
+        let r = StackSlot::default() + (self.frame_base - slot);
 
         Ok(r)
     }
@@ -282,49 +313,48 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 
     pub fn make_variadic(&mut self) {
-        self.variadic = true;
+        self.stack.variadic = true;
     }
 
     pub fn adjust_to(&mut self, height: StackSlot) -> Result<bool, BoundaryViolationError> {
-        let Some(offset) = height.checked_sub(self.base) else {
-            return Err(BoundaryViolationError)
+        let height = self.slot_to_global(height);
+        if height < self.boundary {
+            return Err(BoundaryViolationError);
         };
 
-        let height = self.boundary + offset;
         let r = self.stack.adjust_to(height);
-        self.variadic = false;
 
         Ok(r)
     }
 
     pub fn give_name(&mut self, slot: StackSlot, name: &'s str) -> Result<(), GiveNameError> {
-        let Some(offset) = slot.checked_sub(self.base) else {
-            return Err(BoundaryViolationError.into())
+        let slot = self.slot_to_global(slot);
+        if slot < self.boundary {
+            return Err(BoundaryViolationError.into());
         };
 
-        let slot = self.boundary + offset;
         self.stack.give_name(slot, name)
     }
 
     pub fn lookup(&self, name: &'s str) -> NameLookup {
         match self.stack.lookup(name) {
-            Some(slot) => match slot.checked_sub(self.boundary) {
-                Some(slot) => NameLookup::Local(self.base + slot),
+            Some(slot) => match self.slot_to_frame(slot) {
+                Some(slot) => NameLookup::Local(slot),
                 None => NameLookup::Upvalue,
             },
             None => NameLookup::Global,
         }
     }
 
-    pub fn finalize(self) {
-        // Do nothing for now.
-        // TODO: figure out if we can avoid readjusting stack and simply erase identifiers.
+    pub fn commit(self) {
+        std::mem::forget(self)
     }
 }
 
 impl<'s, 'origin> Drop for StackView<'s, 'origin> {
     fn drop(&mut self) {
         self.stack.adjust_to(self.boundary);
+        self.stack.variadic = self.variadic;
     }
 }
 

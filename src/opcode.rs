@@ -48,6 +48,10 @@ impl StackSlot {
         let inner = self.0.checked_sub(rhs.0)?;
         Some(StackOffset(inner))
     }
+
+    pub(crate) fn sub(self, rhs: Self) -> StackOffset {
+        self.checked_sub(rhs).unwrap()
+    }
 }
 
 impl AddAssign<u32> for StackSlot {
@@ -86,7 +90,7 @@ impl Index for FunctionId {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
 pub struct InstrId(pub u32);
 
 #[derive(Debug, Error)]
@@ -187,6 +191,21 @@ impl Add<u32> for InstrOffset {
 
     fn add(mut self, rhs: u32) -> Self::Output {
         self += rhs;
+        self
+    }
+}
+
+impl SubAssign<u32> for InstrOffset {
+    fn sub_assign(&mut self, rhs: u32) {
+        self.0 -= rhs;
+    }
+}
+
+impl Sub<u32> for InstrOffset {
+    type Output = Self;
+
+    fn sub(mut self, rhs: u32) -> Self::Output {
+        self -= rhs;
         self
     }
 }
