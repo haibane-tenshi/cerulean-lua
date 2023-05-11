@@ -156,6 +156,10 @@ impl<I, T> IndexSlice<I, T> {
         self.1.first()
     }
 
+    pub fn first_mut(&mut self) -> Option<&mut T> {
+        self.1.first_mut()
+    }
+
     pub fn iter(&self) -> std::slice::Iter<T> {
         self.1.iter()
     }
