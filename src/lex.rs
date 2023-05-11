@@ -7,7 +7,7 @@ use thiserror::Error;
 
 pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 
-#[derive(Debug, Clone, PartialEq, Logos)]
+#[derive(Debug, Clone, Eq, PartialEq, Logos)]
 #[logos(skip r"[ \t\r\n\f]+")]
 #[logos(error = LexError)]
 pub enum Token<'s> {
@@ -179,16 +179,115 @@ pub enum Token<'s> {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'s str),
 
-    #[regex("\"(([\\\\](\r\n|.))|[^\"\\\\\r\n])*\"", |lex| unescape(&lex.slice()[1..lex.slice().len()-1]))]
-    #[regex("'(([\\\\](\r\n|.))|[^'\\\\\r\n])*'", |lex| unescape(&lex.slice()[1..lex.slice().len()-1]))]
-    ShortLiteralString(Cow<'s, str>),
+    #[regex("\"(([\\\\](\r\n|.))|[^\"\\\\\r\n])*\"", |lex| RawLiteralString(lex.slice()))]
+    #[regex("'(([\\\\](\r\n|.))|[^'\\\\\r\n])*'", |lex| RawLiteralString(lex.slice()))]
+    ShortLiteralString(RawLiteralString<'s>),
 
-    #[regex("[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?", |lex| lex.slice().parse())]
-    #[regex("0[xX][0-9a-fA-F]+([.][0-9a-fA-F]+)?(([eE]|[pP])[+-]?[0-9a-fA-F]+)?", |lex| lex.slice().parse())]
-    Numeral(Number),
+    #[regex("[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?", |lex| RawNumber(lex.slice()))]
+    #[regex("0[xX][0-9a-fA-F]+([.][0-9a-fA-F]+)?([eEpP][+-]?[0-9a-fA-F]+)?", |lex| RawNumber(lex.slice()))]
+    Numeral(RawNumber<'s>),
 
-    #[regex("--.*\n?")]
-    Comment(&'s str),
+    #[regex("--.*\n?", logos::skip)]
+    Comment,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct RawLiteralString<'s>(&'s str);
+
+impl<'s> RawLiteralString<'s> {
+    pub fn full(&self) -> &'s str {
+        self.0
+    }
+
+    pub fn raw_value(&self) -> &'s str {
+        &self.0[1..self.0.len() - 1]
+    }
+
+    pub fn unescape(&self) -> Result<Cow<'s, str>, UnknownCharacterEscapeError> {
+        let mut s = self.raw_value();
+
+        if !s.contains('\\') {
+            return Ok(s.into());
+        }
+
+        let mut r = String::with_capacity(s.len());
+
+        while let Some(i) = s.find('\\') {
+            r += &s[..i];
+            s = &s[i..];
+
+            let mut iter = s.char_indices();
+            let _ = iter.next();
+            let (_, c) = iter.next().unwrap();
+
+            let unescaped = {
+                let code = match c {
+                    'a' => Some(0x07),
+                    'b' => Some(0x08),
+                    'f' => Some(0x0c),
+                    'r' => Some(0x0d),
+                    't' => Some(0x09),
+                    'v' => Some(0x0b),
+                    'n' => Some(0x0a),
+                    '\\' => Some(0x5c),
+                    '"' => Some(0x22),
+                    '\'' => Some(0x27),
+                    '\n' => Some(0x0a),
+                    '\r' => {
+                        let r = (&mut iter)
+                            .peekable()
+                            .next_if(|&(_, c)| c == '\n')
+                            .map(|_| 0x0a)
+                            .ok_or(UnknownCharacterEscapeError)?;
+
+                        Some(r)
+                    }
+                    'z' => {
+                        while (&mut iter)
+                            .peekable()
+                            .next_if(|(_, c)| c.is_whitespace())
+                            .is_some()
+                        {}
+
+                        None
+                    }
+                    _ => return Err(UnknownCharacterEscapeError),
+                };
+
+                code.map(|code| char::from_u32(code).unwrap())
+            };
+
+            if let Some(c) = unescaped {
+                r.push(c);
+            }
+
+            s = if let Some((i, _)) = iter.next() {
+                &s[i..]
+            } else {
+                ""
+            };
+        }
+
+        r += s;
+
+        Ok(r.into())
+    }
+}
+
+#[derive(Debug)]
+pub struct UnknownCharacterEscapeError;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct RawNumber<'s>(&'s str);
+
+impl<'s> RawNumber<'s> {
+    pub fn raw_value(&self) -> &'s str {
+        self.0
+    }
+
+    pub fn parse(&self) -> Result<Number, UnknownNumberFormat> {
+        self.0.parse()
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -198,7 +297,7 @@ pub enum Number {
 }
 
 impl FromStr for Number {
-    type Err = LexError;
+    type Err = UnknownNumberFormat;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use lexical::{
@@ -305,7 +404,7 @@ impl FromStr for Number {
                 {
                     Number::Float(value.try_into().unwrap())
                 } else {
-                    return Err(LexError);
+                    return Err(UnknownNumberFormat);
                 }
             }
             None => {
@@ -319,7 +418,7 @@ impl FromStr for Number {
                 {
                     Number::Float(value.try_into().unwrap())
                 } else {
-                    return Err(LexError);
+                    return Err(UnknownNumberFormat);
                 }
             }
         };
@@ -328,74 +427,8 @@ impl FromStr for Number {
     }
 }
 
-pub fn unescape(mut s: &str) -> Result<Cow<str>, LexError> {
-    if !s.contains('\\') {
-        return Ok(s.into());
-    }
-
-    let mut r = String::with_capacity(s.len());
-
-    while let Some(i) = s.find('\\') {
-        r += &s[..i];
-        s = &s[i..];
-
-        let mut iter = s.char_indices();
-        let _ = iter.next();
-        let (_, c) = iter.next().ok_or(LexError)?;
-
-        let unescaped = {
-            let code = match c {
-                'a' => Some(0x07),
-                'b' => Some(0x08),
-                'f' => Some(0x0c),
-                'r' => Some(0x0d),
-                't' => Some(0x09),
-                'v' => Some(0x0b),
-                'n' => Some(0x0a),
-                '\\' => Some(0x5c),
-                '"' => Some(0x22),
-                '\'' => Some(0x27),
-                '\n' => Some(0x0a),
-                '\r' => {
-                    let r = (&mut iter)
-                        .peekable()
-                        .next_if(|&(_, c)| c == '\n')
-                        .map(|_| 0x0a)
-                        .ok_or(LexError)?;
-
-                    Some(r)
-                }
-                'z' => {
-                    while (&mut iter)
-                        .peekable()
-                        .next_if(|(_, c)| c.is_whitespace())
-                        .is_some()
-                    {}
-
-                    None
-                }
-                _ => return Err(LexError),
-            };
-
-            code.map(|code| char::from_u32(code).ok_or(LexError))
-                .transpose()?
-        };
-
-        if let Some(c) = unescaped {
-            r.push(c);
-        }
-
-        s = if let Some((i, _)) = iter.next() {
-            &s[i..]
-        } else {
-            ""
-        };
-    }
-
-    r += s;
-
-    Ok(r.into())
-}
+#[derive(Debug, Copy, Clone)]
+pub struct UnknownNumberFormat;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Error)]
 #[error("lexing error")]
