@@ -10,12 +10,12 @@ use either::Either;
 use std::ops::{BitOr, BitOrAssign};
 use thiserror::Error;
 
-use crate::lex::{Error as LexError, Lexer, Token};
-use crate::tracker2::fragment::EmitError;
-use crate::tracker2::stack::{
+use crate::codegen::fragment::EmitError;
+use crate::codegen::stack::{
     BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
     VariadicStackError,
 };
+use crate::lex::{Error as LexError, Lexer, Token};
 use expr::function::FunctionFailure;
 use expr::table::{TabBracketFailure, TabFailure, TabNameFailure};
 use expr::ParExprFailure;
@@ -409,10 +409,10 @@ pub trait HaveFailureMode {
 }
 
 pub fn chunk(s: Lexer) -> Result<Chunk, Error<ParseFailure>> {
+    use crate::codegen::chunk::Chunk;
+    use crate::codegen::function::Function;
+    use crate::codegen::stack::{Stack, StackView};
     use crate::parser::block::block;
-    use crate::tracker2::chunk::Chunk;
-    use crate::tracker2::function::Function;
-    use crate::tracker2::stack::{Stack, StackView};
 
     let mut chunk = Chunk::with_script();
     let mut script = Function::new();

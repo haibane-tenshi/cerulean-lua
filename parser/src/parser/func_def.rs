@@ -1,5 +1,5 @@
+use crate::codegen::stack::StackView;
 use crate::parser::prelude::*;
-use crate::tracker2::stack::StackView;
 use repr::index::FunctionId;
 use thiserror::Error;
 
@@ -8,8 +8,8 @@ pub(crate) fn func_body<'s>(
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, FunctionId, Complete), Error<ParseFailure>> {
+    use crate::codegen::function::Function;
     use crate::parser::block::block;
-    use crate::tracker2::function::Function;
     use FuncDefFailure::*;
 
     let (s, _, Complete) = match_token(s, Token::ParL).map_parse(ParL)?;

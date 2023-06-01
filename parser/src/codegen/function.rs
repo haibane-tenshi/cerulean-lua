@@ -1,5 +1,5 @@
-use crate::tracker2::fragment::FragmentId;
-use crate::tracker2::stack::StackState;
+use crate::codegen::fragment::FragmentId;
+use crate::codegen::stack::StackState;
 use repr::index::{InstrCountError, InstrId};
 use repr::index_vec::IndexVec;
 use repr::opcode::OpCode;

@@ -1,4 +1,4 @@
-use crate::tracker2::const_::Constants;
+use crate::codegen::const_::Constants;
 use repr::chunk::Function;
 use repr::index::FunctionId;
 use repr::index_vec::IndexVec;

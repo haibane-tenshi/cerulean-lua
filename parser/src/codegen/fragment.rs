@@ -1,8 +1,8 @@
 use std::ops::Add;
 use thiserror::Error;
 
-use crate::tracker2::function::{Function, FunctionView};
-use crate::tracker2::stack::{BoundaryViolationError, PopError, PushError, StackView};
+use crate::codegen::function::{Function, FunctionView};
+use crate::codegen::stack::{BoundaryViolationError, PopError, PushError, StackView};
 use repr::index::{InstrCountError, InstrId, StackSlot};
 use repr::opcode::OpCode;
 

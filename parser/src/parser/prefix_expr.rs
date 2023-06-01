@@ -1,7 +1,7 @@
 use thiserror::Error;
 
+use crate::codegen::fragment::EmitError;
 use crate::parser::prelude::*;
-use crate::tracker2::fragment::EmitError;
 
 pub(in crate::parser) fn prefix_expr<'s>(
     s: Lexer<'s>,

@@ -1,5 +1,5 @@
+use crate::codegen::fragment::EmitError;
 use crate::parser::prelude::*;
-use crate::tracker2::fragment::EmitError;
 
 #[derive(Debug, Copy, Clone)]
 enum StackSlotOrConstId {
