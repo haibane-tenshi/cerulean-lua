@@ -1,19 +1,22 @@
 use crate::parser::prelude::*;
+use thiserror::Error;
 
 pub(super) fn local_assignment<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
     use crate::parser::expr::expr_list;
+    use LocalAssignmentFailure::*;
 
-    let (s, ()) = match_token(s, Token::Local)?;
+    let (s, _, Complete) = match_token(s, Token::Local).map_parse(Local)?;
 
     let stack_start = frag.stack().top()?;
 
-    let (s, idents) = ident_list(s).require()?;
-    let (s, ()) = match_token(s, Token::EqualsSign).require()?;
-    let (s, ()) = expr_list(s, chunk, frag.new_fragment()).map_err(LexParseError::eof_into_err)?;
+    let (s, idents, _) = ident_list(s).map_parse(Ident)?;
+    let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
+    let (s, (), status) =
+        expr_list(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     let count: u32 = idents.len().try_into().unwrap();
     frag.emit_adjust_to(stack_start + count)?;
@@ -24,25 +27,58 @@ pub(super) fn local_assignment<'s>(
 
     frag.commit();
 
-    Ok((s, ()))
+    Ok((s, (), status))
 }
 
-fn ident_list<'s>(s: Lexer<'s>) -> Result<(Lexer<'s>, Vec<&'s str>), LexParseError> {
-    let (mut s, ident) = identifier(s)?;
+#[derive(Debug, Error)]
+pub enum LocalAssignmentFailure {
+    #[error("missing `local` keyword")]
+    Local(#[source] TokenMismatch),
+    #[error("assignment list should have at least one identifier")]
+    Ident(#[source] IdentMismatch),
+    #[error("missing equals sign")]
+    EqualsSign(#[source] TokenMismatch),
+}
+
+impl HaveFailureMode for LocalAssignmentFailure {
+    fn mode(&self) -> FailureMode {
+        match self {
+            LocalAssignmentFailure::Local(_) => FailureMode::Mismatch,
+            LocalAssignmentFailure::Ident(_) => FailureMode::Ambiguous,
+            LocalAssignmentFailure::EqualsSign(_) => FailureMode::Ambiguous,
+        }
+    }
+}
+
+fn ident_list<'s>(
+    s: Lexer<'s>,
+) -> Result<(Lexer<'s>, Vec<&'s str>, ParseError<IdentListSuccess>), ParseError<IdentMismatch>> {
+    let (mut s, (ident, _), Complete) = identifier(s)?;
 
     let mut r = vec![ident];
 
-    let next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, &'s str), LexParseError> {
-        let (s, ()) = match_token(s, Token::Comma)?;
-        let (s, ident) = identifier(s).require()?;
+    let next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, _, _), ParseError<IdentListSuccess>> {
+        use IdentListSuccess::*;
 
-        Ok((s, ident))
+        let (s, _, Complete) = match_token(s, Token::Comma).map_parse(Comma)?;
+        let (s, (ident, _), status) = identifier(s).map_parse(Ident)?;
+
+        Ok((s, ident, status))
     };
 
-    while let Ok((ns, ident)) = next_part(s.clone()) {
-        s = ns;
+    let status = loop {
+        let ident;
+        (s, ident) = match next_part(s.clone()) {
+            Ok((s, ident, _)) => (s, ident),
+            Err(err) => break err,
+        };
         r.push(ident);
-    }
+    };
 
-    Ok((s, r))
+    Ok((s, r, status))
+}
+
+enum IdentListSuccess {
+    Comma(TokenMismatch),
+    Ident(IdentMismatch),
 }

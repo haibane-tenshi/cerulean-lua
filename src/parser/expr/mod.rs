@@ -1,8 +1,10 @@
 #[allow(clippy::module_inception)]
 mod expr;
-mod function;
+pub(crate) mod function;
 mod literal;
-mod table;
+pub(crate) mod table;
+
+use thiserror::Error;
 
 use crate::parser::prelude::*;
 
@@ -11,12 +13,12 @@ pub(in crate::parser) use function::function;
 pub(in crate::parser) use literal::literal;
 pub(in crate::parser) use table::table;
 
-pub fn expr_adjusted_to<'s>(
+pub(crate) fn expr_adjusted_to<'s>(
     s: Lexer<'s>,
     count: u32,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ExprSuccessReason), Error<ParseFailure>> {
     let mark = frag.stack().top()? + count;
     let r = expr(s, chunk, frag.new_fragment())?;
     frag.emit_adjust_to(mark)?;
@@ -26,65 +28,86 @@ pub fn expr_adjusted_to<'s>(
     Ok(r)
 }
 
-pub fn expr_adjusted_to_1<'s>(
+pub(crate) fn expr_adjusted_to_1<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ExprSuccessReason), Error<ParseFailure>> {
     expr_adjusted_to(s, 1, chunk, frag)
 }
 
-pub fn par_expr<'s>(
+pub(crate) fn par_expr<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    let (s, ()) = match_token(s, Token::ParL)?;
-    let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment()).require()?;
-    let (s, ()) = match_token(s, Token::ParR).require()?;
+) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
+    use ParExprFailure::*;
+
+    let (s, _, Complete) = match_token(s, Token::ParL).map_parse(ParL)?;
+    let (s, (), _) =
+        expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _, status) = match_token(s, Token::ParR).map_parse(ParR)?;
 
     frag.commit();
 
-    Ok((s, ()))
+    Ok((s, (), status))
 }
 
-pub fn expr_list<'s>(
+#[derive(Debug, Error)]
+#[error("failed to parse parenthesised expression")]
+pub enum ParExprFailure {
+    ParL(TokenMismatch),
+    ParR(TokenMismatch),
+}
+
+impl HaveFailureMode for ParExprFailure {
+    fn mode(&self) -> FailureMode {
+        match self {
+            ParExprFailure::ParL(_) => FailureMode::Mismatch,
+            ParExprFailure::ParR(_) => FailureMode::Malformed,
+        }
+    }
+}
+
+pub(crate) fn expr_list<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
     let mut mark = frag.stack().top()?;
 
-    let (mut s, ()) = expr(s, chunk, frag.new_fragment())?;
+    let (mut s, (), _) = expr(s, chunk, frag.new_fragment())?;
 
-    let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, ()), LexParseError> {
-        let (s, ()) = match_token(s, Token::Comma)?;
+    let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, (), _), ()> {
+        let (s, _, Complete) = match_token(s, Token::Comma).map_err(|_| ())?;
 
         // Expressions inside comma lists are adjusted to 1.
         mark += 1;
-        frag.emit_adjust_to(mark)?;
+        frag.emit_adjust_to(mark).map_err(|_| ())?;
 
-        expr(s, chunk, frag.new_fragment()).require()
+        expr(s, chunk, frag.new_fragment()).map_err(|_| ())
     };
 
-    loop {
+    let status = loop {
         s = match next_part(s.clone()) {
-            Ok((s, ())) => s,
-            Err(_) => break,
+            Ok((s, (), _)) => s,
+            Err(err) => break err,
         }
-    }
+    };
 
     frag.commit();
 
-    Ok((s, ()))
+    Ok((s, (), status))
 }
 
-pub fn expr_list_adjusted_to<'s>(
+enum ExprListSuccess {}
+
+pub(crate) fn expr_list_adjusted_to<'s>(
     s: Lexer<'s>,
     count: u32,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
     let mark = frag.stack().top()? + count;
     let r = expr_list(s, chunk, frag.new_fragment())?;
     frag.emit_adjust_to(mark)?;
@@ -93,3 +116,6 @@ pub fn expr_list_adjusted_to<'s>(
 
     Ok(r)
 }
+
+#[derive(Debug)]
+pub struct ExprSuccessReason;

@@ -1,15 +1,18 @@
 use crate::opcode::FunctionId;
 use crate::parser::prelude::*;
+use crate::tracker2::stack::StackView;
+use thiserror::Error;
 
-pub fn func_body<'s, 'fun, 'stack>(
+pub(crate) fn func_body<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
-    mut outer_frag: Fragment<'s, 'fun, 'stack>,
-) -> Result<(Lexer<'s>, FunctionId), LexParseError> {
+    mut outer_frag: Fragment<'s, '_, '_>,
+) -> Result<(Lexer<'s>, FunctionId, Complete), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::tracker2::function::Function;
+    use FuncDefFailure::*;
 
-    let (s, ()) = match_token(s, Token::ParL)?;
+    let (s, _, Complete) = match_token(s, Token::ParL).map_parse(ParL)?;
 
     // Start function
     let mut fun = Function::new();
@@ -19,44 +22,15 @@ pub fn func_body<'s, 'fun, 'stack>(
     // In the future we will put environment here instead.
     frag.stack_mut().push()?;
 
-    let mut parlist = |s: Lexer<'s>| -> Result<_, LexParseError> {
-        let mut count = 0;
-
-        let (mut s, ident) = identifier(s)?;
-        let slot = frag.stack_mut().push()?;
-        frag.stack_mut().give_name(slot, ident)?;
-        count += 1;
-
-        let mut next_ident = |s: Lexer<'s>| -> Result<_, LexParseError> {
-            let (s, ()) = match_token(s, Token::Comma)?;
-            let (s, ident) = identifier(s).require()?;
-
-            let slot = frag.stack_mut().push()?;
-            frag.stack_mut().give_name(slot, ident)?;
-            count += 1;
-
-            Ok(s)
-        };
-
-        loop {
-            s = match next_ident(s.clone()) {
-                Ok(s) => s,
-                Err(_) => break,
-            };
-        }
-
-        Ok((s, count))
-    };
-
-    let (s, param_count) = parlist(s.clone()).optional(s);
+    let (s, param_count, _) = parlist(s.clone(), frag.stack_mut()).optional(s);
     let param_count = param_count.unwrap_or(0);
 
     // An extra stack slot is taken by function pointer itself.
     let height = param_count + 1;
 
-    let (s, ()) = match_token(s, Token::ParR).require()?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).require()?;
-    let (s, ()) = match_token(s, Token::End).require()?;
+    let (s, _, Complete) = match_token(s, Token::ParR).map_parse(ParR)?;
+    let (s, (), _) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
 
     // Finish function
     frag.commit_scope();
@@ -66,5 +40,64 @@ pub fn func_body<'s, 'fun, 'stack>(
     // Drop outer fragment to make sure we didn't mess up current function.
     drop(outer_frag);
 
-    Ok((s, func_id))
+    Ok((s, func_id, status))
+}
+
+#[derive(Debug, Error)]
+pub enum FuncDefFailure {
+    #[error("missing opening parenthesis")]
+    ParL(#[source] TokenMismatch),
+    #[error("missing closing parenthesis")]
+    ParR(#[source] TokenMismatch),
+    #[error("missing `end` token")]
+    End(#[source] TokenMismatch),
+}
+
+impl HaveFailureMode for FuncDefFailure {
+    fn mode(&self) -> FailureMode {
+        match self {
+            FuncDefFailure::ParL(_) => FailureMode::Mismatch,
+            FuncDefFailure::ParR(_) => FailureMode::Malformed,
+            FuncDefFailure::End(_) => FailureMode::Malformed,
+        }
+    }
+}
+
+fn parlist<'s>(
+    s: Lexer<'s>,
+    stack: &mut StackView<'s, '_>,
+) -> Result<(Lexer<'s>, u32, Error<ParListMismatch>), Error<IdentMismatch>> {
+    let mut count = 0;
+
+    let (mut s, (ident, _), Complete) = identifier(s)?;
+    let slot = stack.push()?;
+    stack.give_name(slot, ident)?;
+    count += 1;
+
+    let mut next_ident = |s: Lexer<'s>| -> Result<_, Error<ParListMismatch>> {
+        use ParListMismatch::*;
+
+        let (s, _, Complete) = match_token(s, Token::Comma).map_parse(Comma)?;
+        let (s, (ident, _), Complete) = identifier(s).map_parse(Ident)?;
+
+        let slot = stack.push()?;
+        stack.give_name(slot, ident)?;
+        count += 1;
+
+        Ok(s)
+    };
+
+    let status = loop {
+        s = match next_ident(s.clone()) {
+            Ok(s) => s,
+            Err(err) => break err,
+        };
+    };
+
+    Ok((s, count, status))
+}
+
+enum ParListMismatch {
+    Comma(TokenMismatch),
+    Ident(IdentMismatch),
 }

@@ -1,19 +1,22 @@
 use crate::parser::prelude::*;
+use thiserror::Error;
 
 pub(super) fn generic_for<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_list_adjusted_to;
+    use GenericForFailure::*;
 
-    let (s, ()) = match_token(s, Token::For)?;
-    let (s, names) = name_list(s).require()?;
-    let (s, ()) = match_token(s, Token::In).require()?;
+    let (s, _, Complete) = match_token(s, Token::For).map_parse(For)?;
+    let (s, names, _) = name_list(s).map_parse(Ident)?;
+    let (s, _, Complete) = match_token(s, Token::In).map_parse(In)?;
 
     let top = outer_frag.stack().top()?;
-    let (s, ()) = expr_list_adjusted_to(s, 4, chunk, outer_frag.new_fragment()).require()?;
+    let (s, (), _) = expr_list_adjusted_to(s, 4, chunk, outer_frag.new_fragment())
+        .with_mode(FailureMode::Malformed)?;
 
     let iter = top;
     let state = top + 1;
@@ -47,30 +50,60 @@ pub(super) fn generic_for<'s>(
         frag.stack_mut().give_name(slot, name)?;
     }
 
-    let (s, ()) = match_token(s, Token::Do).require()?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).require()?;
-    let (s, ()) = match_token(s, Token::End).require()?;
+    let (s, _, Complete) = match_token(s, Token::Do).map_parse(Do)?;
+    let (s, (), _) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
 
     frag.emit_loop_to()?;
     frag.commit_scope();
     outer_frag.commit();
 
-    Ok((s, ()))
+    Ok((s, (), status))
 }
 
-fn name_list<'s>(s: Lexer<'s>) -> Result<(Lexer<'s>, Vec<&'s str>), LexParseError> {
-    let (mut s, ident) = identifier(s)?;
+#[derive(Debug, Error)]
+pub enum GenericForFailure {
+    #[error("missing `for` token")]
+    For(#[source] TokenMismatch),
+    #[error("missing identifier for control variable")]
+    Ident(#[source] IdentMismatch),
+    #[error("missing `in` token")]
+    In(#[source] TokenMismatch),
+    #[error("missing `do` token")]
+    Do(#[source] TokenMismatch),
+    #[error("missing `end` token")]
+    End(#[source] TokenMismatch),
+}
+
+impl HaveFailureMode for GenericForFailure {
+    fn mode(&self) -> FailureMode {
+        match self {
+            GenericForFailure::For(_) => FailureMode::Mismatch,
+            GenericForFailure::Ident(_) => FailureMode::Ambiguous,
+            GenericForFailure::In(_) => FailureMode::Ambiguous,
+            GenericForFailure::Do(_) => FailureMode::Malformed,
+            GenericForFailure::End(_) => FailureMode::Malformed,
+        }
+    }
+}
+
+fn name_list<'s>(s: Lexer<'s>) -> Result<(Lexer<'s>, Vec<&'s str>, ()), ParseError<IdentMismatch>> {
+    let (mut s, (ident, _), Complete) = identifier(s)?;
     let mut r = vec![ident];
 
-    let next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, &'s str), LexParseError> {
-        let (s, ()) = match_token(s, Token::Comma)?;
-        identifier(s).require()
+    let next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, _, _), _> {
+        let (s, _, Complete) = match_token(s, Token::Comma).map_err(|_| ())?;
+        identifier(s).map_err(|_| ())
     };
 
-    while let Ok((ns, ident)) = next_part(s.clone()) {
-        s = ns;
+    let status = loop {
+        let ident;
+        (s, ident) = match next_part(s.clone()) {
+            Ok((s, (ident, _), _)) => (s, ident),
+            Err(err) => break err,
+        };
         r.push(ident);
-    }
+    };
 
-    Ok((s, r))
+    Ok((s, r, status))
 }

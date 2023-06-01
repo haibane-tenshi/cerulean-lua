@@ -18,39 +18,42 @@ impl StackSlotOrConstId {
     }
 }
 
-pub(super) fn numerical_for<'s, 'fun, 'stack>(
+pub(super) fn numerical_for<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
-    mut outer_frag: Fragment<'s, 'fun, 'stack>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+    mut outer_frag: Fragment<'s, '_, '_>,
+) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
+    use NumericalForFailure::*;
 
     let exit = outer_frag.id();
 
-    let (s, ()) = match_token(s, Token::For)?;
-    let (s, ident) = identifier(s).require()?;
-    let (s, ()) = match_token(s, Token::EqualsSign).require()?;
+    let (s, _, Complete) = match_token(s, Token::For).map_parse(For)?;
+    let (s, (ident, _), Complete) = identifier(s).map_parse(Ident)?;
+    let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
 
     let loop_var = outer_frag.stack().top()?;
-    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).require()?;
+    let (s, (), _) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
+        .with_mode(FailureMode::Malformed)?;
     outer_frag.stack_mut().give_name(loop_var, ident)?;
 
-    let (s, ()) = match_token(s, Token::Comma).require()?;
+    let (s, _, Complete) = match_token(s, Token::Comma).map_parse(Comma)?;
 
     let limit = outer_frag.stack().top()?;
-    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).require()?;
+    let (s, (), _) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
+        .with_mode(FailureMode::Malformed)?;
 
-    let mut maybe_step = |s: Lexer<'s>| -> Result<(Lexer<'s>, StackSlot), LexParseError> {
-        let (s, ()) = match_token(s, Token::Comma).require()?;
+    let mut maybe_step = |s: Lexer<'s>| -> Result<(Lexer<'s>, StackSlot, ()), ()> {
+        let (s, _, Complete) = match_token(s, Token::Comma).map_err(|_| ())?;
 
-        let step = outer_frag.stack().top()?;
-        let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).require()?;
+        let step = outer_frag.stack().top().map_err(|_| ())?;
+        let (s, (), _) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).map_err(|_| ())?;
 
-        Ok((s, step))
+        Ok((s, step, ()))
     };
 
-    let (s, step) = maybe_step(s.clone()).optional(s);
+    let (s, step, _) = maybe_step(s.clone()).optional(s);
 
     let step = match step {
         Some(slot) => StackSlotOrConstId::StackSlot(slot),
@@ -113,9 +116,9 @@ pub(super) fn numerical_for<'s, 'fun, 'stack>(
 
     controls.commit();
 
-    let (s, ()) = match_token(s, Token::Do).require()?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).require()?;
-    let (s, ()) = match_token(s, Token::End).require()?;
+    let (s, _, Complete) = match_token(s, Token::Do).map_parse(Do)?;
+    let (s, (), _) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
 
     // Increment control variable.
     frag.emit(OpCode::LoadStack(loop_var))?;
@@ -128,5 +131,34 @@ pub(super) fn numerical_for<'s, 'fun, 'stack>(
     frag.commit();
     outer_frag.commit_scope();
 
-    Ok((s, ()))
+    Ok((s, (), status))
+}
+
+#[derive(Debug, Error)]
+pub enum NumericalForFailure {
+    #[error("missing `for` keyword")]
+    For(#[source] TokenMismatch),
+    #[error("missing identifier for control variable")]
+    Ident(#[source] IdentMismatch),
+    #[error("missing equals sign")]
+    EqualsSign(#[source] TokenMismatch),
+    #[error("missing comma separator between starting value and limit")]
+    Comma(#[source] TokenMismatch),
+    #[error("missing `do` keyword")]
+    Do(#[source] TokenMismatch),
+    #[error("missing `end` keyword")]
+    End(#[source] TokenMismatch),
+}
+
+impl HaveFailureMode for NumericalForFailure {
+    fn mode(&self) -> FailureMode {
+        match self {
+            NumericalForFailure::For(_) => FailureMode::Mismatch,
+            NumericalForFailure::Ident(_) => FailureMode::Ambiguous,
+            NumericalForFailure::EqualsSign(_) => FailureMode::Ambiguous,
+            NumericalForFailure::Comma(_) => FailureMode::Malformed,
+            NumericalForFailure::Do(_) => FailureMode::Malformed,
+            NumericalForFailure::End(_) => FailureMode::Malformed,
+        }
+    }
 }

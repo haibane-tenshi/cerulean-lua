@@ -1,94 +1,98 @@
-mod assignment;
-mod generic_for;
-mod if_then;
-mod local_assignment;
-mod local_function;
-mod numerical_for;
-mod repeat_until;
-mod while_do;
+pub(crate) mod assignment;
+pub(crate) mod do_end;
+pub(crate) mod generic_for;
+pub(crate) mod if_then;
+pub(crate) mod local_assignment;
+pub(crate) mod local_function;
+pub(crate) mod numerical_for;
+pub(crate) mod repeat_until;
+pub(crate) mod return_;
+pub(crate) mod while_do;
 
 use crate::parser::prelude::*;
-
-use assignment::assignment;
-use generic_for::generic_for;
-use if_then::if_then;
-use local_assignment::local_assignment;
-use local_function::local_function;
-use numerical_for::numerical_for;
-use repeat_until::repeat_until;
-use while_do::while_do;
 
 pub(in crate::parser) fn statement<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    let r = if let Ok(r) = semicolon(s.clone()) {
-        r
-    } else if let Ok(r) = do_end(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = if_then(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = while_do(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = repeat_until(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = numerical_for(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = generic_for(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = local_assignment(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = local_function(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = assignment(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else {
-        let mut s = s;
-        let _ = s.next_token()?;
-        return Err(ParseError.into());
+) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
+    use assignment::assignment;
+    use do_end::do_end;
+    use generic_for::generic_for;
+    use if_then::if_then;
+    use local_assignment::local_assignment;
+    use local_function::local_function;
+    use numerical_for::numerical_for;
+    use repeat_until::repeat_until;
+    use while_do::while_do;
+
+    let mut inner = || {
+        let mut err = match semicolon(s.clone()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(_) => {
+                let err = ParseFailure {
+                    mode: FailureMode::Mismatch,
+                    cause: ParseCause::ExpectedStatement,
+                };
+
+                Error::Parse(err)
+            }
+        };
+
+        err |= match do_end(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(err) => err,
+        };
+
+        err |= match if_then(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(err) => err,
+        };
+
+        err |= match while_do(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(err) => err,
+        };
+
+        err |= match repeat_until(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), _status)) => return Ok((s, (), Complete)),
+            Err(err) => err,
+        };
+
+        err |= match numerical_for(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(err) => err,
+        };
+
+        err |= match generic_for(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(err) => err,
+        };
+
+        err |= match local_assignment(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), _status)) => return Ok((s, (), Complete)),
+            Err(err) => err,
+        };
+
+        err |= match local_function(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(err) => err,
+        };
+
+        err |= match assignment(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), _status)) => return Ok((s, (), Complete)),
+            Err(err) => err,
+        };
+
+        Err(err)
     };
 
+    let (s, (), _) = inner()?;
     frag.commit();
-    Ok(r)
+    Ok((s, (), ()))
 }
 
-fn semicolon(s: Lexer) -> Result<(Lexer, ()), LexParseError> {
-    match_token(s, Token::Semicolon)
-}
-
-fn do_end<'s>(
-    s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use crate::parser::block::block;
-
-    let (s, ()) = match_token(s, Token::Do)?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).require()?;
-    let (s, ()) = match_token(s, Token::End).require()?;
-
-    frag.commit_scope();
-
-    Ok((s, ()))
-}
-
-pub(in crate::parser) fn return_<'s>(
-    s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
-    use super::expr::expr_list;
-
-    let (s, ()) = match_token(s, Token::Return)?;
-
-    let slot = frag.stack().top()?;
-
-    let (s, ()) = expr_list(s, chunk, frag.new_fragment()).map_err(LexParseError::eof_into_err)?;
-    let (s, _) = semicolon(s.clone()).optional(s);
-
-    frag.emit(OpCode::Return(slot))?;
-    frag.commit();
-
-    Ok((s, ()))
+fn semicolon(s: Lexer) -> Result<(Lexer, (), Complete), ParseError<TokenMismatch>> {
+    let (s, _, status) = match_token(s, Token::Semicolon)?;
+    Ok((s, (), status))
 }

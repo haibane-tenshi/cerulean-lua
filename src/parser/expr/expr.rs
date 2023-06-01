@@ -1,3 +1,4 @@
+use crate::parser::expr::ExprSuccessReason;
 use crate::parser::prelude::*;
 
 enum OpCodeOrJump {
@@ -9,7 +10,7 @@ pub(in crate::parser) fn expr<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ExprSuccessReason), Error<ParseFailure>> {
     expr_impl(s, 0, chunk, frag)
 }
 
@@ -18,14 +19,14 @@ fn expr_impl<'s>(
     min_bp: u64,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ExprSuccessReason), Error<ParseFailure>> {
     // This should always point at where the first value of previous expressions should be.
     // We need this to implement short-circuiting of `and` and `or` ops.
     let mut top = frag.stack().top()?;
 
     let mut s = if let Ok((s, op)) = prefix_op(s.clone()) {
         let ((), rhs_bp) = op.binding_power();
-        let (s, ()) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())?;
+        let (s, (), _) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())?;
 
         let opcode = match op {
             Prefix::Ari(op) => OpCode::AriUnaOp(op),
@@ -37,7 +38,7 @@ fn expr_impl<'s>(
 
         s
     } else {
-        let (s, ()) = atom(s, chunk, frag.new_fragment())?;
+        let (s, (), _) = atom(s, chunk, frag.new_fragment())?;
 
         s
     };
@@ -87,8 +88,7 @@ fn expr_impl<'s>(
         };
 
         let rhs_top = frag.stack().top()? + 1;
-        (s, _) = expr_impl(ns, rhs_bp, chunk, frag.new_fragment())
-            .map_err(LexParseError::eof_into_err)?;
+        (s, _, _) = expr_impl(ns, rhs_bp, chunk, frag.new_fragment())?;
 
         // Adjust right operand.
         frag.emit_adjust_to(rhs_top)?;
@@ -115,46 +115,68 @@ fn expr_impl<'s>(
 
     frag.commit();
 
-    Ok((s, ()))
+    Ok((s, (), ExprSuccessReason))
 }
 
 fn atom<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, ()), LexParseError> {
+) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
     use super::{function, literal, table};
     use crate::parser::prefix_expr::prefix_expr;
 
-    let r = if let Ok(r) = literal(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = prefix_expr(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = function(s.clone(), chunk, frag.new_fragment()) {
-        r
-    } else if let Ok(r) = table(s, chunk, frag.new_fragment()) {
-        r
-    } else {
-        return Err(ParseError.into());
+    let mut inner = || {
+        let mut err = match literal(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), _status)) => return Ok((s, (), ())),
+            Err(err) => err.map_parse(|_| ParseFailure {
+                mode: FailureMode::Mismatch,
+                cause: ParseCause::ExpectedExpr,
+            }),
+        };
+
+        err |= match prefix_expr(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), status)) => return Ok((s, (), status)),
+            Err(err) => err,
+        };
+
+        err |= match table(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), _status)) => return Ok((s, (), ())),
+            Err(err) => err,
+        };
+
+        err |= match function(s.clone(), chunk, frag.new_fragment()) {
+            Ok((s, (), _status)) => return Ok((s, (), ())),
+            Err(err) => err,
+        };
+
+        Err(err)
     };
 
+    let r = inner()?;
     frag.commit();
 
     Ok(r)
 }
 
-fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), LexParseError> {
-    let op = match s.next_token()? {
+fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix), ParseError<PrefixMismatchError>> {
+    let token = s.next_token().map_parse(|_| PrefixMismatchError)?;
+
+    let op = match token {
         Token::MinusSign => Prefix::Ari(AriUnaOp::Neg),
         Token::Tilde => Prefix::Bit(BitUnaOp::Not),
-        _ => return Err(ParseError.into()),
+        _ => return Err(ParseError::Parse(PrefixMismatchError)),
     };
 
     Ok((s, op))
 }
 
-fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
-    let op = match s.next_token()? {
+struct PrefixMismatchError;
+
+fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), ParseError<InfixMismatchError>> {
+    let token = s.next_token().map_parse(|_| InfixMismatchError)?;
+
+    let op = match token {
         Token::PlusSign => Infix::Ari(AriBinOp::Add),
         Token::MinusSign => Infix::Ari(AriBinOp::Sub),
         Token::Asterisk => Infix::Ari(AriBinOp::Mul),
@@ -176,11 +198,13 @@ fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix), LexParseError> {
         Token::DoubleDot => Infix::Str(StrBinOp::Concat),
         Token::Or => Infix::Logical(Logical::Or),
         Token::And => Infix::Logical(Logical::And),
-        _ => return Err(ParseError.into()),
+        _ => return Err(ParseError::Parse(InfixMismatchError)),
     };
 
     Ok((s, op))
 }
+
+struct InfixMismatchError;
 
 #[derive(Debug, Copy, Clone)]
 enum Prefix {

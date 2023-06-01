@@ -12,6 +12,7 @@ trace = ["tracing/max_level_trace"]
 anyhow = "1.0.70"
 clap = { version = "4.2.2", features = ["derive"] }
 decorum = { version = "0.3.1", default-features = false }
+either = "1.8.1"
 lexical = { version = "6.1.1", default-features = false, features = ["parse", "parse-floats", "parse-integers", "format", "power-of-two"] }
 logos = "0.13.0"
 ordered-float = "3.7.0"
