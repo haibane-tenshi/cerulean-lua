@@ -5,7 +5,6 @@ use rle_vec::RleVec;
 use thiserror::Error;
 
 use crate::index_vec::{Index, IndexVec};
-use crate::tracker2::stack::StackOffset;
 use crate::value::Literal;
 
 #[derive(Debug, Copy, Clone)]
@@ -36,21 +35,15 @@ impl Display for ConstId {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
+pub struct StackOffset(pub u32);
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 pub struct StackSlot(pub u32);
 
 impl StackSlot {
-    pub(crate) fn prev(self) -> Option<Self> {
-        let index = self.0.checked_sub(1)?;
-        Some(StackSlot(index))
-    }
-
-    pub(crate) fn checked_sub(self, rhs: Self) -> Option<StackOffset> {
+    pub fn checked_sub(self, rhs: Self) -> Option<StackOffset> {
         let inner = self.0.checked_sub(rhs.0)?;
         Some(StackOffset(inner))
-    }
-
-    pub(crate) fn sub(self, rhs: Self) -> StackOffset {
-        self.checked_sub(rhs).unwrap()
     }
 }
 
@@ -64,6 +57,37 @@ impl Add<u32> for StackSlot {
     type Output = Self;
 
     fn add(mut self, rhs: u32) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl Sub for StackSlot {
+    type Output = StackOffset;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.checked_sub(rhs).unwrap()
+    }
+}
+
+impl Sub<StackOffset> for StackSlot {
+    type Output = Self;
+
+    fn sub(self, rhs: StackOffset) -> Self::Output {
+        StackSlot(self.0 - rhs.0)
+    }
+}
+
+impl AddAssign<StackOffset> for StackSlot {
+    fn add_assign(&mut self, rhs: StackOffset) {
+        self.0 += rhs.0;
+    }
+}
+
+impl Add<StackOffset> for StackSlot {
+    type Output = Self;
+
+    fn add(mut self, rhs: StackOffset) -> Self::Output {
         self += rhs;
         self
     }

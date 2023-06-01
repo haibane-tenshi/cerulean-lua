@@ -5,12 +5,12 @@ mod stack;
 
 use thiserror::Error;
 
-use crate::index_vec::IndexVec;
-use crate::opcode::{
+use repr::index_vec::IndexVec;
+use repr::opcode::{
     Chunk, ConstCapacityError, ConstId, Function, FunctionCapacityError, FunctionId,
     InstrCountError, StackSlot,
 };
-use crate::value::Literal;
+use repr::value::Literal;
 
 use const_::ConstTracker;
 pub(crate) use function::FunctionTracker;

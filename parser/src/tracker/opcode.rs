@@ -1,5 +1,5 @@
-use crate::index_vec::IndexVec;
-use crate::opcode::{Function, InstrCountError, InstrId, OpCode};
+use repr::index_vec::IndexVec;
+use repr::opcode::{Function, InstrCountError, InstrId, OpCode};
 
 #[derive(Debug, Default)]
 pub struct OpCodeTracker {

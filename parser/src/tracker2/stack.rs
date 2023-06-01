@@ -1,5 +1,5 @@
-use crate::index_vec::{Index, IndexVec};
-use crate::opcode::StackSlot;
+use repr::index_vec::{Index, IndexVec};
+use repr::opcode::StackSlot;
 use std::collections::HashMap;
 use std::ops::{Add, AddAssign, BitOr, Sub, SubAssign};
 use thiserror::Error;
@@ -71,23 +71,7 @@ impl Sub for GlobalStackSlot {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct StackOffset(pub u32);
-
-impl AddAssign<StackOffset> for StackSlot {
-    fn add_assign(&mut self, rhs: StackOffset) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Add<StackOffset> for StackSlot {
-    type Output = Self;
-
-    fn add(mut self, rhs: StackOffset) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
+pub(crate) use repr::opcode::StackOffset;
 
 #[derive(Debug, Copy, Clone)]
 pub enum StackState {
@@ -266,7 +250,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 
     fn slot_to_global(&self, slot: StackSlot) -> GlobalStackSlot {
-        self.frame_base + (slot.sub(StackSlot::default()))
+        self.frame_base + (slot - StackSlot::default())
     }
 
     fn slot_to_frame(&self, slot: GlobalStackSlot) -> Option<StackSlot> {

@@ -1,7 +1,7 @@
 use std::ops::Add;
 use thiserror::Error;
 
-use crate::opcode::{InstrCountError, InstrId, OpCode, StackSlot};
+use repr::opcode::{InstrCountError, InstrId, OpCode, StackSlot};
 use crate::tracker2::function::{Function, FunctionView};
 use crate::tracker2::stack::{BoundaryViolationError, PopError, PushError, StackView};
 

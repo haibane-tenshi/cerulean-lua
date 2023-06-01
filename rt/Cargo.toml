@@ -1,0 +1,18 @@
+[package]
+name = "rt"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+trace = ["tracing/max_level_trace"]
+
+[dependencies]
+anyhow = "1.0.70"
+clap = { version = "4.2.2", features = ["derive"] }
+logos = "0.13.0"
+parser = { version = "0.1.0", path = "../parser" }
+repr = { version = "0.1.0", path = "../repr" }
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"

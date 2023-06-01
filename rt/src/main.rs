@@ -9,9 +9,9 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
-    use cerulean_lua::lex::Token;
-    use cerulean_lua::runtime::Runtime;
     use logos::Logos;
+    use parser::lex::Token;
+    use rt::runtime::Runtime;
 
     let logger = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
@@ -22,7 +22,7 @@ fn main() -> Result<()> {
 
     let data = std::fs::read_to_string(path)?;
     let lexer = Token::lexer(&data);
-    let chunk = cerulean_lua::parser::chunk(lexer)?;
+    let chunk = parser::parser::chunk(lexer)?;
 
     let mut runtime = Runtime::new(&chunk);
 

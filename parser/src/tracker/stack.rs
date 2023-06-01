@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::opcode::StackSlot;
+use repr::opcode::StackSlot;
 
 #[derive(Debug, Error)]
 pub enum StackStateError {

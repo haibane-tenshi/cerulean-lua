@@ -1,4 +1,4 @@
-use crate::opcode::FunctionId;
+use repr::opcode::FunctionId;
 use crate::parser::prelude::*;
 use crate::tracker2::stack::StackView;
 use thiserror::Error;

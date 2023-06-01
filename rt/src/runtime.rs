@@ -1,9 +1,9 @@
 use std::error::Error;
 use std::fmt::Display;
 
-use crate::index_vec::IndexSlice;
-use crate::opcode::{Chunk, ConstId, FunctionId, InstrId, OpCode, StackSlot};
-use crate::value::{Literal, Value};
+use repr::index_vec::IndexSlice;
+use repr::opcode::{Chunk, ConstId, FunctionId, InstrId, OpCode, StackSlot};
+use repr::value::{Literal, Value};
 
 pub type ControlFlow = std::ops::ControlFlow<ControlFrame>;
 
@@ -132,9 +132,9 @@ struct CurrentFrame<'chunk> {
 
 impl<'chunk> CurrentFrame<'chunk> {
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
-        use crate::opcode::OpCode::*;
-        use crate::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
-        use crate::table::TableRef;
+        use repr::opcode::OpCode::*;
+        use repr::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
+        use repr::table::TableRef;
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(ControlFrame::Return(self.stack.top())))

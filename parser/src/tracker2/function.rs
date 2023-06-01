@@ -1,5 +1,5 @@
-use crate::index_vec::IndexVec;
-use crate::opcode::{InstrCountError, InstrId, OpCode};
+use repr::index_vec::IndexVec;
+use repr::opcode::{InstrCountError, InstrId, OpCode};
 use crate::tracker2::fragment::FragmentId;
 use crate::tracker2::stack::StackState;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ impl Function {
         }
     }
 
-    pub fn resolve(self, height: u32) -> crate::opcode::Function {
+    pub fn resolve(self, height: u32) -> repr::opcode::Function {
         let Function {
             opcodes: codes,
             jumps,
@@ -29,7 +29,7 @@ impl Function {
 
         debug_assert!(jumps.is_empty());
 
-        crate::opcode::Function {
+        repr::opcode::Function {
             codes,
             lines: Default::default(),
             height,

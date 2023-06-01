@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 
-use crate::index_vec::IndexVec;
-use crate::opcode::{ConstCapacityError, ConstId};
-use crate::value::Literal;
+use repr::index_vec::IndexVec;
+use repr::opcode::{ConstCapacityError, ConstId};
+use repr::value::Literal;
 
 #[derive(Debug, Default)]
-pub struct Constants {
+pub struct ConstTracker {
     constants: IndexVec<ConstId, Literal>,
     backlinks: HashMap<Literal, ConstId>,
 }
 
-impl Constants {
+impl ConstTracker {
     pub fn insert(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {
         use std::collections::hash_map::Entry;
 

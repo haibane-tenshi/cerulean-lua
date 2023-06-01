@@ -11,7 +11,7 @@ use std::ops::{BitOr, BitOrAssign};
 use thiserror::Error;
 
 use crate::lex::{Error as LexError, Lexer, Token};
-use crate::opcode::{Chunk, ConstCapacityError, FunctionCapacityError, InstrCountError};
+use repr::opcode::{Chunk, ConstCapacityError, FunctionCapacityError, InstrCountError};
 use crate::tracker2::fragment::EmitError;
 use crate::tracker2::stack::{
     BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
