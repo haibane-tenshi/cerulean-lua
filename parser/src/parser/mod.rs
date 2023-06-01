@@ -11,7 +11,6 @@ use std::ops::{BitOr, BitOrAssign};
 use thiserror::Error;
 
 use crate::lex::{Error as LexError, Lexer, Token};
-use repr::opcode::{Chunk, ConstCapacityError, FunctionCapacityError, InstrCountError};
 use crate::tracker2::fragment::EmitError;
 use crate::tracker2::stack::{
     BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
@@ -22,6 +21,8 @@ use expr::table::{TabBracketFailure, TabFailure, TabNameFailure};
 use expr::ParExprFailure;
 use func_def::FuncDefFailure;
 use prefix_expr::{ArgsParExprFailure, FieldFailure, IndexFailure, VariableFailure};
+use repr::chunk::Chunk;
+use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
 use stmt::assignment::AssignmentFailure;
 use stmt::do_end::DoEndFailure;
 use stmt::generic_for::GenericForFailure;

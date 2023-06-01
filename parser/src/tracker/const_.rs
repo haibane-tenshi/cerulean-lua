@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use repr::index::{ConstCapacityError, ConstId};
 use repr::index_vec::IndexVec;
-use repr::opcode::{ConstCapacityError, ConstId};
-use repr::value::Literal;
+use repr::literal::Literal;
 
 #[derive(Debug, Default)]
 pub struct ConstTracker {

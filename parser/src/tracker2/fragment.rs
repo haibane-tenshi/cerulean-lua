@@ -1,9 +1,10 @@
 use std::ops::Add;
 use thiserror::Error;
 
-use repr::opcode::{InstrCountError, InstrId, OpCode, StackSlot};
 use crate::tracker2::function::{Function, FunctionView};
 use crate::tracker2::stack::{BoundaryViolationError, PopError, PushError, StackView};
+use repr::index::{InstrCountError, InstrId, StackSlot};
+use repr::opcode::OpCode;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
 pub struct FragmentId(u32);

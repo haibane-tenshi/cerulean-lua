@@ -1,5 +1,7 @@
+use repr::chunk::Function;
+use repr::index::{InstrCountError, InstrId};
 use repr::index_vec::IndexVec;
-use repr::opcode::{Function, InstrCountError, InstrId, OpCode};
+use repr::opcode::OpCode;
 
 #[derive(Debug, Default)]
 pub struct OpCodeTracker {

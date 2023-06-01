@@ -153,7 +153,7 @@ fn func_call<'s>(
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
-    let invoke_target = frag.stack().top()? - repr::opcode::StackOffset(1);
+    let invoke_target = frag.stack().top()? - repr::index::StackOffset(1);
 
     let choice = || {
         let mut err = match args_par_expr(s.clone(), chunk, frag.new_fragment()) {

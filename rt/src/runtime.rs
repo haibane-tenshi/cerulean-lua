@@ -1,9 +1,12 @@
 use std::error::Error;
 use std::fmt::Display;
 
+use repr::chunk::Chunk;
+use repr::index::{ConstId, FunctionId, InstrId, StackSlot};
 use repr::index_vec::IndexSlice;
-use repr::opcode::{Chunk, ConstId, FunctionId, InstrId, OpCode, StackSlot};
-use repr::value::{Literal, Value};
+use repr::literal::Literal;
+use repr::opcode::OpCode;
+use repr::value::Value;
 
 pub type ControlFlow = std::ops::ControlFlow<ControlFrame>;
 

@@ -1,6 +1,6 @@
-use repr::opcode::FunctionId;
 use crate::parser::prelude::*;
 use crate::tracker2::stack::StackView;
+use repr::index::FunctionId;
 use thiserror::Error;
 
 pub(crate) fn func_body<'s>(

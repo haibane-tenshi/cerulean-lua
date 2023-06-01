@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use thiserror::Error;
 
-use repr::opcode::{Function, InstrCountError, InstrId, OpCode, StackSlot};
+use repr::chunk::Function;
+use repr::index::{InstrCountError, InstrId, StackSlot};
+use repr::opcode::OpCode;
 
 use super::{BlockId, OpCodeTracker, StackStateError, StackTracker};
 

@@ -1,6 +1,7 @@
-use repr::index_vec::IndexVec;
-use repr::opcode::{Function, FunctionId};
 use crate::tracker2::const_::Constants;
+use repr::chunk::Function;
+use repr::index::FunctionId;
+use repr::index_vec::IndexVec;
 
 #[derive(Debug, Default)]
 pub struct Chunk {
@@ -20,7 +21,7 @@ impl Chunk {
         }
     }
 
-    pub fn resolve(self) -> repr::opcode::Chunk {
+    pub fn resolve(self) -> repr::chunk::Chunk {
         let Chunk {
             functions,
             constants,
@@ -28,7 +29,7 @@ impl Chunk {
 
         let constants = constants.resolve();
 
-        repr::opcode::Chunk {
+        repr::chunk::Chunk {
             functions,
             constants,
         }

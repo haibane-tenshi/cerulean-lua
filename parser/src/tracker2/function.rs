@@ -1,7 +1,8 @@
-use repr::index_vec::IndexVec;
-use repr::opcode::{InstrCountError, InstrId, OpCode};
 use crate::tracker2::fragment::FragmentId;
 use crate::tracker2::stack::StackState;
+use repr::index::{InstrCountError, InstrId};
+use repr::index_vec::IndexVec;
+use repr::opcode::OpCode;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -20,7 +21,7 @@ impl Function {
         }
     }
 
-    pub fn resolve(self, height: u32) -> repr::opcode::Function {
+    pub fn resolve(self, height: u32) -> repr::chunk::Function {
         let Function {
             opcodes: codes,
             jumps,
@@ -29,7 +30,7 @@ impl Function {
 
         debug_assert!(jumps.is_empty());
 
-        repr::opcode::Function {
+        repr::chunk::Function {
             codes,
             lines: Default::default(),
             height,

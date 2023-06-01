@@ -110,7 +110,7 @@ fn expr_impl<'s>(
         }
 
         // Make sure that top points at the result of current op.
-        top = frag.stack().top()? - repr::opcode::StackOffset(1);
+        top = frag.stack().top()? - repr::index::StackOffset(1);
     }
 
     frag.commit();

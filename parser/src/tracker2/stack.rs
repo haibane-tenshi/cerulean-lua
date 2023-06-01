@@ -1,5 +1,5 @@
+use repr::index::StackSlot;
 use repr::index_vec::{Index, IndexVec};
-use repr::opcode::StackSlot;
 use std::collections::HashMap;
 use std::ops::{Add, AddAssign, BitOr, Sub, SubAssign};
 use thiserror::Error;
@@ -71,7 +71,7 @@ impl Sub for GlobalStackSlot {
     }
 }
 
-pub(crate) use repr::opcode::StackOffset;
+pub(crate) use repr::index::StackOffset;
 
 #[derive(Debug, Copy, Clone)]
 pub enum StackState {

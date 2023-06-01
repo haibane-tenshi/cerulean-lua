@@ -1,9 +1,8 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 
-use decorum::Finite;
-
-use crate::opcode::FunctionId;
+use crate::index::FunctionId;
+use crate::literal::Literal;
 use crate::table::TableRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -90,22 +89,5 @@ impl From<Literal> for Value {
             Literal::String(value) => Value::String(value),
             Literal::Function(value) => Value::Function(value),
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Literal {
-    Nil,
-    Bool(bool),
-    Int(i64),
-    Float(Finite<f64>),
-    String(String),
-    Function(FunctionId),
-}
-
-impl Display for Literal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let t: Value = Into::into(self.clone());
-        write!(f, "{t}")
     }
 }
