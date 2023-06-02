@@ -1,7 +1,5 @@
 use std::ops::{BitOr, BitOrAssign};
 
-use either::Either;
-use repr::chunk::Chunk;
 use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
 use thiserror::Error;
 
@@ -24,7 +22,7 @@ use crate::codegen::stack::{
     BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
     VariadicStackError,
 };
-use crate::lex::{Error as LexError, Lexer, Token};
+use crate::lex::Error as LexError;
 
 // use prelude::*;
 

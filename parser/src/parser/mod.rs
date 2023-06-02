@@ -8,32 +8,10 @@ mod prelude;
 mod stmt;
 
 use either::Either;
-use std::ops::{BitOr, BitOrAssign};
+use repr::chunk::Chunk;
 use thiserror::Error;
 
-use crate::codegen::fragment::EmitError;
-use crate::codegen::stack::{
-    BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
-    VariadicStackError,
-};
-use crate::lex::{Error as LexError, Lexer, Token};
-use expr::function::FunctionFailure;
-use expr::table::{TabBracketFailure, TabFailure, TabNameFailure};
-use expr::ParExprFailure;
-use func_def::FuncDefFailure;
-use prefix_expr::{ArgsParExprFailure, FieldFailure, IndexFailure, VariableFailure};
-use repr::chunk::Chunk;
-use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
-use stmt::assignment::AssignmentFailure;
-use stmt::do_end::DoEndFailure;
-use stmt::generic_for::GenericForFailure;
-use stmt::if_then::IfThenFailure;
-use stmt::local_assignment::LocalAssignmentFailure;
-use stmt::local_function::LocalFunctionFailure;
-use stmt::numerical_for::NumericalForFailure;
-use stmt::repeat_until::RepeatUntilFailure;
-use stmt::while_do::WhileDoFailure;
-
+use crate::lex::{Lexer, Token};
 use prelude::*;
 
 pub(crate) trait MapParse<F> {
