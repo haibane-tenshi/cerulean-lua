@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 use crate::codegen::fragment::EmitError;
 use crate::parser::prelude::*;
 

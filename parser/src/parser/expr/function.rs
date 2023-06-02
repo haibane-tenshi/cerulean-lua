@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 use crate::parser::prelude::*;
 
 pub(in crate::parser) fn function<'s>(
