@@ -10,9 +10,9 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new() -> Self {
-        Default::default()
-    }
+    // pub fn new() -> Self {
+    //     Default::default()
+    // }
 
     pub fn with_script() -> Self {
         Chunk {

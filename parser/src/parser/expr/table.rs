@@ -1,19 +1,17 @@
-use either::Either;
 use logos::Span;
-use std::ops::BitOr;
 use thiserror::Error;
 
-use crate::parser::expr::ExprSuccessReason;
+use crate::parser::expr::ExprSuccess;
 use crate::parser::prelude::*;
 
-pub(in crate::parser) fn table<'s>(
+pub(crate) fn table<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
     use TabFailure::*;
 
-    let (s, _, _) = match_token(s, Token::CurlyL).map_parse(CurlyL)?;
+    let (s, _, Complete) = match_token(s, Token::CurlyL).map_parse(CurlyL)?;
 
     let table_slot = frag.stack().top()?;
     frag.emit(OpCode::TabCreate)?;
@@ -27,7 +25,7 @@ pub(in crate::parser) fn table<'s>(
 }
 
 #[derive(Debug, Error)]
-pub enum TabFailure {
+pub(crate) enum TabFailure {
     #[error("expected opening curly brace")]
     CurlyL(TokenMismatch),
     #[error("expected closing curly brace")]
@@ -48,7 +46,7 @@ fn field_list<'s>(
     table_slot: StackSlot,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), FieldListSuccessReason), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), FieldListSuccess), Error<ParseFailure>> {
     let mut next_index = 1;
     let mut field = |s: Lexer<'s>| -> Result<_, Error<ParseFailure>> {
         let (s, field_type, status) = field(
@@ -58,9 +56,9 @@ fn field_list<'s>(
             chunk,
             frag.new_fragment(),
         )?;
-        match field_type {
-            FieldType::Index => next_index += 1,
-            _ => (),
+
+        if let FieldType::Index = field_type {
+            next_index += 1
         }
 
         Ok((s, (), status))
@@ -68,73 +66,37 @@ fn field_list<'s>(
 
     let (mut s, (), _) = field(s)?;
 
-    let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, (), _), FieldListSuccessReason> {
-        let (s, _, _) = field_sep(s)?;
-        field(s).map_err(Into::into)
-    };
+    let status = loop {
+        s = match field_sep(s.clone()) {
+            Ok((s, _, Complete)) => s,
+            Err(err) => break FieldListSuccess::FieldSep(err),
+        };
 
-    let err = loop {
-        s = match next_part(s.clone()) {
+        s = match field(s.clone()) {
             Ok((s, (), _)) => s,
-            Err(err) => break err,
+            Err(err) => break FieldListSuccess::Expr(err),
         }
     };
 
-    let (s, _, status) = field_sep(s.clone()).optional(s);
-
     frag.commit();
-    let status = err | status.into();
-
     Ok((s, (), status))
 }
 
 #[derive(Debug)]
-enum FieldListSuccessReason {
-    Complete(Complete),
+enum FieldListSuccess {
     FieldSep(ParseError<FieldSepMismatchError>),
     Expr(Error<ParseFailure>),
 }
 
-impl BitOr for FieldListSuccessReason {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        use FieldListSuccessReason::*;
-
-        match (self, rhs) {
-            (r @ Expr(_), _) => r,
-            (_, r @ Expr(_)) => r,
-            (r @ FieldSep(_), _) => r,
-            (_, r @ FieldSep(_)) => r,
-            (r, _) => r,
-        }
-    }
-}
-
-impl From<Complete> for FieldListSuccessReason {
-    fn from(value: Complete) -> Self {
-        FieldListSuccessReason::Complete(value)
-    }
-}
-
-impl From<ParseError<FieldSepMismatchError>> for FieldListSuccessReason {
+impl From<ParseError<FieldSepMismatchError>> for FieldListSuccess {
     fn from(value: ParseError<FieldSepMismatchError>) -> Self {
-        FieldListSuccessReason::FieldSep(value)
+        FieldListSuccess::FieldSep(value)
     }
 }
 
-impl From<Error<ParseFailure>> for FieldListSuccessReason {
+impl From<Error<ParseFailure>> for FieldListSuccess {
     fn from(value: Error<ParseFailure>) -> Self {
-        FieldListSuccessReason::Expr(value)
-    }
-}
-
-impl From<Either<Complete, ParseError<FieldSepMismatchError>>> for FieldListSuccessReason {
-    fn from(value: Either<Complete, ParseError<FieldSepMismatchError>>) -> Self {
-        match value {
-            Either::Left(value) => FieldListSuccessReason::Complete(value),
-            Either::Right(value) => FieldListSuccessReason::FieldSep(value),
-        }
+        FieldListSuccess::Expr(value)
     }
 }
 
@@ -144,7 +106,7 @@ fn field<'s>(
     next_index: i64,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, FieldType, ExprSuccessReason), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, FieldType, ExprSuccess), Error<ParseFailure>> {
     let inner = || {
         let mut err = match bracket(s.clone(), table_slot, chunk, frag.new_fragment()) {
             Ok((s, (), status)) => return Ok((s, FieldType::Bracket, status)),
@@ -191,14 +153,14 @@ fn field_sep(mut s: Lexer) -> Result<(Lexer, Span, Complete), ParseError<FieldSe
 
 #[derive(Debug, Error)]
 #[error("encountered unexpected token, expected table field separator")]
-pub struct FieldSepMismatchError;
+pub(crate) struct FieldSepMismatchError;
 
 fn bracket<'s>(
     s: Lexer<'s>,
     table_slot: StackSlot,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprSuccessReason), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
     use crate::parser::expr::expr_adjusted_to_1;
     use TabBracketFailure::*;
 
@@ -214,13 +176,13 @@ fn bracket<'s>(
         expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     frag.emit(OpCode::TabSet)?;
-    frag.commit();
 
+    frag.commit();
     Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
-pub enum TabBracketFailure {
+pub(crate) enum TabBracketFailure {
     #[error("expected opening bracket")]
     BracketL(TokenMismatch),
     #[error("expected closing bracket")]
@@ -244,7 +206,7 @@ fn name<'s>(
     table_slot: StackSlot,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprSuccessReason), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
     use crate::parser::expr::expr_adjusted_to_1;
     use TabNameFailure::*;
 
@@ -256,17 +218,17 @@ fn name<'s>(
     frag.emit(OpCode::LoadConstant(const_id))?;
 
     let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
-    let (s, (), status) = expr_adjusted_to_1(s, chunk, frag.new_fragment())
-        .map_err(|err| err.with_mode(FailureMode::Malformed))?;
+    let (s, (), status) =
+        expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     frag.emit(OpCode::TabSet)?;
-    frag.commit();
 
+    frag.commit();
     Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
-pub enum TabNameFailure {
+pub(crate) enum TabNameFailure {
     #[error("expected identifier")]
     Ident(IdentMismatch),
     #[error("expected equals sign")]
@@ -288,7 +250,7 @@ fn index<'s>(
     index: i64,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprSuccessReason), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
     use crate::parser::expr::expr_adjusted_to_1;
 
     let start = frag.stack().top()?;
@@ -304,6 +266,5 @@ fn index<'s>(
     frag.emit_adjust_to(start)?;
 
     frag.commit();
-
     Ok(r)
 }

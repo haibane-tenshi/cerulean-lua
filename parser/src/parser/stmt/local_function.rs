@@ -1,7 +1,7 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(super) fn local_function<'s>(
+pub(crate) fn local_function<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
@@ -27,13 +27,13 @@ pub(super) fn local_function<'s>(
 
     // Stack is already adjusted, we just need to silently write to correct slot here.
     frag.emit_raw(OpCode::LoadConstant(const_id), false)?;
-    frag.commit();
 
+    frag.commit();
     Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
-pub enum LocalFunctionFailure {
+pub(crate) enum LocalFunctionFailure {
     #[error("missing `local` keyword")]
     Local(#[source] TokenMismatch),
     #[error("missing `function` keyword")]

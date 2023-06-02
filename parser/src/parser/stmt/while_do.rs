@@ -1,7 +1,7 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(super) fn while_do<'s>(
+pub(crate) fn while_do<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
@@ -31,7 +31,7 @@ pub(super) fn while_do<'s>(
 }
 
 #[derive(Debug, Error)]
-pub enum WhileDoFailure {
+pub(crate) enum WhileDoFailure {
     #[error("missing `while` keyword")]
     While(#[source] TokenMismatch),
     #[error("missing `do` keyword")]

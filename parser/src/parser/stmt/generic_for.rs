@@ -1,7 +1,7 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(super) fn generic_for<'s>(
+pub(crate) fn generic_for<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
@@ -62,7 +62,7 @@ pub(super) fn generic_for<'s>(
 }
 
 #[derive(Debug, Error)]
-pub enum GenericForFailure {
+pub(crate) enum GenericForFailure {
     #[error("missing `for` token")]
     For(#[source] TokenMismatch),
     #[error("missing identifier for control variable")]
@@ -87,23 +87,22 @@ impl HaveFailureMode for GenericForFailure {
     }
 }
 
-fn name_list<'s>(s: Lexer<'s>) -> Result<(Lexer<'s>, Vec<&'s str>, ()), ParseError<IdentMismatch>> {
+fn name_list(s: Lexer) -> Result<(Lexer, Vec<&str>, NameListSuccess), ParseError<IdentMismatch>> {
     let (mut s, (ident, _), Complete) = identifier(s)?;
     let mut r = vec![ident];
 
-    let next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, _, _), _> {
-        let (s, _, Complete) = match_token(s, Token::Comma).map_err(|_| ())?;
-        identifier(s).map_err(|_| ())
-    };
-
     let status = loop {
-        let ident;
-        (s, ident) = match next_part(s.clone()) {
-            Ok((s, (ident, _), _)) => (s, ident),
+        s = match match_token(s.clone(), Token::Comma) {
+            Ok((s, _, Complete)) => s,
             Err(err) => break err,
         };
+
+        let ident;
+        (s, (ident, _), Complete) = identifier(s)?;
         r.push(ident);
     };
 
-    Ok((s, r, status))
+    Ok((s, r, NameListSuccess(status)))
 }
+
+struct NameListSuccess(ParseError<TokenMismatch>);

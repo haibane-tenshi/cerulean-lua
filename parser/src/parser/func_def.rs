@@ -44,7 +44,7 @@ pub(crate) fn func_body<'s>(
 }
 
 #[derive(Debug, Error)]
-pub enum FuncDefFailure {
+pub(crate) enum FuncDefFailure {
     #[error("missing opening parenthesis")]
     ParL(#[source] TokenMismatch),
     #[error("missing closing parenthesis")]

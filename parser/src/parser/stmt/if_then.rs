@@ -1,8 +1,9 @@
 use crate::codegen::fragment::FragmentId;
+use crate::parser::block::BlockSuccess;
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(super) fn if_then<'s>(
+pub(crate) fn if_then<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
@@ -39,12 +40,11 @@ pub(super) fn if_then<'s>(
     let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
 
     outer_frag.commit();
-
     Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
-pub enum IfThenFailure {
+pub(crate) enum IfThenFailure {
     #[error("missing `if` token")]
     If(#[source] TokenMismatch),
     #[error("missing `then` token")]
@@ -68,7 +68,7 @@ fn else_if_clause<'s>(
     outer: FragmentId,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ()), Error<ElseIfFailure>> {
+) -> Result<(Lexer<'s>, (), BlockSuccess), Error<ElseIfFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
     use ElseIfFailure::*;
@@ -103,7 +103,7 @@ fn else_clause<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ()), Error<ElseFailure>> {
+) -> Result<(Lexer<'s>, (), BlockSuccess), Error<ElseFailure>> {
     use crate::parser::block::block;
     use ElseFailure::*;
 

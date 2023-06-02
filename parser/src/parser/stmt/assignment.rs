@@ -1,17 +1,18 @@
+use crate::parser::expr::ExprListSuccess;
 use crate::parser::prefix_expr::Place;
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(super) fn assignment<'s>(
+pub(crate) fn assignment<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), ExprListSuccess), Error<ParseFailure>> {
     use crate::parser::expr::expr_list_adjusted_to;
     use AssignmentFailure::*;
 
     let mut places_start = frag.stack().top()?;
-    let (s, places, ()) = places(s, chunk, frag.new_fragment())?;
+    let (s, places, _) = places(s, chunk, frag.new_fragment())?;
     let count = places.len().try_into().unwrap();
 
     let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
@@ -41,12 +42,11 @@ pub(super) fn assignment<'s>(
     }
 
     frag.commit();
-
     Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
-pub enum AssignmentFailure {
+pub(crate) enum AssignmentFailure {
     #[error("missing equals sign")]
     EqualsSign(#[source] TokenMismatch),
 }
@@ -63,28 +63,35 @@ fn places<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, Vec<Place>, ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, Vec<Place>, PlacesSuccess), Error<ParseFailure>> {
     use crate::parser::prefix_expr::place;
 
     let (mut s, first, _) = place(s, chunk, frag.new_fragment())?;
 
     let mut r = vec![first];
 
-    let mut next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, Place, _), ()> {
-        let (s, _, Complete) = match_token(s, Token::Comma).map_err(|_| ())?;
-        place(s, chunk, frag.new_fragment()).map_err(|_| ())
+    let mut next_part = |s| -> Result<_, PlacesSuccess> {
+        use PlacesSuccess::*;
+
+        let (s, _, _) = match_token(s, Token::Comma).map_err(Comma)?;
+        let (s, next, status) = place(s, chunk, frag.new_fragment()).map_err(Place)?;
+        r.push(next);
+
+        Ok((s, (), status))
     };
 
     let status = loop {
-        let next;
-        (s, next) = match next_part(s.clone()) {
-            Ok((s, place, _)) => (s, place),
+        s = match next_part(s.clone()) {
+            Ok((s, _, _)) => s,
             Err(err) => break err,
         };
-        r.push(next);
     };
 
     frag.commit();
-
     Ok((s, r, status))
+}
+
+enum PlacesSuccess {
+    Comma(ParseError<TokenMismatch>),
+    Place(Error<ParseFailure>),
 }

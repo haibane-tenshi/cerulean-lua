@@ -3,11 +3,11 @@ use thiserror::Error;
 use crate::codegen::fragment::EmitError;
 use crate::parser::prelude::*;
 
-pub(in crate::parser) fn prefix_expr<'s>(
+pub(crate) fn prefix_expr<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), PrefixExprSuccess), Error<ParseFailure>> {
     let (s, r, status) = prefix_expr_impl(s, chunk, frag.new_fragment())?;
 
     // Eagerly evaluate place.
@@ -20,11 +20,11 @@ pub(in crate::parser) fn prefix_expr<'s>(
     Ok((s, (), status))
 }
 
-pub(in crate::parser) fn place<'s>(
+pub(crate) fn place<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, Place, ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, Place, PrefixExprSuccess), Error<ParseFailure>> {
     let (s, r, status) = prefix_expr_impl(s, chunk, frag.new_fragment())?;
 
     if let PrefixExpr::Place(place) = r {
@@ -42,7 +42,7 @@ pub(in crate::parser) fn place<'s>(
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum Place {
+pub(crate) enum Place {
     Temporary(StackSlot),
     TableField,
 }
@@ -58,18 +58,11 @@ impl Place {
     }
 }
 
-#[derive(Debug)]
-enum PrefixExpr {
-    Expr,
-    Place(Place),
-    FnCall,
-}
-
 fn prefix_expr_impl<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, PrefixExpr, ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, PrefixExpr, PrefixExprSuccess), Error<ParseFailure>> {
     use crate::parser::expr::par_expr;
 
     let stack_top = frag.stack().top()? + 1;
@@ -144,9 +137,17 @@ fn prefix_expr_impl<'s>(
     }
 
     frag.commit();
-
-    Ok((s, r, ()))
+    Ok((s, r, PrefixExprSuccess(())))
 }
+
+#[derive(Debug)]
+enum PrefixExpr {
+    Expr,
+    Place(Place),
+    FnCall,
+}
+
+pub(crate) struct PrefixExprSuccess(());
 
 fn func_call<'s>(
     s: Lexer<'s>,
@@ -180,8 +181,8 @@ fn func_call<'s>(
     let (s, (), Complete) = choice()?;
 
     frag.emit(OpCode::Invoke(invoke_target))?;
-    frag.commit();
 
+    frag.commit();
     Ok((s, (), Complete))
 }
 
@@ -198,7 +199,6 @@ fn args_par_expr<'s>(
     let (s, _, status) = match_token(s, Token::ParR).map_parse(ParR)?;
 
     frag.commit();
-
     Ok((s, (), status))
 }
 
@@ -231,7 +231,6 @@ fn args_str<'s>(
     frag.emit(OpCode::LoadConstant(const_id))?;
 
     frag.commit();
-
     Ok((s, (), Complete))
 }
 
@@ -240,7 +239,7 @@ fn args_table<'s>(
     chunk: &mut Chunk,
     frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
-    crate::parser::expr::table(s, chunk, frag)
+    crate::parser::expr::table::table(s, chunk, frag)
 }
 
 fn variable<'s>(
@@ -259,7 +258,7 @@ fn variable<'s>(
 
 #[derive(Debug, Error)]
 #[error("failed to parse variable")]
-pub enum VariableFailure {
+pub(crate) enum VariableFailure {
     Ident(IdentMismatch),
     #[error("upvalues are not yet supported")]
     UnsupportedUpvalue,
@@ -290,13 +289,12 @@ fn field<'s>(
     frag.emit(OpCode::LoadConstant(const_id))?;
 
     frag.commit();
-
     Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
 #[error("failed to access table's field")]
-pub enum FieldFailure {
+pub(crate) enum FieldFailure {
     Dot(TokenMismatch),
     Ident(IdentMismatch),
 }
@@ -324,13 +322,12 @@ fn index<'s>(
     let (s, _, status) = match_token(s, Token::BracketR).map_parse(BracketR)?;
 
     frag.commit();
-
     Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
 #[error("failed to parse table index")]
-pub enum IndexFailure {
+pub(crate) enum IndexFailure {
     BracketL(TokenMismatch),
     BracketR(TokenMismatch),
 }

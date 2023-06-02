@@ -20,7 +20,7 @@ impl StackSlotOrConstId {
     }
 }
 
-pub(super) fn numerical_for<'s>(
+pub(crate) fn numerical_for<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
@@ -137,7 +137,7 @@ pub(super) fn numerical_for<'s>(
 }
 
 #[derive(Debug, Error)]
-pub enum NumericalForFailure {
+pub(crate) enum NumericalForFailure {
     #[error("missing `for` keyword")]
     For(#[source] TokenMismatch),
     #[error("missing identifier for control variable")]

@@ -1,11 +1,12 @@
+use crate::parser::expr::ExprListSuccess;
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(super) fn local_assignment<'s>(
+pub(crate) fn local_assignment<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), ExprListSuccess), Error<ParseFailure>> {
     use crate::parser::expr::expr_list;
     use LocalAssignmentFailure::*;
 
@@ -26,7 +27,6 @@ pub(super) fn local_assignment<'s>(
     }
 
     frag.commit();
-
     Ok((s, (), status))
 }
 
@@ -50,35 +50,31 @@ impl HaveFailureMode for LocalAssignmentFailure {
     }
 }
 
-fn ident_list<'s>(
-    s: Lexer<'s>,
-) -> Result<(Lexer<'s>, Vec<&'s str>, ParseError<IdentListSuccess>), ParseError<IdentMismatch>> {
+fn ident_list(s: Lexer) -> Result<(Lexer, Vec<&str>, IdentListSuccess), ParseError<IdentMismatch>> {
     let (mut s, (ident, _), Complete) = identifier(s)?;
-
     let mut r = vec![ident];
 
-    let next_part = |s: Lexer<'s>| -> Result<(Lexer<'s>, _, _), ParseError<IdentListSuccess>> {
+    let mut next_part = |s| {
         use IdentListSuccess::*;
 
-        let (s, _, Complete) = match_token(s, Token::Comma).map_parse(Comma)?;
-        let (s, (ident, _), status) = identifier(s).map_parse(Ident)?;
+        let (s, _, _) = match_token(s, Token::Comma).map_err(Comma)?;
+        let (s, (ident, _), status) = identifier(s).map_err(Ident)?;
+        r.push(ident);
 
-        Ok((s, ident, status))
+        Ok((s, (), status))
     };
 
     let status = loop {
-        let ident;
-        (s, ident) = match next_part(s.clone()) {
-            Ok((s, ident, _)) => (s, ident),
+        s = match next_part(s.clone()) {
+            Ok((s, _, _)) => s,
             Err(err) => break err,
         };
-        r.push(ident);
     };
 
     Ok((s, r, status))
 }
 
 enum IdentListSuccess {
-    Comma(TokenMismatch),
-    Ident(IdentMismatch),
+    Comma(ParseError<TokenMismatch>),
+    Ident(ParseError<IdentMismatch>),
 }

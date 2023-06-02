@@ -1,3 +1,7 @@
+// We *are* using quite complex return types, but it is rather difficult to just typedef them:
+// there are many moving/replaceable parts which are specific to individual parsers.
+#![allow(clippy::type_complexity)]
+
 mod basic;
 mod block;
 mod error;

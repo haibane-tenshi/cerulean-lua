@@ -1,6 +1,6 @@
 use crate::parser::prelude::*;
 
-pub(in crate::parser) fn literal<'s>(
+pub(crate) fn literal<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
@@ -11,6 +11,5 @@ pub(in crate::parser) fn literal<'s>(
     frag.emit(OpCode::LoadConstant(id))?;
 
     frag.commit();
-
     Ok((s, (), status))
 }

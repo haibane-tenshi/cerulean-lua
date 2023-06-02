@@ -9,13 +9,14 @@ pub(crate) mod repeat_until;
 pub(crate) mod return_;
 pub(crate) mod while_do;
 
+use crate::parser::expr::{ExprListSuccess, ExprSuccess};
 use crate::parser::prelude::*;
 
-pub(in crate::parser) fn statement<'s>(
+pub(crate) fn statement<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), StatementSuccess), Error<ParseFailure>> {
     use assignment::assignment;
     use do_end::do_end;
     use generic_for::generic_for;
@@ -28,71 +29,97 @@ pub(in crate::parser) fn statement<'s>(
 
     let mut inner = || {
         let mut err = match semicolon(s.clone()) {
-            Ok((s, (), status)) => return Ok((s, (), status)),
-            Err(_) => {
-                let err = ParseFailure {
-                    mode: FailureMode::Mismatch,
-                    cause: ParseCause::ExpectedStatement,
-                };
-
-                Error::Parse(err)
-            }
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
+            Err(err) => err,
         };
 
         err |= match do_end(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, (), status)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match if_then(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, (), status)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match while_do(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, (), status)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match repeat_until(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), _status)) => return Ok((s, (), Complete)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match numerical_for(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, (), status)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match generic_for(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, (), status)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match local_assignment(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), _status)) => return Ok((s, (), Complete)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match local_function(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, (), status)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         err |= match assignment(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), _status)) => return Ok((s, (), Complete)),
+            Ok((s, (), status)) => return Ok((s, (), status.into())),
             Err(err) => err,
         };
 
         Err(err)
     };
 
-    let (s, (), _) = inner()?;
+    let r = inner()?;
     frag.commit();
-    Ok((s, (), ()))
+    Ok(r)
 }
 
-fn semicolon(s: Lexer) -> Result<(Lexer, (), Complete), ParseError<TokenMismatch>> {
-    let (s, _, status) = match_token(s, Token::Semicolon)?;
-    Ok((s, (), status))
+pub(crate) enum StatementSuccess {
+    Complete(Complete),
+    Expr(ExprSuccess),
+    ExprList(ExprListSuccess),
+}
+
+impl From<Complete> for StatementSuccess {
+    fn from(value: Complete) -> Self {
+        StatementSuccess::Complete(value)
+    }
+}
+
+impl From<ExprSuccess> for StatementSuccess {
+    fn from(value: ExprSuccess) -> Self {
+        StatementSuccess::Expr(value)
+    }
+}
+
+impl From<ExprListSuccess> for StatementSuccess {
+    fn from(value: ExprListSuccess) -> Self {
+        StatementSuccess::ExprList(value)
+    }
+}
+
+fn semicolon(s: Lexer) -> Result<(Lexer, (), Complete), Error<ParseFailure>> {
+    match match_token(s, Token::Semicolon) {
+        Ok((s, _, status)) => Ok((s, (), status)),
+        Err(_) => {
+            let err = ParseFailure {
+                mode: FailureMode::Mismatch,
+                cause: ParseCause::ExpectedStatement,
+            };
+
+            Err(Error::Parse(err))
+        }
+    }
 }

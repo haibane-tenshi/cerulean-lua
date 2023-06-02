@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::parser::prelude::*;
 
-pub(in crate::parser) fn function<'s>(
+pub(crate) fn function<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
@@ -18,7 +18,6 @@ pub(in crate::parser) fn function<'s>(
     frag.emit(OpCode::LoadConstant(const_id))?;
 
     frag.commit();
-
     Ok((s, (), status))
 }
 

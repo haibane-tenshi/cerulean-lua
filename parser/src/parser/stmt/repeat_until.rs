@@ -1,11 +1,12 @@
+use crate::parser::expr::ExprSuccess;
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(super) fn repeat_until<'s>(
+pub(crate) fn repeat_until<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ()), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
     use crate::parser::block::inner_block;
     use crate::parser::expr::expr_adjusted_to_1;
     use RepeatUntilFailure::*;
@@ -25,11 +26,11 @@ pub(super) fn repeat_until<'s>(
     frag.commit_scope();
     outer_frag.commit();
 
-    Ok((s, (), ()))
+    Ok((s, (), status))
 }
 
 #[derive(Debug, Error)]
-pub enum RepeatUntilFailure {
+pub(crate) enum RepeatUntilFailure {
     #[error("missing `repeat` keyword")]
     Repeat(#[source] TokenMismatch),
     #[error("missing `until` keyword")]
