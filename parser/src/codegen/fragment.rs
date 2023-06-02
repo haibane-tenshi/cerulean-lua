@@ -18,6 +18,7 @@ impl Add<u32> for FragmentId {
     }
 }
 
+#[derive(Debug)]
 pub struct Fragment<'s, 'fun, 'stack> {
     fun: FunctionView<'fun>,
     stack: StackView<'s, 'stack>,

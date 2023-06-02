@@ -52,12 +52,13 @@ impl Function {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 struct InnerState {
     start: InstrId,
     reachable: bool,
 }
 
+#[derive(Debug)]
 pub(super) struct FunctionView<'fun> {
     fragment_id: FragmentId,
     fun: &'fun mut Function,

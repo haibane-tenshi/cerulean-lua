@@ -85,8 +85,7 @@ fn prefix_expr_impl<'s>(
 
     let (mut s, mut r, _) = prefix()?;
 
-    #[allow(clippy::while_let_loop)]
-    loop {
+    let mut next_part = |s: Lexer<'s>| {
         // Peek to determine if any of the follow-up expressions are expected.
         match s.clone().next_token() {
             Ok(
@@ -96,7 +95,13 @@ fn prefix_expr_impl<'s>(
                 | Token::BracketL
                 | Token::Dot,
             ) => (),
-            _ => break,
+            _ => {
+                return Err(Error::Parse(ParseFailure {
+                    mode: FailureMode::Mismatch,
+                    // TODO: fixme, some random error for now
+                    cause: ParseCause::ExpectedExpr,
+                }))
+            }
         }
 
         // Evaluate place.
@@ -110,7 +115,7 @@ fn prefix_expr_impl<'s>(
         // We are reusing the same stack slot to store it.
         frag.emit_adjust_to(stack_top)?;
 
-        let mut tail = || {
+        let tail = || {
             let mut err = match func_call(s.clone(), chunk, frag.new_fragment()) {
                 Ok((s, (), status)) => return Ok((s, PrefixExpr::FnCall, status)),
                 Err(err) => err,
@@ -123,7 +128,7 @@ fn prefix_expr_impl<'s>(
                 Err(err) => err,
             };
 
-            err |= match index(s.clone(), chunk, frag.new_fragment()) {
+            err |= match index(s, chunk, frag.new_fragment()) {
                 Ok((s, (), status)) => {
                     return Ok((s, PrefixExpr::Place(Place::TableField), status))
                 }
@@ -133,8 +138,18 @@ fn prefix_expr_impl<'s>(
             Err(err)
         };
 
-        (s, r, _) = tail()?;
-    }
+        let (s, nr, status) = tail()?;
+        r = nr;
+
+        Ok((s, (), status))
+    };
+
+    let _ = loop {
+        s = match next_part(s.clone()) {
+            Ok((s, _, _)) => s,
+            Err(err) => break err,
+        }
+    };
 
     frag.commit();
     Ok((s, r, PrefixExprSuccess(())))
