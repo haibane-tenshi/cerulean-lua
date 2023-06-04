@@ -104,6 +104,7 @@ pub(crate) fn expr_list<'s>(
 
 pub(crate) type ExprListSuccess = Error<ExprListSuccessInner>;
 
+#[derive(Debug)]
 pub(crate) enum ExprListSuccessInner {
     Comma(TokenMismatch),
     Expr(ParseFailure),

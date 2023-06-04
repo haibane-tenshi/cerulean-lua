@@ -65,7 +65,7 @@ fn prefix_expr_impl<'s>(
 ) -> Result<(Lexer<'s>, PrefixExpr, PrefixExprSuccess), Error<ParseFailure>> {
     use crate::parser::expr::par_expr;
 
-    let stack_top = frag.stack().top()? + 1;
+    let stack_start = frag.stack().top()?;
 
     let prefix = || {
         let mut err: Error<ParseFailure> = match variable(s.clone(), &frag) {
@@ -84,68 +84,57 @@ fn prefix_expr_impl<'s>(
     };
 
     let (mut s, mut r, _) = prefix()?;
+    let stack_top = stack_start + 1;
 
-    let mut next_part = |s: Lexer<'s>| {
-        // Peek to determine if any of the follow-up expressions are expected.
-        match s.clone().next_token() {
-            Ok(
-                Token::ParL
-                | Token::CurlyL
-                | Token::ShortLiteralString(_)
-                | Token::BracketL
-                | Token::Dot,
-            ) => (),
-            _ => {
-                return Err(Error::Parse(ParseFailure {
-                    mode: FailureMode::Mismatch,
-                    // TODO: fixme, some random error for now
-                    cause: ParseCause::ExpectedExpr,
-                }))
+    let mut next_part =
+        |s: Lexer<'s>, mut frag: Fragment<'s, '_, '_>| -> Result<_, Error<ParseFailure>> {
+            // Evaluate place.
+            if let PrefixExpr::Place(place) = r {
+                place.eval(&mut frag)?;
             }
-        }
 
-        // Evaluate place.
-        // TODO: properly wrap it in fragment instead of peeking
-        if let PrefixExpr::Place(place) = r {
-            place.eval(&mut frag)?;
-        }
+            // Adjust stack.
+            // Prefix expressions (except the very last one) always evaluate to 1 value.
+            // We are reusing the same stack slot to store it.
+            frag.emit_adjust_to(stack_top)?;
 
-        // Adjust stack.
-        // Prefix expressions (except the very last one) always evaluate to 1 value.
-        // We are reusing the same stack slot to store it.
-        frag.emit_adjust_to(stack_top)?;
+            let tail = || {
+                let mut err = match func_call(
+                    s.clone(),
+                    stack_start,
+                    chunk,
+                    frag.new_fragment_at_boundary(),
+                ) {
+                    Ok((s, (), status)) => return Ok((s, PrefixExpr::FnCall, status)),
+                    Err(err) => err,
+                };
 
-        let tail = || {
-            let mut err = match func_call(s.clone(), chunk, frag.new_fragment()) {
-                Ok((s, (), status)) => return Ok((s, PrefixExpr::FnCall, status)),
-                Err(err) => err,
+                err |= match field(s.clone(), chunk, frag.new_fragment()) {
+                    Ok((s, (), status)) => {
+                        return Ok((s, PrefixExpr::Place(Place::TableField), status))
+                    }
+                    Err(err) => err,
+                };
+
+                err |= match index(s, chunk, frag.new_fragment()) {
+                    Ok((s, (), status)) => {
+                        return Ok((s, PrefixExpr::Place(Place::TableField), status))
+                    }
+                    Err(err) => err,
+                };
+
+                Err(err)
             };
 
-            err |= match field(s.clone(), chunk, frag.new_fragment()) {
-                Ok((s, (), status)) => {
-                    return Ok((s, PrefixExpr::Place(Place::TableField), status))
-                }
-                Err(err) => err,
-            };
+            let (s, nr, status) = tail()?;
+            r = nr;
 
-            err |= match index(s, chunk, frag.new_fragment()) {
-                Ok((s, (), status)) => {
-                    return Ok((s, PrefixExpr::Place(Place::TableField), status))
-                }
-                Err(err) => err,
-            };
-
-            Err(err)
+            frag.commit();
+            Ok((s, (), status))
         };
 
-        let (s, nr, status) = tail()?;
-        r = nr;
-
-        Ok((s, (), status))
-    };
-
     let _ = loop {
-        s = match next_part(s.clone()) {
+        s = match next_part(s.clone(), frag.new_fragment_at(stack_start).unwrap()) {
             Ok((s, _, _)) => s,
             Err(err) => break err,
         }
@@ -166,11 +155,10 @@ pub(crate) struct PrefixExprSuccess(());
 
 fn func_call<'s>(
     s: Lexer<'s>,
+    invoke_target: StackSlot,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
-    let invoke_target = frag.stack().top()? - repr::index::StackOffset(1);
-
     let choice = || {
         let mut err = match args_par_expr(s.clone(), chunk, frag.new_fragment()) {
             Ok((s, (), status)) => return Ok((s, (), status)),

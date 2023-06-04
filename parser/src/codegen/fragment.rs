@@ -189,6 +189,10 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
         Ok(r)
     }
 
+    pub fn new_fragment_at_boundary<'a>(&'a mut self) -> Fragment<'s, 'a, 'a> {
+        self.new_fragment_at(self.stack.boundary()).unwrap()
+    }
+
     fn commit_impl(self, preserve_stack: bool) {
         let Fragment { fun, mut stack } = self;
 
