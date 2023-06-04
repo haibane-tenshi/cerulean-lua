@@ -18,6 +18,7 @@ pub(crate) fn expr<'s>(
 
 pub(crate) type ExprSuccess = Error<ExprSuccessInner>;
 
+#[derive(Debug)]
 pub(crate) enum ExprSuccessInner {
     Infix(InfixMismatchError),
     Expr(ParseFailure),

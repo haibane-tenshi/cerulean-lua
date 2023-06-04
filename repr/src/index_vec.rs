@@ -180,7 +180,7 @@ where
         R: RangeBounds<I>,
     {
         let range = convert_range(range);
-        let slice = &self.1[range];
+        let slice = self.1.get(range).unwrap_or_default();
         Self::from_slice(slice)
     }
 
@@ -189,7 +189,7 @@ where
         R: RangeBounds<I>,
     {
         let range = convert_range(range);
-        let slice = &mut self.1[range];
+        let slice = self.1.get_mut(range).unwrap_or_default();
         Self::from_mut_slice(slice)
     }
 }

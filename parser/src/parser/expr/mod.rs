@@ -69,33 +69,31 @@ pub(crate) fn expr_list<'s>(
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, (), ExprListSuccess), Error<ParseFailure>> {
-    let mut mark = frag.stack().top()?;
+    let mut mark = frag.stack().top()? + 1;
 
     let (mut s, (), _) = expr(s, chunk, frag.new_fragment())?;
 
-    let mut next_part = |s| -> Result<_, ExprListSuccess> {
-        use ExprListSuccessInner::*;
+    let mut next_part =
+        |s: Lexer<'s>, mut frag: Fragment<'s, '_, '_>, mark| -> Result<_, ExprListSuccess> {
+            use ExprListSuccessInner::*;
 
-        let (s, _, _) = match_token(s, Token::Comma).map_parse(Comma)?;
+            let (s, _, _) = match_token(s, Token::Comma).map_parse(Comma)?;
 
-        // Expressions inside comma lists are adjusted to 1.
-        // TODO: bug, fixme
-        // Adjustment will persist even if we fail to parse next expression
-        // This needs to be wrapped in fragment, but we cannot do it right now since we cannot
-        // touch outside stack.
-        mark += 1;
-        frag.emit_adjust_to(mark)?;
+            // Expressions inside comma lists are adjusted to 1.
+            frag.emit_adjust_to(mark)?;
 
-        let (s, _, status) = expr(s, chunk, frag.new_fragment()).map_parse(Expr)?;
+            let (s, _, status) = expr(s, chunk, frag.new_fragment()).map_parse(Expr)?;
 
-        Ok((s, (), status))
-    };
+            frag.commit();
+            Ok((s, (), status))
+        };
 
     let status = loop {
-        s = match next_part(s.clone()) {
+        s = match next_part(s.clone(), frag.new_fragment_at(mark).unwrap(), mark) {
             Ok((s, _, _)) => s,
             Err(err) => break err,
         };
+        mark += 1;
     };
 
     frag.commit();
