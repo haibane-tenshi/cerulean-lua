@@ -32,7 +32,7 @@ fn expr_impl<'s>(
 ) -> Result<(Lexer<'s>, (), Error<ExprSuccessImpl>), Error<ParseFailure>> {
     // This should always point at where the first value of previous expressions should be.
     // We need this to implement short-circuiting of `and` and `or` ops.
-    let mut top = frag.stack().top()?;
+    let stack_start = frag.stack().top()?;
 
     let mut s = if let Ok((s, op, Complete)) = prefix_op(s.clone()) {
         let ((), rhs_bp) = op.binding_power();
@@ -43,7 +43,7 @@ fn expr_impl<'s>(
             Prefix::Bit(op) => OpCode::BitUnaOp(op),
         };
 
-        frag.emit_adjust_to(top + 1)?;
+        frag.emit_adjust_to(stack_start + 1)?;
         frag.emit(opcode)?;
 
         s
@@ -57,7 +57,7 @@ fn expr_impl<'s>(
     // This is OK: it can happen when there are no operators in current expression.
     // We cannot trim it yet, outside context might expect those values.
 
-    let mut next_part = |s| {
+    let mut next_part = |s: Lexer<'s>, mut frag: Fragment<'s, '_, '_>| {
         use ExprSuccessImpl::{Expr, LessTightlyBound};
 
         let (s, op, Complete) = infix_op(s).map_parse(ExprSuccessImpl::Infix)?;
@@ -72,28 +72,25 @@ fn expr_impl<'s>(
         // It implies that we HAVE to adjust both operands to 1 value before doing op itself.
 
         // Adjust left operand.
-        frag.emit_adjust_to(top + 1)?;
+        frag.emit_adjust_to(stack_start + 1)?;
 
         let maybe_opcode = match op {
-            Infix::Ari(op) => OpCodeOrJump::OpCode(OpCode::AriBinOp(op)),
-            Infix::Bit(op) => OpCodeOrJump::OpCode(OpCode::BitBinOp(op)),
-            Infix::Rel(op) => OpCodeOrJump::OpCode(OpCode::RelBinOp(op)),
-            Infix::Str(op) => OpCodeOrJump::OpCode(OpCode::StrBinOp(op)),
+            Infix::Ari(op) => Some(OpCode::AriBinOp(op)),
+            Infix::Bit(op) => Some(OpCode::BitBinOp(op)),
+            Infix::Rel(op) => Some(OpCode::RelBinOp(op)),
+            Infix::Str(op) => Some(OpCode::StrBinOp(op)),
             Infix::Logical(op) => {
                 let cond = match op {
                     Logical::Or => true,
                     Logical::And => false,
                 };
 
-                let instr_id = frag.emit(OpCode::JumpIf {
-                    cond,
-                    offset: Default::default(),
-                })?;
+                frag.emit_jump_to(frag.id(), Some(cond))?;
 
                 // Discard left operand when entering the other branch.
-                frag.emit_adjust_to(top)?;
+                frag.emit_adjust_to(stack_start)?;
 
-                OpCodeOrJump::Jump(instr_id)
+                None
             }
         };
 
@@ -105,30 +102,16 @@ fn expr_impl<'s>(
         // Adjust right operand.
         frag.emit_adjust_to(rhs_top)?;
 
-        match maybe_opcode {
-            OpCodeOrJump::OpCode(opcode) => {
-                frag.emit(opcode)?;
-            }
-            OpCodeOrJump::Jump(index) => {
-                let next_instr = frag.len();
-
-                match frag.get_mut(index) {
-                    Some(OpCode::JumpIf { offset, .. }) => {
-                        *offset = next_instr - index - 1;
-                    }
-                    _ => unreachable!(),
-                }
-            }
+        if let Some(opcode) = maybe_opcode {
+            frag.emit(opcode)?;
         }
 
-        // Make sure that top points at the result of current op.
-        top = frag.stack().top()? - repr::index::StackOffset(1);
-
+        frag.commit();
         Ok((s, (), status))
     };
 
     let status = loop {
-        s = match next_part(s.clone()) {
+        s = match next_part(s.clone(), frag.new_fragment_at(stack_start).unwrap()) {
             Ok((s, _, _)) => s,
             Err(err) => break err,
         }
@@ -142,11 +125,6 @@ enum ExprSuccessImpl {
     Infix(InfixMismatchError),
     LessTightlyBound,
     Expr(ParseFailure),
-}
-
-enum OpCodeOrJump {
-    OpCode(OpCode),
-    Jump(InstrId),
 }
 
 fn atom<'s>(

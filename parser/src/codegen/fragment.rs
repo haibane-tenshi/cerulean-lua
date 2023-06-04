@@ -158,13 +158,13 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
         Ok(())
     }
 
-    pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
-        self.fun.get_mut(instr_id)
-    }
-
-    pub fn len(&self) -> InstrId {
-        self.fun.len()
-    }
+    // pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
+    //     self.fun.get_mut(instr_id)
+    // }
+    //
+    // pub fn len(&self) -> InstrId {
+    //     self.fun.len()
+    // }
 
     pub fn new_fragment<'a>(&'a mut self) -> Fragment<'s, 'a, 'a> {
         let Fragment { fun, stack } = self;

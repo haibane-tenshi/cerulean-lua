@@ -104,13 +104,13 @@ impl<'fun> FunctionView<'fun> {
             .push((instr, state));
     }
 
-    pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
-        if instr_id < self.start() {
-            return None;
-        }
-
-        self.fun.opcodes.get_mut(instr_id)
-    }
+    // pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
+    //     if instr_id < self.start() {
+    //         return None;
+    //     }
+    //
+    //     self.fun.opcodes.get_mut(instr_id)
+    // }
 
     pub fn new_block(&mut self) -> FunctionView {
         let fragment_id = self.fragment_id + 1;
