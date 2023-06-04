@@ -2,7 +2,9 @@ use std::ops::Add;
 use thiserror::Error;
 
 use crate::codegen::function::{Function, FunctionView};
-use crate::codegen::stack::{BoundaryViolationError, PopError, PushError, StackView};
+use crate::codegen::stack::{
+    BoundaryViolationError, NewBlockAtError, PopError, PushError, StackView,
+};
 use repr::index::{InstrCountError, InstrId, StackSlot};
 use repr::opcode::OpCode;
 
@@ -171,6 +173,20 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
         let stack = stack.new_block();
 
         Fragment { fun, stack }
+    }
+
+    pub fn new_fragment_at<'a>(
+        &'a mut self,
+        slot: StackSlot,
+    ) -> Result<Fragment<'s, 'a, 'a>, NewBlockAtError> {
+        let Fragment { fun, stack } = self;
+
+        let fun = fun.new_block();
+        let stack = stack.new_block_at(slot)?;
+
+        let r = Fragment { fun, stack };
+
+        Ok(r)
     }
 
     fn commit_impl(self, preserve_stack: bool) {

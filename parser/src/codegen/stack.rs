@@ -164,6 +164,51 @@ impl<'s> Stack<'s> {
             }
         }
     }
+
+    fn inner_state(
+        &self,
+        boundary: GlobalStackSlot,
+    ) -> Result<InnerState, PassingNamedTemporariesError> {
+        if self
+            .temporaries
+            .range(boundary..)
+            .iter()
+            .any(Option::is_some)
+        {
+            return Err(PassingNamedTemporariesError);
+        }
+
+        let r = InnerState {
+            variadic: self.variadic,
+            boundary,
+            top: self.len(),
+        };
+
+        Ok(r)
+    }
+
+    fn inner_state_at_top(&self) -> InnerState {
+        self.inner_state(self.len()).unwrap()
+    }
+
+    fn apply(&mut self, state: InnerState) {
+        let InnerState {
+            variadic,
+            boundary,
+            top,
+        } = state;
+
+        self.variadic = variadic;
+        self.adjust_to(top);
+        for slot in self
+            .temporaries
+            .range_mut(boundary..)
+            .iter_mut()
+            .filter(|temp| temp.is_some())
+        {
+            *slot = None;
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -191,6 +236,13 @@ impl<'s> Backlinks<'s> {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+struct InnerState {
+    variadic: bool,
+    boundary: GlobalStackSlot,
+    top: GlobalStackSlot,
+}
+
 #[derive(Debug)]
 pub enum NameLookup {
     Local(StackSlot),
@@ -201,46 +253,59 @@ pub enum NameLookup {
 #[derive(Debug)]
 pub struct StackView<'s, 'origin> {
     stack: &'origin mut Stack<'s>,
-    variadic: bool,
-    boundary: GlobalStackSlot,
+    inner_state: InnerState,
     frame_base: GlobalStackSlot,
 }
 
 impl<'s, 'origin> StackView<'s, 'origin> {
     pub fn new(stack: &'origin mut Stack<'s>) -> Self {
-        let variadic = stack.variadic;
-        let boundary = stack.len();
+        let inner_state = stack.inner_state_at_top();
         let frame_base = stack.len();
 
         StackView {
             stack,
-            variadic,
-            boundary,
+            inner_state,
             frame_base,
         }
     }
 
     pub fn new_block(&mut self) -> StackView<'s, '_> {
-        let variadic = self.stack.variadic;
-        let boundary = self.stack.len();
+        let inner_state = self.stack.inner_state_at_top();
         let frame_base = self.frame_base;
 
         StackView {
             stack: self.stack,
-            variadic,
-            boundary,
+            inner_state,
             frame_base,
         }
     }
 
+    pub fn new_block_at(&mut self, slot: StackSlot) -> Result<StackView<'s, '_>, NewBlockAtError> {
+        let boundary = self.slot_to_global(slot);
+
+        if boundary < self.inner_state.boundary {
+            return Err(BoundaryViolationError.into());
+        }
+
+        let inner_state = self.stack.inner_state(boundary)?;
+        let frame_base = self.frame_base;
+
+        let r = StackView {
+            stack: self.stack,
+            inner_state,
+            frame_base,
+        };
+
+        Ok(r)
+    }
+
     pub fn new_frame(&mut self) -> StackView<'s, '_> {
-        let boundary = self.stack.len();
-        let frame_base = boundary;
+        let inner_state = self.stack.inner_state_at_top();
+        let frame_base = self.stack.len();
 
         StackView {
             stack: self.stack,
-            variadic: false,
-            boundary,
+            inner_state,
             frame_base,
         }
     }
@@ -293,11 +358,11 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 
     pub fn boundary(&self) -> StackSlot {
-        self.slot_to_frame(self.boundary).unwrap()
+        self.slot_to_frame(self.inner_state.boundary).unwrap()
     }
 
     pub fn push(&mut self) -> Result<StackSlot, PushError> {
-        if self.variadic {
+        if self.stack.variadic {
             return Err(VariadicStackError.into());
         }
 
@@ -308,11 +373,11 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 
     pub fn pop(&mut self) -> Result<(), PopError> {
-        if self.variadic {
+        if self.stack.variadic {
             return Err(VariadicStackError.into());
         }
 
-        if self.stack.len() == self.boundary {
+        if self.stack.len() == self.inner_state.boundary {
             return Err(BoundaryViolationError.into());
         }
 
@@ -329,7 +394,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
 
     pub fn adjust_to(&mut self, height: StackSlot) -> Result<bool, BoundaryViolationError> {
         let height = self.slot_to_global(height);
-        if height < self.boundary {
+        if height < self.inner_state.boundary {
             return Err(BoundaryViolationError);
         };
 
@@ -340,7 +405,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
 
     pub fn give_name(&mut self, slot: StackSlot, name: &'s str) -> Result<(), GiveNameError> {
         let slot = self.slot_to_global(slot);
-        if slot < self.boundary {
+        if slot < self.inner_state.boundary {
             return Err(BoundaryViolationError.into());
         };
 
@@ -359,7 +424,12 @@ impl<'s, 'origin> StackView<'s, 'origin> {
 
     pub fn commit(self, preserve_idents: bool) {
         if !preserve_idents {
-            for slot in self.stack.temporaries.range_mut(self.boundary..).iter_mut() {
+            for slot in self
+                .stack
+                .temporaries
+                .range_mut(self.inner_state.boundary..)
+                .iter_mut()
+            {
                 if let Some(ident) = slot.take() {
                     self.stack.backlinks.pop(ident);
                 }
@@ -372,9 +442,22 @@ impl<'s, 'origin> StackView<'s, 'origin> {
 
 impl<'s, 'origin> Drop for StackView<'s, 'origin> {
     fn drop(&mut self) {
-        self.stack.adjust_to(self.boundary);
-        self.stack.variadic = self.variadic;
+        self.stack.apply(self.inner_state)
     }
+}
+
+/// There are named temporaries above boundary.
+#[derive(Debug, Error)]
+#[error("attempt to pass named temporaries into new frame")]
+pub struct PassingNamedTemporariesError;
+
+#[derive(Debug, Error)]
+#[error("failed to capture part of stack in new frame")]
+pub enum NewBlockAtError {
+    #[error("tried to capture temporaries below current frame's boundary")]
+    Boundary(#[from] BoundaryViolationError),
+    #[error("cannot capture named temporaries in the new frame")]
+    PassingNamed(#[from] PassingNamedTemporariesError),
 }
 
 #[derive(Debug, Error)]
