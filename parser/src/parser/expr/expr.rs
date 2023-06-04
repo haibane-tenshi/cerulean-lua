@@ -30,8 +30,6 @@ fn expr_impl<'s>(
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
 ) -> Result<(Lexer<'s>, (), Error<ExprSuccessImpl>), Error<ParseFailure>> {
-    // This should always point at where the first value of previous expressions should be.
-    // We need this to implement short-circuiting of `and` and `or` ops.
     let stack_start = frag.stack().top()?;
 
     let mut s = if let Ok((s, op, Complete)) = prefix_op(s.clone()) {
