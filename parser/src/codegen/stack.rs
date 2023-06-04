@@ -319,7 +319,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 
     fn slot_to_frame(&self, slot: GlobalStackSlot) -> Option<StackSlot> {
-        let offset = self.frame_base.checked_sub(slot)?;
+        let offset = slot.checked_sub(self.frame_base)?;
         let r = StackSlot::default() + offset;
 
         Some(r)
