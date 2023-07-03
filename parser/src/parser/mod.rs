@@ -11,7 +11,6 @@ mod prefix_expr;
 mod prelude;
 mod stmt;
 
-use either::Either;
 use repr::chunk::Chunk;
 use thiserror::Error;
 
@@ -84,29 +83,23 @@ impl HaveFailureMode for Complete {
 pub(crate) trait Optional {
     type Source;
     type Value;
-    type Success;
     type Failure;
 
     fn optional(
         self,
         source: Self::Source,
-    ) -> (
-        Self::Source,
-        Option<Self::Value>,
-        Either<Self::Success, Self::Failure>,
-    );
+    ) -> (Self::Source, Option<Self::Value>, Option<Self::Failure>);
 }
 
-impl<'s, T, Success, Failure> Optional for Result<(Lexer<'s>, T, Success), Failure> {
+impl<'s, T, Failure> Optional for Result<(Lexer<'s>, T), Failure> {
     type Source = Lexer<'s>;
     type Value = T;
-    type Success = Success;
     type Failure = Failure;
 
-    fn optional(self, source: Self::Source) -> (Self::Source, Option<T>, Either<Success, Failure>) {
+    fn optional(self, source: Self::Source) -> (Self::Source, Option<T>, Option<Failure>) {
         match self {
-            Ok((s, t, success)) => (s, Some(t), Either::Left(success)),
-            Err(failure) => (source, None, Either::Right(failure)),
+            Ok((s, t)) => (s, Some(t), None),
+            Err(failure) => (source, None, Some(failure)),
         }
     }
 }

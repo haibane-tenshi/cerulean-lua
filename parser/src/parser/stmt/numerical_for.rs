@@ -24,35 +24,35 @@ pub(crate) fn numerical_for<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
     use NumericalForFailure::*;
 
     let exit = outer_frag.id();
 
-    let (s, _, Complete) = match_token(s, Token::For).map_parse(For)?;
-    let (s, (ident, _), Complete) = identifier(s).map_parse(Ident)?;
-    let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
+    let (s, _) = match_token(s, Token::For).map_parse(For)?;
+    let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
+    let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
 
     let loop_var = outer_frag.stack().top()?;
-    let (s, (), _) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
+    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
         .with_mode(FailureMode::Malformed)?;
     outer_frag.stack_mut().give_name(loop_var, ident)?;
 
-    let (s, _, Complete) = match_token(s, Token::Comma).map_parse(Comma)?;
+    let (s, _) = match_token(s, Token::Comma).map_parse(Comma)?;
 
     let limit = outer_frag.stack().top()?;
-    let (s, (), _) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
+    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
         .with_mode(FailureMode::Malformed)?;
 
-    let mut maybe_step = |s: Lexer<'s>| -> Result<(Lexer<'s>, StackSlot, ()), ()> {
-        let (s, _, Complete) = match_token(s, Token::Comma).map_err(|_| ())?;
+    let mut maybe_step = |s: Lexer<'s>| -> Result<(Lexer<'s>, StackSlot), ()> {
+        let (s, _) = match_token(s, Token::Comma).map_err(|_| ())?;
 
         let step = outer_frag.stack().top().map_err(|_| ())?;
-        let (s, (), _) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).map_err(|_| ())?;
+        let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).map_err(|_| ())?;
 
-        Ok((s, step, ()))
+        Ok((s, step))
     };
 
     let (s, step, _) = maybe_step(s.clone()).optional(s);
@@ -118,9 +118,9 @@ pub(crate) fn numerical_for<'s>(
 
     controls.commit();
 
-    let (s, _, Complete) = match_token(s, Token::Do).map_parse(Do)?;
-    let (s, (), _) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
+    let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
+    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     // Increment control variable.
     frag.emit(OpCode::LoadStack(loop_var))?;
@@ -133,7 +133,7 @@ pub(crate) fn numerical_for<'s>(
     frag.commit();
     outer_frag.commit_scope();
 
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]

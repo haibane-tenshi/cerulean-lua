@@ -7,12 +7,12 @@ pub(crate) fn func_body<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, FunctionId, Complete), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, FunctionId), Error<ParseFailure>> {
     use crate::codegen::function::Function;
     use crate::parser::block::block;
     use FuncDefFailure::*;
 
-    let (s, _, Complete) = match_token(s, Token::ParL).map_parse(ParL)?;
+    let (s, _) = match_token(s, Token::ParL).map_parse(ParL)?;
 
     // Start function
     let mut fun = Function::new();
@@ -28,9 +28,9 @@ pub(crate) fn func_body<'s>(
     // An extra stack slot is taken by function pointer itself.
     let height = param_count + 1;
 
-    let (s, _, Complete) = match_token(s, Token::ParR).map_parse(ParR)?;
-    let (s, (), _) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
+    let (s, _) = match_token(s, Token::ParR).map_parse(ParR)?;
+    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     // Finish function
     frag.commit_scope();
@@ -40,7 +40,7 @@ pub(crate) fn func_body<'s>(
     // Drop outer fragment to make sure we didn't mess up current function.
     drop(outer_frag);
 
-    Ok((s, func_id, status))
+    Ok((s, func_id))
 }
 
 #[derive(Debug, Error)]
@@ -66,10 +66,10 @@ impl HaveFailureMode for FuncDefFailure {
 fn parlist<'s>(
     s: Lexer<'s>,
     stack: &mut StackView<'s, '_>,
-) -> Result<(Lexer<'s>, u32, Error<ParListMismatch>), Error<IdentMismatch>> {
+) -> Result<(Lexer<'s>, u32), Error<IdentMismatch>> {
     let mut count = 0;
 
-    let (mut s, (ident, _), Complete) = identifier(s)?;
+    let (mut s, (ident, _)) = identifier(s)?;
     let slot = stack.push()?;
     stack.give_name(slot, ident)?;
     count += 1;
@@ -77,8 +77,8 @@ fn parlist<'s>(
     let mut next_ident = |s: Lexer<'s>| -> Result<_, Error<ParListMismatch>> {
         use ParListMismatch::*;
 
-        let (s, _, Complete) = match_token(s, Token::Comma).map_parse(Comma)?;
-        let (s, (ident, _), Complete) = identifier(s).map_parse(Ident)?;
+        let (s, _) = match_token(s, Token::Comma).map_parse(Comma)?;
+        let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
 
         let slot = stack.push()?;
         stack.give_name(slot, ident)?;
@@ -87,14 +87,14 @@ fn parlist<'s>(
         Ok(s)
     };
 
-    let status = loop {
+    loop {
         s = match next_ident(s.clone()) {
             Ok(s) => s,
-            Err(err) => break err,
+            Err(_err) => break,
         };
-    };
+    }
 
-    Ok((s, count, status))
+    Ok((s, count))
 }
 
 enum ParListMismatch {

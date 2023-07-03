@@ -1,4 +1,3 @@
-use crate::parser::expr::ExprListSuccess;
 use crate::parser::prefix_expr::Place;
 use crate::parser::prelude::*;
 use thiserror::Error;
@@ -7,18 +6,18 @@ pub(crate) fn assignment<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprListSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::expr::expr_list_adjusted_to;
     use AssignmentFailure::*;
 
     let mut places_start = frag.stack().top()?;
-    let (s, places, _) = places(s, chunk, frag.new_fragment())?;
+    let (s, places) = places(s, chunk, frag.new_fragment())?;
     let count = places.len().try_into().unwrap();
 
-    let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
+    let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
 
     let expr_start = frag.stack().top()?;
-    let (s, (), status) = expr_list_adjusted_to(s, count, chunk, frag.new_fragment())
+    let (s, ()) = expr_list_adjusted_to(s, count, chunk, frag.new_fragment())
         .with_mode(FailureMode::Malformed)?;
 
     let expr_slots = (expr_start.0..).map(StackSlot);
@@ -42,7 +41,7 @@ pub(crate) fn assignment<'s>(
     }
 
     frag.commit();
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]
@@ -63,32 +62,32 @@ fn places<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, Vec<Place>, PlacesSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, Vec<Place>), Error<ParseFailure>> {
     use crate::parser::prefix_expr::place;
 
-    let (mut s, first, _) = place(s, chunk, frag.new_fragment())?;
+    let (mut s, first) = place(s, chunk, frag.new_fragment())?;
 
     let mut r = vec![first];
 
     let mut next_part = |s| -> Result<_, PlacesSuccess> {
         use PlacesSuccess::*;
 
-        let (s, _, _) = match_token(s, Token::Comma).map_err(Comma)?;
-        let (s, next, status) = place(s, chunk, frag.new_fragment()).map_err(Place)?;
+        let (s, _) = match_token(s, Token::Comma).map_err(Comma)?;
+        let (s, next) = place(s, chunk, frag.new_fragment()).map_err(Place)?;
         r.push(next);
 
-        Ok((s, (), status))
+        Ok((s, ()))
     };
 
-    let status = loop {
+    loop {
         s = match next_part(s.clone()) {
-            Ok((s, _, _)) => s,
-            Err(err) => break err,
+            Ok((s, _)) => s,
+            Err(_err) => break,
         };
-    };
+    }
 
     frag.commit();
-    Ok((s, r, status))
+    Ok((s, r))
 }
 
 enum PlacesSuccess {

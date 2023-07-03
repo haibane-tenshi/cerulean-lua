@@ -4,24 +4,8 @@ pub(crate) fn expr<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
-    expr_impl(s, 0, chunk, frag).map(|(s, (), reason)| {
-        let reason = reason.map_parse(|reason| match reason {
-            ExprSuccessImpl::Infix(err) => ExprSuccessInner::Infix(err),
-            ExprSuccessImpl::LessTightlyBound => unreachable!(),
-            ExprSuccessImpl::Expr(err) => ExprSuccessInner::Expr(err),
-        });
-
-        (s, (), reason)
-    })
-}
-
-pub(crate) type ExprSuccess = Error<ExprSuccessInner>;
-
-#[derive(Debug)]
-pub(crate) enum ExprSuccessInner {
-    Infix(InfixMismatchError),
-    Expr(ParseFailure),
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
+    expr_impl(s, 0, chunk, frag)
 }
 
 fn expr_impl<'s>(
@@ -29,12 +13,12 @@ fn expr_impl<'s>(
     min_bp: u64,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), Error<ExprSuccessImpl>), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     let stack_start = frag.stack().top()?;
 
     let mut s = if let Ok((s, op, Complete)) = prefix_op(s.clone()) {
         let ((), rhs_bp) = op.binding_power();
-        let (s, (), _) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())?;
+        let (s, ()) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())?;
 
         let opcode = match op {
             Prefix::Ari(op) => OpCode::AriUnaOp(op),
@@ -46,7 +30,7 @@ fn expr_impl<'s>(
 
         s
     } else {
-        let (s, (), _) = atom(s, chunk, frag.new_fragment())?;
+        let (s, ()) = atom(s, chunk, frag.new_fragment())?;
 
         s
     };
@@ -93,7 +77,7 @@ fn expr_impl<'s>(
         };
 
         let rhs_top = frag.stack().top()? + 1;
-        let (s, _, status) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())
+        let (s, _) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())
             .with_mode(FailureMode::Malformed)
             .map_parse(Expr)?;
 
@@ -105,18 +89,18 @@ fn expr_impl<'s>(
         }
 
         frag.commit();
-        Ok((s, (), status))
+        Ok((s, ()))
     };
 
-    let status = loop {
+    loop {
         s = match next_part(s.clone(), frag.new_fragment_at(stack_start).unwrap()) {
-            Ok((s, _, _)) => s,
-            Err(err) => break err,
+            Ok((s, _)) => s,
+            Err(_err) => break,
         }
-    };
+    }
 
     frag.commit();
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 enum ExprSuccessImpl {
@@ -129,13 +113,13 @@ fn atom<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), AtomSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use super::{function::function, literal::literal, table::table};
     use crate::parser::prefix_expr::prefix_expr;
 
     let mut inner = || {
         let mut err = match literal(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), _status)) => return Ok((s, (), AtomSuccess)),
+            Ok((s, ())) => return Ok((s, ())),
             Err(err) => err.map_parse(|_| ParseFailure {
                 mode: FailureMode::Mismatch,
                 cause: ParseCause::ExpectedExpr,
@@ -143,17 +127,17 @@ fn atom<'s>(
         };
 
         err |= match prefix_expr(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), _status)) => return Ok((s, (), AtomSuccess)),
+            Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
         err |= match table(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), _status)) => return Ok((s, (), AtomSuccess)),
+            Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
         err |= match function(s.clone(), chunk, frag.new_fragment()) {
-            Ok((s, (), _status)) => return Ok((s, (), AtomSuccess)),
+            Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
@@ -165,8 +149,6 @@ fn atom<'s>(
 
     Ok(r)
 }
-
-struct AtomSuccess;
 
 fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix, Complete), ParseError<PrefixMismatchError>> {
     let token = s.next_token().map_parse(|_| PrefixMismatchError)?;

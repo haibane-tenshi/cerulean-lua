@@ -9,11 +9,11 @@ use crate::parser::NextTokenError;
 pub(crate) fn match_token<'s>(
     mut s: Lexer<'s>,
     token: Token<'static>,
-) -> Result<(Lexer<'s>, Span, Complete), ParseError<TokenMismatch>> {
+) -> Result<(Lexer<'s>, Span), ParseError<TokenMismatch>> {
     match s.next_token() {
         Ok(t) if t == token => {
             let span = s.span();
-            Ok((s, span, Complete))
+            Ok((s, span))
         }
         Ok(_) | Err(NextTokenError::Parse(Eof)) => {
             let err = TokenMismatch { expected: token };
@@ -35,13 +35,11 @@ impl From<TokenMismatch> for ParseError<TokenMismatch> {
     }
 }
 
-pub(crate) fn identifier(
-    mut s: Lexer,
-) -> Result<(Lexer, (&str, Span), Complete), ParseError<IdentMismatch>> {
+pub(crate) fn identifier(mut s: Lexer) -> Result<(Lexer, (&str, Span)), ParseError<IdentMismatch>> {
     match s.next_token() {
         Ok(Token::Ident(ident)) => {
             let span = s.span();
-            Ok((s, (ident, span), Complete))
+            Ok((s, (ident, span)))
         }
         Ok(_) | Err(NextTokenError::Parse(Eof)) => Err(IdentMismatch.into()),
         Err(NextTokenError::Lex(lex)) => Err(lex.into()),
@@ -60,7 +58,7 @@ impl From<IdentMismatch> for ParseError<IdentMismatch> {
 
 pub(crate) fn literal(
     mut s: Lexer,
-) -> Result<(Lexer, (Literal, Span), Complete), ParseError<LiteralMismatch>> {
+) -> Result<(Lexer, (Literal, Span)), ParseError<LiteralMismatch>> {
     let literal = match s.next_token() {
         Ok(Token::Nil) => Literal::Nil,
         Ok(Token::True) => Literal::Bool(true),
@@ -78,7 +76,7 @@ pub(crate) fn literal(
     };
     let span = s.span();
 
-    Ok((s, (literal, span), Complete))
+    Ok((s, (literal, span)))
 }
 
 #[derive(Debug, Error)]
@@ -93,12 +91,12 @@ impl From<LiteralMismatch> for ParseError<LiteralMismatch> {
 
 pub(crate) fn literal_str(
     mut s: Lexer,
-) -> Result<(Lexer, (Cow<str>, Span), Complete), ParseError<LiteralStrMismatch>> {
+) -> Result<(Lexer, (Cow<str>, Span)), ParseError<LiteralStrMismatch>> {
     match s.next_token() {
         Ok(Token::ShortLiteralString(raw_str)) => {
             let r = raw_str.unescape()?;
             let span = s.span();
-            Ok((s, (r, span), Complete))
+            Ok((s, (r, span)))
         }
         Ok(_) | Err(NextTokenError::Parse(Eof)) => Err(LiteralStrMismatch.into()),
         Err(NextTokenError::Lex(lex)) => Err(lex.into()),

@@ -5,17 +5,17 @@ pub(crate) fn generic_for<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_list_adjusted_to;
     use GenericForFailure::*;
 
-    let (s, _, Complete) = match_token(s, Token::For).map_parse(For)?;
-    let (s, names, _) = name_list(s).map_parse(Ident)?;
-    let (s, _, Complete) = match_token(s, Token::In).map_parse(In)?;
+    let (s, _) = match_token(s, Token::For).map_parse(For)?;
+    let (s, names) = name_list(s).map_parse(Ident)?;
+    let (s, _) = match_token(s, Token::In).map_parse(In)?;
 
     let top = outer_frag.stack().top()?;
-    let (s, (), _) = expr_list_adjusted_to(s, 4, chunk, outer_frag.new_fragment())
+    let (s, ()) = expr_list_adjusted_to(s, 4, chunk, outer_frag.new_fragment())
         .with_mode(FailureMode::Malformed)?;
 
     let iter = top;
@@ -50,15 +50,15 @@ pub(crate) fn generic_for<'s>(
         frag.stack_mut().give_name(slot, name)?;
     }
 
-    let (s, _, Complete) = match_token(s, Token::Do).map_parse(Do)?;
-    let (s, (), _) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
+    let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
+    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     frag.emit_loop_to()?;
     frag.commit_scope();
     outer_frag.commit();
 
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]
@@ -87,22 +87,20 @@ impl HaveFailureMode for GenericForFailure {
     }
 }
 
-fn name_list(s: Lexer) -> Result<(Lexer, Vec<&str>, NameListSuccess), ParseError<IdentMismatch>> {
-    let (mut s, (ident, _), Complete) = identifier(s)?;
+fn name_list(s: Lexer) -> Result<(Lexer, Vec<&str>), ParseError<IdentMismatch>> {
+    let (mut s, (ident, _)) = identifier(s)?;
     let mut r = vec![ident];
 
-    let status = loop {
+    loop {
         s = match match_token(s.clone(), Token::Comma) {
-            Ok((s, _, Complete)) => s,
-            Err(err) => break err,
+            Ok((s, _)) => s,
+            Err(_err) => break,
         };
 
         let ident;
-        (s, (ident, _), Complete) = identifier(s)?;
+        (s, (ident, _)) = identifier(s)?;
         r.push(ident);
-    };
+    }
 
-    Ok((s, r, NameListSuccess(status)))
+    Ok((s, r))
 }
-
-struct NameListSuccess(ParseError<TokenMismatch>);

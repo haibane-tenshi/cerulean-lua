@@ -5,13 +5,13 @@ pub(crate) fn local_function<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::func_def::func_body;
     use LocalFunctionFailure::*;
 
-    let (s, _, Complete) = match_token(s, Token::Local).map_parse(Local)?;
-    let (s, _, Complete) = match_token(s, Token::Function).map_parse(Function)?;
-    let (s, (ident, _), Complete) = identifier(s).map_parse(Ident)?;
+    let (s, _) = match_token(s, Token::Local).map_parse(Local)?;
+    let (s, _) = match_token(s, Token::Function).map_parse(Function)?;
+    let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
 
     // Lua disambiguates this case by introducing local variable first and assigning to it later.
     // This is relevant for recursive functions.
@@ -20,7 +20,7 @@ pub(crate) fn local_function<'s>(
     let slot = frag.stack_mut().push()?;
     frag.stack_mut().give_name(slot, ident)?;
 
-    let (s, func_id, status) =
+    let (s, func_id) =
         func_body(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     let const_id = chunk.constants.insert(Literal::Function(func_id))?;
@@ -29,7 +29,7 @@ pub(crate) fn local_function<'s>(
     frag.emit_raw(OpCode::LoadConstant(const_id), false)?;
 
     frag.commit();
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]

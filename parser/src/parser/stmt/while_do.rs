@@ -5,29 +5,29 @@ pub(crate) fn while_do<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut outer_frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
     use WhileDoFailure::*;
 
-    let (s, _, Complete) = match_token(s, Token::While).map_parse(While)?;
+    let (s, _) = match_token(s, Token::While).map_parse(While)?;
 
     let mut frag = outer_frag.new_fragment();
 
-    let (s, (), _) =
+    let (s, ()) =
         expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _, Complete) = match_token(s, Token::Do).map_parse(Do)?;
+    let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
 
     frag.emit_jump_to(frag.id(), Some(false))?;
 
-    let (s, (), _) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _, status) = match_token(s, Token::End).map_parse(End)?;
+    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     frag.emit_loop_to()?;
     frag.commit();
     outer_frag.commit();
 
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]

@@ -1,27 +1,26 @@
 use logos::Span;
 use thiserror::Error;
 
-use crate::parser::expr::ExprSuccess;
 use crate::parser::prelude::*;
 
 pub(crate) fn table<'s>(
     s: Lexer<'s>,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), Complete), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use TabFailure::*;
 
-    let (s, _, Complete) = match_token(s, Token::CurlyL).map_parse(CurlyL)?;
+    let (s, _) = match_token(s, Token::CurlyL).map_parse(CurlyL)?;
 
     let table_slot = frag.stack().top()?;
     frag.emit(OpCode::TabCreate)?;
 
     let (s, _, _) = field_list(s.clone(), table_slot, chunk, frag.new_fragment()).optional(s);
-    let (s, _, status) = match_token(s, Token::CurlyR).map_parse(CurlyR)?;
+    let (s, _) = match_token(s, Token::CurlyR).map_parse(CurlyR)?;
 
     frag.commit();
 
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]
@@ -46,10 +45,10 @@ fn field_list<'s>(
     table_slot: StackSlot,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), FieldListSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     let mut next_index = 1;
     let mut field = |s: Lexer<'s>| -> Result<_, Error<ParseFailure>> {
-        let (s, field_type, status) = field(
+        let (s, field_type) = field(
             s.clone(),
             table_slot,
             next_index,
@@ -61,25 +60,25 @@ fn field_list<'s>(
             next_index += 1
         }
 
-        Ok((s, (), status))
+        Ok((s, ()))
     };
 
-    let (mut s, (), _) = field(s)?;
+    let (mut s, ()) = field(s)?;
 
-    let status = loop {
+    loop {
         s = match field_sep(s.clone()) {
-            Ok((s, _, Complete)) => s,
-            Err(err) => break FieldListSuccess::FieldSep(err),
+            Ok((s, _)) => s,
+            Err(_erf) => break,
         };
 
         s = match field(s.clone()) {
-            Ok((s, (), _)) => s,
-            Err(err) => break FieldListSuccess::Expr(err),
+            Ok((s, ())) => s,
+            Err(_err) => break,
         }
-    };
+    }
 
     frag.commit();
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug)]
@@ -106,20 +105,20 @@ fn field<'s>(
     next_index: i64,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, FieldType, ExprSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, FieldType), Error<ParseFailure>> {
     let inner = || {
         let mut err = match bracket(s.clone(), table_slot, chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, FieldType::Bracket, status)),
+            Ok((s, ())) => return Ok((s, FieldType::Bracket)),
             Err(err) => err,
         };
 
         err |= match name(s.clone(), table_slot, chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, FieldType::Name, status)),
+            Ok((s, ())) => return Ok((s, FieldType::Name)),
             Err(err) => err,
         };
 
         err |= match index(s, table_slot, next_index, chunk, frag.new_fragment()) {
-            Ok((s, (), status)) => return Ok((s, FieldType::Index, status)),
+            Ok((s, ())) => return Ok((s, FieldType::Index)),
             Err(err) => err,
         };
 
@@ -138,13 +137,13 @@ enum FieldType {
     Name,
 }
 
-fn field_sep(mut s: Lexer) -> Result<(Lexer, Span, Complete), ParseError<FieldSepMismatchError>> {
+fn field_sep(mut s: Lexer) -> Result<(Lexer, Span), ParseError<FieldSepMismatchError>> {
     use crate::parser::NextTokenError;
 
     match s.next_token() {
         Ok(Token::Comma | Token::Semicolon) => {
             let span = s.span();
-            Ok((s, span, Complete))
+            Ok((s, span))
         }
         Ok(_) | Err(NextTokenError::Parse(Eof)) => Err(ParseError::Parse(FieldSepMismatchError)),
         Err(NextTokenError::Lex(lex)) => Err(lex.into()),
@@ -160,25 +159,25 @@ fn bracket<'s>(
     table_slot: StackSlot,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::expr::expr_adjusted_to_1;
     use TabBracketFailure::*;
 
-    let (s, _, Complete) = match_token(s, Token::BracketL).map_parse(BracketL)?;
+    let (s, _) = match_token(s, Token::BracketL).map_parse(BracketL)?;
 
     frag.emit(OpCode::LoadStack(table_slot))?;
 
-    let (s, (), _) =
+    let (s, ()) =
         expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _, Complete) = match_token(s, Token::BracketR).map_parse(BracketR)?;
-    let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
-    let (s, (), status) =
+    let (s, _) = match_token(s, Token::BracketR).map_parse(BracketR)?;
+    let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
+    let (s, ()) =
         expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     frag.emit(OpCode::TabSet)?;
 
     frag.commit();
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]
@@ -206,25 +205,25 @@ fn name<'s>(
     table_slot: StackSlot,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::expr::expr_adjusted_to_1;
     use TabNameFailure::*;
 
-    let (s, (ident, _), Complete) = identifier(s).map_parse(Ident)?;
+    let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
 
     frag.emit(OpCode::LoadStack(table_slot))?;
 
     let const_id = chunk.constants.insert(Literal::String(ident.to_string()))?;
     frag.emit(OpCode::LoadConstant(const_id))?;
 
-    let (s, _, Complete) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
-    let (s, (), status) =
+    let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
+    let (s, ()) =
         expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     frag.emit(OpCode::TabSet)?;
 
     frag.commit();
-    Ok((s, (), status))
+    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]
@@ -250,7 +249,7 @@ fn index<'s>(
     index: i64,
     chunk: &mut Chunk,
     mut frag: Fragment<'s, '_, '_>,
-) -> Result<(Lexer<'s>, (), ExprSuccess), Error<ParseFailure>> {
+) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::expr::expr_adjusted_to_1;
 
     let start = frag.stack().top()?;
