@@ -21,6 +21,10 @@ impl Function {
         }
     }
 
+    pub fn view(&mut self) -> FunctionView {
+        FunctionView::new(self)
+    }
+
     pub fn resolve(self, height: u32) -> repr::chunk::Function {
         let Function {
             opcodes: codes,
@@ -59,7 +63,7 @@ struct InnerState {
 }
 
 #[derive(Debug)]
-pub(super) struct FunctionView<'fun> {
+pub struct FunctionView<'fun> {
     fragment_id: FragmentId,
     fun: &'fun mut Function,
     prev_state: InnerState,

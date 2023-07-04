@@ -2,23 +2,21 @@ use crate::parser::prelude::*;
 
 pub(crate) fn expr<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    frag: Fragment<'s, '_, '_>,
+    frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    expr_impl(s, 0, chunk, frag)
+    expr_impl(s, 0, frag)
 }
 
 fn expr_impl<'s>(
     s: Lexer<'s>,
     min_bp: u64,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     let stack_start = frag.stack().top()?;
 
     let mut s = if let Ok((s, op, Complete)) = prefix_op(s.clone()) {
         let ((), rhs_bp) = op.binding_power();
-        let (s, ()) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())?;
+        let (s, ()) = expr_impl(s, rhs_bp, frag.new_fragment())?;
 
         let opcode = match op {
             Prefix::Ari(op) => OpCode::AriUnaOp(op),
@@ -30,7 +28,7 @@ fn expr_impl<'s>(
 
         s
     } else {
-        let (s, ()) = atom(s, chunk, frag.new_fragment())?;
+        let (s, ()) = atom(s, frag.new_fragment())?;
 
         s
     };
@@ -39,7 +37,7 @@ fn expr_impl<'s>(
     // This is OK: it can happen when there are no operators in current expression.
     // We cannot trim it yet, outside context might expect those values.
 
-    let mut next_part = |s: Lexer<'s>, mut frag: Fragment<'s, '_, '_>| {
+    let next_part = |s: Lexer<'s>, mut frag: Fragment<'s, '_>| {
         use ExprSuccessImpl::{Expr, LessTightlyBound};
 
         let (s, op, Complete) = infix_op(s).map_parse(ExprSuccessImpl::Infix)?;
@@ -77,7 +75,7 @@ fn expr_impl<'s>(
         };
 
         let rhs_top = frag.stack().top()? + 1;
-        let (s, _) = expr_impl(s, rhs_bp, chunk, frag.new_fragment())
+        let (s, _) = expr_impl(s, rhs_bp, frag.new_fragment())
             .with_mode(FailureMode::Malformed)
             .map_parse(Expr)?;
 
@@ -111,14 +109,13 @@ enum ExprSuccessImpl {
 
 fn atom<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use super::{function::function, literal::literal, table::table};
     use crate::parser::prefix_expr::prefix_expr;
 
     let mut inner = || {
-        let mut err = match literal(s.clone(), chunk, frag.new_fragment()) {
+        let mut err = match literal(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err.map_parse(|_| ParseFailure {
                 mode: FailureMode::Mismatch,
@@ -126,17 +123,17 @@ fn atom<'s>(
             }),
         };
 
-        err |= match prefix_expr(s.clone(), chunk, frag.new_fragment()) {
+        err |= match prefix_expr(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match table(s.clone(), chunk, frag.new_fragment()) {
+        err |= match table(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match function(s.clone(), chunk, frag.new_fragment()) {
+        err |= match function(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };

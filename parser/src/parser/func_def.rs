@@ -5,8 +5,7 @@ use thiserror::Error;
 
 pub(crate) fn func_body<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut outer_frag: Fragment<'s, '_, '_>,
+    mut outer_frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, FunctionId), Error<ParseFailure>> {
     use crate::codegen::function::Function;
     use crate::parser::block::block;
@@ -15,8 +14,8 @@ pub(crate) fn func_body<'s>(
     let (s, _) = match_token(s, Token::ParL).map_parse(ParL)?;
 
     // Start function
-    let mut fun = Function::new();
-    let mut frag = Fragment::new(&mut fun, outer_frag.stack_mut().new_frame());
+    let mut func = Function::new();
+    let mut frag = outer_frag.new_function(func.view());
 
     // Currently this slot contains pointer to function itself.
     // In the future we will put environment here instead.
@@ -29,13 +28,13 @@ pub(crate) fn func_body<'s>(
     let height = param_count + 1;
 
     let (s, _) = match_token(s, Token::ParR).map_parse(ParR)?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
     let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     // Finish function
     frag.commit_scope();
-    let fun = fun.resolve(height);
-    let func_id = chunk.functions.push(fun)?;
+    let func = func.resolve(height);
+    let func_id = outer_frag.func_table_mut().push(func)?;
 
     // Drop outer fragment to make sure we didn't mess up current function.
     drop(outer_frag);

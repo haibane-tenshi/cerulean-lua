@@ -3,8 +3,7 @@ use thiserror::Error;
 
 pub(crate) fn local_function<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::func_def::func_body;
     use LocalFunctionFailure::*;
@@ -20,10 +19,9 @@ pub(crate) fn local_function<'s>(
     let slot = frag.stack_mut().push()?;
     frag.stack_mut().give_name(slot, ident)?;
 
-    let (s, func_id) =
-        func_body(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, func_id) = func_body(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
-    let const_id = chunk.constants.insert(Literal::Function(func_id))?;
+    let const_id = frag.const_table_mut().insert(Literal::Function(func_id))?;
 
     // Stack is already adjusted, we just need to silently write to correct slot here.
     frag.emit_raw(OpCode::LoadConstant(const_id), false)?;

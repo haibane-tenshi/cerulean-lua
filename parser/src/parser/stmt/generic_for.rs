@@ -3,8 +3,7 @@ use thiserror::Error;
 
 pub(crate) fn generic_for<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut outer_frag: Fragment<'s, '_, '_>,
+    mut outer_frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_list_adjusted_to;
@@ -15,8 +14,8 @@ pub(crate) fn generic_for<'s>(
     let (s, _) = match_token(s, Token::In).map_parse(In)?;
 
     let top = outer_frag.stack().top()?;
-    let (s, ()) = expr_list_adjusted_to(s, 4, chunk, outer_frag.new_fragment())
-        .with_mode(FailureMode::Malformed)?;
+    let (s, ()) =
+        expr_list_adjusted_to(s, 4, outer_frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     let iter = top;
     let state = top + 1;
@@ -24,7 +23,7 @@ pub(crate) fn generic_for<'s>(
     // Currently unimplemented.
     let _close = top + 3;
 
-    let nil = chunk.constants.insert(Literal::Nil)?;
+    let nil = outer_frag.const_table_mut().insert(Literal::Nil)?;
 
     let mut frag = outer_frag.new_fragment();
     let new_control = frag.stack().top()?;
@@ -51,7 +50,7 @@ pub(crate) fn generic_for<'s>(
     }
 
     let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
     let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     frag.emit_loop_to()?;

@@ -4,8 +4,7 @@ use thiserror::Error;
 
 pub(crate) fn if_then<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut outer_frag: Fragment<'s, '_, '_>,
+    mut outer_frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
@@ -14,14 +13,14 @@ pub(crate) fn if_then<'s>(
     let outer = outer_frag.id();
 
     let (s, _) = match_token(s, Token::If).map_parse(If)?;
-    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
-        .with_mode(FailureMode::Malformed)?;
+    let (s, ()) =
+        expr_adjusted_to_1(s, outer_frag.new_fragment()).with_mode(FailureMode::Malformed)?;
     let (s, _) = match_token(s, Token::Then).map_parse(Then)?;
 
     let mut frag = outer_frag.new_fragment();
     frag.emit_jump_to(frag.id(), Some(false))?;
 
-    let (mut s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (mut s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     if match_token(s.clone(), Token::End).is_err() {
         frag.emit_jump_to(outer, None)?;
@@ -29,13 +28,13 @@ pub(crate) fn if_then<'s>(
     frag.commit();
 
     loop {
-        s = match else_if_clause(s.clone(), outer, chunk, outer_frag.new_fragment()) {
+        s = match else_if_clause(s.clone(), outer, outer_frag.new_fragment()) {
             Ok((s, ())) => s,
             Err(_) => break,
         };
     }
 
-    let (s, _, _) = else_clause(s.clone(), chunk, outer_frag.new_fragment()).optional(s);
+    let (s, _, _) = else_clause(s.clone(), outer_frag.new_fragment()).optional(s);
     let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     outer_frag.commit();
@@ -65,22 +64,21 @@ impl HaveFailureMode for IfThenFailure {
 fn else_if_clause<'s>(
     s: Lexer<'s>,
     outer: FragmentId,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ElseIfFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
     use ElseIfFailure::*;
 
     let (s, _) = match_token(s, Token::ElseIf).map_parse(ElseIf)?;
-    let (s, ()) = expr_adjusted_to_1(s, chunk, frag.new_fragment())
+    let (s, ()) = expr_adjusted_to_1(s, frag.new_fragment())
         .with_mode(FailureMode::Malformed)
         .map_parse(Expr)?;
     let (s, _) = match_token(s, Token::Then).map_parse(Then)?;
 
     frag.emit_jump_to(frag.id(), Some(false))?;
 
-    let (s, ()) = block(s, chunk, frag.new_fragment())
+    let (s, ()) = block(s, frag.new_fragment())
         .with_mode(FailureMode::Malformed)
         .map_parse(Expr)?;
 
@@ -100,14 +98,13 @@ enum ElseIfFailure {
 
 fn else_clause<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    frag: Fragment<'s, '_, '_>,
+    frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ElseFailure>> {
     use crate::parser::block::block;
     use ElseFailure::*;
 
     let (s, _) = match_token(s, Token::Else).map_parse(Else)?;
-    let (s, ()) = block(s, chunk, frag)
+    let (s, ()) = block(s, frag)
         .with_mode(FailureMode::Malformed)
         .map_parse(Expr)?;
 

@@ -104,6 +104,10 @@ impl<'s> Stack<'s> {
         Default::default()
     }
 
+    pub fn view(&mut self) -> StackView<'s, '_> {
+        StackView::new(self)
+    }
+
     fn len(&self) -> GlobalStackSlot {
         self.temporaries.len()
     }

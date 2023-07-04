@@ -13,11 +13,10 @@ pub(crate) use expr::expr;
 pub(crate) fn expr_adjusted_to<'s>(
     s: Lexer<'s>,
     count: u32,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     let mark = frag.stack().top()? + count;
-    let r = expr(s, chunk, frag.new_fragment())?;
+    let r = expr(s, frag.new_fragment())?;
     frag.emit_adjust_to(mark)?;
 
     frag.commit();
@@ -26,22 +25,19 @@ pub(crate) fn expr_adjusted_to<'s>(
 
 pub(crate) fn expr_adjusted_to_1<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    frag: Fragment<'s, '_, '_>,
+    frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    expr_adjusted_to(s, 1, chunk, frag)
+    expr_adjusted_to(s, 1, frag)
 }
 
 pub(crate) fn par_expr<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use ParExprFailure::*;
 
     let (s, _) = match_token(s, Token::ParL).map_parse(ParL)?;
-    let (s, ()) =
-        expr_adjusted_to_1(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, ()) = expr_adjusted_to_1(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
     let (s, _) = match_token(s, Token::ParR).map_parse(ParR)?;
 
     frag.commit();
@@ -66,15 +62,14 @@ impl HaveFailureMode for ParExprFailure {
 
 pub(crate) fn expr_list<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     let mut mark = frag.stack().top()? + 1;
 
-    let (mut s, ()) = expr(s, chunk, frag.new_fragment())?;
+    let (mut s, ()) = expr(s, frag.new_fragment())?;
 
-    let mut next_part =
-        |s: Lexer<'s>, mut frag: Fragment<'s, '_, '_>, mark| -> Result<_, ExprListSuccess> {
+    let next_part =
+        |s: Lexer<'s>, mut frag: Fragment<'s, '_>, mark| -> Result<_, ExprListSuccess> {
             use ExprListSuccessInner::*;
 
             let (s, _) = match_token(s, Token::Comma).map_parse(Comma)?;
@@ -82,7 +77,7 @@ pub(crate) fn expr_list<'s>(
             // Expressions inside comma lists are adjusted to 1.
             frag.emit_adjust_to(mark)?;
 
-            let (s, _) = expr(s, chunk, frag.new_fragment()).map_parse(Expr)?;
+            let (s, _) = expr(s, frag.new_fragment()).map_parse(Expr)?;
 
             frag.commit();
             Ok((s, ()))
@@ -111,11 +106,10 @@ pub(crate) enum ExprListSuccessInner {
 pub(crate) fn expr_list_adjusted_to<'s>(
     s: Lexer<'s>,
     count: u32,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     let mark = frag.stack().top()? + count;
-    let r = expr_list(s, chunk, frag.new_fragment())?;
+    let r = expr_list(s, frag.new_fragment())?;
     frag.emit_adjust_to(mark)?;
 
     frag.commit();

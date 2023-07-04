@@ -2,10 +2,9 @@ use crate::parser::prelude::*;
 
 pub(crate) fn block<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    let r = inner_block(s, chunk, frag.new_fragment())?;
+    let r = inner_block(s, frag.new_fragment())?;
 
     frag.commit_scope();
     Ok(r)
@@ -13,20 +12,19 @@ pub(crate) fn block<'s>(
 
 pub(crate) fn inner_block<'s>(
     mut s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::stmt::return_::return_;
     use crate::parser::stmt::statement;
 
     let _ = loop {
-        s = match statement(s.clone(), chunk, frag.new_fragment()) {
+        s = match statement(s.clone(), frag.new_fragment()) {
             Ok((s, _)) => s,
             Err(err) => break err,
         };
     };
 
-    let (s, _, _) = return_(s.clone(), chunk, frag.new_fragment()).optional(s);
+    let (s, _, _) = return_(s.clone(), frag.new_fragment()).optional(s);
 
     frag.commit();
     Ok((s, ()))

@@ -13,8 +13,7 @@ use crate::parser::prelude::*;
 
 pub(crate) fn statement<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use assignment::assignment;
     use do_end::do_end;
@@ -32,47 +31,47 @@ pub(crate) fn statement<'s>(
             Err(err) => err,
         };
 
-        err |= match do_end(s.clone(), chunk, frag.new_fragment()) {
+        err |= match do_end(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match if_then(s.clone(), chunk, frag.new_fragment()) {
+        err |= match if_then(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match while_do(s.clone(), chunk, frag.new_fragment()) {
+        err |= match while_do(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match repeat_until(s.clone(), chunk, frag.new_fragment()) {
+        err |= match repeat_until(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match numerical_for(s.clone(), chunk, frag.new_fragment()) {
+        err |= match numerical_for(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match generic_for(s.clone(), chunk, frag.new_fragment()) {
+        err |= match generic_for(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match local_assignment(s.clone(), chunk, frag.new_fragment()) {
+        err |= match local_assignment(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match local_function(s.clone(), chunk, frag.new_fragment()) {
+        err |= match local_function(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };
 
-        err |= match assignment(s.clone(), chunk, frag.new_fragment()) {
+        err |= match assignment(s.clone(), frag.new_fragment()) {
             Ok((s, ())) => return Ok((s, ())),
             Err(err) => err,
         };

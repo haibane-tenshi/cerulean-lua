@@ -22,8 +22,7 @@ impl StackSlotOrConstId {
 
 pub(crate) fn numerical_for<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut outer_frag: Fragment<'s, '_, '_>,
+    mut outer_frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::block::block;
     use crate::parser::expr::expr_adjusted_to_1;
@@ -36,21 +35,21 @@ pub(crate) fn numerical_for<'s>(
     let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
 
     let loop_var = outer_frag.stack().top()?;
-    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
-        .with_mode(FailureMode::Malformed)?;
+    let (s, ()) =
+        expr_adjusted_to_1(s, outer_frag.new_fragment()).with_mode(FailureMode::Malformed)?;
     outer_frag.stack_mut().give_name(loop_var, ident)?;
 
     let (s, _) = match_token(s, Token::Comma).map_parse(Comma)?;
 
     let limit = outer_frag.stack().top()?;
-    let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment())
-        .with_mode(FailureMode::Malformed)?;
+    let (s, ()) =
+        expr_adjusted_to_1(s, outer_frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     let mut maybe_step = |s: Lexer<'s>| -> Result<(Lexer<'s>, StackSlot), ()> {
         let (s, _) = match_token(s, Token::Comma).map_err(|_| ())?;
 
         let step = outer_frag.stack().top().map_err(|_| ())?;
-        let (s, ()) = expr_adjusted_to_1(s, chunk, outer_frag.new_fragment()).map_err(|_| ())?;
+        let (s, ()) = expr_adjusted_to_1(s, outer_frag.new_fragment()).map_err(|_| ())?;
 
         Ok((s, step))
     };
@@ -60,19 +59,19 @@ pub(crate) fn numerical_for<'s>(
     let step = match step {
         Some(slot) => StackSlotOrConstId::StackSlot(slot),
         None => {
-            let const_id = chunk.constants.insert(Literal::Int(1))?;
+            let const_id = outer_frag.const_table_mut().insert(Literal::Int(1))?;
             StackSlotOrConstId::ConstId(const_id)
         }
     };
 
     // Loop controls.
 
-    let zero = chunk.constants.insert(Literal::Int(0))?;
+    let zero = outer_frag.const_table_mut().insert(Literal::Int(0))?;
 
     // Panic if increment is 0.
     if let StackSlotOrConstId::StackSlot(step) = step {
-        let error_msg = chunk
-            .constants
+        let error_msg = outer_frag
+            .const_table_mut()
             .insert(Literal::String("loop increment is 0".to_string()))?;
 
         let mut zero_check = outer_frag.new_fragment();
@@ -119,7 +118,7 @@ pub(crate) fn numerical_for<'s>(
     controls.commit();
 
     let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
     let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     // Increment control variable.

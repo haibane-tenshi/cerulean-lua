@@ -105,22 +105,41 @@ impl<'s, T, Failure> Optional for Result<(Lexer<'s>, T), Failure> {
 }
 
 pub fn chunk(s: Lexer) -> Result<Chunk, Error<ParseFailure>> {
-    use crate::codegen::chunk::Chunk;
+    use crate::codegen::const_table::ConstTable;
+    use crate::codegen::func_table::FuncTable;
     use crate::codegen::function::Function;
-    use crate::codegen::stack::{Stack, StackView};
+    use crate::codegen::stack::Stack;
     use crate::parser::block::block;
 
-    let mut chunk = Chunk::with_script();
+    // Reserve 0-th slot in table for the script itself.
+    let mut func_table = FuncTable::with_script();
+    let mut const_table = ConstTable::new();
     let mut script = Function::new();
     let mut stack = Stack::new();
 
-    let fragment = Fragment::new(&mut script, StackView::new(&mut stack));
-    let _ = block(s, &mut chunk, fragment)?;
+    let fragment = Fragment::new(
+        func_table.view(),
+        const_table.view(),
+        script.view(),
+        stack.view(),
+    );
+    let _ = block(s, fragment)?;
 
-    // Put script into where runtime expects it to find.
-    let mut script = script.resolve(0);
-    std::mem::swap(chunk.functions.first_mut().unwrap(), &mut script);
-    let chunk = chunk.resolve();
+    let func_table = {
+        let mut func_table = func_table.resolve();
+        let mut script = script.resolve(0);
+
+        // Put script where runtime expects it to find.
+        std::mem::swap(func_table.first_mut().unwrap(), &mut script);
+
+        func_table
+    };
+    let const_table = const_table.resolve();
+
+    let chunk = Chunk {
+        functions: func_table,
+        constants: const_table,
+    };
 
     Ok(chunk)
 }

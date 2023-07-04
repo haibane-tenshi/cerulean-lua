@@ -3,14 +3,13 @@ use thiserror::Error;
 
 pub(crate) fn do_end<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::block::block;
     use DoEndFailure::*;
 
     let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
-    let (s, ()) = block(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
     let (s, _) = match_token(s, Token::End).map_parse(End)?;
 
     frag.commit_scope();

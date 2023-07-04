@@ -3,8 +3,7 @@ use thiserror::Error;
 
 pub(crate) fn local_assignment<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
     use crate::parser::expr::expr_list;
     use LocalAssignmentFailure::*;
@@ -15,7 +14,7 @@ pub(crate) fn local_assignment<'s>(
 
     let (s, idents) = ident_list(s).map_parse(Ident)?;
     let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
-    let (s, ()) = expr_list(s, chunk, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+    let (s, ()) = expr_list(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
     let count: u32 = idents.len().try_into().unwrap();
     frag.emit_adjust_to(stack_start + count)?;

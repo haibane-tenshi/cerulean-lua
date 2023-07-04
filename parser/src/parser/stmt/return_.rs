@@ -2,8 +2,7 @@ use crate::parser::prelude::*;
 
 pub(crate) fn return_<'s>(
     s: Lexer<'s>,
-    chunk: &mut Chunk,
-    mut frag: Fragment<'s, '_, '_>,
+    mut frag: Fragment<'s, '_>,
 ) -> Result<(Lexer<'s>, ()), Error<ReturnFailure>> {
     use crate::parser::expr::expr_list;
     use ReturnFailure::*;
@@ -12,7 +11,7 @@ pub(crate) fn return_<'s>(
 
     let slot = frag.stack().top()?;
 
-    let (s, ()) = expr_list(s, chunk, frag.new_fragment())
+    let (s, ()) = expr_list(s, frag.new_fragment())
         .with_mode(FailureMode::Malformed)
         .map_parse(Expr)?;
     let (s, _, _) = match_token(s.clone(), Token::Semicolon).optional(s);

@@ -1,4 +1,3 @@
-pub(crate) use crate::codegen::chunk::Chunk;
 pub(crate) use crate::codegen::fragment::Fragment;
 pub(crate) use crate::codegen::stack::NameLookup;
 pub(crate) use crate::lex::{Lexer, Number, Token};

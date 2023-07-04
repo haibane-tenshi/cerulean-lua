@@ -1,7 +1,9 @@
 use std::ops::Add;
 use thiserror::Error;
 
-use crate::codegen::function::{Function, FunctionView};
+use crate::codegen::const_table::ConstTableView;
+use crate::codegen::func_table::FuncTableView;
+use crate::codegen::function::FunctionView;
 use crate::codegen::stack::{
     BoundaryViolationError, NewBlockAtError, PopError, PushError, StackView,
 };
@@ -21,27 +23,45 @@ impl Add<u32> for FragmentId {
 }
 
 #[derive(Debug)]
-pub struct Fragment<'s, 'fun, 'stack> {
-    fun: FunctionView<'fun>,
-    stack: StackView<'s, 'stack>,
+pub struct Fragment<'s, 'origin> {
+    func_table: FuncTableView<'origin>,
+    const_table: ConstTableView<'origin>,
+    fun: FunctionView<'origin>,
+    stack: StackView<'s, 'origin>,
 }
 
-impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
-    pub fn new(fun: &'fun mut Function, stack: StackView<'s, 'stack>) -> Self {
-        let fun = FunctionView::new(fun);
-
-        Fragment { fun, stack }
+impl<'s, 'origin> Fragment<'s, 'origin> {
+    pub fn new(
+        func_table: FuncTableView<'origin>,
+        const_table: ConstTableView<'origin>,
+        fun: FunctionView<'origin>,
+        stack: StackView<'s, 'origin>,
+    ) -> Self {
+        Fragment {
+            func_table,
+            const_table,
+            fun,
+            stack,
+        }
     }
 
     pub fn id(&self) -> FragmentId {
         self.fun.id()
     }
 
-    pub fn stack(&self) -> &StackView<'s, 'stack> {
+    pub fn const_table_mut(&mut self) -> &mut ConstTableView<'origin> {
+        &mut self.const_table
+    }
+
+    pub fn func_table_mut(&mut self) -> &mut FuncTableView<'origin> {
+        &mut self.func_table
+    }
+
+    pub fn stack(&self) -> &StackView<'s, 'origin> {
         &self.stack
     }
 
-    pub fn stack_mut(&mut self) -> &mut StackView<'s, 'stack> {
+    pub fn stack_mut(&mut self) -> &mut StackView<'s, 'origin> {
         &mut self.stack
     }
 
@@ -166,35 +186,87 @@ impl<'s, 'fun, 'stack> Fragment<'s, 'fun, 'stack> {
     //     self.fun.len()
     // }
 
-    pub fn new_fragment<'a>(&'a mut self) -> Fragment<'s, 'a, 'a> {
-        let Fragment { fun, stack } = self;
+    pub fn new_function<'a>(&'a mut self, func: FunctionView<'a>) -> Fragment<'s, 'a> {
+        let Fragment {
+            func_table,
+            const_table,
+            fun: _,
+            stack,
+        } = self;
 
+        let func_table = func_table.new_view();
+        let const_table = const_table.new_view();
+        let stack = stack.new_frame();
+
+        Fragment {
+            func_table,
+            const_table,
+            fun: func,
+            stack,
+        }
+    }
+
+    pub fn new_fragment(&mut self) -> Fragment<'s, '_> {
+        let Fragment {
+            func_table,
+            const_table,
+            fun,
+            stack,
+        } = self;
+
+        let func_table = func_table.new_view();
+        let const_table = const_table.new_view();
         let fun = fun.new_block();
         let stack = stack.new_block();
 
-        Fragment { fun, stack }
+        Fragment {
+            func_table,
+            const_table,
+            fun,
+            stack,
+        }
     }
 
-    pub fn new_fragment_at<'a>(
-        &'a mut self,
+    pub fn new_fragment_at(
+        &mut self,
         slot: StackSlot,
-    ) -> Result<Fragment<'s, 'a, 'a>, NewBlockAtError> {
-        let Fragment { fun, stack } = self;
+    ) -> Result<Fragment<'s, '_>, NewBlockAtError> {
+        let Fragment {
+            func_table,
+            const_table,
+            fun,
+            stack,
+        } = self;
 
+        let func_table = func_table.new_view();
+        let const_table = const_table.new_view();
         let fun = fun.new_block();
         let stack = stack.new_block_at(slot)?;
 
-        let r = Fragment { fun, stack };
+        let r = Fragment {
+            func_table,
+            const_table,
+            fun,
+            stack,
+        };
 
         Ok(r)
     }
 
-    pub fn new_fragment_at_boundary<'a>(&'a mut self) -> Fragment<'s, 'a, 'a> {
+    pub fn new_fragment_at_boundary(&mut self) -> Fragment<'s, '_> {
         self.new_fragment_at(self.stack.boundary()).unwrap()
     }
 
     fn commit_impl(self, preserve_stack: bool) {
-        let Fragment { fun, mut stack } = self;
+        let Fragment {
+            func_table,
+            const_table,
+            fun,
+            mut stack,
+        } = self;
+
+        func_table.commit();
+        const_table.commit();
 
         let sequence_state = fun.reachable().then(|| stack.state());
         let jump_state = fun.commit();
