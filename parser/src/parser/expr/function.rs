@@ -12,8 +12,7 @@ pub(crate) fn function<'s>(
     let (s, _) = match_token(s, Token::Function).map_parse(Function)?;
     let (s, func_id) = func_body(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
 
-    let const_id = frag.const_table_mut().insert(Literal::Function(func_id))?;
-    frag.emit(OpCode::LoadConstant(const_id))?;
+    frag.emit_load_literal(Literal::Function(func_id))?;
 
     frag.commit();
     Ok((s, ()))

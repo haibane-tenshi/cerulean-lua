@@ -7,7 +7,8 @@ use crate::codegen::function::FunctionView;
 use crate::codegen::stack::{
     BoundaryViolationError, NewBlockAtError, PopError, PushError, StackView,
 };
-use repr::index::{InstrCountError, InstrId, StackSlot};
+use repr::index::{ConstCapacityError, InstrCountError, InstrId, StackSlot};
+use repr::literal::Literal;
 use repr::opcode::OpCode;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
@@ -178,6 +179,13 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(())
     }
 
+    pub fn emit_load_literal(&mut self, literal: Literal) -> Result<InstrId, EmitLoadLiteralError> {
+        let const_id = self.const_table.insert(literal)?;
+        let instr_id = self.emit(OpCode::LoadConstant(const_id))?;
+
+        Ok(instr_id)
+    }
+
     // pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
     //     self.fun.get_mut(instr_id)
     // }
@@ -302,4 +310,12 @@ pub enum EmitError {
     #[error("invoked pointing at stack slot above stack top")]
     InvokeOutsideStackBoundary,
     InstrCount(#[from] InstrCountError),
+}
+
+#[derive(Debug, Error)]
+pub enum EmitLoadLiteralError {
+    #[error(transparent)]
+    Emit(#[from] EmitError),
+    #[error(transparent)]
+    Literal(#[from] ConstCapacityError),
 }

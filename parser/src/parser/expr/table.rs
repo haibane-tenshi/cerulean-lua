@@ -200,10 +200,7 @@ fn name<'s>(
 
     frag.emit(OpCode::LoadStack(table_slot))?;
 
-    let const_id = frag
-        .const_table_mut()
-        .insert(Literal::String(ident.to_string()))?;
-    frag.emit(OpCode::LoadConstant(const_id))?;
+    frag.emit_load_literal(Literal::String(ident.to_string()))?;
 
     let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
     let (s, ()) = expr_adjusted_to_1(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
@@ -243,10 +240,7 @@ fn index<'s>(
     let r = expr_adjusted_to_1(s, frag.new_fragment())?;
 
     frag.emit(OpCode::LoadStack(table_slot))?;
-
-    let const_id = frag.const_table_mut().insert(Literal::Int(index))?;
-    frag.emit(OpCode::LoadConstant(const_id))?;
-
+    frag.emit_load_literal(Literal::Int(index))?;
     frag.emit(OpCode::LoadStack(start))?;
     frag.emit(OpCode::TabSet)?;
     frag.emit_adjust_to(start)?;

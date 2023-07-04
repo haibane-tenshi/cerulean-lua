@@ -212,10 +212,7 @@ fn args_str<'s>(
 ) -> Result<(Lexer<'s>, ()), Error<LiteralStrMismatch>> {
     let (s, (val, _)) = literal_str(s)?;
 
-    let const_id = frag
-        .const_table_mut()
-        .insert(Literal::String(val.into_owned()))?;
-    frag.emit(OpCode::LoadConstant(const_id))?;
+    frag.emit_load_literal(Literal::String(val.into_owned()))?;
 
     frag.commit();
     Ok((s, ()))
@@ -270,10 +267,7 @@ fn field<'s>(
     let (s, _) = match_token(s, Token::Dot).map_parse(Dot)?;
     let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
 
-    let const_id = frag
-        .const_table_mut()
-        .insert(Literal::String(ident.to_string()))?;
-    frag.emit(OpCode::LoadConstant(const_id))?;
+    frag.emit_load_literal(Literal::String(ident.to_string()))?;
 
     frag.commit();
     Ok((s, ()))

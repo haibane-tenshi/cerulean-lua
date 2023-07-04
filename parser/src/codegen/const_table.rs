@@ -77,7 +77,7 @@ impl<'a> ConstTableView<'a> {
     }
 
     pub fn new_view(&mut self) -> ConstTableView<'_> {
-        ConstTableView::new(&mut self.constants)
+        ConstTableView::new(self.constants)
     }
 
     pub fn insert(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {

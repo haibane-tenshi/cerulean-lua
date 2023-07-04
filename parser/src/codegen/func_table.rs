@@ -61,7 +61,7 @@ impl<'a> FuncTableView<'a> {
     }
 
     pub fn new_view(&mut self) -> FuncTableView<'_> {
-        FuncTableView::new(&mut self.func_table)
+        FuncTableView::new(self.func_table)
     }
 
     pub fn push(&mut self, func: Function) -> Result<FunctionId, FunctionCapacityError> {

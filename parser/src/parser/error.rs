@@ -17,7 +17,7 @@ use super::stmt::local_function::LocalFunctionFailure;
 use super::stmt::numerical_for::NumericalForFailure;
 use super::stmt::repeat_until::RepeatUntilFailure;
 use super::stmt::while_do::WhileDoFailure;
-use crate::codegen::fragment::EmitError;
+use crate::codegen::fragment::{EmitError, EmitLoadLiteralError};
 use crate::codegen::stack::{
     BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
     VariadicStackError,
@@ -138,6 +138,12 @@ impl<P> From<ConstCapacityError> for Error<P> {
 
 impl<P> From<EmitError> for Error<P> {
     fn from(_: EmitError) -> Self {
+        Error::Codegen(CodegenError)
+    }
+}
+
+impl<P> From<EmitLoadLiteralError> for Error<P> {
+    fn from(_: EmitLoadLiteralError) -> Self {
         Error::Codegen(CodegenError)
     }
 }
