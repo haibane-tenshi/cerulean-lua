@@ -11,6 +11,7 @@ struct Cli {
 fn main() -> Result<()> {
     use logos::Logos;
     use parser::lex::Token;
+    use rt::chunk_cache::SingleChunk;
     use rt::runtime::Runtime;
 
     let logger = tracing_subscriber::FmtSubscriber::builder()
@@ -23,8 +24,9 @@ fn main() -> Result<()> {
     let data = std::fs::read_to_string(path)?;
     let lexer = Token::lexer(&data);
     let chunk = parser::parser::chunk(lexer)?;
+    let chunk_cache = SingleChunk::new(chunk);
 
-    let mut runtime = Runtime::new(&chunk);
+    let mut runtime = Runtime::new(chunk_cache);
 
     runtime.run()?;
 

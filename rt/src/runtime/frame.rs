@@ -1,146 +1,87 @@
-use std::error::Error;
-use std::fmt::Display;
-
-use repr::chunk::Chunk;
 use repr::index::{ConstId, FunctionId, InstrId, StackSlot};
 use repr::index_vec::IndexSlice;
 use repr::literal::Literal;
 use repr::opcode::OpCode;
 use repr::value::Value;
 
-pub type ControlFlow = std::ops::ControlFlow<ControlFrame>;
+use super::stack::{ProtectedSize, StackView};
+use super::Runtime;
+use crate::chunk_cache::{ChunkCache, FunctionPtr};
+use crate::RuntimeError;
 
-pub enum ControlFrame {
+pub type ControlFlow = std::ops::ControlFlow<ChangeFrame>;
+
+pub enum ChangeFrame {
     Return(StackSlot),
     Invoke(FunctionId, StackSlot),
 }
 
 #[derive(Debug)]
-pub struct RuntimeError;
+pub struct Frame {
+    pub(crate) function_ptr: FunctionPtr,
+    pub(crate) ip: InstrId,
+    pub(crate) stack_start: ProtectedSize,
+}
 
-impl Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "runtime error")
+impl Frame {
+    pub fn activate<C>(self, rt: &mut Runtime<C>) -> Result<ActiveFrame, RuntimeError>
+    where
+        C: ChunkCache,
+    {
+        let Runtime {
+            chunk_cache, stack, ..
+        } = rt;
+
+        let Frame {
+            function_ptr,
+            ip,
+            stack_start,
+        } = self;
+
+        let chunk = chunk_cache
+            .chunk(function_ptr.chunk_id)
+            .ok_or(RuntimeError)?;
+        let function = chunk
+            .get_function(function_ptr.function_id)
+            .ok_or(RuntimeError)?;
+
+        let constants = &chunk.constants;
+        let opcodes = &function.codes;
+        let stack = StackView::new(stack, stack_start).unwrap();
+
+        let r = ActiveFrame {
+            function_ptr,
+            constants,
+            opcodes,
+            ip,
+            stack,
+        };
+
+        Ok(r)
     }
 }
 
-impl Error for RuntimeError {}
-
-#[derive(Debug, Default)]
-struct Stack {
-    stack: Vec<Value>,
-    protected_size: usize,
-}
-
-impl Stack {
-    fn index(&self, slot: StackSlot) -> Result<usize, RuntimeError> {
-        let offset: usize = slot.0.try_into().map_err(|_| RuntimeError)?;
-        let index = self.protected_size + offset;
-
-        Ok(index)
-    }
-
-    pub fn push(&mut self, value: Value) {
-        self.stack.push(value)
-    }
-
-    pub fn pop(&mut self) -> Result<Value, RuntimeError> {
-        if self.stack.len() <= self.protected_size {
-            return Err(RuntimeError);
-        }
-
-        self.stack.pop().ok_or(RuntimeError)
-    }
-
-    pub fn last(&self) -> Result<&Value, RuntimeError> {
-        self.stack.last().ok_or(RuntimeError)
-    }
-
-    pub fn top(&mut self) -> StackSlot {
-        let offset = self.stack.len() - self.protected_size;
-        let offset = offset.try_into().unwrap();
-
-        StackSlot(offset)
-    }
-
-    pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
-        let index = self.index(slot)?;
-        self.stack.get(index).ok_or(RuntimeError)
-    }
-
-    pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value, RuntimeError> {
-        let index = self.index(slot)?;
-        self.stack.get_mut(index).ok_or(RuntimeError)
-    }
-
-    pub fn set_protected_size(&mut self, protected_size: usize) -> Result<(), RuntimeError> {
-        if self.stack.len() < protected_size {
-            return Err(RuntimeError);
-        }
-
-        self.protected_size = protected_size;
-
-        Ok(())
-    }
-
-    pub fn protect_from(&mut self, slot: StackSlot) -> Result<usize, RuntimeError> {
-        self.protected_size = self.index(slot)?;
-        Ok(self.protected_size)
-    }
-
-    pub fn adjust_height(&mut self, height: u32) {
-        use std::cmp::Ordering;
-
-        let height: usize = height.try_into().unwrap();
-        let requested_height = self.protected_size + height;
-
-        match requested_height.cmp(&self.stack.len()) {
-            Ordering::Equal => (),
-            Ordering::Greater => self
-                .stack
-                .extend(std::iter::repeat(Value::Nil).take(requested_height - self.stack.len())),
-            Ordering::Less => {
-                self.stack.truncate(requested_height);
-            }
-        }
-    }
-
-    pub fn drop_under(&mut self, slot: StackSlot) -> Result<(), RuntimeError> {
-        let height = self.index(slot)?;
-        self.stack.drain(self.protected_size..height);
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default)]
-struct Frame<'chunk> {
-    constants: &'chunk IndexSlice<ConstId, Literal>,
-    codes: &'chunk IndexSlice<InstrId, OpCode>,
+#[derive(Debug)]
+pub struct ActiveFrame<'rt> {
+    function_ptr: FunctionPtr,
+    constants: &'rt IndexSlice<ConstId, Literal>,
+    opcodes: &'rt IndexSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack_start: usize,
+    stack: StackView<'rt>,
 }
 
-impl<'chunk> Frame<'chunk> {
+impl<'rt> ActiveFrame<'rt> {
     pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
         self.constants.get(index)
     }
-}
 
-#[derive(Debug, Default)]
-struct CurrentFrame<'chunk> {
-    frame: Frame<'chunk>,
-    stack: Stack,
-}
-
-impl<'chunk> CurrentFrame<'chunk> {
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
         use repr::table::TableRef;
 
         let Some(code) = self.next_code() else {
-            return Ok(ControlFlow::Break(ControlFrame::Return(self.stack.top())))
+            return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())))
         };
 
         let r = match code {
@@ -151,11 +92,11 @@ impl<'chunk> CurrentFrame<'chunk> {
                     _ => return Err(RuntimeError),
                 };
 
-                ControlFlow::Break(ControlFrame::Invoke(func_id, slot))
+                ControlFlow::Break(ChangeFrame::Invoke(func_id, slot))
             }
-            Return(slot) => ControlFlow::Break(ControlFrame::Return(slot)),
+            Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             LoadConstant(index) => {
-                let constant = self.frame.get_constant(index).ok_or(RuntimeError)?.clone();
+                let constant = self.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
 
                 ControlFlow::Continue(())
@@ -174,7 +115,7 @@ impl<'chunk> CurrentFrame<'chunk> {
 
                 ControlFlow::Continue(())
             }
-            AdjustStack(StackSlot(height)) => {
+            AdjustStack(height) => {
                 self.stack.adjust_height(height);
 
                 ControlFlow::Continue(())
@@ -347,7 +288,7 @@ impl<'chunk> CurrentFrame<'chunk> {
                 ControlFlow::Continue(())
             }
             Jump { offset } => {
-                self.frame.ip += offset;
+                self.ip += offset;
 
                 ControlFlow::Continue(())
             }
@@ -355,17 +296,13 @@ impl<'chunk> CurrentFrame<'chunk> {
                 let value = self.stack.last()?;
 
                 if value.as_boolish() == cond {
-                    self.frame.ip += offset;
+                    self.ip += offset;
                 }
 
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
-                self.frame.ip = self
-                    .frame
-                    .ip
-                    .checked_sub_offset(offset)
-                    .ok_or(RuntimeError)?;
+                self.ip = self.ip.checked_sub_offset(offset).ok_or(RuntimeError)?;
 
                 ControlFlow::Continue(())
             }
@@ -373,11 +310,7 @@ impl<'chunk> CurrentFrame<'chunk> {
                 let value = self.stack.last()?;
 
                 if value.as_boolish() == cond {
-                    self.frame.ip = self
-                        .frame
-                        .ip
-                        .checked_sub_offset(offset)
-                        .ok_or(RuntimeError)?;
+                    self.ip = self.ip.checked_sub_offset(offset).ok_or(RuntimeError)?;
                 }
 
                 ControlFlow::Continue(())
@@ -428,95 +361,33 @@ impl<'chunk> CurrentFrame<'chunk> {
     }
 
     pub fn next_code(&mut self) -> Option<OpCode> {
-        let r = *self.frame.codes.get(self.frame.ip)?;
+        let r = *self.opcodes.get(self.ip)?;
 
-        tracing::trace!(ip = self.frame.ip.0, opcode = %r, "next opcode");
+        tracing::trace!(ip = self.ip.0, opcode = %r, "next opcode");
 
-        self.frame.ip += 1;
+        self.ip += 1;
 
         Some(r)
     }
 
-    pub fn push(&mut self, frame: Frame<'chunk>) -> Result<(), RuntimeError> {
-        self.frame = frame;
-        self.stack.set_protected_size(self.frame.stack_start)
-    }
-}
+    pub fn suspend(self) -> Frame {
+        let ActiveFrame {
+            function_ptr,
+            ip,
+            stack,
+            ..
+        } = self;
 
-pub struct Runtime<'chunk> {
-    chunk: &'chunk Chunk,
-    suspended: Vec<Frame<'chunk>>,
-    current: CurrentFrame<'chunk>,
-}
+        let stack_start = stack.protected_size();
 
-impl<'chunk> Runtime<'chunk> {
-    pub fn new(chunk: &'chunk Chunk) -> Self {
-        tracing::trace!(chunk = %chunk, "constructed runtime");
-
-        let codes = chunk
-            .functions
-            .first()
-            .map(|fun| fun.codes.as_slice())
-            .unwrap_or_default();
-
-        let frame = Frame {
-            constants: &chunk.constants,
-            codes,
-            ip: Default::default(),
-            stack_start: 0,
-        };
-
-        let current = CurrentFrame {
-            frame,
-            stack: Default::default(),
-        };
-
-        Runtime {
-            chunk,
-            suspended: Default::default(),
-            current,
+        Frame {
+            function_ptr,
+            ip,
+            stack_start,
         }
     }
 
-    pub fn run(&mut self) -> Result<(), RuntimeError> {
-        loop {
-            match self.current.step()? {
-                ControlFlow::Break(ControlFrame::Return(slot)) => {
-                    self.current.stack.drop_under(slot)?;
-                    tracing::trace!(stack = ?self.current.stack, "adjusted stack upon function return");
-
-                    let Some(frame) = self.suspended.pop() else {
-                        // If we hit an early return from script, that leaves us pointing at
-                        // some arbitrary instructions immediately after.
-                        // If the user attempts to resume execution it can lead to bogged state.
-                        // To prevent that push in a dummy (empty) frame.
-                        self.current.push(Default::default())?;
-                        break
-                    };
-
-                    self.current.push(frame)?;
-                }
-                ControlFlow::Break(ControlFrame::Invoke(func_id, slot)) => {
-                    let func = self.chunk.get_function(func_id).ok_or(RuntimeError)?;
-                    let codes = &func.codes;
-                    let constants = &self.chunk.constants;
-                    let stack_start = self.current.stack.protect_from(slot)?;
-                    self.current.stack.adjust_height(func.height);
-
-                    let mut frame = Frame {
-                        codes,
-                        constants,
-                        ip: Default::default(),
-                        stack_start,
-                    };
-
-                    std::mem::swap(&mut frame, &mut self.current.frame);
-                    self.suspended.push(frame);
-                }
-                ControlFlow::Continue(()) => (),
-            }
-        }
-
-        Ok(())
+    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError> {
+        self.stack.drop_under(drop_under)
     }
 }
