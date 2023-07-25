@@ -5,7 +5,7 @@ use repr::opcode::OpCode;
 use repr::value::Value;
 
 use super::stack::{ProtectedSize, StackView};
-use super::Runtime;
+use super::RuntimeView;
 use crate::chunk_cache::{ChunkCache, FunctionPtr};
 use crate::RuntimeError;
 
@@ -24,11 +24,14 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn activate<C>(self, rt: &mut Runtime<C>) -> Result<ActiveFrame, RuntimeError>
+    pub fn activate<'rt, C>(
+        self,
+        rt: &'rt mut RuntimeView<C>,
+    ) -> Result<ActiveFrame<'rt>, RuntimeError>
     where
         C: ChunkCache,
     {
-        let Runtime {
+        let RuntimeView {
             chunk_cache, stack, ..
         } = rt;
 
@@ -47,7 +50,7 @@ impl Frame {
 
         let constants = &chunk.constants;
         let opcodes = &function.codes;
-        let stack = StackView::new(stack, stack_start).unwrap();
+        let stack = stack.view(stack_start).unwrap();
 
         let r = ActiveFrame {
             function_ptr,

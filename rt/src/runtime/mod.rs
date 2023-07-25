@@ -9,6 +9,7 @@ use repr::value::Value;
 use crate::chunk_cache::{ChunkCache, FunctionPtr};
 use crate::RuntimeError;
 use frame::{ActiveFrame, ChangeFrame, Frame};
+use stack::StackView;
 
 pub struct Runtime<C> {
     chunk_cache: C,
@@ -29,9 +30,32 @@ where
             stack: Default::default(),
         }
     }
+
+    pub fn view(&mut self) -> RuntimeView<C> {
+        let Runtime {
+            chunk_cache,
+            frames,
+            stack,
+        } = self;
+
+        let frames = FrameStackView::new(frames);
+        let stack = StackView::new(stack);
+
+        RuntimeView {
+            chunk_cache,
+            frames,
+            stack,
+        }
+    }
 }
 
-impl<C> Runtime<C>
+pub struct RuntimeView<'rt, C> {
+    chunk_cache: &'rt mut C,
+    frames: FrameStackView<'rt>,
+    stack: StackView<'rt>,
+}
+
+impl<'rt, C> RuntimeView<'rt, C>
 where
     C: ChunkCache,
 {
@@ -96,5 +120,31 @@ where
         }
 
         Ok(())
+    }
+}
+
+struct FrameStackView<'a> {
+    frames: &'a mut Vec<Frame>,
+    protected_size: usize,
+}
+
+impl<'a> FrameStackView<'a> {
+    fn new(frames: &'a mut Vec<Frame>) -> Self {
+        FrameStackView {
+            frames,
+            protected_size: 0,
+        }
+    }
+
+    fn pop(&mut self) -> Option<Frame> {
+        if self.frames.len() <= self.protected_size {
+            return None;
+        }
+
+        self.frames.pop()
+    }
+
+    fn push(&mut self, frame: Frame) {
+        self.frames.push(frame)
     }
 }

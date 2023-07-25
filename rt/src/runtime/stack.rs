@@ -49,13 +49,20 @@ pub struct StackView<'a> {
 }
 
 impl<'a> StackView<'a> {
-    pub(crate) fn new(stack: &'a mut Vec<Value>, protected_size: ProtectedSize) -> Option<Self> {
-        if stack.len() < protected_size.0 {
+    pub(crate) fn new(stack: &'a mut Vec<Value>) -> Self {
+        StackView {
+            stack,
+            protected_size: ProtectedSize(0),
+        }
+    }
+
+    pub(crate) fn view(&mut self, protected_size: ProtectedSize) -> Option<StackView> {
+        if self.stack.len() < protected_size.0 {
             return None;
         }
 
         let r = StackView {
-            stack,
+            stack: self.stack,
             protected_size,
         };
 

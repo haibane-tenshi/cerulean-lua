@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
     let mut runtime = Runtime::new(chunk_cache);
 
-    runtime.run()?;
+    runtime.view().run()?;
 
     Ok(())
 }
