@@ -26,7 +26,7 @@ impl ChunkCache for SingleChunk {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct ChunkId(pub(crate) usize);
+pub struct ChunkId(pub usize);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FunctionPtr {

@@ -69,6 +69,15 @@ impl<'a> StackView<'a> {
         Some(r)
     }
 
+    pub(crate) fn view_over(&mut self) -> StackView {
+        let protected_size = ProtectedSize(self.stack.len());
+
+        StackView {
+            stack: self.stack,
+            protected_size,
+        }
+    }
+
     pub fn push(&mut self, value: Value) {
         self.stack.push(value)
     }

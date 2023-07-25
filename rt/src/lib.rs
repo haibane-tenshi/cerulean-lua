@@ -1,4 +1,5 @@
 pub mod chunk_cache;
+pub mod ffi;
 pub mod runtime;
 
 use std::error::Error;

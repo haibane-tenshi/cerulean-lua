@@ -11,7 +11,7 @@ struct Cli {
 fn main() -> Result<()> {
     use logos::Logos;
     use parser::lex::Token;
-    use rt::chunk_cache::SingleChunk;
+    use rt::chunk_cache::{ChunkId, SingleChunk};
     use rt::runtime::Runtime;
 
     let logger = tracing_subscriber::FmtSubscriber::builder()
@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
     let mut runtime = Runtime::new(chunk_cache);
 
-    runtime.view().run()?;
+    runtime.view().invoke(rt::ffi::call_chunk(ChunkId(0)))?;
 
     Ok(())
 }

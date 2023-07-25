@@ -4,9 +4,11 @@ mod stack;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
+use repr::index::StackSlot;
 use repr::value::Value;
 
 use crate::chunk_cache::{ChunkCache, FunctionPtr};
+use crate::ffi::Ffi;
 use crate::RuntimeError;
 use frame::{ActiveFrame, ChangeFrame, Frame};
 use stack::StackView;
@@ -50,39 +52,80 @@ where
 }
 
 pub struct RuntimeView<'rt, C> {
-    chunk_cache: &'rt mut C,
+    pub chunk_cache: &'rt mut C,
     frames: FrameStackView<'rt>,
-    stack: StackView<'rt>,
+    pub stack: StackView<'rt>,
 }
 
 impl<'rt, C> RuntimeView<'rt, C>
 where
     C: ChunkCache,
 {
-    fn activate_frame(&mut self) -> Option<ActiveFrame> {
-        let frame = self.frames.pop()?;
-        frame.activate(self).ok()
+    fn view(&mut self) -> RuntimeView<C> {
+        let RuntimeView {
+            chunk_cache,
+            frames,
+            stack,
+        } = self;
+
+        let frames = frames.view();
+        let stack = stack.view_over();
+
+        RuntimeView {
+            chunk_cache,
+            frames,
+            stack,
+        }
     }
 
-    pub fn run(&mut self) -> Result<(), RuntimeError> {
-        use crate::chunk_cache::ChunkId;
-        use repr::index::FunctionId;
-        use stack::ProtectedSize;
+    pub fn make_frame(&self, ptr: FunctionPtr, offset: StackSlot) -> Frame {
+        let stack_start = self.stack.protected_size() + offset;
 
-        // For now just enter the first chunk.
-        // Need to be fixed later when we get Lua-from-Rust FFI working.
-        let frame = Frame {
-            function_ptr: FunctionPtr {
-                chunk_id: ChunkId(0),
-                function_id: FunctionId(0),
-            },
+        Frame {
+            function_ptr: ptr,
             ip: Default::default(),
-            stack_start: ProtectedSize(0),
+            stack_start,
+        }
+    }
+
+    pub fn activate(&mut self, frame: Frame) -> Result<ActiveFrame, RuntimeError>
+    where
+        C: ChunkCache,
+    {
+        let RuntimeView {
+            chunk_cache, stack, ..
+        } = self;
+
+        let Frame {
+            function_ptr,
+            ip,
+            stack_start,
+        } = frame;
+
+        let chunk = chunk_cache
+            .chunk(function_ptr.chunk_id)
+            .ok_or(RuntimeError)?;
+        let function = chunk
+            .get_function(function_ptr.function_id)
+            .ok_or(RuntimeError)?;
+
+        let constants = &chunk.constants;
+        let opcodes = &function.codes;
+        let stack = stack.view(stack_start).unwrap();
+
+        let r = ActiveFrame {
+            function_ptr,
+            constants,
+            opcodes,
+            ip,
+            stack,
         };
 
-        let Ok(mut active_frame) = frame.activate(self) else {
-            return Ok(())
-        };
+        Ok(r)
+    }
+
+    pub fn enter(&mut self, frame: Frame) -> Result<(), RuntimeError> {
+        let mut active_frame = self.activate(frame)?;
 
         loop {
             match active_frame.step()? {
@@ -90,10 +133,11 @@ where
                     active_frame.exit(slot)?;
                     tracing::trace!(stack = ?self.stack, "adjusted stack upon function return");
 
-                    active_frame = match self.activate_frame() {
-                        Some(t) => t,
-                        None => break,
+                    let Some(frame) = self.frames.pop() else {
+                        break
                     };
+
+                    active_frame = self.activate(frame)?;
                 }
                 ControlFlow::Break(ChangeFrame::Invoke(function_id, slot)) => {
                     let frame = active_frame.suspend();
@@ -113,13 +157,17 @@ where
                         stack_start,
                     };
 
-                    active_frame = frame.activate(self)?;
+                    active_frame = self.activate(frame)?;
                 }
                 ControlFlow::Continue(()) => (),
             }
         }
 
         Ok(())
+    }
+
+    pub fn invoke(&mut self, f: impl Ffi<C>) -> Result<(), RuntimeError> {
+        f.call(self.view())
     }
 }
 
@@ -133,6 +181,15 @@ impl<'a> FrameStackView<'a> {
         FrameStackView {
             frames,
             protected_size: 0,
+        }
+    }
+
+    fn view(&mut self) -> FrameStackView {
+        let protected_size = self.frames.len();
+
+        FrameStackView {
+            frames: self.frames,
+            protected_size,
         }
     }
 

@@ -5,8 +5,7 @@ use repr::opcode::OpCode;
 use repr::value::Value;
 
 use super::stack::{ProtectedSize, StackView};
-use super::RuntimeView;
-use crate::chunk_cache::{ChunkCache, FunctionPtr};
+use crate::chunk_cache::FunctionPtr;
 use crate::RuntimeError;
 
 pub type ControlFlow = std::ops::ControlFlow<ChangeFrame>;
@@ -23,54 +22,13 @@ pub struct Frame {
     pub(crate) stack_start: ProtectedSize,
 }
 
-impl Frame {
-    pub fn activate<'rt, C>(
-        self,
-        rt: &'rt mut RuntimeView<C>,
-    ) -> Result<ActiveFrame<'rt>, RuntimeError>
-    where
-        C: ChunkCache,
-    {
-        let RuntimeView {
-            chunk_cache, stack, ..
-        } = rt;
-
-        let Frame {
-            function_ptr,
-            ip,
-            stack_start,
-        } = self;
-
-        let chunk = chunk_cache
-            .chunk(function_ptr.chunk_id)
-            .ok_or(RuntimeError)?;
-        let function = chunk
-            .get_function(function_ptr.function_id)
-            .ok_or(RuntimeError)?;
-
-        let constants = &chunk.constants;
-        let opcodes = &function.codes;
-        let stack = stack.view(stack_start).unwrap();
-
-        let r = ActiveFrame {
-            function_ptr,
-            constants,
-            opcodes,
-            ip,
-            stack,
-        };
-
-        Ok(r)
-    }
-}
-
 #[derive(Debug)]
 pub struct ActiveFrame<'rt> {
-    function_ptr: FunctionPtr,
-    constants: &'rt IndexSlice<ConstId, Literal>,
-    opcodes: &'rt IndexSlice<InstrId, OpCode>,
-    ip: InstrId,
-    stack: StackView<'rt>,
+    pub(crate) function_ptr: FunctionPtr,
+    pub(crate) constants: &'rt IndexSlice<ConstId, Literal>,
+    pub(crate) opcodes: &'rt IndexSlice<InstrId, OpCode>,
+    pub(crate) ip: InstrId,
+    pub(crate) stack: StackView<'rt>,
 }
 
 impl<'rt> ActiveFrame<'rt> {
