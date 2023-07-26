@@ -167,7 +167,7 @@ where
     }
 
     pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError> {
-        f.call(self.view())
+        f.call_once(self.view())
     }
 }
 
