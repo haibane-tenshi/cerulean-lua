@@ -11,7 +11,8 @@ struct Cli {
 fn main() -> Result<()> {
     use logos::Logos;
     use parser::lex::Token;
-    use rt::chunk_cache::{ChunkId, SingleChunk};
+    use rt::chunk_cache::single::SingleChunk;
+    use rt::chunk_cache::ChunkId;
     use rt::runtime::Runtime;
 
     let logger = tracing_subscriber::FmtSubscriber::builder()
