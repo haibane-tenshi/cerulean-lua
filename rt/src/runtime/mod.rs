@@ -8,7 +8,7 @@ use repr::index::StackSlot;
 use repr::value::Value;
 
 use crate::chunk_cache::{ChunkCache, FunctionPtr};
-use crate::ffi::Ffi;
+use crate::ffi::LuaFfiOnce;
 use crate::RuntimeError;
 use frame::{ActiveFrame, ChangeFrame, Frame};
 use stack::StackView;
@@ -166,7 +166,7 @@ where
         Ok(())
     }
 
-    pub fn invoke(&mut self, f: impl Ffi<C>) -> Result<(), RuntimeError> {
+    pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError> {
         f.call(self.view())
     }
 }
