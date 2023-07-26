@@ -11,7 +11,7 @@ struct Cli {
 fn main() -> Result<()> {
     use logos::Logos;
     use parser::lex::Token;
-    use rt::chunk_cache::single::SingleChunk;
+    use rt::chunk_cache::single::{Main, SingleChunk};
     use rt::chunk_cache::ChunkId;
     use rt::runtime::Runtime;
 
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
 
     let mut runtime = Runtime::new(chunk_cache);
 
-    runtime.view().invoke(rt::ffi::call_chunk(ChunkId(0)))?;
+    runtime.view().invoke(rt::ffi::call_script(&Main))?;
 
     Ok(())
 }

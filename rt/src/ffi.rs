@@ -1,4 +1,4 @@
-use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::runtime::RuntimeView;
 use crate::RuntimeError;
 
@@ -57,5 +57,16 @@ where
         let frame = rt.make_frame(ptr, offset);
 
         rt.enter(frame)
+    }
+}
+
+pub fn call_script<C, Q>(script: &Q) -> impl LuaFfi<C> + Copy + '_
+where
+    C: KeyedChunkCache<Q>,
+    Q: ?Sized,
+{
+    move |mut rt: RuntimeView<'_, C>| {
+        let chunk_id = rt.chunk_cache.lookup(script).ok_or(RuntimeError)?;
+        rt.invoke(call_chunk(chunk_id))
     }
 }
