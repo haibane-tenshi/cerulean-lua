@@ -312,7 +312,6 @@ impl FromStr for Number {
         // SAFETY: trivial
         const TWO: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(2) };
         const TEN: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(10) };
-        const SIXTEEN: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(16) };
 
         const BASE_10: u128 = NumberFormatBuilder::new()
             .mantissa_radix(10)
@@ -324,99 +323,74 @@ impl FromStr for Number {
             .no_special(true)
             .build();
 
-        const BASE_16_EXPBASE_10: u128 = NumberFormatBuilder::new()
-            .mantissa_radix(16)
-            .exponent_base(Some(TEN))
-            .exponent_radix(Some(SIXTEEN))
-            .required_integer_digits(true)
-            .required_fraction_digits(true)
-            .required_exponent_digits(true)
-            .no_special(true)
-            .build();
-
-        const BASE_16_EXPBASE_2: u128 = NumberFormatBuilder::new()
+        const BASE_16: u128 = NumberFormatBuilder::new()
             .mantissa_radix(16)
             .exponent_base(Some(TWO))
-            .exponent_radix(Some(SIXTEEN))
+            .exponent_radix(Some(TEN))
             .required_integer_digits(true)
             .required_fraction_digits(true)
             .required_exponent_digits(true)
             .no_special(true)
             .build();
 
-        const OPTIONS_INT: ParseIntegerOptions = ParseIntegerOptions::new();
+        const INT: ParseIntegerOptions = ParseIntegerOptions::new();
 
         // SAFETY: call to .build_unchecked is always safe in compatible versions of lexical.
         // https://docs.rs/lexical/latest/lexical/parse_float_options/struct.OptionsBuilder.html#safety
-        const OPTIONS_FLOAT_E: ParseFloatOptions = unsafe {
+        const FLOAT_E: ParseFloatOptions = unsafe {
             ParseFloatOptions::builder()
                 .decimal_point(b'.')
                 .exponent(b'e')
                 .build_unchecked()
         };
 
-        const OPTIONS_FLOAT_E2: ParseFloatOptions = unsafe {
+        const FLOAT_E2: ParseFloatOptions = unsafe {
             ParseFloatOptions::builder()
                 .decimal_point(b'.')
                 .exponent(b'E')
                 .build_unchecked()
         };
 
-        const OPTIONS_FLOAT_P: ParseFloatOptions = unsafe {
+        const FLOAT_P: ParseFloatOptions = unsafe {
             ParseFloatOptions::builder()
                 .decimal_point(b'.')
                 .exponent(b'p')
                 .build_unchecked()
         };
 
-        const OPTIONS_FLOAT_P2: ParseFloatOptions = unsafe {
+        const FLOAT_P2: ParseFloatOptions = unsafe {
             ParseFloatOptions::builder()
                 .decimal_point(b'.')
                 .exponent(b'P')
                 .build_unchecked()
         };
 
-        const_assert!(OPTIONS_INT.is_valid());
-        const_assert!(OPTIONS_FLOAT_E.is_valid());
-        const_assert!(OPTIONS_FLOAT_E2.is_valid());
-        const_assert!(OPTIONS_FLOAT_P.is_valid());
-        const_assert!(OPTIONS_FLOAT_P2.is_valid());
+        const_assert!(INT.is_valid());
+        const_assert!(FLOAT_E.is_valid());
+        const_assert!(FLOAT_E2.is_valid());
+        const_assert!(FLOAT_P.is_valid());
+        const_assert!(FLOAT_P2.is_valid());
 
         let hex = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"));
 
         let r = match hex {
             Some(s) => {
-                if let Ok(value) = parse_with_options::<_, _, BASE_16_EXPBASE_10>(s, &OPTIONS_INT) {
+                if let Ok(value) = parse_with_options::<_, _, BASE_16>(s, &INT) {
                     Number::Int(value)
-                } else if let Ok(value) =
-                    parse_with_options::<f64, _, BASE_16_EXPBASE_10>(s, &OPTIONS_FLOAT_E)
-                {
+                } else if let Ok(value) = parse_with_options::<f64, _, BASE_16>(s, &FLOAT_P) {
                     Number::Float(value.try_into().unwrap())
-                } else if let Ok(value) =
-                    parse_with_options::<f64, _, BASE_16_EXPBASE_10>(s, &OPTIONS_FLOAT_E2)
-                {
-                    Number::Float(value.try_into().unwrap())
-                } else if let Ok(value) =
-                    parse_with_options::<f64, _, BASE_16_EXPBASE_2>(s, &OPTIONS_FLOAT_P)
-                {
-                    Number::Float(value.try_into().unwrap())
-                } else if let Ok(value) =
-                    parse_with_options::<f64, _, BASE_16_EXPBASE_2>(s, &OPTIONS_FLOAT_P2)
-                {
+                } else if let Ok(value) = parse_with_options::<f64, _, BASE_16>(s, &FLOAT_P2) {
                     Number::Float(value.try_into().unwrap())
                 } else {
                     return Err(UnknownNumberFormatError);
                 }
             }
             None => {
-                if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &OPTIONS_INT) {
+                if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &INT) {
                     Number::Int(value)
-                } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &OPTIONS_FLOAT_E)
-                {
+                } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &FLOAT_E) {
                     Number::Float(value.try_into().unwrap())
-                } else if let Ok(value) =
-                    parse_with_options::<f64, _, BASE_10>(s, &OPTIONS_FLOAT_E2)
-                {
+                } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &FLOAT_E2) {
                     Number::Float(value.try_into().unwrap())
                 } else {
                     return Err(UnknownNumberFormatError);
