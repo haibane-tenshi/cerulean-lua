@@ -1,0 +1,3 @@
+::label::
+
+goto label
