@@ -44,6 +44,36 @@ fn literal_string() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn expr_fn_decl() -> Result<(), Box<dyn Error>> {
+    run_test_pass("./syntax_test_suite/expr_fn_decl.lua")
+}
+
+#[test]
+fn expr_fn_call() -> Result<(), Box<dyn Error>> {
+    run_test_pass("./syntax_test_suite/expr_fn_call.lua")
+}
+
+#[test]
+fn expr_table_decl() -> Result<(), Box<dyn Error>> {
+    run_test_pass("./syntax_test_suite/expr_table_decl.lua")
+}
+
+#[test]
+fn expr_table_lookup() -> Result<(), Box<dyn Error>> {
+    run_test_pass("./syntax_test_suite/expr_table_lookup.lua")
+}
+
+#[test]
+fn expr_variadic() -> Result<(), Box<dyn Error>> {
+    run_test_pass("./syntax_test_suite/expr_variadic.lua")
+}
+
+#[test]
+fn expr_op() -> Result<(), Box<dyn Error>> {
+    run_test_pass("./syntax_test_suite/expr_op.lua")
+}
+
+#[test]
 fn stmt_semicolon() -> Result<(), Box<dyn Error>> {
     run_test_pass("./syntax_test_suite/stmt_semicolon.lua")
 }

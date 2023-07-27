@@ -1,13 +1,11 @@
-local f = function () end
+local f
 
 f()
 f(nil)
 f(nil, nil)
 f(nil, nil, nil)
 
-local f = function(_, _) end
+f{}
 
-f()
-f(nil)
-f(nil, nil)
-f(nil, nil, nil)
+f"a"
+f "a"
