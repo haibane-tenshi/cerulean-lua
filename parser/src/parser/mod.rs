@@ -123,7 +123,16 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error<ParseFailure>> {
         script.view(),
         stack.view(),
     );
-    let _ = block(s, fragment)?;
+    let (mut s, _) = block(s, fragment)?;
+
+    if !matches!(s.next_token(), Err(NextTokenError::Parse(Eof))) {
+        let err = ParseFailure {
+            mode: FailureMode::Malformed,
+            cause: ParseCause::ExpectedStatement,
+        };
+
+        return Err(Error::Parse(err));
+    }
 
     let func_table = {
         let mut func_table = func_table.resolve();
