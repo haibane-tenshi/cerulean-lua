@@ -10,6 +10,7 @@ mod func_def;
 mod prefix_expr;
 mod prelude;
 mod stmt;
+mod traits;
 
 use repr::chunk::Chunk;
 use thiserror::Error;
