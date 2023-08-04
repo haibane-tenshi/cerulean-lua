@@ -224,6 +224,22 @@ impl HaveFailureMode for Never {
     }
 }
 
+pub trait WithMode {
+    fn with_mode(self, mode: FailureMode) -> Self;
+}
+
+impl WithMode for Never {
+    fn with_mode(self, mode: FailureMode) -> Self {
+        match self {}
+    }
+}
+
+impl WithMode for ParseFailure {
+    fn with_mode(self, mode: FailureMode) -> Self {
+        ParseFailure { mode, ..self }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum FailFast {
     #[error(transparent)]

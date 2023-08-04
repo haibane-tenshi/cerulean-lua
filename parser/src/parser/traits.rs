@@ -1,4 +1,5 @@
 use super::error::Combine;
+use super::error::{FailureMode, WithMode};
 
 pub trait ParseOnce<Source>: Sized {
     type Output;
@@ -461,6 +462,17 @@ pub enum ParsingState<Source, Output, Success, Failure> {
 }
 
 impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Failure> {
+    pub fn with_mode(
+        self,
+        mode: FailureMode,
+    ) -> ParsingStateWithMode<Source, Output, Success, Failure> {
+        ParsingStateWithMode { mode, state: self }
+    }
+
+    pub fn is_success(&self) -> bool {
+        matches!(self, ParsingState::Success(..))
+    }
+
     pub fn map_output<T>(
         self,
         f: impl FnOnce(Output) -> T,
@@ -542,19 +554,7 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
         Success: Combine<P::Failure>,
         <Success as Combine<P::Failure>>::Output: Into<Failure>,
     {
-        let r = match self {
-            ParsingState::Success(s, output, reason) => match p.parse_once(s)? {
-                ParsingState::Success(s, output2, reason) => {
-                    ParsingState::Success(s, f(output, output2), reason)
-                }
-                ParsingState::Failure(failure) => {
-                    ParsingState::Failure(reason.combine(failure).into())
-                }
-            },
-            ParsingState::Failure(failure) => ParsingState::Failure(failure),
-        };
-
-        Ok(r)
+        self.then(|output| p.map_output(|output2| f(output, output2)))
     }
 
     pub fn and<P>(
@@ -639,6 +639,178 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
                 }
                 ParsingState::Failure(failure2) => ParsingState::Failure(failure.combine(failure2)),
             },
+        };
+
+        Ok(r)
+    }
+}
+
+pub struct ParsingStateWithMode<Source, Output, Success, Failure> {
+    mode: FailureMode,
+    state: ParsingState<Source, Output, Success, Failure>,
+}
+
+impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Success, Failure> {
+    pub fn with_mode(self, mode: FailureMode) -> Self {
+        ParsingStateWithMode { mode, ..self }
+    }
+
+    pub fn collapse(self) -> ParsingState<Source, Output, Success, Failure> {
+        self.state
+    }
+
+    pub fn map_output<T>(
+        self,
+        f: impl FnOnce(Output) -> T,
+    ) -> ParsingStateWithMode<Source, T, Success, Failure> {
+        ParsingStateWithMode {
+            mode: self.mode,
+            state: self.state.map_output(f),
+        }
+    }
+
+    pub fn try_map_output<T, FailFast>(
+        self,
+        f: impl FnOnce(Output) -> Result<T, FailFast>,
+    ) -> Result<ParsingStateWithMode<Source, T, Success, Failure>, FailFast> {
+        let r = ParsingStateWithMode {
+            mode: self.mode,
+            state: self.state.try_map_output(f)?,
+        };
+
+        Ok(r)
+    }
+
+    pub fn map_success<T>(
+        self,
+        f: impl FnOnce(Success) -> T,
+    ) -> ParsingStateWithMode<Source, Output, T, Failure> {
+        ParsingStateWithMode {
+            mode: self.mode,
+            state: self.state.map_success(f),
+        }
+    }
+
+    pub fn map_failure<T>(
+        self,
+        f: impl FnOnce(Failure) -> T,
+    ) -> ParsingStateWithMode<Source, Output, Success, T> {
+        ParsingStateWithMode {
+            mode: self.mode,
+            state: self.state.map_failure(f),
+        }
+    }
+
+    pub fn transform<Out>(
+        self,
+        f: impl FnOnce(Output) -> Result<Out, Failure>,
+    ) -> ParsingStateWithMode<Source, Out, Success, Failure> {
+        ParsingStateWithMode {
+            mode: self.mode,
+            state: self.state.transform(f),
+        }
+    }
+
+    pub fn inspect(self, f: impl FnOnce(&Output)) -> Self {
+        ParsingStateWithMode {
+            mode: self.mode,
+            state: self.state.inspect(f),
+        }
+    }
+
+    pub fn and_with<P, Out>(
+        self,
+        p: P,
+        f: impl FnOnce(Output, P::Output) -> Out,
+    ) -> Result<ParsingStateWithMode<Source, Out, P::Success, Failure>, P::FailFast>
+    where
+        P: ParseOnce<Source>,
+        Success: Combine<P::Failure>,
+        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Failure: WithMode,
+    {
+        self.then(|out| p.map_output(|out2| f(out, out2)))
+    }
+
+    pub fn and<P>(
+        self,
+        p: P,
+    ) -> Result<ParsingStateWithMode<Source, (Output, P::Output), P::Success, Failure>, P::FailFast>
+    where
+        P: ParseOnce<Source>,
+        Success: Combine<P::Failure>,
+        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Failure: WithMode,
+    {
+        self.and_with(p, |out, out2| (out, out2))
+    }
+
+    pub fn and_discard<P>(
+        self,
+        p: P,
+    ) -> Result<ParsingStateWithMode<Source, Output, P::Success, Failure>, P::FailFast>
+    where
+        P: ParseOnce<Source>,
+        Success: Combine<P::Failure>,
+        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Failure: WithMode,
+    {
+        self.and_with(p, |out, _| out)
+    }
+
+    pub fn and_replace<P>(
+        self,
+        p: P,
+    ) -> Result<ParsingStateWithMode<Source, P::Output, P::Success, Failure>, P::FailFast>
+    where
+        P: ParseOnce<Source>,
+        Success: Combine<P::Failure>,
+        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Failure: WithMode,
+    {
+        self.and_with(p, |_, out| out)
+    }
+
+    pub fn then<P>(
+        self,
+        f: impl FnOnce(Output) -> P,
+    ) -> Result<ParsingStateWithMode<Source, P::Output, P::Success, Failure>, P::FailFast>
+    where
+        P: ParseOnce<Source>,
+        Success: Combine<P::Failure>,
+        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Failure: WithMode,
+    {
+        let ParsingStateWithMode { mode, state } = self;
+
+        let is_success = state.is_success();
+
+        let state = state
+            .then(f)?
+            .map_failure(|f| if is_success { f.with_mode(mode) } else { f });
+
+        let r = ParsingStateWithMode { mode, state };
+
+        Ok(r)
+    }
+
+    pub fn or<P>(
+        self,
+        s: Source,
+        p: P,
+    ) -> Result<
+        ParsingStateWithMode<Source, Output, Success, <Failure as Combine<P::Failure>>::Output>,
+        P::FailFast,
+    >
+    where
+        P: ParseOnce<Source>,
+        P::Output: Into<Output>,
+        P::Success: Into<Success>,
+        Failure: Combine<P::Failure>,
+    {
+        let r = ParsingStateWithMode {
+            mode: self.mode,
+            state: self.state.or(s, p)?,
         };
 
         Ok(r)
