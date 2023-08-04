@@ -22,7 +22,7 @@ pub(crate) fn match_token<'s>(
             }
             Ok(_) | Err(Eof) => {
                 let err = TokenMismatch { expected: token };
-                ParsingState::Failure(err.into())
+                ParsingState::Failure(err)
             }
         };
 
@@ -44,7 +44,7 @@ pub(crate) fn identifier(
             let span = s.span();
             ParsingState::Success(s, (ident, span), Complete)
         }
-        Ok(_) | Err(Eof) => ParsingState::Failure(IdentMismatch.into()),
+        Ok(_) | Err(Eof) => ParsingState::Failure(IdentMismatch),
     };
 
     Ok(r)
@@ -75,7 +75,7 @@ pub(crate) fn literal(
             let r = raw_str.unescape()?.to_string();
             Literal::String(r)
         }
-        Ok(_) | Err(Eof) => return Ok(ParsingState::Failure(LiteralMismatch.into())),
+        Ok(_) | Err(Eof) => return Ok(ParsingState::Failure(LiteralMismatch)),
     };
     let span = s.span();
 

@@ -204,9 +204,9 @@ fn args_par_expr<'s, 'origin>(
         use crate::parser::expr::expr_list;
 
         let token_par_l = match_token(Token::ParL)
-            .map_failure(|f| ParseFailure::from(ArgsParExprFailure::ParL(f)));
+            .map_failure(|f| ParseFailure::from(FnArgsParExprFailure::ParL(f)));
         let token_par_r = match_token(Token::ParR)
-            .map_failure(|f| ParseFailure::from(ArgsParExprFailure::ParR(f)));
+            .map_failure(|f| ParseFailure::from(FnArgsParExprFailure::ParR(f)));
 
         let state = token_par_l
             .parse_once(s)?
@@ -222,14 +222,14 @@ fn args_par_expr<'s, 'origin>(
 
 #[derive(Debug, Error)]
 #[error("failed to parse function arguments")]
-pub enum ArgsParExprFailure {
+pub enum FnArgsParExprFailure {
     ParL(TokenMismatch),
     ParR(TokenMismatch),
 }
 
-impl HaveFailureMode for ArgsParExprFailure {
+impl HaveFailureMode for FnArgsParExprFailure {
     fn mode(&self) -> FailureMode {
-        use ArgsParExprFailure::*;
+        use FnArgsParExprFailure::*;
 
         match self {
             ParL(_) => FailureMode::Mismatch,

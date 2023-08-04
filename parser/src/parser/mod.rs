@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 mod basic;
 mod block;
 mod error;

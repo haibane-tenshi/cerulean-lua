@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 use crate::parser::prelude::*;
 
 pub(crate) fn expr<'s, 'origin>(
@@ -23,6 +25,23 @@ pub(crate) fn expr<'s, 'origin>(
     }
 }
 
+#[derive(Debug, Error)]
+pub(crate) enum ExprFailure {
+    #[error("failed to parse prefix")]
+    Prefix(PrefixMismatchError),
+    #[error("failed to parse infix")]
+    Infix(InfixMismatchError),
+}
+
+impl HaveFailureMode for ExprFailure {
+    fn mode(&self) -> FailureMode {
+        match self {
+            ExprFailure::Prefix(_) => FailureMode::Mismatch,
+            ExprFailure::Infix(_) => FailureMode::Ambiguous,
+        }
+    }
+}
+
 fn expr_impl<'s, 'origin>(
     min_bp: u64,
     mut frag: Fragment<'s, 'origin>,
@@ -39,7 +58,7 @@ fn expr_impl<'s, 'origin>(
         let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
             let frag = &mut frag;
             let r = prefix_op(s.clone())?
-                .map_failure(Into::<ParseFailure>::into)
+                .map_failure(|f| ParseFailure::from(ExprFailure::Prefix(f)))
                 .then(|op| {
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
                         let ((), rhs_bp) = op.binding_power();
@@ -80,7 +99,7 @@ fn expr_impl<'s, 'origin>(
         > {
             let mut frag = frag.new_fragment();
             let r = infix_op(s)?
-                .map_failure(|failure| ExprSuccess::Parsing(failure.into()))
+                .map_failure(|failure| ExprSuccess::Parsing(ExprFailure::Infix(failure).into()))
                 .transform(|op| {
                     let (lhs_bp, _rhs_bp) = op.binding_power();
 
@@ -264,6 +283,8 @@ fn prefix_op(
     Ok(ParsingState::Success(s, op, Complete))
 }
 
+#[derive(Debug, Error)]
+#[error("expected prefix op")]
 pub(crate) struct PrefixMismatchError;
 
 impl HaveFailureMode for PrefixMismatchError {
@@ -303,7 +324,8 @@ fn infix_op(
     Ok(ParsingState::Success(s, op, Complete))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("expected infix op")]
 pub(crate) struct InfixMismatchError;
 
 impl HaveFailureMode for InfixMismatchError {

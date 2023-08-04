@@ -3,13 +3,13 @@ use std::ops::{BitOr, BitOrAssign};
 use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
 use thiserror::Error;
 
-use super::expr::expr::{InfixMismatchError, PrefixMismatchError};
+use super::expr::expr::ExprFailure;
 use super::expr::function::FunctionFailure;
-use super::expr::table::{FieldSepMismatchError, TabBracketFailure, TabFailure, TabNameFailure};
+use super::expr::table::{TabBracketFailure, TabFailure, TabNameFailure};
 use super::expr::{ExprListError, ParExprFailure};
-use super::func_def::{FuncDefFailure, ParListMismatch};
-use super::prefix_expr::{ArgsParExprFailure, FieldFailure, IndexFailure, VariableFailure};
-use super::stmt::assignment::{AssignmentFailure, PlacesSep};
+use super::func_def::FuncDefFailure;
+use super::prefix_expr::{FieldFailure, FnArgsParExprFailure, IndexFailure, VariableFailure};
+use super::stmt::assignment::AssignmentFailure;
 use super::stmt::do_end::DoEndFailure;
 use super::stmt::generic_for::GenericForFailure;
 use super::stmt::if_then::IfThenFailure;
@@ -17,6 +17,7 @@ use super::stmt::local_assignment::LocalAssignmentFailure;
 use super::stmt::local_function::LocalFunctionFailure;
 use super::stmt::numerical_for::NumericalForFailure;
 use super::stmt::repeat_until::RepeatUntilFailure;
+use super::stmt::return_::ReturnFailure;
 use super::stmt::while_do::WhileDoFailure;
 use crate::codegen::fragment::{EmitError, EmitLoadLiteralError};
 use crate::codegen::stack::{
@@ -115,7 +116,7 @@ impl ParseFailure {
 
 impl BitOrAssign for ParseFailure {
     fn bitor_assign(&mut self, rhs: Self) {
-        if self.mode < rhs.mode {
+        if self.mode <= rhs.mode {
             *self = rhs
         }
     }
@@ -169,7 +170,11 @@ pub(crate) enum ParseCause {
     #[error("expected function call")]
     FunctionCall,
     #[error("failed to parse function call arguments")]
-    FunctionArgs(#[from] ArgsParExprFailure),
+    FunctionArgs(#[from] FnArgsParExprFailure),
+    #[error("failed to parse expression")]
+    Expr(#[from] ExprFailure),
+    #[error("failed to parse expression list")]
+    ExprList(#[from] ExprListError),
     #[error("failed to parse variable assignment")]
     Assignment(#[from] AssignmentFailure),
     #[error("failed to parse generic-for statement")]
@@ -190,47 +195,13 @@ pub(crate) enum ParseCause {
     ExpectedStatement,
     #[error("failed to parse do-end block")]
     DoEnd(#[from] DoEndFailure),
+    #[error("failed to parse return statement")]
+    Return(#[from] ReturnFailure),
 }
 
 impl From<Never> for ParseCause {
     fn from(value: Never) -> Self {
         match value {}
-    }
-}
-
-impl From<FieldSepMismatchError> for ParseCause {
-    fn from(_value: FieldSepMismatchError) -> Self {
-        todo!()
-    }
-}
-
-impl From<InfixMismatchError> for ParseCause {
-    fn from(_value: InfixMismatchError) -> Self {
-        todo!()
-    }
-}
-
-impl From<PrefixMismatchError> for ParseCause {
-    fn from(_value: PrefixMismatchError) -> Self {
-        todo!()
-    }
-}
-
-impl From<ExprListError> for ParseCause {
-    fn from(_value: ExprListError) -> Self {
-        todo!()
-    }
-}
-
-impl From<ParListMismatch> for ParseCause {
-    fn from(_value: ParListMismatch) -> Self {
-        todo!()
-    }
-}
-
-impl From<PlacesSep> for ParseCause {
-    fn from(_value: PlacesSep) -> Self {
-        todo!()
     }
 }
 

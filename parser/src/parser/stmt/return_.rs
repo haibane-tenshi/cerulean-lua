@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 use crate::parser::prelude::*;
 
 pub(crate) fn return_<'s, 'origin>(
@@ -35,18 +37,14 @@ pub(crate) fn return_<'s, 'origin>(
     }
 }
 
+#[derive(Debug, Error)]
 pub(crate) enum ReturnFailure {
+    #[error("missing return keyword")]
     Return(TokenMismatch),
 }
 
 impl HaveFailureMode for ReturnFailure {
     fn mode(&self) -> FailureMode {
         FailureMode::Mismatch
-    }
-}
-
-impl From<ReturnFailure> for ParseCause {
-    fn from(_value: ReturnFailure) -> Self {
-        todo!()
     }
 }

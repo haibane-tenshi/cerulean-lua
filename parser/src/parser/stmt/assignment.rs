@@ -64,12 +64,15 @@ pub(crate) fn assignment<'s, 'origin>(
 pub(crate) enum AssignmentFailure {
     #[error("missing equals sign")]
     EqualsSign(#[source] TokenMismatch),
+    #[error("missing comma")]
+    Comma(#[source] TokenMismatch),
 }
 
 impl HaveFailureMode for AssignmentFailure {
     fn mode(&self) -> FailureMode {
         match self {
             AssignmentFailure::EqualsSign(_) => FailureMode::Ambiguous,
+            AssignmentFailure::Comma(_) => FailureMode::Malformed,
         }
     }
 }
@@ -96,8 +99,8 @@ fn places<'s, 'origin>(
         let mut r = vec![first];
 
         let next = |s| -> Result<_, FailFast> {
-            let token_comma =
-                match_token(Token::Comma).map_failure(|_| ParseFailure::from(PlacesSep));
+            let token_comma = match_token(Token::Comma)
+                .map_failure(|f| ParseFailure::from(AssignmentFailure::Comma(f)));
 
             let state = token_comma
                 .parse_once(s)?
@@ -115,13 +118,5 @@ fn places<'s, 'origin>(
         });
 
         Ok(state)
-    }
-}
-
-pub(crate) struct PlacesSep;
-
-impl HaveFailureMode for PlacesSep {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Mismatch
     }
 }

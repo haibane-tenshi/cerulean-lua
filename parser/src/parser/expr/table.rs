@@ -13,25 +13,12 @@ pub(crate) fn table<'s, 'frag>(
     FailFast = FailFast,
 > + 'frag {
     move |s: Lexer<'s>| {
-        use TabFailure::*;
+        let curly_l =
+            match_token(Token::CurlyL).map_failure(|f| ParseFailure::from(TabFailure::CurlyL(f)));
+        let curly_r =
+            match_token(Token::CurlyR).map_failure(|f| ParseFailure::from(TabFailure::CurlyR(f)));
 
-        let curly_l = |s| -> Result<_, LexError> {
-            let r = match_token(Token::CurlyL)
-                .parse(s)?
-                .map_failure(CurlyL)
-                .map_failure(Into::<ParseFailure>::into);
-            Ok(r)
-        };
-
-        let curly_r = |s| -> Result<_, LexError> {
-            let r = match_token(Token::CurlyR)
-                .parse(s)?
-                .map_failure(CurlyR)
-                .map_failure(Into::<ParseFailure>::into);
-            Ok(r)
-        };
-
-        let r = curly_l
+        let state = curly_l
             .parse(s)?
             .try_map_output(|_| -> Result<_, CodegenError> {
                 let table_slot = frag.stack().top()?;
@@ -45,7 +32,7 @@ pub(crate) fn table<'s, 'frag>(
                 frag.commit();
             });
 
-        Ok(r)
+        Ok(state)
     }
 }
 
@@ -53,6 +40,8 @@ pub(crate) fn table<'s, 'frag>(
 pub(crate) enum TabFailure {
     #[error("expected opening curly brace")]
     CurlyL(TokenMismatch),
+    #[error("expected table field separator")]
+    Sep(FieldSepMismatchError),
     #[error("expected closing curly brace")]
     CurlyR(TokenMismatch),
 }
@@ -61,6 +50,7 @@ impl HaveFailureMode for TabFailure {
     fn mode(&self) -> FailureMode {
         match self {
             TabFailure::CurlyL(_) => FailureMode::Mismatch,
+            TabFailure::Sep(_) => FailureMode::Malformed,
             TabFailure::CurlyR(_) => FailureMode::Malformed,
         }
     }
@@ -102,7 +92,7 @@ fn field_list<'s, 'origin>(
             };
 
             field_sep(s)?
-                .map_failure(Into::<ParseFailure>::into)
+                .map_failure(|f| ParseFailure::from(TabFailure::Sep(f)))
                 .and(field)
         };
 
@@ -126,9 +116,7 @@ fn field<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        // let bracket = |
-
-        let r = bracket(table_slot, frag.new_fragment())
+        let state = bracket(table_slot, frag.new_fragment())
             .parse_once(s.clone())?
             .map_output(|_| FieldType::Bracket)
             .or(
@@ -144,7 +132,7 @@ fn field<'s, 'origin>(
                 r
             });
 
-        Ok(r)
+        Ok(state)
     }
 }
 
@@ -169,14 +157,8 @@ fn field_sep(
 }
 
 #[derive(Debug, Error)]
-#[error("encountered unexpected token, expected table field separator")]
+#[error("encountered unexpected token, expected table field separator `,` or ';`")]
 pub(crate) struct FieldSepMismatchError;
-
-impl HaveFailureMode for FieldSepMismatchError {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Mismatch
-    }
-}
 
 fn bracket<'s, 'origin>(
     table_slot: StackSlot,
@@ -190,30 +172,16 @@ fn bracket<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         use crate::parser::expr::expr_adjusted_to_1;
-        use TabBracketFailure::*;
 
-        let bracket_l = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(match_token(Token::BracketL)
-                .parse(s)?
-                .map_failure(BracketL)
-                .map_failure(Into::<ParseFailure>::into))
-        };
+        let bracket_l = match_token(Token::BracketL)
+            .map_failure(|f| ParseFailure::from(TabBracketFailure::BracketL(f)));
+        let bracket_r = match_token(Token::BracketR)
+            .map_failure(|f| ParseFailure::from(TabBracketFailure::BracketR(f)));
+        let equals_sign = match_token(Token::EqualsSign)
+            .map_failure(|f| ParseFailure::from(TabBracketFailure::EqualsSign(f)));
 
-        let bracket_r = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(match_token(Token::BracketR)
-                .parse(s)?
-                .map_failure(BracketR)
-                .map_failure(Into::<ParseFailure>::into))
-        };
-
-        let equals_sign = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(match_token(Token::EqualsSign)
-                .parse(s)?
-                .map_failure(EqualsSign)
-                .map_failure(Into::<ParseFailure>::into))
-        };
-
-        let r = bracket_l(s)?
+        let state = bracket_l
+            .parse(s)?
             .try_map_output(|_| -> Result<_, CodegenError> {
                 frag.emit(OpCode::LoadStack(table_slot))?;
                 Ok(())
@@ -229,7 +197,7 @@ fn bracket<'s, 'origin>(
                 Ok(())
             })?;
 
-        Ok(r)
+        Ok(state)
     }
 }
 
@@ -265,21 +233,13 @@ fn name<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         use crate::parser::expr::expr_adjusted_to_1;
-        use TabNameFailure::*;
 
-        let ident = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(identifier(s)?
-                .map_failure(Ident)
-                .map_failure(Into::<ParseFailure>::into))
-        };
+        let ident = identifier.map_failure(|f| ParseFailure::from(TabNameFailure::Ident(f)));
+        let equals_sign = match_token(Token::EqualsSign)
+            .map_failure(|f| ParseFailure::from(TabNameFailure::EqualsSign(f)));
 
-        let equals_sign = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(match_token(Token::EqualsSign)
-                .parse(s)?
-                .map_failure(EqualsSign))
-        };
-
-        let r = ident(s)?
+        let r = ident
+            .parse(s)?
             .try_map_output(|(ident, _)| -> Result<_, CodegenError> {
                 frag.emit(OpCode::LoadStack(table_slot))?;
                 frag.emit_load_literal(Literal::String(ident.to_string()))?;

@@ -116,12 +116,11 @@ pub(crate) fn expr_list<'s, 'origin>(
         let state = expr(frag.new_fragment()).parse_once(s)?;
 
         let next_part = |s: Lexer<'s>| -> Result<_, FailFast> {
-            use ExprListError::*;
+            let token_comma = match_token(Token::Comma)
+                .map_failure(|f| ParseFailure::from(ExprListError::Comma(f)));
 
-            let r = match_token(Token::Comma)
+            let r = token_comma
                 .parse(s)?
-                .map_failure(Comma)
-                .map_failure(Into::<ParseFailure>::into)
                 .try_map_output(|_| -> Result<_, CodegenError> {
                     // Expressions inside comma lists are adjusted to 1.
                     frag.emit_adjust_to(mark)?;
@@ -143,8 +142,9 @@ pub(crate) fn expr_list<'s, 'origin>(
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub(crate) enum ExprListError {
+    #[error("expected comma")]
     Comma(TokenMismatch),
 }
 

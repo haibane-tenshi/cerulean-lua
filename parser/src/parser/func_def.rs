@@ -29,12 +29,10 @@ pub(crate) fn func_body<'s, 'origin>(
         // In the future we will put environment here instead.
         frag.stack_mut().push()?;
 
-        let state = token_par_l.parse_once(s)?.and_with(
-            parlist(frag.stack_mut().new_block()).optional(),
-            |_, param_count| param_count,
-        )?;
-
-        let state = state
+        let state = token_par_l
+            .parse_once(s)?
+            .and_replace(parlist(frag.stack_mut().new_block()).optional())?
+            .map_success(FuncDefFailure::from)
             .map_success(ParseFailure::from)
             .and_discard(token_par_r)?
             .and_discard(block(frag.new_fragment()))?
@@ -68,6 +66,10 @@ pub(crate) fn func_body<'s, 'origin>(
 pub(crate) enum FuncDefFailure {
     #[error("missing opening parenthesis")]
     ParL(#[source] TokenMismatch),
+    #[error("missing comma between arguments")]
+    ArgListComma(#[source] TokenMismatch),
+    #[error("function argument requires to be a valid identifier")]
+    ArgListIdent(#[source] IdentMismatch),
     #[error("missing closing parenthesis")]
     ParR(#[source] TokenMismatch),
     #[error("missing `end` token")]
@@ -78,8 +80,19 @@ impl HaveFailureMode for FuncDefFailure {
     fn mode(&self) -> FailureMode {
         match self {
             FuncDefFailure::ParL(_) => FailureMode::Mismatch,
+            FuncDefFailure::ArgListComma(_) => FailureMode::Malformed,
+            FuncDefFailure::ArgListIdent(_) => FailureMode::Malformed,
             FuncDefFailure::ParR(_) => FailureMode::Malformed,
             FuncDefFailure::End(_) => FailureMode::Malformed,
+        }
+    }
+}
+
+impl From<ParListMismatch> for FuncDefFailure {
+    fn from(value: ParListMismatch) -> Self {
+        match value {
+            ParListMismatch::Comma(err) => FuncDefFailure::ArgListComma(err),
+            ParListMismatch::Ident(err) => FuncDefFailure::ArgListIdent(err),
         }
     }
 }
@@ -133,7 +146,7 @@ fn parlist<'s, 'origin>(
     }
 }
 
-pub(crate) enum ParListMismatch {
+enum ParListMismatch {
     Comma(TokenMismatch),
     Ident(IdentMismatch),
 }
