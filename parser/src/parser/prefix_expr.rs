@@ -3,39 +3,60 @@ use thiserror::Error;
 use crate::codegen::fragment::EmitError;
 use crate::parser::prelude::*;
 
-pub(crate) fn prefix_expr<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    let (s, r) = prefix_expr_impl(s, frag.new_fragment())?;
+pub(crate) fn prefix_expr<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let state = prefix_expr_impl(frag.new_fragment())
+            .parse_once(s)?
+            .try_map_output(|output| -> Result<_, CodegenError> {
+                // Eagerly evaluate place.
+                if let PrefixExpr::Place(place) = output {
+                    place.eval(&mut frag)?;
+                }
 
-    // Eagerly evaluate place.
-    if let PrefixExpr::Place(place) = r {
-        place.eval(&mut frag)?;
+                frag.commit();
+                Ok(())
+            })?;
+
+        Ok(state)
     }
-
-    frag.commit();
-
-    Ok((s, ()))
 }
 
-pub(crate) fn place<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, Place), Error<ParseFailure>> {
-    let (s, r) = prefix_expr_impl(s, frag.new_fragment())?;
+pub(crate) fn place<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = Place,
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let state = prefix_expr_impl(frag.new_fragment())
+            .parse_once(s)?
+            .transform(|output| {
+                if let PrefixExpr::Place(place) = output {
+                    frag.commit();
 
-    if let PrefixExpr::Place(place) = r {
-        frag.commit();
+                    Ok(place)
+                } else {
+                    let err = ParseFailure {
+                        mode: FailureMode::Malformed,
+                        cause: ParseCause::ExpectedPlace,
+                    };
 
-        Ok((s, place))
-    } else {
-        let err = ParseFailure {
-            mode: FailureMode::Malformed,
-            cause: ParseCause::ExpectedPlace,
-        };
+                    Err(err)
+                }
+            });
 
-        Err(err.into())
+        Ok(state)
     }
 }
 
@@ -56,136 +77,147 @@ impl Place {
     }
 }
 
-fn prefix_expr_impl<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, PrefixExpr), Error<ParseFailure>> {
-    use crate::parser::expr::par_expr;
+fn prefix_expr_impl<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = PrefixExpr,
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::expr::par_expr;
 
-    let stack_start = frag.stack().top()?;
+        let stack_start = frag.stack().top()?;
 
-    let prefix = || {
-        let mut err: Error<ParseFailure> = match variable(s.clone(), &frag) {
-            Ok((s, slot)) => return Ok((s, PrefixExpr::Place(Place::Temporary(slot)))),
-            Err(err) => err.into(),
+        let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
+            let state = variable(&frag).parse(s.clone())?;
+
+            let state = state
+                .map_output(|slot| PrefixExpr::Place(Place::Temporary(slot)))
+                .or(
+                    s,
+                    par_expr(frag.new_fragment()).map_output(|_| PrefixExpr::Expr),
+                )?;
+
+            Ok(state)
         };
 
-        err |= match par_expr(s, frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, PrefixExpr::Expr)),
-            Err(err) => err,
+        let (mut output, state) = match prefix.parse_once(s)? {
+            ParsingState::Success(s, output, success) => {
+                (output, ParsingState::Success(s, (), success))
+            }
+            ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
         };
 
-        Err(err)
-    };
+        let next = |s: Lexer<'s>| -> Result<_, FailFast> {
+            let mut frag = frag.new_fragment_at(stack_start).unwrap();
 
-    let (mut s, mut r) = prefix()?;
-    let stack_top = stack_start + 1;
+            // Evaluate place.
+            if let PrefixExpr::Place(place) = output {
+                place.eval(&mut frag)?;
+            }
 
-    let mut next_part = |s: Lexer<'s>,
-                         mut frag: Fragment<'s, '_>|
-     -> Result<_, Error<ParseFailure>> {
-        // Evaluate place.
-        if let PrefixExpr::Place(place) = r {
-            place.eval(&mut frag)?;
-        }
+            // Adjust stack.
+            // Prefix expressions (except the very last one) always evaluate to 1 value.
+            // We are reusing the same stack slot to store it.
+            frag.emit_adjust_to(stack_start + 1)?;
 
-        // Adjust stack.
-        // Prefix expressions (except the very last one) always evaluate to 1 value.
-        // We are reusing the same stack slot to store it.
-        frag.emit_adjust_to(stack_top)?;
+            let state = func_call(stack_start, frag.new_fragment_at_boundary())
+                .parse_once(s.clone())?
+                .map_output(|_| PrefixExpr::FnCall)
+                .or(
+                    s.clone(),
+                    field(frag.new_fragment()).map_output(|_| PrefixExpr::Place(Place::TableField)),
+                )?
+                .or(
+                    s,
+                    index(frag.new_fragment()).map_output(|_| PrefixExpr::Place(Place::TableField)),
+                )?
+                .map_output(|expr| {
+                    output = expr;
+                    frag.commit();
+                });
 
-        let tail = || {
-            let mut err = match func_call(s.clone(), stack_start, frag.new_fragment_at_boundary()) {
-                Ok((s, ())) => return Ok((s, PrefixExpr::FnCall)),
-                Err(err) => err,
-            };
-
-            err |= match field(s.clone(), frag.new_fragment()) {
-                Ok((s, ())) => return Ok((s, PrefixExpr::Place(Place::TableField))),
-                Err(err) => err,
-            };
-
-            err |= match index(s, frag.new_fragment()) {
-                Ok((s, ())) => return Ok((s, PrefixExpr::Place(Place::TableField))),
-                Err(err) => err,
-            };
-
-            Err(err)
+            Ok(state)
         };
 
-        let (s, nr) = tail()?;
-        r = nr;
+        let state = state.and(next.repeat())?.map_output(move |_| {
+            frag.commit();
+            output
+        });
 
-        frag.commit();
-        Ok((s, ()))
-    };
-
-    let _ = loop {
-        s = match next_part(s.clone(), frag.new_fragment_at(stack_start).unwrap()) {
-            Ok((s, _)) => s,
-            Err(err) => break err,
-        }
-    };
-
-    frag.commit();
-    Ok((s, r))
+        Ok(state)
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum PrefixExpr {
     Expr,
     Place(Place),
     FnCall,
 }
 
-fn func_call<'s>(
-    s: Lexer<'s>,
+fn func_call<'s, 'origin>(
     invoke_target: StackSlot,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    let choice = || {
-        let mut err = match args_par_expr(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let state = args_par_expr(frag.new_fragment())
+            .parse_once(s.clone())?
+            .or(s.clone(), args_table(frag.new_fragment()))?
+            .or(
+                s,
+                args_str(frag.new_fragment()).map_failure(|_| ParseFailure {
+                    mode: FailureMode::Mismatch,
+                    cause: ParseCause::FunctionCall,
+                }),
+            )?
+            .try_map_output(move |_| -> Result<_, CodegenError> {
+                frag.emit(OpCode::Invoke(invoke_target))?;
 
-        err |= match args_table(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
+                frag.commit();
+                Ok(())
+            })?;
 
-        err |= match args_str(s, frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err.map_parse(|_| ParseFailure {
-                mode: FailureMode::Mismatch,
-                cause: ParseCause::FunctionCall,
-            }),
-        };
-
-        Err(err)
-    };
-
-    let (s, ()) = choice()?;
-
-    frag.emit(OpCode::Invoke(invoke_target))?;
-
-    frag.commit();
-    Ok((s, ()))
+        Ok(state)
+    }
 }
 
-fn args_par_expr<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use crate::parser::expr::expr_list;
-    use ArgsParExprFailure::*;
+fn args_par_expr<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::expr::expr_list;
 
-    let (s, _) = match_token(s, Token::ParL).map_parse(ParL)?;
-    let (s, _, _) = expr_list(s.clone(), frag.new_fragment()).optional(s);
-    let (s, _) = match_token(s, Token::ParR).map_parse(ParR)?;
+        let token_par_l = match_token(Token::ParL)
+            .map_failure(|f| ParseFailure::from(ArgsParExprFailure::ParL(f)));
+        let token_par_r = match_token(Token::ParR)
+            .map_failure(|f| ParseFailure::from(ArgsParExprFailure::ParR(f)));
 
-    frag.commit();
-    Ok((s, ()))
+        let state = token_par_l
+            .parse_once(s)?
+            .and(expr_list(frag.new_fragment()).optional())?
+            .and(token_par_r)?
+            .map_output(move |_| {
+                frag.commit();
+            });
+
+        Ok(state)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -206,36 +238,50 @@ impl HaveFailureMode for ArgsParExprFailure {
     }
 }
 
-fn args_str<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<LiteralStrMismatch>> {
-    let (s, (val, _)) = literal_str(s)?;
+fn args_str<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = LiteralStrMismatch,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let state =
+            literal_str(s)?.try_map_output(move |(value, _)| -> Result<_, CodegenError> {
+                frag.emit_load_literal(Literal::String(value.into_owned()))?;
 
-    frag.emit_load_literal(Literal::String(val.into_owned()))?;
+                frag.commit();
+                Ok(())
+            })?;
 
-    frag.commit();
-    Ok((s, ()))
+        Ok(state)
+    }
 }
 
-fn args_table<'s>(
-    s: Lexer<'s>,
-    frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    crate::parser::expr::table::table(s, frag)
-}
+use crate::parser::expr::table::table as args_table;
 
-fn variable<'s>(
-    s: Lexer<'s>,
-    frag: &Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, StackSlot), ParseError<VariableFailure>> {
-    use VariableFailure::*;
+fn variable<'s, 'a>(
+    frag: &'a Fragment<'s, '_>,
+) -> impl Parse<
+    Lexer<'s>,
+    Output = StackSlot,
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'a {
+    move |s: Lexer<'s>| {
+        let state = identifier(s)?
+            .map_failure(VariableFailure::Ident)
+            .transform(|(ident, _)| match frag.stack().lookup(ident) {
+                NameLookup::Local(slot) => Ok(slot),
+                NameLookup::Upvalue => Err(VariableFailure::UnsupportedUpvalue),
+                NameLookup::Global => Err(VariableFailure::UnsupportedGlobal),
+            })
+            .map_failure(Into::into);
 
-    let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
-    match frag.stack().lookup(ident) {
-        NameLookup::Local(slot) => Ok((s, slot)),
-        NameLookup::Upvalue => Err(ParseError::Parse(UnsupportedUpvalue)),
-        NameLookup::Global => Err(ParseError::Parse(UnsupportedGlobal)),
+        Ok(state)
     }
 }
 
@@ -258,19 +304,32 @@ impl HaveFailureMode for VariableFailure {
     }
 }
 
-fn field<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use FieldFailure::*;
+fn field<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let token_dot =
+            match_token(Token::Dot).map_failure(|f| ParseFailure::from(FieldFailure::Dot(f)));
+        let identifier = identifier.map_failure(|f| ParseFailure::from(FieldFailure::Ident(f)));
 
-    let (s, _) = match_token(s, Token::Dot).map_parse(Dot)?;
-    let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
+        let state = token_dot
+            .parse_once(s)?
+            .and_with(identifier, |_, (ident, _)| ident)?
+            .try_map_output(move |ident| -> Result<_, CodegenError> {
+                frag.emit_load_literal(Literal::String(ident.to_string()))?;
 
-    frag.emit_load_literal(Literal::String(ident.to_string()))?;
+                frag.commit();
+                Ok(())
+            })?;
 
-    frag.commit();
-    Ok((s, ()))
+        Ok(state)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -289,20 +348,33 @@ impl HaveFailureMode for FieldFailure {
     }
 }
 
-fn index<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use crate::parser::expr::expr_adjusted_to_1;
-    use IndexFailure::*;
+fn index<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::expr::expr_adjusted_to_1;
 
-    let (s, _) = match_token(s, Token::BracketL).map_parse(BracketL)?;
-    let (s, ()) = expr_adjusted_to_1(s, frag.new_fragment())
-        .map_err(|err| err.with_mode(FailureMode::Malformed))?;
-    let (s, _) = match_token(s, Token::BracketR).map_parse(BracketR)?;
+        let token_bracket_l = match_token(Token::BracketL)
+            .map_failure(|f| ParseFailure::from(IndexFailure::BracketL(f)));
+        let token_bracket_r = match_token(Token::BracketR)
+            .map_failure(|f| ParseFailure::from(IndexFailure::BracketR(f)));
 
-    frag.commit();
-    Ok((s, ()))
+        let state = token_bracket_l
+            .parse_once(s)?
+            .and(expr_adjusted_to_1(frag.new_fragment()))?
+            .and(token_bracket_r)?
+            .map_output(move |_| {
+                frag.commit();
+            });
+
+        Ok(state)
+    }
 }
 
 #[derive(Debug, Error)]

@@ -3,12 +3,13 @@ use std::ops::{BitOr, BitOrAssign};
 use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
 use thiserror::Error;
 
+use super::expr::expr::{InfixMismatchError, PrefixMismatchError};
 use super::expr::function::FunctionFailure;
-use super::expr::table::{TabBracketFailure, TabFailure, TabNameFailure};
-use super::expr::ParExprFailure;
-use super::func_def::FuncDefFailure;
+use super::expr::table::{FieldSepMismatchError, TabBracketFailure, TabFailure, TabNameFailure};
+use super::expr::{ExprListError, ParExprFailure};
+use super::func_def::{FuncDefFailure, ParListMismatch};
 use super::prefix_expr::{ArgsParExprFailure, FieldFailure, IndexFailure, VariableFailure};
-use super::stmt::assignment::AssignmentFailure;
+use super::stmt::assignment::{AssignmentFailure, PlacesSep};
 use super::stmt::do_end::DoEndFailure;
 use super::stmt::generic_for::GenericForFailure;
 use super::stmt::if_then::IfThenFailure;
@@ -22,177 +23,79 @@ use crate::codegen::stack::{
     BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
     VariadicStackError,
 };
-use crate::lex::Error as LexError;
+
+pub use crate::lex::Error as LexError;
+pub use std::convert::Infallible as Never;
 
 // use prelude::*;
-
-#[derive(Debug, Error)]
-pub enum ParseError<P> {
-    #[error(transparent)]
-    Lex(LexError),
-
-    #[error(transparent)]
-    Parse(P),
-}
-
-impl<T, P> From<T> for ParseError<P>
-where
-    T: Into<LexError>,
-{
-    fn from(value: T) -> Self {
-        ParseError::Lex(value.into())
-    }
-}
 
 #[derive(Debug, Error)]
 #[error("codegen error")]
 pub struct CodegenError;
 
-#[derive(Debug, Error)]
-pub enum Error<P> {
-    #[error(transparent)]
-    Lex(#[from] LexError),
-
-    #[error(transparent)]
-    Parse(P),
-
-    #[error("failed to generate code")]
-    Codegen(#[from] CodegenError),
-}
-
-impl<P> Error<P> {
-    pub fn map_parse<F, U>(self, f: F) -> Error<U>
-    where
-        F: FnOnce(P) -> U,
-    {
-        match self {
-            Error::Lex(t) => Error::Lex(t),
-            Error::Codegen(t) => Error::Codegen(t),
-            Error::Parse(t) => Error::Parse(f(t)),
-        }
-    }
-}
-
-impl Error<ParseFailure> {
-    pub fn with_mode(self, mode: FailureMode) -> Self {
-        match self {
-            Error::Parse(t) => Error::Parse(t.with_mode(mode)),
-            t => t,
-        }
-    }
-}
-
-impl<T, P> From<ParseError<T>> for Error<P>
-where
-    T: Into<P>,
-{
-    fn from(value: ParseError<T>) -> Self {
-        match value {
-            ParseError::Lex(err) => Error::Lex(err),
-            ParseError::Parse(err) => Error::Parse(err.into()),
-        }
-    }
-}
-
-impl<P> From<VariadicStackError> for Error<P> {
+impl From<VariadicStackError> for CodegenError {
     fn from(_: VariadicStackError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<StackOverflowError> for Error<P> {
+impl From<StackOverflowError> for CodegenError {
     fn from(_: StackOverflowError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<PushError> for Error<P> {
+impl From<PushError> for CodegenError {
     fn from(_: PushError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<PopError> for Error<P> {
+impl From<PopError> for CodegenError {
     fn from(_: PopError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<BoundaryViolationError> for Error<P> {
+impl From<BoundaryViolationError> for CodegenError {
     fn from(_: BoundaryViolationError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<GiveNameError> for Error<P> {
+impl From<GiveNameError> for CodegenError {
     fn from(_: GiveNameError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<ConstCapacityError> for Error<P> {
+impl From<ConstCapacityError> for CodegenError {
     fn from(_: ConstCapacityError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<EmitError> for Error<P> {
+impl From<EmitError> for CodegenError {
     fn from(_: EmitError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<EmitLoadLiteralError> for Error<P> {
+impl From<EmitLoadLiteralError> for CodegenError {
     fn from(_: EmitLoadLiteralError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<InstrCountError> for Error<P> {
+impl From<InstrCountError> for CodegenError {
     fn from(_: InstrCountError) -> Self {
-        Error::Codegen(CodegenError)
+        CodegenError
     }
 }
 
-impl<P> From<FunctionCapacityError> for Error<P> {
+impl From<FunctionCapacityError> for CodegenError {
     fn from(_: FunctionCapacityError) -> Self {
-        Error::Codegen(CodegenError)
-    }
-}
-
-impl<P> From<P> for Error<ParseFailure>
-where
-    P: Into<ParseFailure>,
-{
-    fn from(value: P) -> Self {
-        Error::Parse(value.into())
-    }
-}
-
-impl<P> BitOrAssign for Error<P>
-where
-    P: BitOrAssign,
-{
-    fn bitor_assign(&mut self, rhs: Self) {
-        match (self, rhs) {
-            (Error::Lex(_), _) => (),
-            (t, value @ Error::Lex(_)) => *t = value,
-            (Error::Codegen(_), _) => (),
-            (t, value @ Error::Codegen(_)) => *t = value,
-            (Error::Parse(t), Error::Parse(value)) => *t |= value,
-        }
-    }
-}
-
-impl<P> BitOr for Error<P>
-where
-    Self: BitOrAssign,
-{
-    type Output = Self;
-
-    fn bitor(mut self, rhs: Self) -> Self::Output {
-        self |= rhs;
-        self
+        CodegenError
     }
 }
 
@@ -289,6 +192,48 @@ pub(crate) enum ParseCause {
     DoEnd(#[from] DoEndFailure),
 }
 
+impl From<Never> for ParseCause {
+    fn from(value: Never) -> Self {
+        match value {}
+    }
+}
+
+impl From<FieldSepMismatchError> for ParseCause {
+    fn from(_value: FieldSepMismatchError) -> Self {
+        todo!()
+    }
+}
+
+impl From<InfixMismatchError> for ParseCause {
+    fn from(_value: InfixMismatchError) -> Self {
+        todo!()
+    }
+}
+
+impl From<PrefixMismatchError> for ParseCause {
+    fn from(_value: PrefixMismatchError) -> Self {
+        todo!()
+    }
+}
+
+impl From<ExprListError> for ParseCause {
+    fn from(_value: ExprListError) -> Self {
+        todo!()
+    }
+}
+
+impl From<ParListMismatch> for ParseCause {
+    fn from(_value: ParListMismatch) -> Self {
+        todo!()
+    }
+}
+
+impl From<PlacesSep> for ParseCause {
+    fn from(_value: PlacesSep) -> Self {
+        todo!()
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum FailureMode {
     Success,
@@ -302,12 +247,148 @@ pub trait HaveFailureMode {
     fn mode(&self) -> FailureMode;
 }
 
-pub(crate) trait WithMode {
-    fn with_mode(self, mode: FailureMode) -> Self;
+impl HaveFailureMode for Never {
+    fn mode(&self) -> FailureMode {
+        match *self {}
+    }
 }
 
-impl<T> WithMode for Result<T, Error<ParseFailure>> {
-    fn with_mode(self, mode: FailureMode) -> Self {
-        self.map_err(|err| err.with_mode(mode))
+#[derive(Debug, Error)]
+pub enum FailFast {
+    #[error(transparent)]
+    Lex(#[from] LexError),
+    #[error(transparent)]
+    Codegen(CodegenError),
+}
+
+impl<T> From<T> for FailFast
+where
+    T: Into<CodegenError>,
+{
+    fn from(value: T) -> Self {
+        FailFast::Codegen(value.into())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Complete;
+
+impl HaveFailureMode for Complete {
+    fn mode(&self) -> FailureMode {
+        FailureMode::Success
+    }
+}
+
+pub(crate) type ParseFailureOrComplete = CompleteOr<ParseFailure>;
+
+pub(crate) enum CompleteOr<T> {
+    Complete(Complete),
+    Other(T),
+}
+
+impl<T> From<Complete> for CompleteOr<T> {
+    fn from(value: Complete) -> Self {
+        CompleteOr::Complete(value)
+    }
+}
+
+impl From<ParseFailure> for ParseFailureOrComplete {
+    fn from(value: ParseFailure) -> Self {
+        ParseFailureOrComplete::Other(value)
+    }
+}
+
+pub trait Combine<Other> {
+    type Output;
+
+    fn combine(self, other: Other) -> Self::Output;
+}
+
+impl<T> Combine<T> for Never {
+    type Output = Never;
+
+    fn combine(self, _: T) -> Self::Output {
+        self
+    }
+}
+
+impl Combine<Never> for ParseFailure {
+    type Output = Never;
+
+    fn combine(self, other: Never) -> Self::Output {
+        other
+    }
+}
+
+impl Combine<ParseFailure> for ParseFailure {
+    type Output = Self;
+
+    fn combine(self, other: ParseFailure) -> Self::Output {
+        self | other
+    }
+}
+
+impl Combine<Complete> for ParseFailure {
+    type Output = Self;
+
+    fn combine(self, _: Complete) -> Self::Output {
+        self
+    }
+}
+
+impl Combine<ParseFailureOrComplete> for ParseFailure {
+    type Output = Self;
+
+    fn combine(self, other: ParseFailureOrComplete) -> Self::Output {
+        match other {
+            ParseFailureOrComplete::Complete(_) => self,
+            ParseFailureOrComplete::Other(this) => self.combine(this),
+        }
+    }
+}
+
+impl<T> Combine<T> for Complete {
+    type Output = T;
+
+    fn combine(self, other: T) -> Self::Output {
+        other
+    }
+}
+
+impl<T> Combine<Never> for CompleteOr<T> {
+    type Output = Never;
+
+    fn combine(self, other: Never) -> Self::Output {
+        other
+    }
+}
+
+impl Combine<ParseFailure> for ParseFailureOrComplete {
+    type Output = ParseFailure;
+
+    fn combine(self, other: ParseFailure) -> Self::Output {
+        other.combine(self)
+    }
+}
+
+impl Combine<Complete> for ParseFailureOrComplete {
+    type Output = Self;
+
+    fn combine(self, _: Complete) -> Self::Output {
+        self
+    }
+}
+
+impl Combine<ParseFailureOrComplete> for ParseFailureOrComplete {
+    type Output = Self;
+
+    fn combine(self, other: ParseFailureOrComplete) -> Self::Output {
+        use CompleteOr::{Complete as EComplete, Other};
+
+        match (self, other) {
+            (Other(lhs), Other(rhs)) => Other(lhs.combine(rhs)),
+            (Other(failure), _) | (_, Other(failure)) => Other(failure),
+            (EComplete(_), EComplete(_)) => EComplete(Complete),
+        }
     }
 }

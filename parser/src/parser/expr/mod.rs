@@ -1,5 +1,5 @@
 #[allow(clippy::module_inception)]
-mod expr;
+pub(crate) mod expr;
 pub(crate) mod function;
 pub(crate) mod literal;
 pub(crate) mod table;
@@ -10,38 +10,79 @@ use crate::parser::prelude::*;
 
 pub(crate) use expr::expr;
 
-pub(crate) fn expr_adjusted_to<'s>(
-    s: Lexer<'s>,
+pub(crate) fn expr_adjusted_to<'s, 'origin>(
     count: u32,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    let mark = frag.stack().top()? + count;
-    let r = expr(s, frag.new_fragment())?;
-    frag.emit_adjust_to(mark)?;
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let mark = frag.stack().top().map_err(Into::<CodegenError>::into)? + count;
+        let r = expr(frag.new_fragment()).parse_once(s)?.try_map_output(
+            move |_| -> Result<_, CodegenError> {
+                frag.emit_adjust_to(mark)?;
 
-    frag.commit();
-    Ok(r)
+                frag.commit();
+                Ok(())
+            },
+        )?;
+
+        Ok(r)
+    }
 }
 
-pub(crate) fn expr_adjusted_to_1<'s>(
-    s: Lexer<'s>,
-    frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    expr_adjusted_to(s, 1, frag)
+pub(crate) fn expr_adjusted_to_1<'s, 'origin>(
+    frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| expr_adjusted_to(1, frag).parse_once(s)
 }
 
-pub(crate) fn par_expr<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use ParExprFailure::*;
+pub(crate) fn par_expr<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use ParExprFailure::*;
 
-    let (s, _) = match_token(s, Token::ParL).map_parse(ParL)?;
-    let (s, ()) = expr_adjusted_to_1(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _) = match_token(s, Token::ParR).map_parse(ParR)?;
+        let par_l = |s: Lexer<'s>| -> Result<_, FailFast> {
+            Ok(match_token(Token::ParL)
+                .parse(s)?
+                .map_failure(ParL)
+                .map_failure(Into::<ParseFailure>::into))
+        };
 
-    frag.commit();
-    Ok((s, ()))
+        let par_r = |s: Lexer<'s>| -> Result<_, FailFast> {
+            Ok(match_token(Token::ParR)
+                .parse(s)?
+                .map_failure(ParR)
+                .map_failure(Into::<ParseFailure>::into))
+        };
+
+        let r = par_l
+            .parse(s)?
+            .and(expr_adjusted_to_1(frag.new_fragment()))?
+            .and(par_r)?
+            .map_output(|_| {
+                frag.commit();
+            });
+
+        Ok(r)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -60,58 +101,80 @@ impl HaveFailureMode for ParExprFailure {
     }
 }
 
-pub(crate) fn expr_list<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    let mut mark = frag.stack().top()? + 1;
+pub(crate) fn expr_list<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let mut mark = frag.stack().top()? + 1;
 
-    let (mut s, ()) = expr(s, frag.new_fragment())?;
+        let state = expr(frag.new_fragment()).parse_once(s)?;
 
-    let next_part =
-        |s: Lexer<'s>, mut frag: Fragment<'s, '_>, mark| -> Result<_, ExprListSuccess> {
-            use ExprListSuccessInner::*;
+        let next_part = |s: Lexer<'s>| -> Result<_, FailFast> {
+            use ExprListError::*;
 
-            let (s, _) = match_token(s, Token::Comma).map_parse(Comma)?;
+            let r = match_token(Token::Comma)
+                .parse(s)?
+                .map_failure(Comma)
+                .map_failure(Into::<ParseFailure>::into)
+                .try_map_output(|_| -> Result<_, CodegenError> {
+                    // Expressions inside comma lists are adjusted to 1.
+                    frag.emit_adjust_to(mark)?;
+                    Ok(())
+                })?
+                .and(expr(frag.new_fragment_at(mark).unwrap()))?
+                .map_output(|_| {
+                    mark += 1;
+                });
 
-            // Expressions inside comma lists are adjusted to 1.
-            frag.emit_adjust_to(mark)?;
-
-            let (s, _) = expr(s, frag.new_fragment()).map_parse(Expr)?;
-
-            frag.commit();
-            Ok((s, ()))
+            Ok(r)
         };
 
-    loop {
-        s = match next_part(s.clone(), frag.new_fragment_at(mark).unwrap(), mark) {
-            Ok((s, _)) => s,
-            Err(_err) => break,
-        };
-        mark += 1;
+        let r = state
+            .and(next_part.repeat())?
+            .map_output(move |_| frag.commit());
+
+        Ok(r)
     }
-
-    frag.commit();
-    Ok((s, ()))
 }
-
-pub(crate) type ExprListSuccess = Error<ExprListSuccessInner>;
 
 #[derive(Debug)]
-pub(crate) enum ExprListSuccessInner {
+pub(crate) enum ExprListError {
     Comma(TokenMismatch),
-    Expr(ParseFailure),
 }
 
-pub(crate) fn expr_list_adjusted_to<'s>(
-    s: Lexer<'s>,
-    count: u32,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    let mark = frag.stack().top()? + count;
-    let r = expr_list(s, frag.new_fragment())?;
-    frag.emit_adjust_to(mark)?;
+impl HaveFailureMode for ExprListError {
+    fn mode(&self) -> FailureMode {
+        FailureMode::Mismatch
+    }
+}
 
-    frag.commit();
-    Ok(r)
+pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
+    count: u32,
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let mark = frag.stack().top()? + count;
+        let r = expr_list(frag.new_fragment())
+            .parse_once(s)?
+            .try_map_output(|_| -> Result<_, CodegenError> {
+                frag.emit_adjust_to(mark)?;
+
+                frag.commit();
+                Ok(())
+            })?;
+
+        Ok(r)
+    }
 }

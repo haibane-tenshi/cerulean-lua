@@ -1,7 +1,3 @@
-// We *are* using quite complex return types, but it is rather difficult to just typedef them:
-// there are many moving/replaceable parts which are specific to individual parsers.
-#![allow(clippy::type_complexity)]
-
 mod basic;
 mod block;
 mod error;
@@ -18,51 +14,21 @@ use thiserror::Error;
 use crate::lex::{Lexer, Token};
 use prelude::*;
 
-pub(crate) trait MapParse<F> {
-    type Output;
-
-    fn map_parse(self, f: F) -> Self::Output;
-}
-
-impl<T, U, E, F> MapParse<F> for Result<T, ParseError<E>>
-where
-    F: FnOnce(E) -> U,
-{
-    type Output = Result<T, ParseError<U>>;
-
-    fn map_parse(self, f: F) -> Self::Output {
-        match self {
-            Ok(t) => Ok(t),
-            Err(ParseError::Parse(err)) => Err(ParseError::Parse(f(err))),
-            Err(ParseError::Lex(err)) => Err(ParseError::Lex(err)),
-        }
-    }
-}
-
-impl<T, U, E, F> MapParse<F> for Result<T, Error<E>>
-where
-    F: FnOnce(E) -> U,
-{
-    type Output = Result<T, Error<U>>;
-
-    fn map_parse(self, f: F) -> Self::Output {
-        self.map_err(|err| err.map_parse(f))
-    }
-}
-
 pub(crate) trait NextToken {
     type Token;
 
-    fn next_token(&mut self) -> Result<Self::Token, NextTokenError>;
+    fn next_token(&mut self) -> Result<Result<Self::Token, Eof>, LexError>;
 }
 
 impl<'s> NextToken for Lexer<'s> {
     type Token = Token<'s>;
 
-    fn next_token(&mut self) -> Result<Self::Token, NextTokenError> {
-        let r = self.next().ok_or(NextTokenError::Parse(Eof))??;
-
-        Ok(r)
+    fn next_token(&mut self) -> Result<Result<Self::Token, Eof>, LexError> {
+        match self.next() {
+            Some(Ok(token)) => Ok(Ok(token)),
+            Some(Err(err)) => Err(LexError::Token(err)),
+            None => Ok(Err(Eof)),
+        }
     }
 }
 
@@ -70,42 +36,26 @@ impl<'s> NextToken for Lexer<'s> {
 #[error("reached end of input")]
 pub(crate) struct Eof;
 
-type NextTokenError = ParseError<Eof>;
-
-#[derive(Debug)]
-pub(crate) struct Complete;
-
-impl HaveFailureMode for Complete {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Success
-    }
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    Lex(#[from] LexError),
+    #[error(transparent)]
+    Parse(#[from] ParseFailure),
+    #[error(transparent)]
+    Codegen(#[from] CodegenError),
 }
 
-pub(crate) trait Optional {
-    type Source;
-    type Value;
-    type Failure;
-
-    fn optional(
-        self,
-        source: Self::Source,
-    ) -> (Self::Source, Option<Self::Value>, Option<Self::Failure>);
-}
-
-impl<'s, T, Failure> Optional for Result<(Lexer<'s>, T), Failure> {
-    type Source = Lexer<'s>;
-    type Value = T;
-    type Failure = Failure;
-
-    fn optional(self, source: Self::Source) -> (Self::Source, Option<T>, Option<Failure>) {
-        match self {
-            Ok((s, t)) => (s, Some(t), None),
-            Err(failure) => (source, None, Some(failure)),
+impl From<FailFast> for Error {
+    fn from(value: FailFast) -> Self {
+        match value {
+            FailFast::Lex(err) => Error::Lex(err),
+            FailFast::Codegen(err) => Error::Codegen(err),
         }
     }
 }
 
-pub fn chunk(s: Lexer) -> Result<Chunk, Error<ParseFailure>> {
+pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::const_table::ConstTable;
     use crate::codegen::func_table::FuncTable;
     use crate::codegen::function::Function;
@@ -124,15 +74,25 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error<ParseFailure>> {
         script.view(),
         stack.view(),
     );
-    let (mut s, _) = block(s, fragment)?;
+    let state = block(fragment).parse_once(s)?;
 
-    if !matches!(s.next_token(), Err(NextTokenError::Parse(Eof))) {
-        let err = ParseFailure {
-            mode: FailureMode::Malformed,
-            cause: ParseCause::ExpectedStatement,
-        };
+    match state {
+        ParsingState::Success(mut s, _, reason) => {
+            if !matches!(s.next_token(), Ok(Err(Eof))) {
+                match reason {
+                    CompleteOr::Other(failure) => return Err(Error::Parse(failure)),
+                    CompleteOr::Complete(_) => {
+                        let err = ParseFailure {
+                            mode: FailureMode::Malformed,
+                            cause: ParseCause::ExpectedStatement,
+                        };
 
-        return Err(Error::Parse(err));
+                        return Err(Error::Parse(err));
+                    }
+                }
+            }
+        }
+        ParsingState::Failure(failure) => match failure {},
     }
 
     let func_table = {

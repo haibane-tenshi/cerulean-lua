@@ -1,30 +1,47 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(crate) fn local_assignment<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use crate::parser::expr::expr_list;
-    use LocalAssignmentFailure::*;
+pub(crate) fn local_assignment<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::expr::expr_list;
 
-    let (s, _) = match_token(s, Token::Local).map_parse(Local)?;
+        let token_local = match_token(Token::Local)
+            .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Local(f)));
+        let token_equals_sign = match_token(Token::EqualsSign)
+            .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::EqualsSign(f)));
 
-    let stack_start = frag.stack().top()?;
+        let stack_start = frag.stack().top()?;
 
-    let (s, idents) = ident_list(s).map_parse(Ident)?;
-    let (s, _) = match_token(s, Token::EqualsSign).map_parse(EqualsSign)?;
-    let (s, ()) = expr_list(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+        let state = token_local
+            .parse_once(s)?
+            .and_with(
+                ident_list.map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Ident(f))),
+                |_, idents| idents,
+            )?
+            .and_discard(token_equals_sign)?
+            .and_discard(expr_list(frag.new_fragment()))?
+            .try_map_output(|idents| -> Result<_, CodegenError> {
+                let count: u32 = idents.len().try_into().unwrap();
+                frag.emit_adjust_to(stack_start + count)?;
 
-    let count: u32 = idents.len().try_into().unwrap();
-    frag.emit_adjust_to(stack_start + count)?;
+                for (ident, slot) in idents.into_iter().zip((stack_start.0..).map(StackSlot)) {
+                    frag.stack_mut().give_name(slot, ident)?;
+                }
 
-    for (ident, slot) in idents.into_iter().zip((stack_start.0..).map(StackSlot)) {
-        frag.stack_mut().give_name(slot, ident)?;
+                frag.commit();
+                Ok(())
+            })?;
+
+        Ok(state)
     }
-
-    frag.commit();
-    Ok((s, ()))
 }
 
 #[derive(Debug, Error)]
@@ -47,31 +64,50 @@ impl HaveFailureMode for LocalAssignmentFailure {
     }
 }
 
-fn ident_list(s: Lexer) -> Result<(Lexer, Vec<&str>), ParseError<IdentMismatch>> {
-    let (mut s, (ident, _)) = identifier(s)?;
-    let mut r = vec![ident];
-
-    let mut next_part = |s| -> Result<_, IdentListSuccess> {
-        use IdentListSuccess::*;
-
-        let (s, _) = match_token(s, Token::Comma).map_err(Comma)?;
-        let (s, (ident, _)) = identifier(s).map_err(Ident)?;
-        r.push(ident);
-
-        Ok((s, ()))
+fn ident_list(
+    s: Lexer,
+) -> Result<ParsingState<Lexer, Vec<&str>, IdentListSuccess, IdentMismatch>, LexError> {
+    let (ident, state) = match identifier(s)? {
+        ParsingState::Success(s, (ident, _), success) => {
+            (ident, ParsingState::Success(s, (), success))
+        }
+        ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
     };
 
-    loop {
-        s = match next_part(s.clone()) {
-            Ok((s, _)) => s,
-            Err(_err) => break,
-        };
-    }
+    let mut output = vec![ident];
 
-    Ok((s, r))
+    let next = |s| -> Result<_, LexError> {
+        let token_comma = match_token(Token::Comma).map_failure(|_| IdentListSuccess::Comma);
+
+        let state = token_comma
+            .parse_once(s)?
+            .and(identifier.map_failure(IdentListSuccess::Ident))?
+            .map_output(|(_, (ident, _))| {
+                output.push(ident);
+            });
+
+        Ok(state)
+    };
+
+    let state = state.and(next.repeat())?.map_output(|_| output);
+
+    Ok(state)
 }
 
 enum IdentListSuccess {
-    Comma(ParseError<TokenMismatch>),
-    Ident(ParseError<IdentMismatch>),
+    Comma,
+    Ident(IdentMismatch),
+}
+
+impl Combine<ParseFailure> for IdentListSuccess {
+    type Output = ParseFailure;
+
+    fn combine(self, other: ParseFailure) -> Self::Output {
+        match self {
+            IdentListSuccess::Comma => other,
+            IdentListSuccess::Ident(f) => {
+                ParseFailure::from(LocalAssignmentFailure::Ident(f)).combine(other)
+            }
+        }
+    }
 }

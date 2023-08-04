@@ -7,7 +7,7 @@ use thiserror::Error;
 
 pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 
-#[derive(Debug, Clone, Eq, PartialEq, Logos)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Logos)]
 #[logos(skip r"[ \t\r\n\f]+")]
 #[logos(error = UnrecognizedTokenError)]
 pub enum Token<'s> {

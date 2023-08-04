@@ -4,22 +4,29 @@ use logos::Span;
 use thiserror::Error;
 
 use crate::parser::prelude::*;
-use crate::parser::NextTokenError;
 
 pub(crate) fn match_token<'s>(
-    mut s: Lexer<'s>,
     token: Token<'static>,
-) -> Result<(Lexer<'s>, Span), ParseError<TokenMismatch>> {
-    match s.next_token() {
-        Ok(t) if t == token => {
-            let span = s.span();
-            Ok((s, span))
-        }
-        Ok(_) | Err(NextTokenError::Parse(Eof)) => {
-            let err = TokenMismatch { expected: token };
-            Err(err.into())
-        }
-        Err(NextTokenError::Lex(err)) => Err(err.into()),
+) -> impl Parse<
+    Lexer<'s>,
+    Output = Span,
+    Success = Complete,
+    Failure = TokenMismatch,
+    FailFast = LexError,
+> + Copy {
+    move |mut s: Lexer<'s>| {
+        let r = match s.next_token()? {
+            Ok(t) if t == token => {
+                let span = s.span();
+                ParsingState::Success(s, span, Complete)
+            }
+            Ok(_) | Err(Eof) => {
+                let err = TokenMismatch { expected: token };
+                ParsingState::Failure(err.into())
+            }
+        };
+
+        Ok(r)
     }
 }
 
@@ -29,37 +36,34 @@ pub struct TokenMismatch {
     expected: Token<'static>,
 }
 
-impl From<TokenMismatch> for ParseError<TokenMismatch> {
-    fn from(value: TokenMismatch) -> Self {
-        ParseError::Parse(value)
-    }
-}
-
-pub(crate) fn identifier(mut s: Lexer) -> Result<(Lexer, (&str, Span)), ParseError<IdentMismatch>> {
-    match s.next_token() {
+pub(crate) fn identifier(
+    mut s: Lexer,
+) -> Result<ParsingState<Lexer, (&str, Span), Complete, IdentMismatch>, LexError> {
+    let r = match s.next_token()? {
         Ok(Token::Ident(ident)) => {
             let span = s.span();
-            Ok((s, (ident, span)))
+            ParsingState::Success(s, (ident, span), Complete)
         }
-        Ok(_) | Err(NextTokenError::Parse(Eof)) => Err(IdentMismatch.into()),
-        Err(NextTokenError::Lex(lex)) => Err(lex.into()),
-    }
+        Ok(_) | Err(Eof) => ParsingState::Failure(IdentMismatch.into()),
+    };
+
+    Ok(r)
 }
 
 #[derive(Debug, Error)]
 #[error("encountered unexpected token, expected identifier")]
 pub struct IdentMismatch;
 
-impl From<IdentMismatch> for ParseError<IdentMismatch> {
-    fn from(value: IdentMismatch) -> Self {
-        ParseError::Parse(value)
+impl From<Never> for IdentMismatch {
+    fn from(value: Never) -> Self {
+        match value {}
     }
 }
 
 pub(crate) fn literal(
     mut s: Lexer,
-) -> Result<(Lexer, (Literal, Span)), ParseError<LiteralMismatch>> {
-    let literal = match s.next_token() {
+) -> Result<ParsingState<Lexer, (Literal, Span), Complete, LiteralMismatch>, LexError> {
+    let literal = match s.next_token()? {
         Ok(Token::Nil) => Literal::Nil,
         Ok(Token::True) => Literal::Bool(true),
         Ok(Token::False) => Literal::Bool(false),
@@ -71,44 +75,32 @@ pub(crate) fn literal(
             let r = raw_str.unescape()?.to_string();
             Literal::String(r)
         }
-        Ok(_) | Err(NextTokenError::Parse(Eof)) => return Err(LiteralMismatch.into()),
-        Err(NextTokenError::Lex(lex)) => return Err(lex.into()),
+        Ok(_) | Err(Eof) => return Ok(ParsingState::Failure(LiteralMismatch.into())),
     };
     let span = s.span();
 
-    Ok((s, (literal, span)))
+    Ok(ParsingState::Success(s, (literal, span), Complete))
 }
 
 #[derive(Debug, Error)]
 #[error("encountered unexpected token, expected literal")]
 pub struct LiteralMismatch;
 
-impl From<LiteralMismatch> for ParseError<LiteralMismatch> {
-    fn from(value: LiteralMismatch) -> Self {
-        ParseError::Parse(value)
-    }
-}
-
 pub(crate) fn literal_str(
     mut s: Lexer,
-) -> Result<(Lexer, (Cow<str>, Span)), ParseError<LiteralStrMismatch>> {
-    match s.next_token() {
+) -> Result<ParsingState<Lexer, (Cow<str>, Span), Complete, LiteralStrMismatch>, LexError> {
+    let r = match s.next_token()? {
         Ok(Token::ShortLiteralString(raw_str)) => {
             let r = raw_str.unescape()?;
             let span = s.span();
-            Ok((s, (r, span)))
+            ParsingState::Success(s, (r, span), Complete)
         }
-        Ok(_) | Err(NextTokenError::Parse(Eof)) => Err(LiteralStrMismatch.into()),
-        Err(NextTokenError::Lex(lex)) => Err(lex.into()),
-    }
+        Ok(_) | Err(Eof) => ParsingState::Failure(LiteralStrMismatch.into()),
+    };
+
+    Ok(r)
 }
 
 #[derive(Debug, Error)]
 #[error("encountered unexpected token, expected literal string")]
 pub struct LiteralStrMismatch;
-
-impl From<LiteralStrMismatch> for ParseError<LiteralStrMismatch> {
-    fn from(value: LiteralStrMismatch) -> Self {
-        ParseError::Parse(value)
-    }
-}

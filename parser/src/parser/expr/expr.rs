@@ -1,199 +1,316 @@
 use crate::parser::prelude::*;
 
-pub(crate) fn expr<'s>(
-    s: Lexer<'s>,
-    frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    expr_impl(s, 0, frag)
+pub(crate) fn expr<'s, 'origin>(
+    frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let r = expr_impl(0, frag)
+            .parse_once(s)?
+            .map_success(|success| match success {
+                ExprSuccess::LessTightlyBound => {
+                    unreachable!("there should be no ops with binding power below 0")
+                }
+                ExprSuccess::Parsing(success) => success,
+            });
+
+        Ok(r)
+    }
 }
 
-fn expr_impl<'s>(
-    s: Lexer<'s>,
+fn expr_impl<'s, 'origin>(
     min_bp: u64,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    let stack_start = frag.stack().top()?;
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ExprSuccess,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let stack_start = frag.stack().top().map_err(Into::<CodegenError>::into)?;
 
-    let mut s = if let Ok((s, op, Complete)) = prefix_op(s.clone()) {
-        let ((), rhs_bp) = op.binding_power();
-        let (s, ()) = expr_impl(s, rhs_bp, frag.new_fragment())?;
+        let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
+            let frag = &mut frag;
+            let r = prefix_op(s.clone())?
+                .map_failure(Into::<ParseFailure>::into)
+                .then(|op| {
+                    move |s: Lexer<'s>| -> Result<_, FailFast> {
+                        let ((), rhs_bp) = op.binding_power();
 
-        let opcode = match op {
-            Prefix::Ari(op) => OpCode::AriUnaOp(op),
-            Prefix::Bit(op) => OpCode::BitUnaOp(op),
+                        let r = expr_impl(rhs_bp, frag.new_fragment())
+                            .parse_once(s)?
+                            .try_map_output(|_| -> Result<_, CodegenError> {
+                                let opcode = match op {
+                                    Prefix::Ari(op) => OpCode::AriUnaOp(op),
+                                    Prefix::Bit(op) => OpCode::BitUnaOp(op),
+                                };
+
+                                frag.emit_adjust_to(stack_start + 1)?;
+                                frag.emit(opcode)?;
+
+                                Ok(())
+                            })?;
+
+                        Ok(r)
+                    }
+                })?;
+
+            Ok(r)
         };
 
-        frag.emit_adjust_to(stack_start + 1)?;
-        frag.emit(opcode)?;
+        let state = prefix
+            .parse_once(s.clone())?
+            .map_success(CompleteOr::Other)
+            .or(s, atom(frag.new_fragment()))?;
 
-        s
-    } else {
-        let (s, ()) = atom(s, frag.new_fragment())?;
+        // At this point there can be variadic number of values on stack.
+        // This is OK: it can happen when there are no operators in current expression.
+        // We cannot trim it yet, outside context might expect those values.
 
-        s
-    };
+        let next_part = |s: Lexer<'s>| -> Result<
+            ParsingState<Lexer<'s>, (), ExprSuccess, ExprSuccess>,
+            FailFast,
+        > {
+            let mut frag = frag.new_fragment();
+            let r = infix_op(s)?
+                .map_failure(|failure| ExprSuccess::Parsing(failure.into()))
+                .transform(|op| {
+                    let (lhs_bp, _rhs_bp) = op.binding_power();
 
-    // At this point there can be variadic number of values on stack.
-    // This is OK: it can happen when there are no operators in current expression.
-    // We cannot trim it yet, outside context might expect those values.
+                    if lhs_bp < min_bp {
+                        Err(ExprSuccess::LessTightlyBound)
+                    } else {
+                        Ok(op)
+                    }
+                })
+                .try_map_output(|op| -> Result<_, CodegenError> {
+                    // At this point we 100% know that we are parsing an infix operator.
+                    // It implies that we HAVE to adjust both operands to 1 value before doing op itself.
 
-    let next_part = |s: Lexer<'s>, mut frag: Fragment<'s, '_>| {
-        use ExprSuccessImpl::{Expr, LessTightlyBound};
+                    // Adjust left operand.
+                    frag.emit_adjust_to(stack_start + 1)?;
 
-        let (s, op, Complete) = infix_op(s).map_parse(ExprSuccessImpl::Infix)?;
+                    let maybe_opcode = match op {
+                        Infix::Ari(op) => Some(OpCode::AriBinOp(op)),
+                        Infix::Bit(op) => Some(OpCode::BitBinOp(op)),
+                        Infix::Rel(op) => Some(OpCode::RelBinOp(op)),
+                        Infix::Str(op) => Some(OpCode::StrBinOp(op)),
+                        Infix::Logical(op) => {
+                            let cond = match op {
+                                Logical::Or => true,
+                                Logical::And => false,
+                            };
 
-        let (lhs_bp, rhs_bp) = op.binding_power();
+                            frag.emit_jump_to(frag.id(), Some(cond))?;
 
-        if lhs_bp < min_bp {
-            return Err(Error::Parse(LessTightlyBound));
-        }
+                            // Discard left operand when entering the other branch.
+                            frag.emit_adjust_to(stack_start)?;
 
-        // At this point we 100% know that we are parsing an infix operator.
-        // It implies that we HAVE to adjust both operands to 1 value before doing op itself.
+                            None
+                        }
+                    };
 
-        // Adjust left operand.
-        frag.emit_adjust_to(stack_start + 1)?;
+                    let rhs_top = frag.stack().top()? + 1;
 
-        let maybe_opcode = match op {
-            Infix::Ari(op) => Some(OpCode::AriBinOp(op)),
-            Infix::Bit(op) => Some(OpCode::BitBinOp(op)),
-            Infix::Rel(op) => Some(OpCode::RelBinOp(op)),
-            Infix::Str(op) => Some(OpCode::StrBinOp(op)),
-            Infix::Logical(op) => {
-                let cond = match op {
-                    Logical::Or => true,
-                    Logical::And => false,
-                };
+                    Ok((maybe_opcode, rhs_top, op))
+                })?
+                .then(|(maybe_opcode, rhs_top, op)| {
+                    let frag = &mut frag;
+                    move |s: Lexer<'s>| -> Result<_, FailFast> {
+                        let r = expr_impl(op.binding_power().1, frag.new_fragment())
+                            .parse_once(s)?
+                            .map_output(|_| (maybe_opcode, rhs_top));
 
-                frag.emit_jump_to(frag.id(), Some(cond))?;
+                        Ok(r)
+                    }
+                })?
+                .try_map_output(move |(maybe_opcode, rhs_top)| -> Result<_, CodegenError> {
+                    // Adjust right operand.
+                    frag.emit_adjust_to(rhs_top)?;
 
-                // Discard left operand when entering the other branch.
-                frag.emit_adjust_to(stack_start)?;
+                    if let Some(opcode) = maybe_opcode {
+                        frag.emit(opcode)?;
+                    }
 
-                None
-            }
+                    frag.commit();
+                    Ok(())
+                })?;
+
+            Ok(r)
         };
 
-        let rhs_top = frag.stack().top()? + 1;
-        let (s, _) = expr_impl(s, rhs_bp, frag.new_fragment())
-            .with_mode(FailureMode::Malformed)
-            .map_parse(Expr)?;
+        let r = state.and(next_part.repeat())?.map_output(|_| {
+            frag.commit();
+        });
 
-        // Adjust right operand.
-        frag.emit_adjust_to(rhs_top)?;
+        Ok(r)
+    }
+}
 
-        if let Some(opcode) = maybe_opcode {
-            frag.emit(opcode)?;
-        }
+enum ExprSuccess {
+    LessTightlyBound,
+    Parsing(ParseFailure),
+}
 
-        frag.commit();
-        Ok((s, ()))
-    };
-
-    loop {
-        s = match next_part(s.clone(), frag.new_fragment_at(stack_start).unwrap()) {
-            Ok((s, _)) => s,
-            Err(_err) => break,
+impl From<CompleteOr<ParseFailure>> for CompleteOr<ExprSuccess> {
+    fn from(value: CompleteOr<ParseFailure>) -> Self {
+        match value {
+            CompleteOr::Complete(value) => CompleteOr::Complete(value),
+            CompleteOr::Other(value) => CompleteOr::Other(ExprSuccess::Parsing(value)),
         }
     }
-
-    frag.commit();
-    Ok((s, ()))
 }
 
-enum ExprSuccessImpl {
-    Infix(InfixMismatchError),
-    LessTightlyBound,
-    Expr(ParseFailure),
+impl Combine<ExprSuccess> for ExprSuccess {
+    type Output = Self;
+
+    fn combine(self, other: ExprSuccess) -> Self::Output {
+        use ExprSuccess::*;
+
+        match (self, other) {
+            (Parsing(lhs), Parsing(rhs)) => Parsing(lhs.combine(rhs)),
+            (Parsing(failure), _) | (_, Parsing(failure)) => Parsing(failure),
+            (LessTightlyBound, LessTightlyBound) => LessTightlyBound,
+        }
+    }
 }
 
-fn atom<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use super::{function::function, literal::literal, table::table};
-    use crate::parser::prefix_expr::prefix_expr;
+impl Combine<ParseFailure> for ExprSuccess {
+    type Output = Self;
 
-    let mut inner = || {
-        let mut err = match literal(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err.map_parse(|_| ParseFailure {
+    fn combine(self, other: ParseFailure) -> Self::Output {
+        match self {
+            ExprSuccess::LessTightlyBound => ExprSuccess::LessTightlyBound,
+            ExprSuccess::Parsing(failure) => ExprSuccess::Parsing(failure.combine(other)),
+        }
+    }
+}
+
+impl Combine<Never> for ExprSuccess {
+    type Output = Never;
+
+    fn combine(self, other: Never) -> Self::Output {
+        other
+    }
+}
+
+impl Combine<ExprSuccess> for CompleteOr<ExprSuccess> {
+    type Output = ExprSuccess;
+
+    fn combine(self, other: ExprSuccess) -> Self::Output {
+        match self {
+            CompleteOr::Complete(_) => other,
+            CompleteOr::Other(value) => value.combine(other),
+        }
+    }
+}
+
+impl<T> From<T> for ExprSuccess
+where
+    T: Into<ParseFailure>,
+{
+    fn from(value: T) -> Self {
+        ExprSuccess::Parsing(value.into())
+    }
+}
+
+fn atom<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailureOrComplete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use super::{function::function, literal::literal, table::table};
+        use crate::parser::prefix_expr::prefix_expr;
+
+        let r = literal(frag.new_fragment())
+            .parse_once(s.clone())?
+            .map_failure(|_| ParseFailure {
                 mode: FailureMode::Mismatch,
                 cause: ParseCause::ExpectedExpr,
-            }),
-        };
+            })
+            .map_success(ParseFailureOrComplete::Complete)
+            .or(s.clone(), prefix_expr(frag.new_fragment()))?
+            .or(s.clone(), table(frag.new_fragment()))?
+            .or(s, function(frag.new_fragment()))?
+            .map_output(|_| {
+                frag.commit();
+            });
 
-        err |= match prefix_expr(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match table(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match function(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        Err(err)
-    };
-
-    let r = inner()?;
-    frag.commit();
-
-    Ok(r)
+        Ok(r)
+    }
 }
 
-fn prefix_op(mut s: Lexer) -> Result<(Lexer, Prefix, Complete), ParseError<PrefixMismatchError>> {
-    let token = s.next_token().map_parse(|_| PrefixMismatchError)?;
-
-    let op = match token {
-        Token::MinusSign => Prefix::Ari(AriUnaOp::Neg),
-        Token::Tilde => Prefix::Bit(BitUnaOp::Not),
-        _ => return Err(ParseError::Parse(PrefixMismatchError)),
+fn prefix_op(
+    mut s: Lexer,
+) -> Result<ParsingState<Lexer, Prefix, Complete, PrefixMismatchError>, LexError> {
+    let op = match s.next_token()? {
+        Ok(Token::MinusSign) => Prefix::Ari(AriUnaOp::Neg),
+        Ok(Token::Tilde) => Prefix::Bit(BitUnaOp::Not),
+        _ => return Ok(ParsingState::Failure(PrefixMismatchError)),
     };
 
-    Ok((s, op, Complete))
+    Ok(ParsingState::Success(s, op, Complete))
 }
 
-struct PrefixMismatchError;
+pub(crate) struct PrefixMismatchError;
 
-fn infix_op(mut s: Lexer) -> Result<(Lexer, Infix, Complete), ParseError<InfixMismatchError>> {
-    let token = s.next_token().map_parse(|_| InfixMismatchError)?;
+impl HaveFailureMode for PrefixMismatchError {
+    fn mode(&self) -> FailureMode {
+        FailureMode::Mismatch
+    }
+}
 
-    let op = match token {
-        Token::PlusSign => Infix::Ari(AriBinOp::Add),
-        Token::MinusSign => Infix::Ari(AriBinOp::Sub),
-        Token::Asterisk => Infix::Ari(AriBinOp::Mul),
-        Token::Slash => Infix::Ari(AriBinOp::Div),
-        Token::DoubleSlash => Infix::Ari(AriBinOp::FloorDiv),
-        Token::PercentSign => Infix::Ari(AriBinOp::Rem),
-        Token::Circumflex => Infix::Ari(AriBinOp::Exp),
-        Token::Ampersand => Infix::Bit(BitBinOp::And),
-        Token::Pipe => Infix::Bit(BitBinOp::Or),
-        Token::Tilde => Infix::Bit(BitBinOp::Xor),
-        Token::DoubleAngleL => Infix::Bit(BitBinOp::ShL),
-        Token::DoubleAngleR => Infix::Bit(BitBinOp::ShR),
-        Token::DoubleEqualsSign => Infix::Rel(RelBinOp::Eq),
-        Token::TildeEqualsSign => Infix::Rel(RelBinOp::Neq),
-        Token::AngleL => Infix::Rel(RelBinOp::Lt),
-        Token::AngleLEqualsSign => Infix::Rel(RelBinOp::Le),
-        Token::AngleR => Infix::Rel(RelBinOp::Gt),
-        Token::AngleREqualsSign => Infix::Rel(RelBinOp::Ge),
-        Token::DoubleDot => Infix::Str(StrBinOp::Concat),
-        Token::Or => Infix::Logical(Logical::Or),
-        Token::And => Infix::Logical(Logical::And),
-        _ => return Err(ParseError::Parse(InfixMismatchError)),
+fn infix_op(
+    mut s: Lexer,
+) -> Result<ParsingState<Lexer, Infix, Complete, InfixMismatchError>, LexError> {
+    let op = match s.next_token()? {
+        Ok(Token::PlusSign) => Infix::Ari(AriBinOp::Add),
+        Ok(Token::MinusSign) => Infix::Ari(AriBinOp::Sub),
+        Ok(Token::Asterisk) => Infix::Ari(AriBinOp::Mul),
+        Ok(Token::Slash) => Infix::Ari(AriBinOp::Div),
+        Ok(Token::DoubleSlash) => Infix::Ari(AriBinOp::FloorDiv),
+        Ok(Token::PercentSign) => Infix::Ari(AriBinOp::Rem),
+        Ok(Token::Circumflex) => Infix::Ari(AriBinOp::Exp),
+        Ok(Token::Ampersand) => Infix::Bit(BitBinOp::And),
+        Ok(Token::Pipe) => Infix::Bit(BitBinOp::Or),
+        Ok(Token::Tilde) => Infix::Bit(BitBinOp::Xor),
+        Ok(Token::DoubleAngleL) => Infix::Bit(BitBinOp::ShL),
+        Ok(Token::DoubleAngleR) => Infix::Bit(BitBinOp::ShR),
+        Ok(Token::DoubleEqualsSign) => Infix::Rel(RelBinOp::Eq),
+        Ok(Token::TildeEqualsSign) => Infix::Rel(RelBinOp::Neq),
+        Ok(Token::AngleL) => Infix::Rel(RelBinOp::Lt),
+        Ok(Token::AngleLEqualsSign) => Infix::Rel(RelBinOp::Le),
+        Ok(Token::AngleR) => Infix::Rel(RelBinOp::Gt),
+        Ok(Token::AngleREqualsSign) => Infix::Rel(RelBinOp::Ge),
+        Ok(Token::DoubleDot) => Infix::Str(StrBinOp::Concat),
+        Ok(Token::Or) => Infix::Logical(Logical::Or),
+        Ok(Token::And) => Infix::Logical(Logical::And),
+        _ => return Ok(ParsingState::Failure(InfixMismatchError)),
     };
 
-    Ok((s, op, Complete))
+    Ok(ParsingState::Success(s, op, Complete))
 }
 
 #[derive(Debug)]
 pub(crate) struct InfixMismatchError;
+
+impl HaveFailureMode for InfixMismatchError {
+    fn mode(&self) -> FailureMode {
+        FailureMode::Mismatch
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 enum Prefix {

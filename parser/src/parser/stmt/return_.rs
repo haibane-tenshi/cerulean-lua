@@ -1,28 +1,52 @@
 use crate::parser::prelude::*;
 
-pub(crate) fn return_<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ReturnFailure>> {
-    use crate::parser::expr::expr_list;
-    use ReturnFailure::*;
+pub(crate) fn return_<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailureOrComplete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::expr::expr_list;
 
-    let (s, _) = match_token(s, Token::Return).map_parse(Return)?;
+        let token_return = match_token(Token::Return)
+            .map_failure(|f| ParseFailure::from(ReturnFailure::Return(f)));
+        let token_semicolon = match_token(Token::Semicolon).map_failure(|_| Complete);
 
-    let slot = frag.stack().top()?;
+        let state = token_return
+            .parse(s)?
+            .try_map_output(|_| frag.stack().top())?
+            .and_discard(expr_list(frag.new_fragment()))?
+            .and_discard(
+                token_semicolon
+                    .optional()
+                    .map_success(ParseFailureOrComplete::Complete),
+            )?
+            .try_map_output(|slot| -> Result<_, CodegenError> {
+                frag.emit(OpCode::Return(slot))?;
+                frag.commit();
+                Ok(())
+            })?;
 
-    let (s, ()) = expr_list(s, frag.new_fragment())
-        .with_mode(FailureMode::Malformed)
-        .map_parse(Expr)?;
-    let (s, _, _) = match_token(s.clone(), Token::Semicolon).optional(s);
-
-    frag.emit(OpCode::Return(slot))?;
-    frag.commit();
-
-    Ok((s, ()))
+        Ok(state)
+    }
 }
 
 pub(crate) enum ReturnFailure {
     Return(TokenMismatch),
-    Expr(ParseFailure),
+}
+
+impl HaveFailureMode for ReturnFailure {
+    fn mode(&self) -> FailureMode {
+        FailureMode::Mismatch
+    }
+}
+
+impl From<ReturnFailure> for ParseCause {
+    fn from(_value: ReturnFailure) -> Self {
+        todo!()
+    }
 }

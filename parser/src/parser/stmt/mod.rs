@@ -11,89 +11,49 @@ pub(crate) mod while_do;
 
 use crate::parser::prelude::*;
 
-pub(crate) fn statement<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use assignment::assignment;
-    use do_end::do_end;
-    use generic_for::generic_for;
-    use if_then::if_then;
-    use local_assignment::local_assignment;
-    use local_function::local_function;
-    use numerical_for::numerical_for;
-    use repeat_until::repeat_until;
-    use while_do::while_do;
+pub(crate) fn statement<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailureOrComplete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use assignment::assignment;
+        use do_end::do_end;
+        use generic_for::generic_for;
+        use if_then::if_then;
+        use local_assignment::local_assignment;
+        use local_function::local_function;
+        use numerical_for::numerical_for;
+        use repeat_until::repeat_until;
+        use while_do::while_do;
 
-    let mut inner = || {
-        let mut err = match semicolon(s.clone()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
+        let state = semicolon(s.clone())?
+            .map_success(ParseFailureOrComplete::Complete)
+            .or(s.clone(), local_assignment(frag.new_fragment()))?
+            .or(s.clone(), assignment(frag.new_fragment()))?
+            .or(s.clone(), if_then(frag.new_fragment()))?
+            .or(s.clone(), numerical_for(frag.new_fragment()))?
+            .or(s.clone(), generic_for(frag.new_fragment()))?
+            .or(s.clone(), local_function(frag.new_fragment()))?
+            .or(s.clone(), while_do(frag.new_fragment()))?
+            .or(s.clone(), do_end(frag.new_fragment()))?
+            .or(s, repeat_until(frag.new_fragment()))?
+            .map_output(|_| frag.commit());
 
-        err |= match do_end(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match if_then(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match while_do(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match repeat_until(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match numerical_for(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match generic_for(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match local_assignment(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match local_function(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        err |= match assignment(s.clone(), frag.new_fragment()) {
-            Ok((s, ())) => return Ok((s, ())),
-            Err(err) => err,
-        };
-
-        Err(err)
-    };
-
-    let r = inner()?;
-    frag.commit();
-    Ok(r)
+        Ok(state)
+    }
 }
 
-fn semicolon(s: Lexer) -> Result<(Lexer, ()), Error<ParseFailure>> {
-    match match_token(s, Token::Semicolon) {
-        Ok((s, _)) => Ok((s, ())),
-        Err(_) => {
-            let err = ParseFailure {
-                mode: FailureMode::Mismatch,
-                cause: ParseCause::ExpectedStatement,
-            };
-
-            Err(Error::Parse(err))
-        }
-    }
+fn semicolon(s: Lexer) -> Result<ParsingState<Lexer, (), Complete, ParseFailure>, LexError> {
+    match_token(Token::Semicolon)
+        .map_failure(|_| ParseFailure {
+            mode: FailureMode::Mismatch,
+            cause: ParseCause::ExpectedStatement,
+        })
+        .map_output(|_| ())
+        .parse(s)
 }

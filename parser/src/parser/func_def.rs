@@ -3,43 +3,65 @@ use crate::parser::prelude::*;
 use repr::index::FunctionId;
 use thiserror::Error;
 
-pub(crate) fn func_body<'s>(
-    s: Lexer<'s>,
-    mut outer_frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, FunctionId), Error<ParseFailure>> {
-    use crate::codegen::function::Function;
-    use crate::parser::block::block;
-    use FuncDefFailure::*;
+pub(crate) fn func_body<'s, 'origin>(
+    mut outer_frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = FunctionId,
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::codegen::function::Function;
+        use crate::parser::block::block;
+        use FuncDefFailure::*;
 
-    let (s, _) = match_token(s, Token::ParL).map_parse(ParL)?;
+        let token_par_l = match_token(Token::ParL).map_failure(|f| ParseFailure::from(ParL(f)));
+        let token_par_r = match_token(Token::ParR).map_failure(|f| ParseFailure::from(ParR(f)));
+        let token_end = match_token(Token::End).map_failure(|f| ParseFailure::from(End(f)));
 
-    // Start function
-    let mut func = Function::new();
-    let mut frag = outer_frag.new_function(func.view());
+        // Start function
+        let mut func = Function::new();
+        let mut frag = outer_frag.new_function(func.view());
 
-    // Currently this slot contains pointer to function itself.
-    // In the future we will put environment here instead.
-    frag.stack_mut().push()?;
+        // Currently this slot contains pointer to function itself.
+        // In the future we will put environment here instead.
+        frag.stack_mut().push()?;
 
-    let (s, param_count, _) = parlist(s.clone(), frag.stack_mut()).optional(s);
-    let param_count = param_count.unwrap_or(0);
+        let state = token_par_l.parse_once(s)?.and_with(
+            parlist(frag.stack_mut().new_block()).optional(),
+            |_, param_count| param_count,
+        )?;
 
-    // An extra stack slot is taken by function pointer itself.
-    let height = param_count + 1;
+        let state = state
+            .map_success(ParseFailure::from)
+            .and_discard(token_par_r)?
+            .and_discard(block(frag.new_fragment()))?
+            .and_discard(token_end)?
+            .inspect(|_| {
+                // Cannot capture both `frag` and `func` in the same closure.
+                frag.commit_scope();
+            })
+            .try_map_output(move |param_count| -> Result<_, CodegenError> {
+                let param_count = param_count.unwrap_or(0);
 
-    let (s, _) = match_token(s, Token::ParR).map_parse(ParR)?;
-    let (s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _) = match_token(s, Token::End).map_parse(End)?;
+                // An extra stack slot is taken by function pointer itself.
+                let height = param_count + 1;
 
-    // Finish function
-    frag.commit_scope();
-    let func = func.resolve(height);
-    let func_id = outer_frag.func_table_mut().push(func)?;
+                // Finish function.
+                // frag.commit_scope();
+                let func = func.resolve(height);
+                let func_id = outer_frag.func_table_mut().push(func)?;
 
-    // Drop outer fragment to make sure we didn't mess up current function.
-    drop(outer_frag);
+                // Drop outer fragment to make sure we didn't mess up current function.
+                drop(outer_frag);
 
-    Ok((s, func_id))
+                Ok(func_id)
+            })?;
+
+        Ok(state)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -62,41 +84,86 @@ impl HaveFailureMode for FuncDefFailure {
     }
 }
 
-fn parlist<'s>(
-    s: Lexer<'s>,
-    stack: &mut StackView<'s, '_>,
-) -> Result<(Lexer<'s>, u32), Error<IdentMismatch>> {
-    let mut count = 0;
-
-    let (mut s, (ident, _)) = identifier(s)?;
-    let slot = stack.push()?;
-    stack.give_name(slot, ident)?;
-    count += 1;
-
-    let mut next_ident = |s: Lexer<'s>| -> Result<_, Error<ParListMismatch>> {
+fn parlist<'s, 'origin>(
+    mut stack: StackView<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = u32,
+    Success = ParListMismatch,
+    Failure = ParListMismatch,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
         use ParListMismatch::*;
 
-        let (s, _) = match_token(s, Token::Comma).map_parse(Comma)?;
-        let (s, (ident, _)) = identifier(s).map_parse(Ident)?;
+        let mut count = 0;
 
-        let slot = stack.push()?;
-        stack.give_name(slot, ident)?;
-        count += 1;
+        let state = identifier(s)?.map_failure(Ident).try_map_output(
+            |(ident, _)| -> Result<_, CodegenError> {
+                let slot = stack.push()?;
+                stack.give_name(slot, ident)?;
+                count += 1;
 
-        Ok(s)
-    };
+                Ok(())
+            },
+        )?;
 
-    loop {
-        s = match next_ident(s.clone()) {
-            Ok(s) => s,
-            Err(_err) => break,
+        let next = |s: Lexer<'s>| -> Result<_, FailFast> {
+            let r = match_token(Token::Comma)
+                .parse(s)?
+                .map_failure(Comma)
+                .and(identifier.map_failure(Ident))?
+                .try_map_output(|(_, (ident, _))| -> Result<_, CodegenError> {
+                    let slot = stack.push()?;
+                    stack.give_name(slot, ident)?;
+                    count += 1;
+
+                    Ok(())
+                })?;
+
+            Ok(r)
         };
-    }
 
-    Ok((s, count))
+        let r = state.and(next.repeat())?.map_output(|_| {
+            stack.commit(true);
+            count
+        });
+
+        Ok(r)
+    }
 }
 
-enum ParListMismatch {
+pub(crate) enum ParListMismatch {
     Comma(TokenMismatch),
     Ident(IdentMismatch),
+}
+
+impl HaveFailureMode for ParListMismatch {
+    fn mode(&self) -> FailureMode {
+        use ParListMismatch::*;
+
+        match self {
+            Comma(_) => FailureMode::Mismatch,
+            Ident(_) => FailureMode::Malformed,
+        }
+    }
+}
+
+impl From<Never> for ParListMismatch {
+    fn from(value: Never) -> Self {
+        match value {}
+    }
+}
+
+impl Combine<ParListMismatch> for ParListMismatch {
+    type Output = Self;
+
+    fn combine(self, other: ParListMismatch) -> Self::Output {
+        use ParListMismatch::*;
+
+        match (self, other) {
+            (Comma(_), rhs @ Ident(_)) => rhs,
+            (lhs, _) => lhs,
+        }
+    }
 }

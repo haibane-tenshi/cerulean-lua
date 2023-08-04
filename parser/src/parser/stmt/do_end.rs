@@ -1,19 +1,33 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(crate) fn do_end<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use crate::parser::block::block;
-    use DoEndFailure::*;
+pub(crate) fn do_end<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::block::block;
 
-    let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
-    let (s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _) = match_token(s, Token::End).map_parse(End)?;
+        let token_do =
+            match_token(Token::Do).map_failure(|f| ParseFailure::from(DoEndFailure::Do(f)));
+        let token_end =
+            match_token(Token::End).map_failure(|f| ParseFailure::from(DoEndFailure::End(f)));
 
-    frag.commit_scope();
-    Ok((s, ()))
+        let state = token_do
+            .parse_once(s)?
+            .and(block(frag.new_fragment()))?
+            .and(token_end)?
+            .map_output(move |_| {
+                frag.commit_scope();
+            });
+
+        Ok(state)
+    }
 }
 
 #[derive(Debug, Error)]

@@ -1,31 +1,59 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(crate) fn while_do<'s>(
-    s: Lexer<'s>,
-    mut outer_frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use crate::parser::block::block;
-    use crate::parser::expr::expr_adjusted_to_1;
-    use WhileDoFailure::*;
+pub(crate) fn while_do<'s, 'origin>(
+    mut outer_frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::block::block;
+        use crate::parser::expr::expr_adjusted_to_1;
 
-    let (s, _) = match_token(s, Token::While).map_parse(While)?;
+        let token_while =
+            match_token(Token::While).map_failure(|f| ParseFailure::from(WhileDoFailure::While(f)));
+        let token_do =
+            match_token(Token::Do).map_failure(|f| ParseFailure::from(WhileDoFailure::Do(f)));
+        let token_end =
+            match_token(Token::End).map_failure(|f| ParseFailure::from(WhileDoFailure::End(f)));
 
-    let mut frag = outer_frag.new_fragment();
+        let state = token_while
+            .parse(s)?
+            .map_output(|_| outer_frag.new_fragment())
+            .then(|mut frag| {
+                move |s| -> Result<_, FailFast> {
+                    Ok(expr_adjusted_to_1(frag.new_fragment())
+                        .parse_once(s)?
+                        .map_output(|_| frag))
+                }
+            })?
+            .and_discard(token_do)?
+            .try_map_output(|mut frag| -> Result<_, CodegenError> {
+                frag.emit_jump_to(frag.id(), Some(false))?;
+                Ok(frag)
+            })?
+            .then(|mut frag| {
+                move |s| -> Result<_, FailFast> {
+                    Ok(block(frag.new_fragment())
+                        .parse_once(s)?
+                        .map_output(|_| frag))
+                }
+            })?
+            .and_discard(token_end)?
+            .try_map_output(|mut frag| -> Result<_, CodegenError> {
+                frag.emit_loop_to()?;
+                frag.commit();
+                Ok(())
+            })?;
 
-    let (s, ()) = expr_adjusted_to_1(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _) = match_token(s, Token::Do).map_parse(Do)?;
+        let state = state.map_output(|_| outer_frag.commit());
 
-    frag.emit_jump_to(frag.id(), Some(false))?;
-
-    let (s, ()) = block(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
-    let (s, _) = match_token(s, Token::End).map_parse(End)?;
-
-    frag.emit_loop_to()?;
-    frag.commit();
-    outer_frag.commit();
-
-    Ok((s, ()))
+        Ok(state)
+    }
 }
 
 #[derive(Debug, Error)]

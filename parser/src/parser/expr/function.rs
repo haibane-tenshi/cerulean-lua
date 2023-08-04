@@ -2,20 +2,37 @@ use thiserror::Error;
 
 use crate::parser::prelude::*;
 
-pub(crate) fn function<'s>(
-    s: Lexer<'s>,
-    mut frag: Fragment<'s, '_>,
-) -> Result<(Lexer<'s>, ()), Error<ParseFailure>> {
-    use crate::parser::func_def::func_body;
-    use FunctionFailure::*;
+pub(crate) fn function<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::func_def::func_body;
+        use FunctionFailure::*;
 
-    let (s, _) = match_token(s, Token::Function).map_parse(Function)?;
-    let (s, func_id) = func_body(s, frag.new_fragment()).with_mode(FailureMode::Malformed)?;
+        let function = |s: Lexer<'s>| -> Result<_, FailFast> {
+            Ok(match_token(Token::Function)
+                .parse(s)?
+                .map_failure(Function)
+                .map_failure(Into::<ParseFailure>::into))
+        };
 
-    frag.emit_load_literal(Literal::Function(func_id))?;
+        let r = function(s)?
+            .and(func_body(frag.new_fragment()))?
+            .try_map_output(|(_, func_id)| -> Result<_, CodegenError> {
+                frag.emit_load_literal(Literal::Function(func_id))?;
 
-    frag.commit();
-    Ok((s, ()))
+                frag.commit();
+                Ok(())
+            })?;
+
+        Ok(r)
+    }
 }
 
 #[derive(Debug, Error)]
