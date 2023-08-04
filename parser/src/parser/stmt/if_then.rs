@@ -26,6 +26,7 @@ pub(crate) fn if_then<'s, 'origin>(
 
         let state = token_if
             .parse_once(s)?
+            .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_fragment()))?
             .and(token_then)?
             .try_map_output(|_| -> Result<_, CodegenError> {
@@ -33,23 +34,13 @@ pub(crate) fn if_then<'s, 'origin>(
                 Ok(())
             })?
             .and(block(frag.new_fragment()))?
-            .and(
-                (|s| {
-                    else_if_clause(outer, frag.new_fragment())
-                        .map_success(ElseIfFailure::Expr)
-                        .parse_once(s)
-                })
-                .repeat(),
-            )?
-            .and(
-                else_clause(outer, frag.new_fragment())
-                    .map_success(ElseFailure::Expr)
-                    .optional(),
-            )?
+            .and((|s| else_if_clause(outer, frag.new_fragment()).parse_once(s)).repeat())?
+            .and(else_clause(outer, frag.new_fragment()).optional())?
             .and(token_end)?
             .map_output(|_| {
                 frag.commit();
-            });
+            })
+            .collapse();
 
         Ok(state)
     }
@@ -61,6 +52,10 @@ pub(crate) enum IfThenFailure {
     If(#[source] TokenMismatch),
     #[error("missing `then` token")]
     Then(#[source] TokenMismatch),
+    #[error("missing `elseif` token")]
+    ElseIf(#[source] TokenMismatch),
+    #[error("missing `else` token")]
+    Else(#[source] TokenMismatch),
     #[error("missing `end` token")]
     End(#[source] TokenMismatch),
 }
@@ -70,6 +65,8 @@ impl HaveFailureMode for IfThenFailure {
         match self {
             IfThenFailure::If(_) => FailureMode::Mismatch,
             IfThenFailure::Then(_) => FailureMode::Malformed,
+            IfThenFailure::ElseIf(_) => FailureMode::Malformed,
+            IfThenFailure::Else(_) => FailureMode::Malformed,
             IfThenFailure::End(_) => FailureMode::Malformed,
         }
     }
@@ -82,96 +79,35 @@ fn else_if_clause<'s, 'origin>(
     Lexer<'s>,
     Output = (),
     Success = CompleteOr<ParseFailure>,
-    Failure = ElseIfFailure,
+    Failure = ParseFailure,
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
         use crate::parser::block::block;
         use crate::parser::expr::expr_adjusted_to_1;
 
-        let token_elseif = match_token(Token::ElseIf).map_failure(|_| ElseIfFailure::ElseIf);
+        let token_elseif = match_token(Token::ElseIf)
+            .map_failure(|f| ParseFailure::from(IfThenFailure::ElseIf(f)));
         let token_then = match_token(Token::Then)
-            .map_failure(|f| ElseIfFailure::Expr(CompleteOr::Other(IfThenFailure::Then(f).into())));
+            .map_failure(|f| CompleteOr::Other(IfThenFailure::Then(f).into()));
 
         // Emit jump from end of previous block to end of if-then statement since we didn't reach the end yet.
         frag.emit_jump_to(outer, None)?;
 
         let state = token_elseif
             .parse_once(s)?
+            .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_fragment()))?
             .and(token_then)?
             .try_map_output(|_| frag.emit_jump_to(frag.id(), Some(false)))?
-            .and(block(frag.new_fragment()))?;
+            .and(block(frag.new_fragment()))?
+            .collapse();
 
         let state = state.map_output(|_| {
             frag.commit();
         });
 
         Ok(state)
-    }
-}
-
-enum ElseIfFailure {
-    ElseIf,
-    Expr(CompleteOr<ParseFailure>),
-}
-
-impl From<Never> for ElseIfFailure {
-    fn from(value: Never) -> Self {
-        match value {}
-    }
-}
-
-impl From<ParseFailure> for ElseIfFailure {
-    fn from(value: ParseFailure) -> Self {
-        ElseIfFailure::Expr(CompleteOr::Other(value))
-    }
-}
-
-impl Combine<Never> for ElseIfFailure {
-    type Output = Never;
-
-    fn combine(self, other: Never) -> Self::Output {
-        match other {}
-    }
-}
-
-impl Combine<ElseIfFailure> for ElseIfFailure {
-    type Output = Self;
-
-    fn combine(self, other: ElseIfFailure) -> Self::Output {
-        match (self, other) {
-            (r, ElseIfFailure::ElseIf) => r,
-            (ElseIfFailure::Expr(f0), ElseIfFailure::Expr(f1)) => {
-                ElseIfFailure::Expr(f0.combine(f1))
-            }
-            (_, r) => r,
-        }
-    }
-}
-
-impl Combine<ElseIfFailure> for ParseFailure {
-    type Output = ParseFailure;
-
-    fn combine(self, other: ElseIfFailure) -> Self::Output {
-        match other {
-            ElseIfFailure::ElseIf => self,
-            ElseIfFailure::Expr(failure) => self.combine(failure),
-        }
-    }
-}
-
-impl Combine<ElseFailure> for ElseIfFailure {
-    type Output = ElseFailure;
-
-    fn combine(self, other: ElseFailure) -> Self::Output {
-        match other {
-            ElseFailure::Else => ElseFailure::Else,
-            ElseFailure::Expr(failure0) => match self {
-                ElseIfFailure::ElseIf => ElseFailure::Expr(failure0),
-                ElseIfFailure::Expr(failure1) => ElseFailure::Expr(failure0.combine(failure1)),
-            },
-        }
     }
 }
 
@@ -182,44 +118,25 @@ fn else_clause<'s, 'origin>(
     Lexer<'s>,
     Output = (),
     Success = CompleteOr<ParseFailure>,
-    Failure = ElseFailure,
+    Failure = ParseFailure,
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
         use crate::parser::block::block;
 
-        let token_else = match_token(Token::Else).map_failure(|_| ElseFailure::Else);
+        let token_else =
+            match_token(Token::Else).map_failure(|f| ParseFailure::from(IfThenFailure::Else(f)));
 
         // Emit jump from end of previous block to end of if-then statement since we didn't reach the end yet.
         frag.emit_jump_to(outer, None)?;
 
         let state = token_else
             .parse_once(s)?
+            .with_mode(FailureMode::Malformed)
             .and(block(frag))?
-            .map_output(|_| ());
+            .map_output(|_| ())
+            .collapse();
 
         Ok(state)
-    }
-}
-
-enum ElseFailure {
-    Else,
-    Expr(CompleteOr<ParseFailure>),
-}
-
-impl From<Never> for ElseFailure {
-    fn from(value: Never) -> Self {
-        match value {}
-    }
-}
-
-impl Combine<ParseFailure> for ElseFailure {
-    type Output = ParseFailure;
-
-    fn combine(self, other: ParseFailure) -> Self::Output {
-        match self {
-            ElseFailure::Else => other,
-            ElseFailure::Expr(f) => f.combine(other),
-        }
     }
 }

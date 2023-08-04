@@ -25,11 +25,13 @@ pub(crate) fn generic_for<'s, 'origin>(
 
         let state = token_for
             .parse_once(s)?
+            .with_mode(FailureMode::Ambiguous)
             .and_with(
                 name_list.map_failure(GenericForFailure::Ident),
                 |_, names| names,
             )?
             .and_discard(token_in)?
+            .with_mode(FailureMode::Malformed)
             .and(|s| {
                 let top = outer_frag.stack().top()?;
                 expr_list_adjusted_to(4, outer_frag.new_fragment())
@@ -84,7 +86,8 @@ pub(crate) fn generic_for<'s, 'origin>(
                 frag.emit_loop_to()?;
                 frag.commit_scope();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         let state = state.map_output(move |_| {
             outer_frag.commit();

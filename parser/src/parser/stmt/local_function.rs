@@ -22,7 +22,9 @@ pub(crate) fn local_function<'s, 'origin>(
 
         let state = token_local
             .parse_once(s)?
+            .with_mode(FailureMode::Ambiguous)
             .and(token_function)?
+            .with_mode(FailureMode::Malformed)
             .and_with(identifier, |_, (ident, _)| ident)?
             .try_map_output(|ident| -> Result<_, CodegenError> {
                 // Lua disambiguates this case by introducing local variable first and assigning to it later.
@@ -42,7 +44,8 @@ pub(crate) fn local_function<'s, 'origin>(
 
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         Ok(state)
     }

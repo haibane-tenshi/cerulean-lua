@@ -51,8 +51,10 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
         let state = token_for
             .parse_once(s)?
+            .with_mode(FailureMode::Ambiguous)
             .and_replace(identifier)?
             .and_discard(token_equals_sign)?
+            .with_mode(FailureMode::Malformed)
             .then(|ident| {
                 |s| -> Result<_, FailFast> {
                     let loop_var = outer_frag.stack().top()?;
@@ -172,7 +174,8 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 // Clean up.
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         // Clean up.
         let state = state.map_output(|_| outer_frag.commit());

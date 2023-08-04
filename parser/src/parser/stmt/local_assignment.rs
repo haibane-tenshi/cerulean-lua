@@ -22,11 +22,13 @@ pub(crate) fn local_assignment<'s, 'origin>(
 
         let state = token_local
             .parse_once(s)?
+            .with_mode(FailureMode::Ambiguous)
             .and_with(
                 ident_list.map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Ident(f))),
                 |_, idents| idents,
             )?
             .and_discard(token_equals_sign)?
+            .with_mode(FailureMode::Malformed)
             .and_discard(expr_list(frag.new_fragment()))?
             .try_map_output(|idents| -> Result<_, CodegenError> {
                 let count: u32 = idents.len().try_into().unwrap();
@@ -38,7 +40,8 @@ pub(crate) fn local_assignment<'s, 'origin>(
 
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         Ok(state)
     }

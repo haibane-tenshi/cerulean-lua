@@ -23,6 +23,7 @@ pub(crate) fn while_do<'s, 'origin>(
 
         let state = token_while
             .parse(s)?
+            .with_mode(FailureMode::Malformed)
             .map_output(|_| outer_frag.new_fragment())
             .then(|mut frag| {
                 move |s| -> Result<_, FailFast> {
@@ -48,7 +49,8 @@ pub(crate) fn while_do<'s, 'origin>(
                 frag.emit_loop_to()?;
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         let state = state.map_output(|_| outer_frag.commit());
 

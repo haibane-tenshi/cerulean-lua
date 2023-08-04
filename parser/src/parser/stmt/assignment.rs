@@ -21,7 +21,9 @@ pub(crate) fn assignment<'s, 'origin>(
 
         let state = places(frag.new_fragment())
             .parse_once(s)?
+            .with_mode(FailureMode::Ambiguous)
             .and_discard(token_equals_sign)?
+            .with_mode(FailureMode::Malformed)
             .then(|places| {
                 |s| {
                     let count = places.len().try_into().unwrap();
@@ -54,7 +56,8 @@ pub(crate) fn assignment<'s, 'origin>(
 
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         Ok(state)
     }

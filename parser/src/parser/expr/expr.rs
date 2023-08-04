@@ -87,7 +87,8 @@ fn expr_impl<'s, 'origin>(
         let state = prefix
             .parse_once(s.clone())?
             .map_success(CompleteOr::Other)
-            .or(s, atom(frag.new_fragment()))?;
+            .or(s, atom(frag.new_fragment()))?
+            .with_mode(FailureMode::Ambiguous);
 
         // At this point there can be variadic number of values on stack.
         // This is OK: it can happen when there are no operators in current expression.
@@ -100,6 +101,7 @@ fn expr_impl<'s, 'origin>(
             let mut frag = frag.new_fragment();
             let r = infix_op(s)?
                 .map_failure(|failure| ExprSuccess::Parsing(ExprFailure::Infix(failure).into()))
+                .with_mode(FailureMode::Malformed)
                 .transform(|op| {
                     let (lhs_bp, _rhs_bp) = op.binding_power();
 
@@ -160,14 +162,18 @@ fn expr_impl<'s, 'origin>(
 
                     frag.commit();
                     Ok(())
-                })?;
+                })?
+                .collapse();
 
             Ok(r)
         };
 
-        let r = state.and(next_part.repeat())?.map_output(|_| {
-            frag.commit();
-        });
+        let r = state
+            .and(next_part.repeat())?
+            .map_output(|_| {
+                frag.commit();
+            })
+            .collapse();
 
         Ok(r)
     }
@@ -176,6 +182,15 @@ fn expr_impl<'s, 'origin>(
 enum ExprSuccess {
     LessTightlyBound,
     Parsing(ParseFailure),
+}
+
+impl WithMode for ExprSuccess {
+    fn with_mode(self, mode: FailureMode) -> Self {
+        match self {
+            ExprSuccess::LessTightlyBound => ExprSuccess::LessTightlyBound,
+            ExprSuccess::Parsing(err) => ExprSuccess::Parsing(err.with_mode(mode)),
+        }
+    }
 }
 
 impl From<CompleteOr<ParseFailure>> for CompleteOr<ExprSuccess> {

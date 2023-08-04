@@ -13,23 +13,21 @@ pub(crate) fn function<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         use crate::parser::func_def::func_body;
-        use FunctionFailure::*;
 
-        let function = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(match_token(Token::Function)
-                .parse(s)?
-                .map_failure(Function)
-                .map_failure(Into::<ParseFailure>::into))
-        };
+        let token_function = match_token(Token::Function)
+            .map_failure(|f| ParseFailure::from(FunctionFailure::Function(f)));
 
-        let r = function(s)?
+        let r = token_function
+            .parse(s)?
+            .with_mode(FailureMode::Malformed)
             .and(func_body(frag.new_fragment()))?
             .try_map_output(|(_, func_id)| -> Result<_, CodegenError> {
                 frag.emit_load_literal(Literal::Function(func_id))?;
 
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         Ok(r)
     }

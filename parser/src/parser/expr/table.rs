@@ -20,6 +20,7 @@ pub(crate) fn table<'s, 'frag>(
 
         let state = curly_l
             .parse(s)?
+            .with_mode(FailureMode::Malformed)
             .try_map_output(|_| -> Result<_, CodegenError> {
                 let table_slot = frag.stack().top()?;
                 frag.emit(OpCode::TabCreate)?;
@@ -30,7 +31,8 @@ pub(crate) fn table<'s, 'frag>(
             .and(curly_r)?
             .map_output(move |_| {
                 frag.commit();
-            });
+            })
+            .collapse();
 
         Ok(state)
     }
@@ -182,6 +184,7 @@ fn bracket<'s, 'origin>(
 
         let state = bracket_l
             .parse(s)?
+            .with_mode(FailureMode::Malformed)
             .try_map_output(|_| -> Result<_, CodegenError> {
                 frag.emit(OpCode::LoadStack(table_slot))?;
                 Ok(())
@@ -195,7 +198,8 @@ fn bracket<'s, 'origin>(
 
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         Ok(state)
     }
@@ -240,6 +244,7 @@ fn name<'s, 'origin>(
 
         let r = ident
             .parse(s)?
+            .with_mode(FailureMode::Ambiguous)
             .try_map_output(|(ident, _)| -> Result<_, CodegenError> {
                 frag.emit(OpCode::LoadStack(table_slot))?;
                 frag.emit_load_literal(Literal::String(ident.to_string()))?;
@@ -247,13 +252,15 @@ fn name<'s, 'origin>(
                 Ok(())
             })?
             .and(equals_sign)?
+            .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_fragment()))?
             .try_map_output(move |_| -> Result<_, CodegenError> {
                 frag.emit(OpCode::TabSet)?;
 
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         Ok(r)
     }

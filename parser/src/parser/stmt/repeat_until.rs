@@ -21,6 +21,7 @@ pub(crate) fn repeat_until<'s, 'origin>(
 
         let state = token_repeat
             .parse(s)?
+            .with_mode(FailureMode::Malformed)
             .map_output(|_| outer_frag.new_fragment())
             .then(|mut frag| {
                 |s| -> Result<_, FailFast> {
@@ -44,7 +45,8 @@ pub(crate) fn repeat_until<'s, 'origin>(
                 frag.emit_loop_to()?;
                 frag.commit_scope();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         let state = state.map_output(|_| outer_frag.commit());
 

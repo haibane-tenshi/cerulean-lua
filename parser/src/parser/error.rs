@@ -229,7 +229,7 @@ pub trait WithMode {
 }
 
 impl WithMode for Never {
-    fn with_mode(self, mode: FailureMode) -> Self {
+    fn with_mode(self, _: FailureMode) -> Self {
         match self {}
     }
 }
@@ -268,6 +268,7 @@ impl HaveFailureMode for Complete {
 
 pub(crate) type ParseFailureOrComplete = CompleteOr<ParseFailure>;
 
+#[derive(Debug)]
 pub(crate) enum CompleteOr<T> {
     Complete(Complete),
     Other(T),

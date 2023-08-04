@@ -20,11 +20,13 @@ pub(crate) fn do_end<'s, 'origin>(
 
         let state = token_do
             .parse_once(s)?
+            .with_mode(FailureMode::Malformed)
             .and(block(frag.new_fragment()))?
             .and(token_end)?
             .map_output(move |_| {
                 frag.commit_scope();
-            });
+            })
+            .collapse();
 
         Ok(state)
     }

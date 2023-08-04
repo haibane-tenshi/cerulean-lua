@@ -20,6 +20,7 @@ pub(crate) fn return_<'s, 'origin>(
 
         let state = token_return
             .parse(s)?
+            .with_mode(FailureMode::Malformed)
             .try_map_output(|_| frag.stack().top())?
             .and_discard(expr_list(frag.new_fragment()))?
             .and_discard(
@@ -31,7 +32,8 @@ pub(crate) fn return_<'s, 'origin>(
                 frag.emit(OpCode::Return(slot))?;
                 frag.commit();
                 Ok(())
-            })?;
+            })?
+            .collapse();
 
         Ok(state)
     }
