@@ -21,7 +21,7 @@ pub(crate) fn match_token<'s>(
                 ParsingState::Success(s, span, Complete)
             }
             Ok(_) | Err(Eof) => {
-                let err = TokenMismatch { expected: token };
+                let err = TokenMismatch { span: s.span() };
                 ParsingState::Failure(err)
             }
         };
@@ -31,9 +31,9 @@ pub(crate) fn match_token<'s>(
 }
 
 #[derive(Debug, Error)]
-#[error("encountered unexpected token, expected {expected:?}")]
+#[error("encountered unexpected token at {span:?}")]
 pub struct TokenMismatch {
-    expected: Token<'static>,
+    span: Span,
 }
 
 pub(crate) fn identifier(
