@@ -27,8 +27,8 @@ pub(crate) fn local_assignment<'s, 'origin>(
                 ident_list.map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Ident(f))),
                 |_, idents| idents,
             )?
-            .and_discard(token_equals_sign)?
             .with_mode(FailureMode::Malformed)
+            .and_discard(token_equals_sign)?
             .and_discard(expr_list(frag.new_fragment()))?
             .try_map_output(|idents| -> Result<_, CodegenError> {
                 let count: u32 = idents.len().try_into().unwrap();
@@ -102,15 +102,23 @@ enum IdentListSuccess {
     Ident(IdentMismatch),
 }
 
-impl Combine<ParseFailure> for IdentListSuccess {
+impl Arrow<ParseFailure> for IdentListSuccess {
     type Output = ParseFailure;
 
-    fn combine(self, other: ParseFailure) -> Self::Output {
+    fn arrow(self, other: ParseFailure) -> Self::Output {
         match self {
             IdentListSuccess::Comma => other,
             IdentListSuccess::Ident(f) => {
-                ParseFailure::from(LocalAssignmentFailure::Ident(f)).combine(other)
+                ParseFailure::from(LocalAssignmentFailure::Ident(f)).arrow(other)
             }
         }
+    }
+}
+
+impl Arrow<IdentListSuccess> for Complete {
+    type Output = IdentListSuccess;
+
+    fn arrow(self, other: IdentListSuccess) -> Self::Output {
+        other
     }
 }

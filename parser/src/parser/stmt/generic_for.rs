@@ -27,7 +27,7 @@ pub(crate) fn generic_for<'s, 'origin>(
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
             .and_with(
-                name_list.map_failure(GenericForFailure::Ident),
+                name_list.map_failure(|f| ParseFailure::from(GenericForFailure::Ident(f))),
                 |_, names| names,
             )?
             .and_discard(token_in)?
@@ -155,14 +155,22 @@ enum NameListSuccess {
     Ident(IdentMismatch),
 }
 
-impl Combine<ParseFailure> for NameListSuccess {
+impl Arrow<NameListSuccess> for Complete {
+    type Output = NameListSuccess;
+
+    fn arrow(self, other: NameListSuccess) -> Self::Output {
+        other
+    }
+}
+
+impl Arrow<ParseFailure> for NameListSuccess {
     type Output = ParseFailure;
 
-    fn combine(self, other: ParseFailure) -> Self::Output {
+    fn arrow(self, other: ParseFailure) -> Self::Output {
         match self {
             NameListSuccess::Comma => other,
-            NameListSuccess::Ident(err) => {
-                ParseFailure::from(GenericForFailure::Ident(err)).combine(other)
+            NameListSuccess::Ident(f) => {
+                ParseFailure::from(GenericForFailure::Ident(f)).arrow(other)
             }
         }
     }

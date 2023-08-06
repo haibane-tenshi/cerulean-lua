@@ -1,5 +1,6 @@
-use super::error::Combine;
-use super::error::{FailureMode, WithMode};
+use super::error::{Arrow, FailureMode, WithMode};
+
+type ArrowT<T, U> = <T as Arrow<U>>::Output;
 
 pub trait ParseOnce<Source>: Sized {
     type Output;
@@ -336,12 +337,12 @@ where
     Source: Clone,
     P: ParseMut<Source>,
     P::Output: Default,
-    P::Success: Combine<P::Failure>,
-    P::Failure: Into<<P::Success as Combine<P::Failure>>::Output>,
+    P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
+    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
     F: FnMut(P::Output, P::Output) -> P::Output,
 {
     type Output = P::Output;
-    type Success = <P::Success as Combine<P::Failure>>::Output;
+    type Success = ArrowT<P::Success, P::Failure>;
     type Failure = std::convert::Infallible;
     type FailFast = P::FailFast;
 
@@ -358,9 +359,9 @@ impl<P, F, Source> ParseMut<Source> for RepeatWith<P, F>
 where
     Source: Clone,
     P: ParseMut<Source>,
+    P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
+    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
     P::Output: Default,
-    P::Success: Combine<P::Failure>,
-    P::Failure: Into<<P::Success as Combine<P::Failure>>::Output>,
     F: FnMut(P::Output, P::Output) -> P::Output,
 {
     fn parse_mut(
@@ -368,7 +369,7 @@ where
         s: Source,
     ) -> Result<ParsingState<Source, Self::Output, Self::Success, Self::Failure>, Self::FailFast>
     {
-        let (mut s, mut output, mut reason) = match self.parser.parse_mut(s.clone())? {
+        let (mut s, mut output, mut success) = match self.parser.parse_mut(s.clone())? {
             ParsingState::Success(s, output, reason) => (s, output, reason),
             ParsingState::Failure(failure) => {
                 return Ok(ParsingState::Success(s, Default::default(), failure.into()))
@@ -379,10 +380,10 @@ where
             match self.parser.parse_mut(s.clone())? {
                 ParsingState::Success(ns, noutput, nreason) => {
                     s = ns;
-                    reason = nreason;
+                    success = success.arrow(nreason);
                     output = (self.fold)(output, noutput);
                 }
-                ParsingState::Failure(err) => break reason.combine(err),
+                ParsingState::Failure(failure) => break success.arrow(failure),
             }
         };
 
@@ -398,11 +399,11 @@ impl<P, Source> ParseOnce<Source> for Repeat<P>
 where
     Source: Clone,
     P: ParseMut<Source>,
-    P::Success: Combine<P::Failure>,
-    P::Failure: Into<<P::Success as Combine<P::Failure>>::Output>,
+    P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
+    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
 {
     type Output = ();
-    type Success = <P::Success as Combine<P::Failure>>::Output;
+    type Success = ArrowT<P::Success, P::Failure>;
     type Failure = std::convert::Infallible;
     type FailFast = P::FailFast;
 
@@ -419,8 +420,8 @@ impl<P, Source> ParseMut<Source> for Repeat<P>
 where
     Source: Clone,
     P: ParseMut<Source>,
-    P::Success: Combine<P::Failure>,
-    P::Failure: Into<<P::Success as Combine<P::Failure>>::Output>,
+    P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
+    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
 {
     fn parse_mut(
         &mut self,
@@ -548,11 +549,14 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
         self,
         p: P,
         f: impl FnOnce(Output, P::Output) -> Out,
-    ) -> Result<ParsingState<Source, Out, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingState<Source, Out, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
     {
         self.then(|output| p.map_output(|output2| f(output, output2)))
     }
@@ -560,11 +564,14 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
     pub fn and<P>(
         self,
         p: P,
-    ) -> Result<ParsingState<Source, (Output, P::Output), P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingState<Source, (Output, P::Output), <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
     {
         self.and_with(p, |out, out2| (out, out2))
     }
@@ -572,11 +579,14 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
     pub fn and_discard<P>(
         self,
         p: P,
-    ) -> Result<ParsingState<Source, Output, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingState<Source, Output, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
     {
         self.and_with(p, |out, _| out)
     }
@@ -584,11 +594,14 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
     pub fn and_replace<P>(
         self,
         p: P,
-    ) -> Result<ParsingState<Source, P::Output, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingState<Source, P::Output, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
     {
         self.and_with(p, |_, out| out)
     }
@@ -596,19 +609,22 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
     pub fn then<P>(
         self,
         f: impl FnOnce(Output) -> P,
-    ) -> Result<ParsingState<Source, P::Output, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingState<Source, P::Output, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
     {
         let r = match self {
-            ParsingState::Success(s, output, reason) => match f(output).parse_once(s)? {
-                ParsingState::Success(s, output2, reason) => {
-                    ParsingState::Success(s, output2, reason)
+            ParsingState::Success(s, output, success) => match f(output).parse_once(s)? {
+                ParsingState::Success(s, output, success2) => {
+                    ParsingState::Success(s, output, success.arrow(success2))
                 }
                 ParsingState::Failure(failure) => {
-                    ParsingState::Failure(reason.combine(failure).into())
+                    ParsingState::Failure(success.arrow(failure).into())
                 }
             },
             ParsingState::Failure(failure) => ParsingState::Failure(failure),
@@ -622,22 +638,22 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
         s: Source,
         p: P,
     ) -> Result<
-        ParsingState<Source, Output, Success, <Failure as Combine<P::Failure>>::Output>,
+        ParsingState<Source, Output, Success, <Failure as Arrow<P::Failure>>::Output>,
         P::FailFast,
     >
     where
         P: ParseOnce<Source>,
         P::Output: Into<Output>,
-        P::Success: Into<Success>,
-        Failure: Combine<P::Failure>,
+        Failure: Arrow<P::Success> + Arrow<P::Failure>,
+        <Failure as Arrow<P::Success>>::Output: Into<Success>,
     {
         let r = match self {
             ParsingState::Success(s, output, success) => ParsingState::Success(s, output, success),
             ParsingState::Failure(failure) => match p.parse_once(s)? {
                 ParsingState::Success(s, output, success) => {
-                    ParsingState::Success(s, output.into(), success.into())
+                    ParsingState::Success(s, output.into(), failure.arrow(success).into())
                 }
-                ParsingState::Failure(failure2) => ParsingState::Failure(failure.combine(failure2)),
+                ParsingState::Failure(failure2) => ParsingState::Failure(failure.arrow(failure2)),
             },
         };
 
@@ -722,11 +738,14 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
         self,
         p: P,
         f: impl FnOnce(Output, P::Output) -> Out,
-    ) -> Result<ParsingStateWithMode<Source, Out, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingStateWithMode<Source, Out, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
         Failure: WithMode,
     {
         self.then(|out| p.map_output(|out2| f(out, out2)))
@@ -735,11 +754,19 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
     pub fn and<P>(
         self,
         p: P,
-    ) -> Result<ParsingStateWithMode<Source, (Output, P::Output), P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingStateWithMode<
+            Source,
+            (Output, P::Output),
+            <Success as Arrow<P::Success>>::Output,
+            Failure,
+        >,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
         Failure: WithMode,
     {
         self.and_with(p, |out, out2| (out, out2))
@@ -748,11 +775,14 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
     pub fn and_discard<P>(
         self,
         p: P,
-    ) -> Result<ParsingStateWithMode<Source, Output, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingStateWithMode<Source, Output, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
         Failure: WithMode,
     {
         self.and_with(p, |out, _| out)
@@ -761,11 +791,14 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
     pub fn and_replace<P>(
         self,
         p: P,
-    ) -> Result<ParsingStateWithMode<Source, P::Output, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingStateWithMode<Source, P::Output, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
         Failure: WithMode,
     {
         self.and_with(p, |_, out| out)
@@ -774,11 +807,14 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
     pub fn then<P>(
         self,
         f: impl FnOnce(Output) -> P,
-    ) -> Result<ParsingStateWithMode<Source, P::Output, P::Success, Failure>, P::FailFast>
+    ) -> Result<
+        ParsingStateWithMode<Source, P::Output, <Success as Arrow<P::Success>>::Output, Failure>,
+        P::FailFast,
+    >
     where
         P: ParseOnce<Source>,
-        Success: Combine<P::Failure>,
-        <Success as Combine<P::Failure>>::Output: Into<Failure>,
+        Success: Arrow<P::Success> + Arrow<P::Failure>,
+        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
         Failure: WithMode,
     {
         let ParsingStateWithMode { mode, state } = self;
@@ -799,14 +835,14 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
         s: Source,
         p: P,
     ) -> Result<
-        ParsingStateWithMode<Source, Output, Success, <Failure as Combine<P::Failure>>::Output>,
+        ParsingStateWithMode<Source, Output, Success, <Failure as Arrow<P::Failure>>::Output>,
         P::FailFast,
     >
     where
         P: ParseOnce<Source>,
         P::Output: Into<Output>,
-        P::Success: Into<Success>,
-        Failure: Combine<P::Failure>,
+        Failure: Arrow<P::Success> + Arrow<P::Failure>,
+        <Failure as Arrow<P::Success>>::Output: Into<Success>,
     {
         let r = ParsingStateWithMode {
             mode: self.mode,

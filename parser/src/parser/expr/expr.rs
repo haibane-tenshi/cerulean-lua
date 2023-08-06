@@ -202,46 +202,34 @@ impl From<CompleteOr<ParseFailure>> for CompleteOr<ExprSuccess> {
     }
 }
 
-impl Combine<ExprSuccess> for ExprSuccess {
+impl Arrow<ExprSuccess> for ExprSuccess {
     type Output = Self;
 
-    fn combine(self, other: ExprSuccess) -> Self::Output {
-        use ExprSuccess::*;
-
+    fn arrow(self, other: ExprSuccess) -> Self::Output {
         match (self, other) {
-            (Parsing(lhs), Parsing(rhs)) => Parsing(lhs.combine(rhs)),
-            (Parsing(failure), _) | (_, Parsing(failure)) => Parsing(failure),
-            (LessTightlyBound, LessTightlyBound) => LessTightlyBound,
+            (ExprSuccess::Parsing(lhs), ExprSuccess::Parsing(rhs)) => {
+                ExprSuccess::Parsing(lhs.arrow(rhs))
+            }
+            (_, r) => r,
         }
     }
 }
 
-impl Combine<ParseFailure> for ExprSuccess {
-    type Output = Self;
+impl Arrow<ExprSuccess> for Complete {
+    type Output = ExprSuccess;
 
-    fn combine(self, other: ParseFailure) -> Self::Output {
-        match self {
-            ExprSuccess::LessTightlyBound => ExprSuccess::LessTightlyBound,
-            ExprSuccess::Parsing(failure) => ExprSuccess::Parsing(failure.combine(other)),
-        }
-    }
-}
-
-impl Combine<Never> for ExprSuccess {
-    type Output = Never;
-
-    fn combine(self, other: Never) -> Self::Output {
+    fn arrow(self, other: ExprSuccess) -> Self::Output {
         other
     }
 }
 
-impl Combine<ExprSuccess> for CompleteOr<ExprSuccess> {
+impl Arrow<ExprSuccess> for CompleteOr<ExprSuccess> {
     type Output = ExprSuccess;
 
-    fn combine(self, other: ExprSuccess) -> Self::Output {
+    fn arrow(self, other: ExprSuccess) -> Self::Output {
         match self {
             CompleteOr::Complete(_) => other,
-            CompleteOr::Other(value) => value.combine(other),
+            CompleteOr::Other(lhs) => lhs.arrow(other),
         }
     }
 }

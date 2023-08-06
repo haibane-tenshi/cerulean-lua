@@ -88,8 +88,8 @@ fn else_if_clause<'s, 'origin>(
 
         let token_elseif = match_token(Token::ElseIf)
             .map_failure(|f| ParseFailure::from(IfThenFailure::ElseIf(f)));
-        let token_then = match_token(Token::Then)
-            .map_failure(|f| CompleteOr::Other(IfThenFailure::Then(f).into()));
+        let token_then =
+            match_token(Token::Then).map_failure(|f| ParseFailure::from(IfThenFailure::Then(f)));
 
         // Emit jump from end of previous block to end of if-then statement since we didn't reach the end yet.
         frag.emit_jump_to(outer, None)?;

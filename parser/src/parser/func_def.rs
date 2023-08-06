@@ -31,9 +31,11 @@ pub(crate) fn func_body<'s, 'origin>(
 
         let state = token_par_l
             .parse_once(s)?
+            .with_mode(FailureMode::Ambiguous)
             .and_replace(parlist(frag.stack_mut().new_block()).optional())?
             .map_success(FuncDefFailure::from)
             .map_success(ParseFailure::from)
+            .with_mode(FailureMode::Malformed)
             .and_discard(token_par_r)?
             .and_discard(block(frag.new_fragment()))?
             .and_discard(token_end)?
@@ -56,7 +58,8 @@ pub(crate) fn func_body<'s, 'origin>(
                 drop(outer_frag);
 
                 Ok(func_id)
-            })?;
+            })?
+            .collapse();
 
         Ok(state)
     }
@@ -168,15 +171,10 @@ impl From<Never> for ParListMismatch {
     }
 }
 
-impl Combine<ParListMismatch> for ParListMismatch {
-    type Output = Self;
+impl Arrow<ParListMismatch> for Complete {
+    type Output = ParListMismatch;
 
-    fn combine(self, other: ParListMismatch) -> Self::Output {
-        use ParListMismatch::*;
-
-        match (self, other) {
-            (Comma(_), rhs @ Ident(_)) => rhs,
-            (lhs, _) => lhs,
-        }
+    fn arrow(self, other: ParListMismatch) -> Self::Output {
+        other
     }
 }

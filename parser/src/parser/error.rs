@@ -1,3 +1,29 @@
+//! Complete Complete
+//!
+//! type Success = Complete
+//! type Failure = FailureA | FailureB
+//!
+//! Complete Branch
+//!
+//! type Success = SuccessB
+//! type Failure = FailureA | FailureB
+//!
+//! Branch Complete
+//!
+//! type Success = Complete
+//! type Branch = FailureA | (SuccessA -> FailureB)
+//!
+//! Branch Branch
+//!
+//! type Success = SuccessA -> SuccessB
+//! type Failure = FailureA | (SuccessA -> FailureB)
+//!
+//!
+//! (BranchA BranchB) BranchC
+//!
+//! type Success = (SuccessA -> SuccessB) -> SuccessC
+//! type Failure = (FailureA | (SuccessA -> FailureB)) | ((SuccessA -> SuccessB) -> FailureC)
+
 use std::ops::{BitOr, BitOrAssign};
 
 use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
@@ -286,97 +312,82 @@ impl From<ParseFailure> for ParseFailureOrComplete {
     }
 }
 
-pub trait Combine<Other> {
+pub trait Arrow<Other> {
     type Output;
 
-    fn combine(self, other: Other) -> Self::Output;
+    fn arrow(self, other: Other) -> Self::Output;
 }
 
-impl<T> Combine<T> for Never {
-    type Output = Never;
+impl<T> Arrow<Complete> for T {
+    type Output = Complete;
 
-    fn combine(self, _: T) -> Self::Output {
-        self
-    }
-}
-
-impl Combine<Never> for ParseFailure {
-    type Output = Never;
-
-    fn combine(self, other: Never) -> Self::Output {
+    fn arrow(self, other: Complete) -> Self::Output {
         other
     }
 }
 
-impl Combine<ParseFailure> for ParseFailure {
+impl<T> Arrow<Never> for T {
+    type Output = Never;
+
+    fn arrow(self, other: Never) -> Self::Output {
+        other
+    }
+}
+
+impl Arrow<ParseFailure> for Complete {
+    type Output = ParseFailure;
+
+    fn arrow(self, other: ParseFailure) -> Self::Output {
+        other
+    }
+}
+
+impl<T> Arrow<CompleteOr<T>> for Complete {
+    type Output = CompleteOr<T>;
+
+    fn arrow(self, other: CompleteOr<T>) -> Self::Output {
+        other
+    }
+}
+
+impl Arrow<ParseFailure> for ParseFailure {
     type Output = Self;
 
-    fn combine(self, other: ParseFailure) -> Self::Output {
+    fn arrow(self, other: ParseFailure) -> Self::Output {
         self | other
     }
 }
 
-impl Combine<Complete> for ParseFailure {
-    type Output = Self;
+impl Arrow<CompleteOr<ParseFailure>> for ParseFailure {
+    type Output = CompleteOr<ParseFailure>;
 
-    fn combine(self, _: Complete) -> Self::Output {
-        self
-    }
-}
-
-impl Combine<ParseFailureOrComplete> for ParseFailure {
-    type Output = Self;
-
-    fn combine(self, other: ParseFailureOrComplete) -> Self::Output {
+    fn arrow(self, other: CompleteOr<ParseFailure>) -> Self::Output {
         match other {
-            ParseFailureOrComplete::Complete(_) => self,
-            ParseFailureOrComplete::Other(this) => self.combine(this),
+            CompleteOr::Complete(t) => CompleteOr::Complete(t),
+            CompleteOr::Other(rhs) => CompleteOr::Other(self.arrow(rhs)),
         }
     }
 }
 
-impl<T> Combine<T> for Complete {
-    type Output = T;
-
-    fn combine(self, other: T) -> Self::Output {
-        other
-    }
-}
-
-impl<T> Combine<Never> for CompleteOr<T> {
-    type Output = Never;
-
-    fn combine(self, other: Never) -> Self::Output {
-        other
-    }
-}
-
-impl Combine<ParseFailure> for ParseFailureOrComplete {
+impl Arrow<ParseFailure> for CompleteOr<ParseFailure> {
     type Output = ParseFailure;
 
-    fn combine(self, other: ParseFailure) -> Self::Output {
-        other.combine(self)
+    fn arrow(self, other: ParseFailure) -> Self::Output {
+        match self {
+            CompleteOr::Complete(_) => other,
+            CompleteOr::Other(this) => this.arrow(other),
+        }
     }
 }
 
-impl Combine<Complete> for ParseFailureOrComplete {
+impl Arrow<CompleteOr<ParseFailure>> for CompleteOr<ParseFailure> {
     type Output = Self;
 
-    fn combine(self, _: Complete) -> Self::Output {
-        self
-    }
-}
-
-impl Combine<ParseFailureOrComplete> for ParseFailureOrComplete {
-    type Output = Self;
-
-    fn combine(self, other: ParseFailureOrComplete) -> Self::Output {
-        use CompleteOr::{Complete as EComplete, Other};
-
+    fn arrow(self, other: CompleteOr<ParseFailure>) -> Self::Output {
         match (self, other) {
-            (Other(lhs), Other(rhs)) => Other(lhs.combine(rhs)),
-            (Other(failure), _) | (_, Other(failure)) => Other(failure),
-            (EComplete(_), EComplete(_)) => EComplete(Complete),
+            (CompleteOr::Other(lhs), CompleteOr::Other(rhs)) => CompleteOr::Other(lhs.arrow(rhs)),
+            (CompleteOr::Other(r), _) | (_, CompleteOr::Other(r)) => CompleteOr::Other(r),
+            (CompleteOr::Complete(_), CompleteOr::Complete(_)) => CompleteOr::Complete(Complete),
         }
     }
 }
