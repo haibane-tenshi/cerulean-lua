@@ -60,18 +60,6 @@ pub(crate) enum IfThenFailure {
     End(#[source] TokenMismatch),
 }
 
-impl HaveFailureMode for IfThenFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            IfThenFailure::If(_) => FailureMode::Mismatch,
-            IfThenFailure::Then(_) => FailureMode::Malformed,
-            IfThenFailure::ElseIf(_) => FailureMode::Malformed,
-            IfThenFailure::Else(_) => FailureMode::Malformed,
-            IfThenFailure::End(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 fn else_if_clause<'s, 'origin>(
     outer: FragmentId,
     mut frag: Fragment<'s, 'origin>,

@@ -57,16 +57,6 @@ pub enum LocalAssignmentFailure {
     EqualsSign(#[source] TokenMismatch),
 }
 
-impl HaveFailureMode for LocalAssignmentFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            LocalAssignmentFailure::Local(_) => FailureMode::Mismatch,
-            LocalAssignmentFailure::Ident(_) => FailureMode::Ambiguous,
-            LocalAssignmentFailure::EqualsSign(_) => FailureMode::Ambiguous,
-        }
-    }
-}
-
 fn ident_list(
     s: Lexer,
 ) -> Result<ParsingState<Lexer, Vec<&str>, IdentListSuccess, IdentMismatch>, LexError> {

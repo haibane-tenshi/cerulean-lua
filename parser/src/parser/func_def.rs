@@ -79,18 +79,6 @@ pub(crate) enum FuncDefFailure {
     End(#[source] TokenMismatch),
 }
 
-impl HaveFailureMode for FuncDefFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            FuncDefFailure::ParL(_) => FailureMode::Mismatch,
-            FuncDefFailure::ArgListComma(_) => FailureMode::Malformed,
-            FuncDefFailure::ArgListIdent(_) => FailureMode::Malformed,
-            FuncDefFailure::ParR(_) => FailureMode::Malformed,
-            FuncDefFailure::End(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 impl From<ParListMismatch> for FuncDefFailure {
     fn from(value: ParListMismatch) -> Self {
         match value {
@@ -152,17 +140,6 @@ fn parlist<'s, 'origin>(
 enum ParListMismatch {
     Comma(TokenMismatch),
     Ident(IdentMismatch),
-}
-
-impl HaveFailureMode for ParListMismatch {
-    fn mode(&self) -> FailureMode {
-        use ParListMismatch::*;
-
-        match self {
-            Comma(_) => FailureMode::Mismatch,
-            Ident(_) => FailureMode::Malformed,
-        }
-    }
 }
 
 impl From<Never> for ParListMismatch {

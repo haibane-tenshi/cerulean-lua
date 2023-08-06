@@ -227,17 +227,6 @@ pub enum FnArgsParExprFailure {
     ParR(TokenMismatch),
 }
 
-impl HaveFailureMode for FnArgsParExprFailure {
-    fn mode(&self) -> FailureMode {
-        use FnArgsParExprFailure::*;
-
-        match self {
-            ParL(_) => FailureMode::Mismatch,
-            ParR(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 fn args_str<'s, 'origin>(
     mut frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -295,15 +284,6 @@ pub(crate) enum VariableFailure {
     UnsupportedGlobal,
 }
 
-impl HaveFailureMode for VariableFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            VariableFailure::Ident(_) => FailureMode::Mismatch,
-            _ => FailureMode::Malformed,
-        }
-    }
-}
-
 fn field<'s, 'origin>(
     mut frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -337,15 +317,6 @@ fn field<'s, 'origin>(
 pub(crate) enum FieldFailure {
     Dot(TokenMismatch),
     Ident(IdentMismatch),
-}
-
-impl HaveFailureMode for FieldFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            FieldFailure::Dot(_) => FailureMode::Mismatch,
-            FieldFailure::Ident(_) => FailureMode::Malformed,
-        }
-    }
 }
 
 fn index<'s, 'origin>(
@@ -382,13 +353,4 @@ fn index<'s, 'origin>(
 pub(crate) enum IndexFailure {
     BracketL(TokenMismatch),
     BracketR(TokenMismatch),
-}
-
-impl HaveFailureMode for IndexFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            IndexFailure::BracketL(_) => FailureMode::Mismatch,
-            IndexFailure::BracketR(_) => FailureMode::Malformed,
-        }
-    }
 }

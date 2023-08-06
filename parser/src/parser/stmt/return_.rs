@@ -44,9 +44,3 @@ pub(crate) enum ReturnFailure {
     #[error("missing return keyword")]
     Return(TokenMismatch),
 }
-
-impl HaveFailureMode for ReturnFailure {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Mismatch
-    }
-}

@@ -159,10 +159,10 @@ impl BitOr for ParseFailure {
 
 impl<T> From<T> for ParseFailure
 where
-    T: HaveFailureMode + Into<ParseCause>,
+    T: Into<ParseCause>,
 {
     fn from(value: T) -> Self {
-        let mode = value.mode();
+        let mode = FailureMode::Mismatch;
         let cause = value.into();
 
         ParseFailure { mode, cause }
@@ -240,16 +240,6 @@ pub enum FailureMode {
     Codegen,
 }
 
-pub trait HaveFailureMode {
-    fn mode(&self) -> FailureMode;
-}
-
-impl HaveFailureMode for Never {
-    fn mode(&self) -> FailureMode {
-        match *self {}
-    }
-}
-
 pub trait WithMode {
     fn with_mode(self, mode: FailureMode) -> Self;
 }
@@ -285,12 +275,6 @@ where
 
 #[derive(Debug)]
 pub(crate) struct Complete;
-
-impl HaveFailureMode for Complete {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Success
-    }
-}
 
 pub(crate) type ParseFailureOrComplete = CompleteOr<ParseFailure>;
 

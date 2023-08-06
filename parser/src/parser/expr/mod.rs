@@ -92,15 +92,6 @@ pub enum ParExprFailure {
     ParR(TokenMismatch),
 }
 
-impl HaveFailureMode for ParExprFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            ParExprFailure::ParL(_) => FailureMode::Mismatch,
-            ParExprFailure::ParR(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 pub(crate) fn expr_list<'s, 'origin>(
     mut frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -146,12 +137,6 @@ pub(crate) fn expr_list<'s, 'origin>(
 pub(crate) enum ExprListError {
     #[error("expected comma")]
     Comma(TokenMismatch),
-}
-
-impl HaveFailureMode for ExprListError {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Mismatch
-    }
 }
 
 pub(crate) fn expr_list_adjusted_to<'s, 'origin>(

@@ -39,12 +39,3 @@ pub(crate) enum DoEndFailure {
     #[error("missing `end` keyword")]
     End(#[source] TokenMismatch),
 }
-
-impl HaveFailureMode for DoEndFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            DoEndFailure::Do(_) => FailureMode::Mismatch,
-            DoEndFailure::End(_) => FailureMode::Malformed,
-        }
-    }
-}

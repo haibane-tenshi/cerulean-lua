@@ -48,16 +48,6 @@ pub(crate) enum TabFailure {
     CurlyR(TokenMismatch),
 }
 
-impl HaveFailureMode for TabFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            TabFailure::CurlyL(_) => FailureMode::Mismatch,
-            TabFailure::Sep(_) => FailureMode::Malformed,
-            TabFailure::CurlyR(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 fn field_list<'s, 'origin>(
     table_slot: StackSlot,
     mut frag: Fragment<'s, 'origin>,
@@ -215,16 +205,6 @@ pub(crate) enum TabBracketFailure {
     EqualsSign(TokenMismatch),
 }
 
-impl HaveFailureMode for TabBracketFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            TabBracketFailure::BracketL(_) => FailureMode::Mismatch,
-            TabBracketFailure::BracketR(_) => FailureMode::Malformed,
-            TabBracketFailure::EqualsSign(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 fn name<'s, 'origin>(
     table_slot: StackSlot,
     mut frag: Fragment<'s, 'origin>,
@@ -272,15 +252,6 @@ pub(crate) enum TabNameFailure {
     Ident(IdentMismatch),
     #[error("expected equals sign")]
     EqualsSign(TokenMismatch),
-}
-
-impl HaveFailureMode for TabNameFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            TabNameFailure::Ident(_) => FailureMode::Mismatch,
-            TabNameFailure::EqualsSign(_) => FailureMode::Malformed,
-        }
-    }
 }
 
 fn index<'s, 'origin>(

@@ -61,12 +61,3 @@ pub(crate) enum RepeatUntilFailure {
     #[error("missing `until` keyword")]
     Until(#[source] TokenMismatch),
 }
-
-impl HaveFailureMode for RepeatUntilFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            RepeatUntilFailure::Repeat(_) => FailureMode::Mismatch,
-            RepeatUntilFailure::Until(_) => FailureMode::Malformed,
-        }
-    }
-}

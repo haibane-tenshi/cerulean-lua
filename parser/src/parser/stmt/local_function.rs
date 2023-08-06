@@ -60,13 +60,3 @@ pub(crate) enum LocalFunctionFailure {
     #[error("expected function name")]
     Ident(#[source] IdentMismatch),
 }
-
-impl HaveFailureMode for LocalFunctionFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            LocalFunctionFailure::Local(_) => FailureMode::Mismatch,
-            LocalFunctionFailure::Function(_) => FailureMode::Ambiguous,
-            LocalFunctionFailure::Ident(_) => FailureMode::Malformed,
-        }
-    }
-}

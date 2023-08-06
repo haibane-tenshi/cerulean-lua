@@ -111,18 +111,6 @@ pub(crate) enum GenericForFailure {
     End(#[source] TokenMismatch),
 }
 
-impl HaveFailureMode for GenericForFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            GenericForFailure::For(_) => FailureMode::Mismatch,
-            GenericForFailure::Ident(_) => FailureMode::Ambiguous,
-            GenericForFailure::In(_) => FailureMode::Ambiguous,
-            GenericForFailure::Do(_) => FailureMode::Malformed,
-            GenericForFailure::End(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 fn name_list<'s>(
     s: Lexer<'s>,
 ) -> Result<ParsingState<Lexer<'s>, Vec<&str>, NameListSuccess, IdentMismatch>, LexError> {

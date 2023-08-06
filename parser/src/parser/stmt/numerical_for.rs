@@ -199,16 +199,3 @@ pub(crate) enum NumericalForFailure {
     #[error("missing `end` keyword")]
     End(#[source] TokenMismatch),
 }
-
-impl HaveFailureMode for NumericalForFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            NumericalForFailure::For(_) => FailureMode::Mismatch,
-            NumericalForFailure::Ident(_) => FailureMode::Ambiguous,
-            NumericalForFailure::EqualsSign(_) => FailureMode::Ambiguous,
-            NumericalForFailure::Comma(_) => FailureMode::Malformed,
-            NumericalForFailure::Do(_) => FailureMode::Malformed,
-            NumericalForFailure::End(_) => FailureMode::Malformed,
-        }
-    }
-}

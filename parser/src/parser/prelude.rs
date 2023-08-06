@@ -3,8 +3,8 @@ pub(crate) use crate::codegen::stack::NameLookup;
 pub(crate) use crate::lex::{Lexer, Number, Token};
 pub(crate) use crate::parser::basic::*;
 pub(crate) use crate::parser::error::{
-    Arrow, CodegenError, Complete, CompleteOr, FailFast, FailureMode, HaveFailureMode, LexError,
-    Never, ParseCause, ParseFailure, ParseFailureOrComplete, WithMode,
+    Arrow, CodegenError, Complete, CompleteOr, FailFast, FailureMode, LexError, Never, ParseCause,
+    ParseFailure, ParseFailureOrComplete, WithMode,
 };
 pub(crate) use crate::parser::traits::{Parse, ParseMut, ParseOnce, ParsingState};
 pub(crate) use crate::parser::{Eof, NextToken};

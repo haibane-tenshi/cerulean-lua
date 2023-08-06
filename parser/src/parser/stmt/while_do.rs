@@ -67,13 +67,3 @@ pub(crate) enum WhileDoFailure {
     #[error("missing `end` keyword")]
     End(#[source] TokenMismatch),
 }
-
-impl HaveFailureMode for WhileDoFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            WhileDoFailure::While(_) => FailureMode::Mismatch,
-            WhileDoFailure::Do(_) => FailureMode::Malformed,
-            WhileDoFailure::End(_) => FailureMode::Malformed,
-        }
-    }
-}

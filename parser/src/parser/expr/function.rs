@@ -38,9 +38,3 @@ pub(crate) fn function<'s, 'origin>(
 pub enum FunctionFailure {
     Function(TokenMismatch),
 }
-
-impl HaveFailureMode for FunctionFailure {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Mismatch
-    }
-}

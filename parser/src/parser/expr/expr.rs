@@ -33,15 +33,6 @@ pub(crate) enum ExprFailure {
     Infix(InfixMismatchError),
 }
 
-impl HaveFailureMode for ExprFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            ExprFailure::Prefix(_) => FailureMode::Mismatch,
-            ExprFailure::Infix(_) => FailureMode::Ambiguous,
-        }
-    }
-}
-
 fn expr_impl<'s, 'origin>(
     min_bp: u64,
     mut frag: Fragment<'s, 'origin>,
@@ -290,12 +281,6 @@ fn prefix_op(
 #[error("expected prefix op")]
 pub(crate) struct PrefixMismatchError;
 
-impl HaveFailureMode for PrefixMismatchError {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Mismatch
-    }
-}
-
 fn infix_op(
     mut s: Lexer,
 ) -> Result<ParsingState<Lexer, Infix, Complete, InfixMismatchError>, LexError> {
@@ -330,12 +315,6 @@ fn infix_op(
 #[derive(Debug, Error)]
 #[error("expected infix op")]
 pub(crate) struct InfixMismatchError;
-
-impl HaveFailureMode for InfixMismatchError {
-    fn mode(&self) -> FailureMode {
-        FailureMode::Mismatch
-    }
-}
 
 #[derive(Debug, Copy, Clone)]
 enum Prefix {

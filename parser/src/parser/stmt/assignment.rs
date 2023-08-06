@@ -71,15 +71,6 @@ pub(crate) enum AssignmentFailure {
     Comma(#[source] TokenMismatch),
 }
 
-impl HaveFailureMode for AssignmentFailure {
-    fn mode(&self) -> FailureMode {
-        match self {
-            AssignmentFailure::EqualsSign(_) => FailureMode::Ambiguous,
-            AssignmentFailure::Comma(_) => FailureMode::Malformed,
-        }
-    }
-}
-
 fn places<'s, 'origin>(
     mut frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
