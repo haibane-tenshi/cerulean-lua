@@ -14,6 +14,7 @@ pub(crate) fn expr<'s, 'origin>(
     move |s: Lexer<'s>| {
         let r = expr_impl(0, frag)
             .parse_once(s)?
+            .map_failure(|failure| failure.arrow(ParseFailure::from(ParseCause::ExpectedExpr)))
             .map_success(|success| match success {
                 ExprSuccess::LessTightlyBound => {
                     unreachable!("there should be no ops with binding power below 0")
@@ -31,6 +32,10 @@ pub(crate) enum ExprFailure {
     Prefix(PrefixMismatchError),
     #[error("failed to parse infix")]
     Infix(InfixMismatchError),
+    #[error("failed to parse opening parenthesis")]
+    ParL(TokenMismatch),
+    #[error("failed to parse closing parenthesis")]
+    ParR(TokenMismatch),
 }
 
 fn expr_impl<'s, 'origin>(
@@ -249,10 +254,8 @@ fn atom<'s, 'origin>(
 
         let r = literal(frag.new_fragment())
             .parse_once(s.clone())?
-            .map_failure(|_| ParseFailure {
-                mode: FailureMode::Mismatch,
-                cause: ParseCause::ExpectedExpr,
-            })
+            // Discard failure, we should never observe this one as an error.
+            .map_failure(|_| Complete)
             .map_success(ParseFailureOrComplete::Complete)
             .or(s.clone(), prefix_expr(frag.new_fragment()))?
             .or(s.clone(), table(frag.new_fragment()))?
@@ -271,7 +274,10 @@ fn prefix_op(
     let op = match s.next_token()? {
         Ok(Token::MinusSign) => Prefix::Ari(AriUnaOp::Neg),
         Ok(Token::Tilde) => Prefix::Bit(BitUnaOp::Not),
-        _ => return Ok(ParsingState::Failure(PrefixMismatchError)),
+        _ => {
+            let span = s.span();
+            return Ok(ParsingState::Failure(PrefixMismatchError { span }));
+        }
     };
 
     Ok(ParsingState::Success(s, op, Complete))
@@ -279,7 +285,9 @@ fn prefix_op(
 
 #[derive(Debug, Error)]
 #[error("expected prefix op")]
-pub(crate) struct PrefixMismatchError;
+pub(crate) struct PrefixMismatchError {
+    pub(crate) span: logos::Span,
+}
 
 fn infix_op(
     mut s: Lexer,
@@ -306,7 +314,10 @@ fn infix_op(
         Ok(Token::DoubleDot) => Infix::Str(StrBinOp::Concat),
         Ok(Token::Or) => Infix::Logical(Logical::Or),
         Ok(Token::And) => Infix::Logical(Logical::And),
-        _ => return Ok(ParsingState::Failure(InfixMismatchError)),
+        _ => {
+            let span = s.span();
+            return Ok(ParsingState::Failure(InfixMismatchError { span }));
+        }
     };
 
     Ok(ParsingState::Success(s, op, Complete))
@@ -314,7 +325,9 @@ fn infix_op(
 
 #[derive(Debug, Error)]
 #[error("expected infix op")]
-pub(crate) struct InfixMismatchError;
+pub(crate) struct InfixMismatchError {
+    pub(crate) span: logos::Span,
+}
 
 #[derive(Debug, Copy, Clone)]
 enum Prefix {

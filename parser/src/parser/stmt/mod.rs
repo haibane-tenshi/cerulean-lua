@@ -42,6 +42,7 @@ pub(crate) fn statement<'s, 'origin>(
             .or(s.clone(), while_do(frag.new_fragment()))?
             .or(s.clone(), do_end(frag.new_fragment()))?
             .or(s, repeat_until(frag.new_fragment()))?
+            .map_failure(|f| f.arrow(ParseFailure::from(ParseCause::ExpectedStatement)))
             .map_output(|_| frag.commit());
 
         Ok(state)

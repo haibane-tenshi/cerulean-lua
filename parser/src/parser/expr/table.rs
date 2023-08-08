@@ -14,9 +14,9 @@ pub(crate) fn table<'s, 'frag>(
 > + 'frag {
     move |s: Lexer<'s>| {
         let curly_l =
-            match_token(Token::CurlyL).map_failure(|f| ParseFailure::from(TabFailure::CurlyL(f)));
+            match_token(Token::CurlyL).map_failure(|f| ParseFailure::from(TableFailure::CurlyL(f)));
         let curly_r =
-            match_token(Token::CurlyR).map_failure(|f| ParseFailure::from(TabFailure::CurlyR(f)));
+            match_token(Token::CurlyR).map_failure(|f| ParseFailure::from(TableFailure::CurlyR(f)));
 
         let state = curly_l
             .parse(s)?
@@ -39,9 +39,13 @@ pub(crate) fn table<'s, 'frag>(
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum TabFailure {
+pub(crate) enum TableFailure {
     #[error("expected opening curly brace")]
     CurlyL(TokenMismatch),
+    #[error("failed to parse bracket setter")]
+    BracketSetter(#[from] BracketFailure),
+    #[error("failed to parse name setter")]
+    NameSetter(#[from] NameFailure),
     #[error("expected table field separator")]
     Sep(FieldSepMismatchError),
     #[error("expected closing curly brace")]
@@ -84,7 +88,7 @@ fn field_list<'s, 'origin>(
             };
 
             field_sep(s)?
-                .map_failure(|f| ParseFailure::from(TabFailure::Sep(f)))
+                .map_failure(|f| ParseFailure::from(TableFailure::Sep(f)))
                 .and(field)
         };
 
@@ -164,13 +168,15 @@ fn bracket<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         use crate::parser::expr::expr_adjusted_to_1;
+        use BracketFailure::*;
+        use TableFailure::BracketSetter;
 
         let bracket_l = match_token(Token::BracketL)
-            .map_failure(|f| ParseFailure::from(TabBracketFailure::BracketL(f)));
+            .map_failure(|f| ParseFailure::from(BracketSetter(BracketL(f))));
         let bracket_r = match_token(Token::BracketR)
-            .map_failure(|f| ParseFailure::from(TabBracketFailure::BracketR(f)));
+            .map_failure(|f| ParseFailure::from(BracketSetter(BracketR(f))));
         let equals_sign = match_token(Token::EqualsSign)
-            .map_failure(|f| ParseFailure::from(TabBracketFailure::EqualsSign(f)));
+            .map_failure(|f| ParseFailure::from(BracketSetter(EqualsSign(f))));
 
         let state = bracket_l
             .parse(s)?
@@ -196,7 +202,7 @@ fn bracket<'s, 'origin>(
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum TabBracketFailure {
+pub(crate) enum BracketFailure {
     #[error("expected opening bracket")]
     BracketL(TokenMismatch),
     #[error("expected closing bracket")]
@@ -217,10 +223,12 @@ fn name<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         use crate::parser::expr::expr_adjusted_to_1;
+        use NameFailure::*;
+        use TableFailure::NameSetter;
 
-        let ident = identifier.map_failure(|f| ParseFailure::from(TabNameFailure::Ident(f)));
+        let ident = identifier.map_failure(|f| ParseFailure::from(NameSetter(Ident(f))));
         let equals_sign = match_token(Token::EqualsSign)
-            .map_failure(|f| ParseFailure::from(TabNameFailure::EqualsSign(f)));
+            .map_failure(|f| ParseFailure::from(NameSetter(EqualsSign(f))));
 
         let r = ident
             .parse(s)?
@@ -247,7 +255,7 @@ fn name<'s, 'origin>(
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum TabNameFailure {
+pub(crate) enum NameFailure {
     #[error("expected identifier")]
     Ident(IdentMismatch),
     #[error("expected equals sign")]

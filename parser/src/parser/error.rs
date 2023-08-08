@@ -31,9 +31,9 @@ use thiserror::Error;
 
 use super::expr::expr::ExprFailure;
 use super::expr::function::FunctionFailure;
-use super::expr::table::{TabBracketFailure, TabFailure, TabNameFailure};
-use super::expr::{ExprListError, ParExprFailure};
-use super::func_def::FuncDefFailure;
+use super::expr::table::TableFailure;
+use super::expr::ExprListError;
+use super::func_def::FuncBodyFailure;
 use super::prefix_expr::{FieldFailure, FnArgsParExprFailure, IndexFailure, VariableFailure};
 use super::stmt::assignment::AssignmentFailure;
 use super::stmt::do_end::DoEndFailure;
@@ -126,6 +126,12 @@ impl From<FunctionCapacityError> for CodegenError {
     }
 }
 
+impl From<VariableFailure> for CodegenError {
+    fn from(_: VariableFailure) -> Self {
+        CodegenError
+    }
+}
+
 #[derive(Debug, Error)]
 #[error("failed to parse input")]
 pub struct ParseFailure {
@@ -171,24 +177,18 @@ where
 
 #[derive(Debug, Error)]
 pub(crate) enum ParseCause {
-    #[error("failed to parse named table setter")]
-    TabName(#[from] TabNameFailure),
-    #[error("failed to parse bracketed table setter")]
-    TabBracket(#[from] TabBracketFailure),
-    #[error("failed to parse table constructor")]
-    Tab(#[from] TabFailure),
-    #[error("expected place")]
-    ExpectedPlace,
     #[error("expected expression")]
     ExpectedExpr,
-    #[error("failed to parse parenthesised expression")]
-    ParExpr(#[from] ParExprFailure),
+    #[error("failed to parse table constructor")]
+    TableExpr(#[from] TableFailure),
     #[error("failed to parse function expression")]
     FunctionExpr(#[from] FunctionFailure),
     #[error("failed to parse function definition")]
-    FunctionDef(#[from] FuncDefFailure),
-    #[error("failed to parse variable")]
-    Variable(#[from] VariableFailure),
+    FunctionBodyExpr(#[from] FuncBodyFailure),
+    #[error("failed to parse expression")]
+    Expr(#[from] ExprFailure),
+    #[error("failed to parse expression list")]
+    ExprList(#[from] ExprListError),
     #[error("failed to access table field")]
     TabField(#[from] FieldFailure),
     #[error("failed to index into table")]
@@ -197,32 +197,267 @@ pub(crate) enum ParseCause {
     FunctionCall,
     #[error("failed to parse function call arguments")]
     FunctionArgs(#[from] FnArgsParExprFailure),
-    #[error("failed to parse expression")]
-    Expr(#[from] ExprFailure),
-    #[error("failed to parse expression list")]
-    ExprList(#[from] ExprListError),
-    #[error("failed to parse variable assignment")]
-    Assignment(#[from] AssignmentFailure),
-    #[error("failed to parse generic-for statement")]
-    GenericFor(#[from] GenericForFailure),
-    #[error("failed to parse if-then statement")]
-    IfThen(#[from] IfThenFailure),
+    #[error("expected statement")]
+    ExpectedStatement,
     #[error("failed to parse local assignment")]
     LocalAssignment(#[from] LocalAssignmentFailure),
     #[error("failed to parse local function declaration")]
     LocalFunction(#[from] LocalFunctionFailure),
+    #[error("failed to parse variable assignment")]
+    Assignment(#[from] AssignmentFailure),
+    #[error("failed to parse if-then statement")]
+    IfThen(#[from] IfThenFailure),
+    #[error("failed to parse generic-for statement")]
+    GenericFor(#[from] GenericForFailure),
     #[error("failed to parse numerical-for statement")]
     NumericalFor(#[from] NumericalForFailure),
     #[error("failed to parse repeat-until statement")]
     RepeatUntil(#[from] RepeatUntilFailure),
     #[error("failed to parse while-do statement")]
     WhileDo(#[from] WhileDoFailure),
-    #[error("expected statement")]
-    ExpectedStatement,
     #[error("failed to parse do-end block")]
     DoEnd(#[from] DoEndFailure),
     #[error("failed to parse return statement")]
     Return(#[from] ReturnFailure),
+}
+
+impl ParseCause {
+    pub(crate) fn into_diagnostic(self) -> codespan_reporting::diagnostic::Diagnostic<()> {
+        use codespan_reporting::diagnostic::Label;
+        type Diagnostic = codespan_reporting::diagnostic::Diagnostic<()>;
+
+        match self {
+            ParseCause::ExpectedExpr => Diagnostic::error().with_message("expected expression"),
+            ParseCause::TableExpr(err) => {
+                use super::expr::table::{BracketFailure, NameFailure};
+                use TableFailure::*;
+
+                let (msg, span) = match err {
+                    CurlyL(err) => ("expected opening curly brace `{`", err.span),
+                    BracketSetter(BracketFailure::BracketL(err)) => (
+                        "failed to parse table setter, expected opnenig square bracket `[`",
+                        err.span,
+                    ),
+                    BracketSetter(BracketFailure::BracketR(err)) => (
+                        "failed to parse table setter, expected closing square bracket `]`",
+                        err.span,
+                    ),
+                    BracketSetter(BracketFailure::EqualsSign(err)) => (
+                        "failed to parse table setter, expected equals sign `=`",
+                        err.span,
+                    ),
+                    NameSetter(NameFailure::Ident(err)) => (
+                        "failed to parse table setter, expected identifier",
+                        err.span,
+                    ),
+                    NameSetter(NameFailure::EqualsSign(err)) => (
+                        "failed to parse table setter, expected equals sign `=`",
+                        err.span,
+                    ),
+                    Sep(_err) => unreachable!(),
+                    CurlyR(err) => ("expected closing curly brace `}`", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::FunctionExpr(err) => {
+                let (msg, span) = match err {
+                    FunctionFailure::Function(err) => ("expected `function` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::FunctionBodyExpr(err) => {
+                let (msg, span) = match err {
+                    FuncBodyFailure::ParL(err) => ("missing openening parenthesis", err.span),
+                    FuncBodyFailure::ParR(err) => ("missing closing parenthesis", err.span),
+                    FuncBodyFailure::ArgListIdent(err) => {
+                        ("function parameters should be identifiers", err.span)
+                    }
+                    FuncBodyFailure::ArgListComma(err) => ("expected comma", err.span),
+                    FuncBodyFailure::End(err) => ("expected `end` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::Expr(err) => {
+                let (msg, span) = match err {
+                    ExprFailure::Prefix(err) => ("expected prefix op", err.span),
+                    ExprFailure::Infix(err) => ("expected infix op", err.span),
+                    ExprFailure::ParL(err) => ("expected opening parenthesis", err.span),
+                    ExprFailure::ParR(err) => ("expected closing parenthesis", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::ExprList(err) => {
+                let (msg, span) = match err {
+                    ExprListError::Comma(err) => ("expected comma", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::TabField(err) => {
+                let (msg, span) = match err {
+                    FieldFailure::Dot(err) => ("expected dot", err.span),
+                    FieldFailure::Ident(err) => {
+                        ("only valid identifier can be used for indexing", err.span)
+                    }
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::TabIndex(err) => {
+                let (msg, span) = match err {
+                    IndexFailure::BracketL(err) => ("expected opnening bracket", err.span),
+                    IndexFailure::BracketR(err) => ("expected closing bracket", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::FunctionCall => Diagnostic::error().with_message("expected function call"),
+            ParseCause::FunctionArgs(err) => {
+                let (msg, span) = match err {
+                    FnArgsParExprFailure::ParL(err) => ("expected opnening parenthesis", err.span),
+                    FnArgsParExprFailure::ParR(err) => ("expected closing parenthesis", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::ExpectedStatement => Diagnostic::error().with_message("expected statement"),
+            ParseCause::LocalAssignment(err) => {
+                let (msg, span) = match err {
+                    LocalAssignmentFailure::Local(err) => ("expected `local` keyword", err.span),
+                    LocalAssignmentFailure::Ident(err) => ("expceted identifier", err.span),
+                    LocalAssignmentFailure::EqualsSign(err) => ("expected equals sign", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::LocalFunction(err) => {
+                let (msg, span) = match err {
+                    LocalFunctionFailure::Local(err) => ("expected `local` keyword", err.span),
+                    LocalFunctionFailure::Function(err) => {
+                        ("expected `function` keyword", err.span)
+                    }
+                    LocalFunctionFailure::Ident(err) => ("expected identifier", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::Assignment(err) => {
+                let (msg, span) = match err {
+                    AssignmentFailure::Place(err) => ("expected place", err.span),
+                    AssignmentFailure::Comma(err) => ("expected comma", err.span),
+                    AssignmentFailure::EqualsSign(err) => ("expected equals sign", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::IfThen(err) => {
+                let (msg, span) = match err {
+                    IfThenFailure::If(err) => ("expcted `if` keyword", err.span),
+                    IfThenFailure::Then(err) => ("expected `then` keyword", err.span),
+                    IfThenFailure::ElseIf(err) => ("expceted `elseif` keyword", err.span),
+                    IfThenFailure::Else(err) => ("expected `else` keyword", err.span),
+                    IfThenFailure::End(err) => ("expcted `end` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::GenericFor(err) => {
+                let (msg, span) = match err {
+                    GenericForFailure::For(err) => ("expected `for` keyword", err.span),
+                    GenericForFailure::Ident(err) => ("expected identifier", err.span),
+                    GenericForFailure::In(err) => ("expected `in` keyword", err.span),
+                    GenericForFailure::Do(err) => ("expected `do` keyword", err.span),
+                    GenericForFailure::End(err) => ("expected `end` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::NumericalFor(err) => {
+                let (msg, span) = match err {
+                    NumericalForFailure::For(err) => ("expected `for` keyword", err.span),
+                    NumericalForFailure::Ident(err) => ("expected identifier", err.span),
+                    NumericalForFailure::EqualsSign(err) => ("expected equals sign", err.span),
+                    NumericalForFailure::Comma(err) => ("expected comma", err.span),
+                    NumericalForFailure::Do(err) => ("expected `do` keyword", err.span),
+                    NumericalForFailure::End(err) => ("expected `end` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::RepeatUntil(err) => {
+                let (msg, span) = match err {
+                    RepeatUntilFailure::Repeat(err) => ("expected `repeat` keyword", err.span),
+                    RepeatUntilFailure::Until(err) => ("expected `until` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::WhileDo(err) => {
+                let (msg, span) = match err {
+                    WhileDoFailure::While(err) => ("expected `while` keyword", err.span),
+                    WhileDoFailure::Do(err) => ("expected `do` keyword", err.span),
+                    WhileDoFailure::End(err) => ("expected `end` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::DoEnd(err) => {
+                let (msg, span) = match err {
+                    DoEndFailure::Do(err) => ("expected `do` keyword", err.span),
+                    DoEndFailure::End(err) => ("expected `end` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::Return(err) => {
+                let (msg, span) = match err {
+                    ReturnFailure::Return(err) => ("expected `return` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+        }
+    }
 }
 
 impl From<Never> for ParseCause {

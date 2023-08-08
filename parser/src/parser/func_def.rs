@@ -15,7 +15,7 @@ pub(crate) fn func_body<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::codegen::function::Function;
         use crate::parser::block::block;
-        use FuncDefFailure::*;
+        use FuncBodyFailure::*;
 
         let token_par_l = match_token(Token::ParL).map_failure(|f| ParseFailure::from(ParL(f)));
         let token_par_r = match_token(Token::ParR).map_failure(|f| ParseFailure::from(ParR(f)));
@@ -33,7 +33,7 @@ pub(crate) fn func_body<'s, 'origin>(
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
             .and_replace(parlist(frag.stack_mut().new_block()).optional())?
-            .map_success(FuncDefFailure::from)
+            .map_success(FuncBodyFailure::from)
             .map_success(ParseFailure::from)
             .with_mode(FailureMode::Malformed)
             .and_discard(token_par_r)?
@@ -66,7 +66,7 @@ pub(crate) fn func_body<'s, 'origin>(
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum FuncDefFailure {
+pub(crate) enum FuncBodyFailure {
     #[error("missing opening parenthesis")]
     ParL(#[source] TokenMismatch),
     #[error("missing comma between arguments")]
@@ -79,11 +79,11 @@ pub(crate) enum FuncDefFailure {
     End(#[source] TokenMismatch),
 }
 
-impl From<ParListMismatch> for FuncDefFailure {
+impl From<ParListMismatch> for FuncBodyFailure {
     fn from(value: ParListMismatch) -> Self {
         match value {
-            ParListMismatch::Comma(err) => FuncDefFailure::ArgListComma(err),
-            ParListMismatch::Ident(err) => FuncDefFailure::ArgListIdent(err),
+            ParListMismatch::Comma(err) => FuncBodyFailure::ArgListComma(err),
+            ParListMismatch::Ident(err) => FuncBodyFailure::ArgListIdent(err),
         }
     }
 }

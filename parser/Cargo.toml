@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+codespan-reporting = "0.11.1"
 decorum = { version = "0.3.1", default-features = false }
 either = "1.8.1"
 lexical = { version = "6.1.1", default-features = false, features = ["parse", "parse-floats", "parse-integers", "format", "power-of-two"] }

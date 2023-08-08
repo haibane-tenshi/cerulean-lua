@@ -1,4 +1,4 @@
-use crate::parser::prefix_expr::Place;
+use crate::parser::prefix_expr::{Place, PlaceFailure};
 use crate::parser::prelude::*;
 use thiserror::Error;
 
@@ -65,6 +65,8 @@ pub(crate) fn assignment<'s, 'origin>(
 
 #[derive(Debug, Error)]
 pub(crate) enum AssignmentFailure {
+    #[error("expected place")]
+    Place(#[from] PlaceFailure),
     #[error("missing equals sign")]
     EqualsSign(#[source] TokenMismatch),
     #[error("missing comma")]

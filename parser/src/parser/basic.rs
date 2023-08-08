@@ -33,7 +33,7 @@ pub(crate) fn match_token<'s>(
 #[derive(Debug, Error)]
 #[error("encountered unexpected token at {span:?}")]
 pub struct TokenMismatch {
-    span: Span,
+    pub(crate) span: Span,
 }
 
 pub(crate) fn identifier(
@@ -44,7 +44,10 @@ pub(crate) fn identifier(
             let span = s.span();
             ParsingState::Success(s, (ident, span), Complete)
         }
-        Ok(_) | Err(Eof) => ParsingState::Failure(IdentMismatch),
+        Ok(_) | Err(Eof) => {
+            let span = s.span();
+            ParsingState::Failure(IdentMismatch { span })
+        }
     };
 
     Ok(r)
@@ -52,7 +55,9 @@ pub(crate) fn identifier(
 
 #[derive(Debug, Error)]
 #[error("encountered unexpected token, expected identifier")]
-pub struct IdentMismatch;
+pub struct IdentMismatch {
+    pub(crate) span: Span,
+}
 
 impl From<Never> for IdentMismatch {
     fn from(value: Never) -> Self {

@@ -39,13 +39,38 @@ impl<'s> NextToken for Lexer<'s> {
 pub(crate) struct Eof;
 
 #[derive(Debug, Error)]
+#[error(transparent)]
+pub struct ParseError(#[from] ParseCause);
+
+impl ParseError {
+    pub fn into_diagnostic(self) -> codespan_reporting::diagnostic::Diagnostic<()> {
+        self.0.into_diagnostic()
+    }
+}
+
+impl From<ParseFailure> for ParseError {
+    fn from(value: ParseFailure) -> Self {
+        value.cause.into()
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
     Lex(#[from] LexError),
     #[error(transparent)]
-    Parse(#[from] ParseFailure),
+    Parse(#[from] ParseError),
     #[error(transparent)]
     Codegen(#[from] CodegenError),
+}
+
+impl Error {
+    pub fn into_diagnostic(self) -> codespan_reporting::diagnostic::Diagnostic<()> {
+        match self {
+            Error::Parse(err) => err.into_diagnostic(),
+            _ => todo!(),
+        }
+    }
 }
 
 impl From<FailFast> for Error {
@@ -82,14 +107,14 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
         ParsingState::Success(mut s, _, reason) => {
             if !matches!(s.next_token(), Ok(Err(Eof))) {
                 match reason {
-                    CompleteOr::Other(failure) => return Err(Error::Parse(failure)),
+                    CompleteOr::Other(failure) => return Err(Error::Parse(failure.into())),
                     CompleteOr::Complete(_) => {
                         let err = ParseFailure {
                             mode: FailureMode::Malformed,
                             cause: ParseCause::ExpectedStatement,
                         };
 
-                        return Err(Error::Parse(err));
+                        return Err(Error::Parse(err.into()));
                     }
                 }
             }

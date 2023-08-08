@@ -39,22 +39,32 @@ pub(crate) fn place<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let state = prefix_expr_impl(frag.new_fragment())
-            .parse_once(s)?
-            .transform(|output| {
+        let start = s.span().start;
+
+        let state = prefix_expr_impl(frag.new_fragment()).parse_once(s)?;
+
+        let state = match state {
+            ParsingState::Success(s, output, success) => {
                 if let PrefixExpr::Place(place) = output {
                     frag.commit();
 
-                    Ok(place)
+                    ParsingState::Success(s, place, success)
                 } else {
+                    use super::stmt::assignment::AssignmentFailure;
+
+                    let end = s.span().end;
+                    let failure = PlaceFailure { span: start..end };
+
                     let err = ParseFailure {
-                        mode: FailureMode::Malformed,
-                        cause: ParseCause::ExpectedPlace,
+                        mode: FailureMode::Mismatch,
+                        cause: ParseCause::from(AssignmentFailure::from(failure)),
                     };
 
-                    Err(err)
+                    ParsingState::Failure(err)
                 }
-            });
+            }
+            ParsingState::Failure(failure) => ParsingState::Failure(failure),
+        };
 
         Ok(state)
     }
@@ -77,6 +87,12 @@ impl Place {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("expected expression that evaluates to place")]
+pub(crate) struct PlaceFailure {
+    pub(crate) span: logos::Span,
+}
+
 fn prefix_expr_impl<'s, 'origin>(
     mut frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -92,7 +108,7 @@ fn prefix_expr_impl<'s, 'origin>(
         let stack_start = frag.stack().top()?;
 
         let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let state = variable(&frag).parse(s.clone())?;
+            let state = variable(&frag).parse(s.clone())?.map_failure(|_| Complete);
 
             let state = state
                 .map_output(|slot| PrefixExpr::Place(Place::Temporary(slot)))
@@ -257,18 +273,16 @@ fn variable<'s, 'a>(
     Lexer<'s>,
     Output = StackSlot,
     Success = Complete,
-    Failure = ParseFailure,
+    Failure = IdentMismatch,
     FailFast = FailFast,
 > + 'a {
     move |s: Lexer<'s>| {
-        let state = identifier(s)?
-            .map_failure(VariableFailure::Ident)
-            .transform(|(ident, _)| match frag.stack().lookup(ident) {
+        let state =
+            identifier(s)?.try_map_output(|(ident, _)| match frag.stack().lookup(ident) {
                 NameLookup::Local(slot) => Ok(slot),
                 NameLookup::Upvalue => Err(VariableFailure::UnsupportedUpvalue),
                 NameLookup::Global => Err(VariableFailure::UnsupportedGlobal),
-            })
-            .map_failure(Into::into);
+            })?;
 
         Ok(state)
     }
@@ -277,7 +291,6 @@ fn variable<'s, 'a>(
 #[derive(Debug, Error)]
 #[error("failed to parse variable")]
 pub(crate) enum VariableFailure {
-    Ident(IdentMismatch),
     #[error("upvalues are not yet supported")]
     UnsupportedUpvalue,
     #[error("globals are not yet supported")]

@@ -57,21 +57,13 @@ pub(crate) fn par_expr<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use ParExprFailure::*;
+        use expr::ExprFailure;
 
-        let par_l = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(match_token(Token::ParL)
-                .parse(s)?
-                .map_failure(ParL)
-                .map_failure(Into::<ParseFailure>::into))
-        };
+        let par_l =
+            match_token(Token::ParL).map_failure(|f| ParseFailure::from(ExprFailure::ParL(f)));
 
-        let par_r = |s: Lexer<'s>| -> Result<_, FailFast> {
-            Ok(match_token(Token::ParR)
-                .parse(s)?
-                .map_failure(ParR)
-                .map_failure(Into::<ParseFailure>::into))
-        };
+        let par_r =
+            match_token(Token::ParR).map_failure(|f| ParseFailure::from(ExprFailure::ParR(f)));
 
         let r = par_l
             .parse(s)?
@@ -87,10 +79,7 @@ pub(crate) fn par_expr<'s, 'origin>(
 
 #[derive(Debug, Error)]
 #[error("failed to parse parenthesised expression")]
-pub enum ParExprFailure {
-    ParL(TokenMismatch),
-    ParR(TokenMismatch),
-}
+pub enum ParExprFailure {}
 
 pub(crate) fn expr_list<'s, 'origin>(
     mut frag: Fragment<'s, 'origin>,
