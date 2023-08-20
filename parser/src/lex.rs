@@ -179,8 +179,8 @@ pub enum Token<'s> {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'s str),
 
-    #[regex("\"(([\\\\](\r\n|.))|[^\"\\\\\r\n])*\"", |lex| RawLiteralString(lex.slice()))]
-    #[regex("'(([\\\\](\r\n|.))|[^'\\\\\r\n])*'", |lex| RawLiteralString(lex.slice()))]
+    #[regex(r#""((\\((\r\n)|.))|[^"\\])*""#, |lex| RawLiteralString(lex.slice()))]
+    #[regex(r#"'((\\((\r\n)|.))|[^'\\])*'"#, |lex| RawLiteralString(lex.slice()))]
     ShortLiteralString(RawLiteralString<'s>),
 
     #[regex("[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?", |lex| RawNumber(lex.slice()))]
@@ -210,13 +210,31 @@ impl<'s> RawLiteralString<'s> {
             return Ok(s.into());
         }
 
+        fn hex_digit(c: char) -> Option<u32> {
+            let r = match c {
+                '0'..='9' => c as u32 - '0' as u32,
+                'a'..='f' => 10 + (c as u32 - 'a' as u32),
+                'A'..='F' => 10 + (c as u32 - 'A' as u32),
+                _ => return None,
+            };
+
+            Some(r)
+        }
+
+        fn digit(c: char) -> Option<u32> {
+            match c {
+                '0'..='9' => Some(c as u32 - '0' as u32),
+                _ => None,
+            }
+        }
+
         let mut r = String::with_capacity(s.len());
 
         while let Some(i) = s.find('\\') {
             r += &s[..i];
             s = &s[i..];
 
-            let mut iter = s.char_indices();
+            let mut iter = s.char_indices().peekable();
             let _ = iter.next();
             let (_, c) = iter.next().unwrap();
 
@@ -234,8 +252,7 @@ impl<'s> RawLiteralString<'s> {
                     '\'' => Some(0x27),
                     '\n' => Some(0x0a),
                     '\r' => {
-                        let r = (&mut iter)
-                            .peekable()
+                        let r = iter
                             .next_if(|&(_, c)| c == '\n')
                             .map(|_| 0x0a)
                             .ok_or(UnknownEscapeSequenceError)?;
@@ -243,18 +260,64 @@ impl<'s> RawLiteralString<'s> {
                         Some(r)
                     }
                     'z' => {
-                        while (&mut iter)
-                            .peekable()
-                            .next_if(|(_, c)| c.is_whitespace())
-                            .is_some()
-                        {}
+                        while iter.next_if(|(_, c)| c.is_whitespace()).is_some() {}
 
                         None
+                    }
+                    'x' => {
+                        let (_, n1) = iter.next().ok_or(UnknownEscapeSequenceError)?;
+                        let (_, n0) = iter.next().ok_or(UnknownEscapeSequenceError)?;
+
+                        let n1 = hex_digit(n1).ok_or(UnknownEscapeSequenceError)?;
+                        let n0 = hex_digit(n0).ok_or(UnknownEscapeSequenceError)?;
+
+                        let r = n1 * 16 + n0;
+
+                        Some(r)
+                    }
+                    'u' => {
+                        match iter.next() {
+                            Some((_, '{')) => (),
+                            _ => return Err(UnknownEscapeSequenceError),
+                        }
+
+                        let mut r = 0;
+
+                        loop {
+                            match iter.next() {
+                                Some((_, d @ '0'..='9')) => {
+                                    r *= 16;
+                                    r += hex_digit(d).unwrap();
+                                }
+                                Some((_, '}')) => break,
+                                _ => return Err(UnknownEscapeSequenceError),
+                            }
+                        }
+
+                        Some(r)
+                    }
+                    '0'..='9' => {
+                        let mut r = digit(c).unwrap();
+
+                        for _ in 0..2 {
+                            if let Some(digit) = iter
+                                .next_if(|(_, c)| c.is_numeric())
+                                .map(|(_, c)| digit(c).unwrap())
+                            {
+                                r *= 10;
+                                r += digit;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        Some(r)
                     }
                     _ => return Err(UnknownEscapeSequenceError),
                 };
 
-                code.map(|code| char::from_u32(code).unwrap())
+                code.map(|code| char::from_u32(code).ok_or(UnknownEscapeSequenceError))
+                    .transpose()?
             };
 
             if let Some(c) = unescaped {

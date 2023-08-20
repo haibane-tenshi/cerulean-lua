@@ -4,7 +4,9 @@ local _ = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890 `~!@#$
 local _ = "'"
 local _ = '"'
 
-local _ = "\a\b\f\n\r\t\v\'\"\\"
+local _ = "\a\b\f\n\r\t\v\'\""
+local _ = "\\"
+local _ = "\\\\\\"
 local _ = "abc\
 def"
 local _ = "abc\z
