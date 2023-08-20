@@ -27,7 +27,7 @@ pub(crate) fn table<'s, 'frag>(
 
                 Ok(table_slot)
             })?
-            .then(|table_slot| field_list(table_slot, frag.new_fragment()))?
+            .then(|table_slot| field_list(table_slot, frag.new_fragment()).optional())?
             .and(curly_r)?
             .map_output(move |_| {
                 frag.commit();
@@ -58,7 +58,7 @@ fn field_list<'s, 'origin>(
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
-    Success = ParseFailure,
+    Success = CompleteOr<ParseFailure>,
     Failure = ParseFailure,
     FailFast = FailFast,
 > + 'origin {
@@ -74,6 +74,8 @@ fn field_list<'s, 'origin>(
             Ok(r)
         };
 
+        let field_sep = field_sep.map_failure(|f| ParseFailure::from(TableFailure::Sep(f)));
+
         let state = first_field.parse_once(s)?;
 
         let next = |s: Lexer<'s>| {
@@ -87,14 +89,15 @@ fn field_list<'s, 'origin>(
                 Ok(r)
             };
 
-            field_sep(s)?
-                .map_failure(|f| ParseFailure::from(TableFailure::Sep(f)))
-                .and(field)
+            field_sep.parse(s)?.and(field)
         };
 
-        let r = state.and(next.repeat())?.map_output(|_| {
-            frag.commit();
-        });
+        let r = state
+            .and(next.repeat())?
+            .and(field_sep.map_success(CompleteOr::Complete).optional())?
+            .map_output(|_| {
+                frag.commit();
+            });
 
         Ok(r)
     }
