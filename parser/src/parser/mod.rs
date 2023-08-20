@@ -28,7 +28,7 @@ impl<'s> NextToken for Lexer<'s> {
     fn next_token(&mut self) -> Result<Result<Self::Token, Eof>, LexError> {
         match self.next() {
             Some(Ok(token)) => Ok(Ok(token)),
-            Some(Err(err)) => Err(LexError::Token(err)),
+            Some(Err(_err)) => Err(LexError::Token(self.span())),
             None => Ok(Err(Eof)),
         }
     }
@@ -68,7 +68,8 @@ impl Error {
     pub fn into_diagnostic(self) -> codespan_reporting::diagnostic::Diagnostic<()> {
         match self {
             Error::Parse(err) => err.into_diagnostic(),
-            _ => todo!(),
+            Error::Lex(err) => err.into_diagnostic(),
+            _ => todo!("{:?}", self),
         }
     }
 }

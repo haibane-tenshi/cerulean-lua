@@ -26,6 +26,7 @@
 
 use std::ops::{BitOr, BitOrAssign};
 
+use logos::Span;
 use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
 use thiserror::Error;
 
@@ -51,10 +52,47 @@ use crate::codegen::stack::{
     VariadicStackError,
 };
 
-pub use crate::lex::Error as LexError;
 pub use std::convert::Infallible as Never;
 
 // use prelude::*;
+
+#[derive(Debug, Error)]
+#[error("failed to tokenize input")]
+pub enum LexError {
+    Token(Span),
+    Str(Span),
+    Number(Span),
+}
+
+impl LexError {
+    pub fn into_diagnostic(self) -> codespan_reporting::diagnostic::Diagnostic<()> {
+        use codespan_reporting::diagnostic::{Diagnostic, Label};
+
+        match self {
+            LexError::Token(span) => {
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error()
+                    .with_labels(labels)
+                    .with_message("encountered unrecognized token")
+            }
+            LexError::Number(span) => {
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error()
+                    .with_labels(labels)
+                    .with_message("number is written in unrecognized format")
+            }
+            LexError::Str(span) => {
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error()
+                    .with_labels(labels)
+                    .with_message("string contains unknown escape sequence")
+            }
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 #[error("codegen error")]

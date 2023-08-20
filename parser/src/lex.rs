@@ -409,11 +409,3 @@ pub struct UnknownNumberFormatError;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Error)]
 #[error("unrecognized character sequence")]
 pub struct UnrecognizedTokenError;
-
-#[derive(Debug, Error)]
-#[error("failed to tokenize input")]
-pub enum Error {
-    Token(#[from] UnrecognizedTokenError),
-    Str(#[from] UnknownEscapeSequenceError),
-    Number(#[from] UnknownNumberFormatError),
-}

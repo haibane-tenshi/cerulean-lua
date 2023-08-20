@@ -72,12 +72,17 @@ pub(crate) fn literal(
         Ok(Token::Nil) => Literal::Nil,
         Ok(Token::True) => Literal::Bool(true),
         Ok(Token::False) => Literal::Bool(false),
-        Ok(Token::Numeral(raw_number)) => match raw_number.parse()? {
-            Number::Int(n) => Literal::Int(n),
-            Number::Float(n) => Literal::Float(n),
-        },
+        Ok(Token::Numeral(raw_number)) => {
+            match raw_number.parse().map_err(|_| LexError::Number(s.span()))? {
+                Number::Int(n) => Literal::Int(n),
+                Number::Float(n) => Literal::Float(n),
+            }
+        }
         Ok(Token::ShortLiteralString(raw_str)) => {
-            let r = raw_str.unescape()?.to_string();
+            let r = raw_str
+                .unescape()
+                .map_err(|_| LexError::Str(s.span()))?
+                .to_string();
             Literal::String(r)
         }
         Ok(_) | Err(Eof) => return Ok(ParsingState::Failure(LiteralMismatch)),
@@ -96,7 +101,7 @@ pub(crate) fn literal_str(
 ) -> Result<ParsingState<Lexer, (Cow<str>, Span), Complete, LiteralStrMismatch>, LexError> {
     let r = match s.next_token()? {
         Ok(Token::ShortLiteralString(raw_str)) => {
-            let r = raw_str.unescape()?;
+            let r = raw_str.unescape().map_err(|_| LexError::Str(s.span()))?;
             let span = s.span();
             ParsingState::Success(s, (r, span), Complete)
         }
