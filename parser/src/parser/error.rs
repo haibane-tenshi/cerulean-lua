@@ -216,7 +216,7 @@ where
 #[derive(Debug, Error)]
 pub(crate) enum ParseCause {
     #[error("expected expression")]
-    ExpectedExpr,
+    ExpectedExpr(Span),
     #[error("failed to parse table constructor")]
     TableExpr(#[from] TableFailure),
     #[error("failed to parse function expression")]
@@ -265,7 +265,13 @@ impl ParseCause {
         type Diagnostic = codespan_reporting::diagnostic::Diagnostic<()>;
 
         match self {
-            ParseCause::ExpectedExpr => Diagnostic::error().with_message("expected expression"),
+            ParseCause::ExpectedExpr(span) => {
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error()
+                    .with_labels(labels)
+                    .with_message("expected expression")
+            }
             ParseCause::TableExpr(err) => {
                 use super::expr::table::{BracketFailure, NameFailure};
                 use TableFailure::*;

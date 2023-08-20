@@ -11,10 +11,15 @@ pub(crate) fn expr<'s, 'origin>(
     Failure = ParseFailure,
     FailFast = FailFast,
 > + 'origin {
-    move |s: Lexer<'s>| {
+    move |mut s: Lexer<'s>| {
         let r = expr_impl(0, frag)
-            .parse_once(s)?
-            .map_failure(|failure| failure.arrow(ParseFailure::from(ParseCause::ExpectedExpr)))
+            .parse_once(s.clone())?
+            .map_failure(|failure| {
+                let _ = s.next();
+                let err = ParseFailure::from(ParseCause::ExpectedExpr(s.span()));
+
+                failure.arrow(err)
+            })
             .map_success(|success| match success {
                 ExprSuccess::LessTightlyBound => {
                     unreachable!("there should be no ops with binding power below 0")
