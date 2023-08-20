@@ -22,7 +22,7 @@ pub(crate) fn return_<'s, 'origin>(
             .parse(s)?
             .with_mode(FailureMode::Malformed)
             .try_map_output(|_| frag.stack().top())?
-            .and_discard(expr_list(frag.new_fragment()))?
+            .and_discard(expr_list(frag.new_fragment()).optional())?
             .and_discard(
                 token_semicolon
                     .optional()
