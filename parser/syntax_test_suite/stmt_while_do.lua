@@ -9,5 +9,4 @@ while a == nil do end
 
 while nil do
    local b = a
-   break
 end

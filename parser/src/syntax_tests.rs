@@ -157,3 +157,8 @@ fn stmt_repeat_until() -> Result<(), Box<dyn Error>> {
 fn stmt_while_do() -> Result<(), Box<dyn Error>> {
     run_test_pass("./syntax_test_suite/stmt_while_do.lua")
 }
+
+#[test]
+fn stmt_break() -> Result<(), Box<dyn Error>> {
+    run_test_pass("./syntax_test_suite/stmt_break.lua")
+}
