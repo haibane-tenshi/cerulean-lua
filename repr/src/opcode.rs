@@ -11,12 +11,8 @@ pub enum OpCode {
     LoadStack(StackSlot),
     StoreStack(StackSlot),
     AdjustStack(StackSlot),
-    AriUnaOp(AriUnaOp),
-    AriBinOp(AriBinOp),
-    BitUnaOp(BitUnaOp),
-    BitBinOp(BitBinOp),
-    RelBinOp(RelBinOp),
-    StrBinOp(StrBinOp),
+    BinOp(BinOp),
+    UnaOp(UnaOp),
     Jump { offset: InstrOffset },
     JumpIf { cond: bool, offset: InstrOffset },
     Loop { offset: InstrOffset },
@@ -38,12 +34,8 @@ impl Display for OpCode {
             LoadStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "LoadStack"),
             StoreStack(StackSlot(index)) => format!("{:<10} [{index:>3}]", "StoreStack"),
             AdjustStack(StackSlot(height)) => format!("{:<10} [{height:>3}]", "AdjustStack"),
-            AriUnaOp(op) => format!("{:<10} [{op}]", "AriUnaOp"),
-            AriBinOp(op) => format!("{:<10} [{op}]", "AriBinOp"),
-            BitUnaOp(op) => format!("{:<10} [{op}]", "BitUnaOp"),
-            BitBinOp(op) => format!("{:<10} [{op}]", "BitBinOp"),
-            RelBinOp(op) => format!("{:<10} [{op}]", "RelBinOp"),
-            StrBinOp(op) => format!("{:<10} [{op}]", "StrBinOp"),
+            BinOp(op) => format!("{:<10} [{op}]", "BinaryOp"),
+            UnaOp(op) => format!("{:<10} [{op}]", "UnaryOp"),
             Jump { offset } => format!("{:<10} [{:>3}]", "Jump", offset.0),
             JumpIf { cond, offset } => format!("{:<10} [{cond:>5}] [{:>3}]", "JumpIf", offset.0),
             Loop { offset } => format!("{:<10} [{:>3}]", "Loop", offset.0),
@@ -51,21 +43,6 @@ impl Display for OpCode {
             TabCreate => format!("{:<10}", "TabCreate"),
             TabSet => format!("{:<10}", "TabSet"),
             TabGet => format!("{:<10}", "TabGet"),
-        };
-
-        write!(f, "{s}")
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum AriUnaOp {
-    Neg,
-}
-
-impl Display for AriUnaOp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match *self {
-            AriUnaOp::Neg => '-',
         };
 
         write!(f, "{s}")
@@ -95,21 +72,6 @@ impl Display for AriBinOp {
             FloorDiv => "//",
             Rem => "%",
             Exp => "^",
-        };
-
-        write!(f, "{s}")
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum BitUnaOp {
-    Not,
-}
-
-impl Display for BitUnaOp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match *self {
-            BitUnaOp::Not => "~",
         };
 
         write!(f, "{s}")
@@ -176,5 +138,41 @@ impl Display for StrBinOp {
         };
 
         write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BinOp {
+    Ari(AriBinOp),
+    Bit(BitBinOp),
+    Rel(RelBinOp),
+    Str(StrBinOp),
+}
+
+impl Display for BinOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinOp::Ari(t) => write!(f, "{}", t),
+            BinOp::Bit(t) => write!(f, "{}", t),
+            BinOp::Rel(t) => write!(f, "{}", t),
+            BinOp::Str(t) => write!(f, "{}", t),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnaOp {
+    AriNeg,
+    BitNot,
+}
+
+impl Display for UnaOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            UnaOp::AriNeg => "-",
+            UnaOp::BitNot => "~",
+        };
+
+        write!(f, "{}", s)
     }
 }
