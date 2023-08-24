@@ -57,10 +57,11 @@ fn expr_impl<'s, 'origin>(
         let stack_start = frag.stack().top();
 
         let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let frag = &mut frag;
-            let r = prefix_op(s.clone())?
+            let mut frag = frag.new_fragment();
+            let r = prefix_op(s)?
                 .map_failure(|f| ParseFailure::from(ExprFailure::Prefix(f)))
                 .then(|op| {
+                    let frag = &mut frag;
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
                         let ((), rhs_bp) = op.binding_power();
 
@@ -78,7 +79,10 @@ fn expr_impl<'s, 'origin>(
 
                         Ok(r)
                     }
-                })?;
+                })?
+                .map_output(|_| {
+                    frag.commit();
+                });
 
             Ok(r)
         };
@@ -97,7 +101,7 @@ fn expr_impl<'s, 'origin>(
             ParsingState<Lexer<'s>, (), ExprSuccess, ExprSuccess>,
             FailFast,
         > {
-            let mut frag = frag.new_fragment();
+            let mut frag = frag.new_fragment_at(stack_start);
             let r = infix_op(s)?
                 .map_failure(|failure| ExprSuccess::Parsing(ExprFailure::Infix(failure).into()))
                 .with_mode(FailureMode::Malformed)
