@@ -224,6 +224,8 @@ impl From<StrBinOp> for BinOp {
 pub enum UnaOp {
     AriNeg,
     BitNot,
+    StrLen,
+    LogNot,
 }
 
 impl Display for UnaOp {
@@ -231,6 +233,8 @@ impl Display for UnaOp {
         let s = match self {
             UnaOp::AriNeg => "-",
             UnaOp::BitNot => "~",
+            UnaOp::StrLen => "#",
+            UnaOp::LogNot => "not",
         };
 
         write!(f, "{}", s)

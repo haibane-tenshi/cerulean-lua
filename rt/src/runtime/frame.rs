@@ -94,6 +94,16 @@ impl<'rt> ActiveFrame<'rt> {
                         Value::Int(val) => Value::Int(!val),
                         _ => return Err(RuntimeError),
                     },
+                    UnaOp::StrLen => match val {
+                        Value::String(val) => Value::Int(val.len().try_into().unwrap()),
+                        Value::Table(val) => {
+                            let border = val.borrow().map_err(|_| RuntimeError)?.border();
+
+                            Value::Int(border)
+                        }
+                        _ => return Err(RuntimeError),
+                    },
+                    UnaOp::LogNot => Value::Bool(!val.as_boolish()),
                 };
 
                 self.stack.push(r);

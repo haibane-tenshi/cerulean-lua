@@ -275,6 +275,8 @@ fn prefix_op(
     let op = match s.next_token()? {
         Ok(Token::MinusSign) => Prefix(UnaOp::AriNeg),
         Ok(Token::Tilde) => Prefix(UnaOp::BitNot),
+        Ok(Token::Hash) => Prefix(UnaOp::StrLen),
+        Ok(Token::Not) => Prefix(UnaOp::LogNot),
         _ => {
             let span = s.span();
             return Ok(ParsingState::Failure(PrefixMismatchError { span }));
@@ -335,10 +337,7 @@ struct Prefix(UnaOp);
 
 impl Prefix {
     fn binding_power(self) -> ((), u64) {
-        match self.0 {
-            UnaOp::AriNeg => ((), 24),
-            UnaOp::BitNot => ((), 24),
-        }
+        ((), 24)
     }
 }
 

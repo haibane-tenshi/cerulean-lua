@@ -25,6 +25,13 @@ impl Table {
             self.data.insert(key, value);
         }
     }
+
+    pub fn border(&self) -> i64 {
+        // Inefficient, but will get fixed when table layout is improved.
+        (0..)
+            .find(|&i| !self.data.contains_key(&KeyValue::Int(i + 1)))
+            .unwrap_or(i64::MAX)
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
