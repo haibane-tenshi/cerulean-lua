@@ -10,14 +10,11 @@ pub(crate) fn literal<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let r = crate::parser::basic::literal(s)?.try_map_output(
-            move |(literal, _)| -> Result<_, CodegenError> {
-                frag.emit_load_literal(literal)?;
+        let r = crate::parser::basic::literal(s)?.map_output(move |(literal, _)| {
+            frag.emit_load_literal(literal);
 
-                frag.commit();
-                Ok(())
-            },
-        )?;
+            frag.commit();
+        });
 
         Ok(r)
     }

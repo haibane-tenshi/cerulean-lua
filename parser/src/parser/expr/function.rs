@@ -21,12 +21,11 @@ pub(crate) fn function<'s, 'origin>(
             .parse(s)?
             .with_mode(FailureMode::Malformed)
             .and(func_body(frag.new_fragment()))?
-            .try_map_output(|(_, func_id)| -> Result<_, CodegenError> {
-                frag.emit_load_literal(Literal::Function(func_id))?;
+            .map_output(|(_, func_id)| {
+                frag.emit_load_literal(Literal::Function(func_id));
 
                 frag.commit();
-                Ok(())
-            })?
+            })
             .collapse();
 
         Ok(r)

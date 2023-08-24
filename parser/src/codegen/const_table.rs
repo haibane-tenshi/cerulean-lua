@@ -80,8 +80,12 @@ impl<'a> ConstTableView<'a> {
         ConstTableView::new(self.constants)
     }
 
-    pub fn insert(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {
+    pub fn try_insert(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {
         self.constants.insert(value)
+    }
+
+    pub fn insert(&mut self, value: Literal) -> ConstId {
+        self.try_insert(value).unwrap()
     }
 
     pub fn commit(self) {

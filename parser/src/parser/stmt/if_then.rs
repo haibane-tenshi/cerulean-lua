@@ -32,11 +32,11 @@ pub(crate) fn if_then<'s, 'origin>(
             .and(|s| -> Result<_, FailFast> {
                 let mut frag = frag.new_fragment_at_boundary();
 
-                frag.emit_jump_to(frag.id(), Some(false))?;
+                frag.emit_jump_to(frag.id(), Some(false));
 
                 let state = block(frag.new_fragment()).parse_once(s)?;
 
-                frag.emit_jump_to(outer, None)?;
+                frag.emit_jump_to(outer, None);
 
                 frag.commit();
                 Ok(state)
@@ -94,11 +94,11 @@ fn else_if_clause<'s, 'origin>(
             .and(|s| -> Result<_, FailFast> {
                 let mut frag = frag.new_fragment_at_boundary();
 
-                frag.emit_jump_to(frag.id(), Some(false))?;
+                frag.emit_jump_to(frag.id(), Some(false));
 
                 let state = block(frag.new_fragment()).parse_once(s)?;
 
-                frag.emit_jump_to(outer, None)?;
+                frag.emit_jump_to(outer, None);
 
                 frag.commit();
                 Ok(state)

@@ -77,7 +77,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
                 OpCode::Return(_) => (),
                 // This opcode never returns, however it grabs the top value as panic message.
                 OpCode::Panic => {
-                    self.stack.pop()?;
+                    self.stack.try_pop()?;
                 }
                 OpCode::Invoke(slot) => {
                     if slot > self.stack.raw_top() {
@@ -86,31 +86,31 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
                     // Stack space at `slot` and above is consumed during invocation.
                     // Function returns are always variadic.
-                    self.stack.adjust_to(slot)?;
+                    self.stack.try_adjust_to(slot)?;
                     self.stack.make_variadic();
                 }
 
                 OpCode::LoadConstant(_) | OpCode::LoadStack(_) | OpCode::TabCreate => {
-                    self.stack.push()?;
+                    self.stack.try_push()?;
                 }
                 OpCode::StoreStack(_) => {
-                    self.stack.pop()?;
+                    self.stack.try_pop()?;
                 }
                 OpCode::AdjustStack(slot) => {
-                    self.stack.adjust_to(slot)?;
+                    self.stack.try_adjust_to(slot)?;
                 }
                 OpCode::AriUnaOp(_) | OpCode::BitUnaOp(_) => {
-                    self.stack.pop()?;
-                    self.stack.push()?;
+                    self.stack.try_pop()?;
+                    self.stack.try_push()?;
                 }
 
                 OpCode::AriBinOp(_)
                 | OpCode::BitBinOp(_)
                 | OpCode::RelBinOp(_)
                 | OpCode::StrBinOp(_) => {
-                    self.stack.pop()?;
-                    self.stack.pop()?;
-                    self.stack.push()?;
+                    self.stack.try_pop()?;
+                    self.stack.try_pop()?;
+                    self.stack.try_push()?;
                 }
 
                 OpCode::Jump { .. }
@@ -118,14 +118,14 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
                 | OpCode::Loop { .. }
                 | OpCode::LoopIf { .. } => (),
                 OpCode::TabGet => {
-                    self.stack.pop()?;
-                    self.stack.pop()?;
-                    self.stack.push()?;
+                    self.stack.try_pop()?;
+                    self.stack.try_pop()?;
+                    self.stack.try_push()?;
                 }
                 OpCode::TabSet => {
-                    self.stack.pop()?;
-                    self.stack.pop()?;
-                    self.stack.pop()?;
+                    self.stack.try_pop()?;
+                    self.stack.try_pop()?;
+                    self.stack.try_pop()?;
                 }
             }
         }
@@ -133,12 +133,16 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.fun.emit(instr).map_err(Into::into)
     }
 
-    pub fn emit(&mut self, instr: OpCode) -> Result<InstrId, EmitError> {
+    pub fn try_emit(&mut self, instr: OpCode) -> Result<InstrId, EmitError> {
         self.emit_raw(instr, true)
     }
 
-    pub fn emit_adjust_to(&mut self, slot: StackSlot) -> Result<Option<InstrId>, EmitError> {
-        let need_adjustment = self.stack.adjust_to(slot)?;
+    pub fn emit(&mut self, instr: OpCode) -> InstrId {
+        self.try_emit(instr).unwrap()
+    }
+
+    pub fn try_emit_adjust_to(&mut self, slot: StackSlot) -> Result<Option<InstrId>, EmitError> {
+        let need_adjustment = self.stack.try_adjust_to(slot)?;
 
         let instr_id = if need_adjustment {
             let id = self.emit_raw(OpCode::AdjustStack(slot), false)?;
@@ -150,7 +154,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn emit_jump_to(
+    pub fn emit_adjust_to(&mut self, slot: StackSlot) -> Option<InstrId> {
+        self.try_emit_adjust_to(slot).unwrap()
+    }
+
+    pub fn try_emit_jump_to(
         &mut self,
         target: FragmentId,
         cond: Option<bool>,
@@ -165,25 +173,40 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             },
         };
 
-        let instr_id = self.emit(opcode)?;
+        let instr_id = self.try_emit(opcode)?;
         self.fun.register_jump(target, instr_id, self.stack.state());
 
         Ok(instr_id)
     }
 
-    pub fn emit_loop_to(&mut self) -> Result<(), EmitError> {
-        self.emit_adjust_to(self.stack.boundary())?;
+    pub fn emit_jump_to(&mut self, target: FragmentId, cond: Option<bool>) -> InstrId {
+        self.try_emit_jump_to(target, cond).unwrap()
+    }
+
+    pub fn try_emit_loop_to(&mut self) -> Result<(), EmitError> {
+        self.try_emit_adjust_to(self.stack.boundary())?;
         let offset = self.fun.len() - self.fun.start() + 1;
-        self.emit(OpCode::Loop { offset })?;
+        self.try_emit(OpCode::Loop { offset })?;
 
         Ok(())
     }
 
-    pub fn emit_load_literal(&mut self, literal: Literal) -> Result<InstrId, EmitLoadLiteralError> {
-        let const_id = self.const_table.insert(literal)?;
-        let instr_id = self.emit(OpCode::LoadConstant(const_id))?;
+    pub fn emit_loop_to(&mut self) {
+        self.try_emit_loop_to().unwrap()
+    }
+
+    pub fn try_emit_load_literal(
+        &mut self,
+        literal: Literal,
+    ) -> Result<InstrId, EmitLoadLiteralError> {
+        let const_id = self.const_table.try_insert(literal)?;
+        let instr_id = self.try_emit(OpCode::LoadConstant(const_id))?;
 
         Ok(instr_id)
+    }
+
+    pub fn emit_load_literal(&mut self, literal: Literal) -> InstrId {
+        self.try_emit_load_literal(literal).unwrap()
     }
 
     // pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
@@ -235,7 +258,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         }
     }
 
-    pub fn new_fragment_at(
+    pub fn try_new_fragment_at(
         &mut self,
         slot: StackSlot,
     ) -> Result<Fragment<'s, '_>, NewBlockAtError> {
@@ -249,7 +272,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let func_table = func_table.new_view();
         let const_table = const_table.new_view();
         let fun = fun.new_block();
-        let stack = stack.new_block_at(slot)?;
+        let stack = stack.try_new_block_at(slot)?;
 
         let r = Fragment {
             func_table,
@@ -261,8 +284,12 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(r)
     }
 
+    pub fn new_fragment_at(&mut self, slot: StackSlot) -> Fragment<'s, '_> {
+        self.try_new_fragment_at(slot).unwrap()
+    }
+
     pub fn new_fragment_at_boundary(&mut self) -> Fragment<'s, '_> {
-        self.new_fragment_at(self.stack.boundary()).unwrap()
+        self.new_fragment_at(self.stack.boundary())
     }
 
     fn commit_impl(self, preserve_stack: bool) {
@@ -286,7 +313,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         };
 
         if let Some(state) = final_state {
-            stack.apply(state).unwrap();
+            stack.apply(state);
         }
 
         stack.commit(preserve_stack);

@@ -21,18 +21,17 @@ pub(crate) fn return_<'s, 'origin>(
         let state = token_return
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .try_map_output(|_| frag.stack().top())?
+            .map_output(|_| frag.stack().top())
             .and_discard(expr_list(frag.new_fragment()).optional())?
             .and_discard(
                 token_semicolon
                     .optional()
                     .map_success(ParseFailureOrComplete::Complete),
             )?
-            .try_map_output(|slot| -> Result<_, CodegenError> {
-                frag.emit(OpCode::Return(slot))?;
+            .map_output(|slot| {
+                frag.emit(OpCode::Return(slot));
                 frag.commit();
-                Ok(())
-            })?
+            })
             .collapse();
 
         Ok(state)

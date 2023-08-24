@@ -26,18 +26,17 @@ pub(crate) fn local_function<'s, 'origin>(
             .and(token_function)?
             .with_mode(FailureMode::Malformed)
             .and_with(identifier, |_, (ident, _)| ident)?
-            .try_map_output(|ident| -> Result<_, CodegenError> {
+            .map_output(|ident| {
                 // Lua disambiguates this case by introducing local variable first and assigning to it later.
                 // This is relevant for recursive functions.
                 // We only need to introduce the name:
                 // it will get assigned to after function body is parsed.
-                let slot = frag.stack_mut().push()?;
-                frag.stack_mut().give_name(slot, ident)?;
-                Ok(())
-            })?
+                let slot = frag.stack_mut().push();
+                frag.stack_mut().give_name(slot, ident);
+            })
             .and_replace(func_body(frag.new_fragment()))?
             .try_map_output(|func_id| -> Result<_, CodegenError> {
-                let const_id = frag.const_table_mut().insert(Literal::Function(func_id))?;
+                let const_id = frag.const_table_mut().insert(Literal::Function(func_id));
 
                 // Stack is already adjusted, we just need to silently write to correct slot here.
                 frag.emit_raw(OpCode::LoadConstant(const_id), false)?;

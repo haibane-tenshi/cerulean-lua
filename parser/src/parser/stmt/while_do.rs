@@ -33,10 +33,10 @@ pub(crate) fn while_do<'s, 'origin>(
                 }
             })?
             .and_discard(token_do)?
-            .try_map_output(|mut frag| -> Result<_, CodegenError> {
-                frag.emit_jump_to(frag.id(), Some(false))?;
-                Ok(frag)
-            })?
+            .map_output(|mut frag| {
+                frag.emit_jump_to(frag.id(), Some(false));
+                frag
+            })
             .then(|mut frag| {
                 move |s| -> Result<_, FailFast> {
                     Ok(block(frag.new_fragment())
@@ -45,11 +45,10 @@ pub(crate) fn while_do<'s, 'origin>(
                 }
             })?
             .and_discard(token_end)?
-            .try_map_output(|mut frag| -> Result<_, CodegenError> {
-                frag.emit_loop_to()?;
+            .map_output(|mut frag| {
+                frag.emit_loop_to();
                 frag.commit();
-                Ok(())
-            })?
+            })
             .collapse();
 
         let state = state.map_output(|_| outer_frag.commit());

@@ -33,46 +33,46 @@ pub(crate) fn generic_for<'s, 'origin>(
             .and_discard(token_in)?
             .with_mode(FailureMode::Malformed)
             .and(|s| {
-                let top = outer_frag.stack().top()?;
+                let top = outer_frag.stack().top();
                 expr_list_adjusted_to(4, outer_frag.new_fragment())
                     .map_output(|_| top)
                     .parse_once(s)
             })?
-            .try_map_output(|(names, top)| -> Result<_, CodegenError> {
+            .map_output(|(names, top)| {
                 let iter = top;
                 let state = top + 1;
                 let control = top + 2;
                 // Currently unimplemented.
                 let _close = top + 3;
 
-                let nil = outer_frag.const_table_mut().insert(Literal::Nil)?;
+                let nil = outer_frag.const_table_mut().insert(Literal::Nil);
 
                 let mut frag = outer_frag.new_fragment();
-                let new_control = frag.stack().top()?;
+                let new_control = frag.stack().top();
 
-                frag.emit(OpCode::LoadStack(iter))?;
-                frag.emit(OpCode::LoadStack(state))?;
-                frag.emit(OpCode::LoadStack(control))?;
-                frag.emit(OpCode::Invoke(new_control))?;
+                frag.emit(OpCode::LoadStack(iter));
+                frag.emit(OpCode::LoadStack(state));
+                frag.emit(OpCode::LoadStack(control));
+                frag.emit(OpCode::Invoke(new_control));
 
                 let count: u32 = names.len().try_into().unwrap();
-                frag.emit_adjust_to(new_control + count)?;
+                frag.emit_adjust_to(new_control + count);
 
-                frag.emit(OpCode::LoadStack(new_control))?;
-                frag.emit(OpCode::LoadConstant(nil))?;
-                frag.emit(OpCode::RelBinOp(RelBinOp::Eq))?;
-                frag.emit_jump_to(frag.id(), Some(true))?;
+                frag.emit(OpCode::LoadStack(new_control));
+                frag.emit(OpCode::LoadConstant(nil));
+                frag.emit(OpCode::RelBinOp(RelBinOp::Eq));
+                frag.emit_jump_to(frag.id(), Some(true));
 
-                frag.emit(OpCode::LoadStack(new_control))?;
-                frag.emit(OpCode::StoreStack(control))?;
+                frag.emit(OpCode::LoadStack(new_control));
+                frag.emit(OpCode::StoreStack(control));
 
                 // Assign names
                 for (name, slot) in names.into_iter().zip((new_control.0..).map(StackSlot)) {
-                    frag.stack_mut().give_name(slot, name)?;
+                    frag.stack_mut().give_name(slot, name);
                 }
 
-                Ok(frag)
-            })?
+                frag
+            })
             .and_discard(token_do)?
             .then(|mut frag| {
                 |s| -> Result<_, FailFast> {
@@ -82,11 +82,10 @@ pub(crate) fn generic_for<'s, 'origin>(
                 }
             })?
             .and_discard(token_end)?
-            .try_map_output(|mut frag| -> Result<_, CodegenError> {
-                frag.emit_loop_to()?;
+            .map_output(|mut frag| {
+                frag.emit_loop_to();
                 frag.commit_scope();
-                Ok(())
-            })?
+            })
             .collapse();
 
         let state = state.map_output(move |_| {

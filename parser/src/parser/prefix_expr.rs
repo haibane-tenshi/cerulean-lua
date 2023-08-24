@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-use crate::codegen::fragment::EmitError;
 use crate::parser::prelude::*;
 
 pub(crate) fn prefix_expr<'s, 'origin>(
@@ -15,15 +14,14 @@ pub(crate) fn prefix_expr<'s, 'origin>(
     move |s: Lexer<'s>| {
         let state = prefix_expr_impl(frag.new_fragment())
             .parse_once(s)?
-            .try_map_output(|output| -> Result<_, CodegenError> {
+            .map_output(|output| {
                 // Eagerly evaluate place.
                 if let PrefixExpr::Place(place) = output {
-                    place.eval(&mut frag)?;
+                    place.eval(&mut frag);
                 }
 
                 frag.commit();
-                Ok(())
-            })?;
+            });
 
         Ok(state)
     }
@@ -77,7 +75,7 @@ pub(crate) enum Place {
 }
 
 impl Place {
-    pub fn eval(self, frag: &mut Fragment) -> Result<InstrId, EmitError> {
+    pub fn eval(self, frag: &mut Fragment) -> InstrId {
         let opcode = match self {
             Place::Temporary(slot) => OpCode::LoadStack(slot),
             Place::TableField => OpCode::TabGet,
@@ -105,7 +103,7 @@ fn prefix_expr_impl<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::parser::expr::par_expr;
 
-        let stack_start = frag.stack().top()?;
+        let stack_start = frag.stack().top();
 
         let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
             let state = variable(&frag).parse(s.clone())?.map_failure(|_| Complete);
@@ -128,17 +126,17 @@ fn prefix_expr_impl<'s, 'origin>(
         };
 
         let next = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let mut frag = frag.new_fragment_at(stack_start).unwrap();
+            let mut frag = frag.new_fragment_at(stack_start);
 
             // Evaluate place.
             if let PrefixExpr::Place(place) = output {
-                place.eval(&mut frag)?;
+                place.eval(&mut frag);
             }
 
             // Adjust stack.
             // Prefix expressions (except the very last one) always evaluate to 1 value.
             // We are reusing the same stack slot to store it.
-            frag.emit_adjust_to(stack_start + 1)?;
+            frag.emit_adjust_to(stack_start + 1);
 
             let state = func_call(stack_start, frag.new_fragment_at_boundary())
                 .parse_once(s.clone())?
@@ -196,12 +194,11 @@ fn func_call<'s, 'origin>(
                     cause: ParseCause::FunctionCall,
                 }),
             )?
-            .try_map_output(move |_| -> Result<_, CodegenError> {
-                frag.emit(OpCode::Invoke(invoke_target))?;
+            .map_output(move |_| {
+                frag.emit(OpCode::Invoke(invoke_target));
 
                 frag.commit();
-                Ok(())
-            })?;
+            });
 
         Ok(state)
     }
@@ -253,13 +250,11 @@ fn args_str<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let state =
-            literal_str(s)?.try_map_output(move |(value, _)| -> Result<_, CodegenError> {
-                frag.emit_load_literal(Literal::String(value.into_owned()))?;
+        let state = literal_str(s)?.map_output(move |(value, _)| {
+            frag.emit_load_literal(Literal::String(value.into_owned()));
 
-                frag.commit();
-                Ok(())
-            })?;
+            frag.commit();
+        });
 
         Ok(state)
     }
@@ -314,12 +309,11 @@ fn field<'s, 'origin>(
         let state = token_dot
             .parse_once(s)?
             .and_with(identifier, |_, (ident, _)| ident)?
-            .try_map_output(move |ident| -> Result<_, CodegenError> {
-                frag.emit_load_literal(Literal::String(ident.to_string()))?;
+            .map_output(move |ident| {
+                frag.emit_load_literal(Literal::String(ident.to_string()));
 
                 frag.commit();
-                Ok(())
-            })?;
+            });
 
         Ok(state)
     }

@@ -284,7 +284,10 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
     }
 
-    pub fn new_block_at(&mut self, slot: StackSlot) -> Result<StackView<'s, '_>, NewBlockAtError> {
+    pub fn try_new_block_at(
+        &mut self,
+        slot: StackSlot,
+    ) -> Result<StackView<'s, '_>, NewBlockAtError> {
         let boundary = self.slot_to_global(slot);
 
         if boundary < self.inner_state.boundary {
@@ -301,6 +304,10 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         };
 
         Ok(r)
+    }
+
+    pub fn new_block_at(&mut self, slot: StackSlot) -> StackView<'s, '_> {
+        self.try_new_block_at(slot).unwrap()
     }
 
     pub fn new_frame(&mut self) -> StackView<'s, '_> {
@@ -341,31 +348,39 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
     }
 
-    pub fn apply(&mut self, state: StackState) -> Result<(), BoundaryViolationError> {
+    pub fn try_apply(&mut self, state: StackState) -> Result<(), BoundaryViolationError> {
         match state {
             StackState::Variadic => {
                 self.make_variadic();
             }
             StackState::Finite(height) => {
-                self.adjust_to(height)?;
+                self.try_adjust_to(height)?;
             }
         }
 
         Ok(())
     }
 
-    pub fn top(&self) -> Result<StackSlot, VariadicStackError> {
+    pub fn apply(&mut self, state: StackState) {
+        self.try_apply(state).unwrap()
+    }
+
+    pub fn try_top(&self) -> Result<StackSlot, VariadicStackError> {
         match self.state() {
             StackState::Finite(top) => Ok(top),
             StackState::Variadic => Err(VariadicStackError),
         }
     }
 
+    pub fn top(&self) -> StackSlot {
+        self.try_top().unwrap()
+    }
+
     pub fn boundary(&self) -> StackSlot {
         self.slot_to_frame(self.inner_state.boundary).unwrap()
     }
 
-    pub fn push(&mut self) -> Result<StackSlot, PushError> {
+    pub fn try_push(&mut self) -> Result<StackSlot, PushError> {
         if self.stack.variadic {
             return Err(VariadicStackError.into());
         }
@@ -376,7 +391,11 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         Ok(r)
     }
 
-    pub fn pop(&mut self) -> Result<(), PopError> {
+    pub fn push(&mut self) -> StackSlot {
+        self.try_push().unwrap()
+    }
+
+    pub fn try_pop(&mut self) -> Result<(), PopError> {
         if self.stack.variadic {
             return Err(VariadicStackError.into());
         }
@@ -392,11 +411,15 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         Ok(())
     }
 
+    pub fn pop(&mut self) {
+        self.try_pop().unwrap();
+    }
+
     pub fn make_variadic(&mut self) {
         self.stack.variadic = true;
     }
 
-    pub fn adjust_to(&mut self, height: StackSlot) -> Result<bool, BoundaryViolationError> {
+    pub fn try_adjust_to(&mut self, height: StackSlot) -> Result<bool, BoundaryViolationError> {
         let height = self.slot_to_global(height);
         if height < self.inner_state.boundary {
             return Err(BoundaryViolationError);
@@ -407,13 +430,21 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         Ok(r)
     }
 
-    pub fn give_name(&mut self, slot: StackSlot, name: &'s str) -> Result<(), GiveNameError> {
+    pub fn adjust_to(&mut self, height: StackSlot) -> bool {
+        self.try_adjust_to(height).unwrap()
+    }
+
+    pub fn try_give_name(&mut self, slot: StackSlot, name: &'s str) -> Result<(), GiveNameError> {
         let slot = self.slot_to_global(slot);
         if slot < self.inner_state.boundary {
             return Err(BoundaryViolationError.into());
         };
 
         self.stack.give_name(slot, name)
+    }
+
+    pub fn give_name(&mut self, slot: StackSlot, name: &'s str) {
+        self.try_give_name(slot, name).unwrap()
     }
 
     pub fn lookup(&self, name: &'s str) -> NameLookup {

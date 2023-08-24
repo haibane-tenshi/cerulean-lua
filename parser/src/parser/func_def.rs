@@ -27,7 +27,7 @@ pub(crate) fn func_body<'s, 'origin>(
 
         // Currently this slot contains pointer to function itself.
         // In the future we will put environment here instead.
-        frag.stack_mut().push()?;
+        frag.stack_mut().push();
 
         let state = token_par_l
             .parse_once(s)?
@@ -102,28 +102,22 @@ fn parlist<'s, 'origin>(
 
         let mut count = 0;
 
-        let state = identifier(s)?.map_failure(Ident).try_map_output(
-            |(ident, _)| -> Result<_, CodegenError> {
-                let slot = stack.push()?;
-                stack.give_name(slot, ident)?;
-                count += 1;
-
-                Ok(())
-            },
-        )?;
+        let state = identifier(s)?.map_failure(Ident).map_output(|(ident, _)| {
+            let slot = stack.push();
+            stack.give_name(slot, ident);
+            count += 1;
+        });
 
         let next = |s: Lexer<'s>| -> Result<_, FailFast> {
             let r = match_token(Token::Comma)
                 .parse(s)?
                 .map_failure(Comma)
                 .and(identifier.map_failure(Ident))?
-                .try_map_output(|(_, (ident, _))| -> Result<_, CodegenError> {
-                    let slot = stack.push()?;
-                    stack.give_name(slot, ident)?;
+                .map_output(|(_, (ident, _))| {
+                    let slot = stack.push();
+                    stack.give_name(slot, ident);
                     count += 1;
-
-                    Ok(())
-                })?;
+                });
 
             Ok(r)
         };

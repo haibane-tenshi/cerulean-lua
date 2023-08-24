@@ -21,15 +21,14 @@ pub(crate) fn expr_adjusted_to<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mark = frag.stack().top().map_err(Into::<CodegenError>::into)? + count;
-        let r = expr(frag.new_fragment()).parse_once(s)?.try_map_output(
-            move |_| -> Result<_, CodegenError> {
-                frag.emit_adjust_to(mark)?;
+        let mark = frag.stack().top() + count;
+        let r = expr(frag.new_fragment())
+            .parse_once(s)?
+            .map_output(move |_| {
+                frag.emit_adjust_to(mark);
 
                 frag.commit();
-                Ok(())
-            },
-        )?;
+            });
 
         Ok(r)
     }
@@ -91,7 +90,7 @@ pub(crate) fn expr_list<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut mark = frag.stack().top()? + 1;
+        let mut mark = frag.stack().top() + 1;
 
         let state = expr(frag.new_fragment()).parse_once(s)?;
 
@@ -101,12 +100,11 @@ pub(crate) fn expr_list<'s, 'origin>(
 
             let r = token_comma
                 .parse(s)?
-                .try_map_output(|_| -> Result<_, CodegenError> {
+                .map_output(|_| {
                     // Expressions inside comma lists are adjusted to 1.
-                    frag.emit_adjust_to(mark)?;
-                    Ok(())
-                })?
-                .and(expr(frag.new_fragment_at(mark).unwrap()))?
+                    frag.emit_adjust_to(mark);
+                })
+                .and(expr(frag.new_fragment_at(mark)))?
                 .map_output(|_| {
                     mark += 1;
                 });
@@ -139,15 +137,14 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mark = frag.stack().top()? + count;
+        let mark = frag.stack().top() + count;
         let r = expr_list(frag.new_fragment())
             .parse_once(s)?
-            .try_map_output(|_| -> Result<_, CodegenError> {
-                frag.emit_adjust_to(mark)?;
+            .map_output(|_| {
+                frag.emit_adjust_to(mark);
 
                 frag.commit();
-                Ok(())
-            })?;
+            });
 
         Ok(r)
     }

@@ -54,7 +54,7 @@ fn expr_impl<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let stack_start = frag.stack().top().map_err(Into::<CodegenError>::into)?;
+        let stack_start = frag.stack().top();
 
         let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
             let frag = &mut frag;
@@ -66,17 +66,15 @@ fn expr_impl<'s, 'origin>(
 
                         let r = expr_impl(rhs_bp, frag.new_fragment())
                             .parse_once(s)?
-                            .try_map_output(|_| -> Result<_, CodegenError> {
+                            .map_output(|_| {
                                 let opcode = match op {
                                     Prefix::Ari(op) => OpCode::AriUnaOp(op),
                                     Prefix::Bit(op) => OpCode::BitUnaOp(op),
                                 };
 
-                                frag.emit_adjust_to(stack_start + 1)?;
-                                frag.emit(opcode)?;
-
-                                Ok(())
-                            })?;
+                                frag.emit_adjust_to(stack_start + 1);
+                                frag.emit(opcode);
+                            });
 
                         Ok(r)
                     }
@@ -112,12 +110,12 @@ fn expr_impl<'s, 'origin>(
                         Ok(op)
                     }
                 })
-                .try_map_output(|op| -> Result<_, CodegenError> {
+                .map_output(|op| {
                     // At this point we 100% know that we are parsing an infix operator.
                     // It implies that we HAVE to adjust both operands to 1 value before doing op itself.
 
                     // Adjust left operand.
-                    frag.emit_adjust_to(stack_start + 1)?;
+                    frag.emit_adjust_to(stack_start + 1);
 
                     let maybe_opcode = match op {
                         Infix::Ari(op) => Some(OpCode::AriBinOp(op)),
@@ -130,19 +128,19 @@ fn expr_impl<'s, 'origin>(
                                 Logical::And => false,
                             };
 
-                            frag.emit_jump_to(frag.id(), Some(cond))?;
+                            frag.emit_jump_to(frag.id(), Some(cond));
 
                             // Discard left operand when entering the other branch.
-                            frag.emit_adjust_to(stack_start)?;
+                            frag.emit_adjust_to(stack_start);
 
                             None
                         }
                     };
 
-                    let rhs_top = frag.stack().top()? + 1;
+                    let rhs_top = frag.stack().top() + 1;
 
-                    Ok((maybe_opcode, rhs_top, op))
-                })?
+                    (maybe_opcode, rhs_top, op)
+                })
                 .then(|(maybe_opcode, rhs_top, op)| {
                     let frag = &mut frag;
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
@@ -153,17 +151,16 @@ fn expr_impl<'s, 'origin>(
                         Ok(r)
                     }
                 })?
-                .try_map_output(move |(maybe_opcode, rhs_top)| -> Result<_, CodegenError> {
+                .map_output(move |(maybe_opcode, rhs_top)| {
                     // Adjust right operand.
-                    frag.emit_adjust_to(rhs_top)?;
+                    frag.emit_adjust_to(rhs_top);
 
                     if let Some(opcode) = maybe_opcode {
-                        frag.emit(opcode)?;
+                        frag.emit(opcode);
                     }
 
                     frag.commit();
-                    Ok(())
-                })?
+                })
                 .collapse();
 
             Ok(r)

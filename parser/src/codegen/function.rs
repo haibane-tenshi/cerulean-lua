@@ -32,6 +32,7 @@ impl Function {
             reachable: _,
         } = self;
 
+        // Fixme: jumps not adjusted on rollback leading to panic here
         debug_assert!(jumps.is_empty());
 
         repr::chunk::Function {

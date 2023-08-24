@@ -17,7 +17,7 @@ pub(crate) fn assignment<'s, 'origin>(
         let token_equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(AssignmentFailure::EqualsSign(f)));
 
-        let mut places_start = frag.stack().top()?;
+        let mut places_start = frag.stack().top();
 
         let state = places(frag.new_fragment())
             .parse_once(s)?
@@ -27,36 +27,35 @@ pub(crate) fn assignment<'s, 'origin>(
             .then(|places| {
                 |s| {
                     let count = places.len().try_into().unwrap();
-                    let expr_start = frag.stack().top()?;
+                    let expr_start = frag.stack().top();
                     expr_list_adjusted_to(count, frag.new_fragment())
                         .map_output(|_| (expr_start, places))
                         .parse_once(s)
                 }
             })?
-            .try_map_output(move |(expr_start, places)| -> Result<_, CodegenError> {
+            .map_output(move |(expr_start, places)| {
                 let expr_slots = (expr_start.0..).map(StackSlot);
                 for (expr_slot, place) in expr_slots.zip(places) {
                     match place {
                         Place::Temporary(slot) => {
-                            frag.emit(OpCode::LoadStack(expr_slot))?;
-                            frag.emit(OpCode::StoreStack(slot))?;
+                            frag.emit(OpCode::LoadStack(expr_slot));
+                            frag.emit(OpCode::StoreStack(slot));
                         }
                         Place::TableField => {
                             let table = places_start;
                             let field = places_start + 1;
                             places_start += 2;
 
-                            frag.emit(OpCode::LoadStack(table))?;
-                            frag.emit(OpCode::LoadStack(field))?;
-                            frag.emit(OpCode::LoadStack(expr_slot))?;
-                            frag.emit(OpCode::TabSet)?;
+                            frag.emit(OpCode::LoadStack(table));
+                            frag.emit(OpCode::LoadStack(field));
+                            frag.emit(OpCode::LoadStack(expr_slot));
+                            frag.emit(OpCode::TabSet);
                         }
                     }
                 }
 
                 frag.commit();
-                Ok(())
-            })?
+            })
             .collapse();
 
         Ok(state)

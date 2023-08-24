@@ -40,12 +40,11 @@ pub(crate) fn repeat_until<'s, 'origin>(
                     Ok(state)
                 }
             })?
-            .try_map_output(|mut frag| -> Result<_, CodegenError> {
-                frag.emit_jump_to(frag.id(), Some(true))?;
-                frag.emit_loop_to()?;
+            .map_output(|mut frag| {
+                frag.emit_jump_to(frag.id(), Some(true));
+                frag.emit_loop_to();
                 frag.commit_scope();
-                Ok(())
-            })?
+            })
             .collapse();
 
         let state = state.map_output(|_| outer_frag.commit());

@@ -18,7 +18,7 @@ pub(crate) fn local_assignment<'s, 'origin>(
         let token_equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::EqualsSign(f)));
 
-        let stack_start = frag.stack().top()?;
+        let stack_start = frag.stack().top();
 
         let state = token_local
             .parse_once(s)?
@@ -37,17 +37,16 @@ pub(crate) fn local_assignment<'s, 'origin>(
                 })
                 .optional(),
             )?
-            .try_map_output(|idents| -> Result<_, CodegenError> {
+            .map_output(|idents| {
                 let count: u32 = idents.len().try_into().unwrap();
-                frag.emit_adjust_to(stack_start + count)?;
+                frag.emit_adjust_to(stack_start + count);
 
                 for (ident, slot) in idents.into_iter().zip((stack_start.0..).map(StackSlot)) {
-                    frag.stack_mut().give_name(slot, ident)?;
+                    frag.stack_mut().give_name(slot, ident);
                 }
 
                 frag.commit();
-                Ok(())
-            })?
+            })
             .collapse();
 
         Ok(state)
