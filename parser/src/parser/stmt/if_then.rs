@@ -29,13 +29,20 @@ pub(crate) fn if_then<'s, 'origin>(
             .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_fragment()))?
             .and(token_then)?
-            .try_map_output(|_| -> Result<_, CodegenError> {
-                frag.emit_jump_to(outer, Some(false))?;
-                Ok(())
+            .and(|s| -> Result<_, FailFast> {
+                let mut frag = frag.new_fragment_at_boundary();
+
+                frag.emit_jump_to(frag.id(), Some(false))?;
+
+                let state = block(frag.new_fragment()).parse_once(s)?;
+
+                frag.emit_jump_to(outer, None)?;
+
+                frag.commit();
+                Ok(state)
             })?
-            .and(block(frag.new_fragment()))?
             .and((|s| else_if_clause(outer, frag.new_fragment()).parse_once(s)).repeat())?
-            .and(else_clause(outer, frag.new_fragment()).optional())?
+            .and(else_clause(frag.new_fragment()).optional())?
             .and(token_end)?
             .map_output(|_| {
                 frag.commit();
@@ -79,16 +86,23 @@ fn else_if_clause<'s, 'origin>(
         let token_then =
             match_token(Token::Then).map_failure(|f| ParseFailure::from(IfThenFailure::Then(f)));
 
-        // Emit jump from end of previous block to end of if-then statement since we didn't reach the end yet.
-        frag.emit_jump_to(outer, None)?;
-
         let state = token_elseif
             .parse_once(s)?
             .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_fragment()))?
             .and(token_then)?
-            .try_map_output(|_| frag.emit_jump_to(frag.id(), Some(false)))?
-            .and(block(frag.new_fragment()))?
+            .and(|s| -> Result<_, FailFast> {
+                let mut frag = frag.new_fragment_at_boundary();
+
+                frag.emit_jump_to(frag.id(), Some(false))?;
+
+                let state = block(frag.new_fragment()).parse_once(s)?;
+
+                frag.emit_jump_to(outer, None)?;
+
+                frag.commit();
+                Ok(state)
+            })?
             .collapse();
 
         let state = state.map_output(|_| {
@@ -100,8 +114,7 @@ fn else_if_clause<'s, 'origin>(
 }
 
 fn else_clause<'s, 'origin>(
-    outer: FragmentId,
-    mut frag: Fragment<'s, 'origin>,
+    frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -114,9 +127,6 @@ fn else_clause<'s, 'origin>(
 
         let token_else =
             match_token(Token::Else).map_failure(|f| ParseFailure::from(IfThenFailure::Else(f)));
-
-        // Emit jump from end of previous block to end of if-then statement since we didn't reach the end yet.
-        frag.emit_jump_to(outer, None)?;
 
         let state = token_else
             .parse_once(s)?
