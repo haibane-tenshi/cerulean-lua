@@ -31,7 +31,9 @@ pub(crate) fn local_assignment<'s, 'origin>(
                 (|s| -> Result<_, FailFast> {
                     let state = token_equals_sign
                         .parse(s)?
-                        .and_discard(expr_list(frag.new_fragment()))?;
+                        .with_mode(FailureMode::Malformed)
+                        .and_discard(expr_list(frag.new_fragment()))?
+                        .collapse();
 
                     Ok(state)
                 })
