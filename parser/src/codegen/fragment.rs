@@ -138,8 +138,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 
     pub fn emit(&mut self, instr: OpCode) -> InstrId {
-        self.try_emit(instr)
-            .expect(&format!("should be able to emit opcode {}", instr))
+        self.try_emit(instr).unwrap()
     }
 
     pub fn try_emit_adjust_to(&mut self, slot: StackSlot) -> Result<Option<InstrId>, EmitError> {

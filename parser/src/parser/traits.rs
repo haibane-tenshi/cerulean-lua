@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::error::{Arrow, FailureMode, WithMode};
 
 type ArrowT<T, U> = <T as Arrow<U>>::Output;

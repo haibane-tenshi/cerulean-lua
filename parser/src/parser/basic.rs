@@ -105,7 +105,7 @@ pub(crate) fn literal_str(
             let span = s.span();
             ParsingState::Success(s, (r, span), Complete)
         }
-        Ok(_) | Err(Eof) => ParsingState::Failure(LiteralStrMismatch.into()),
+        Ok(_) | Err(Eof) => ParsingState::Failure(LiteralStrMismatch),
     };
 
     Ok(r)

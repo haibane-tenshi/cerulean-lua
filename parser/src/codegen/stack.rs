@@ -306,9 +306,9 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         Ok(r)
     }
 
-    pub fn new_block_at(&mut self, slot: StackSlot) -> StackView<'s, '_> {
-        self.try_new_block_at(slot).unwrap()
-    }
+    // pub fn new_block_at(&mut self, slot: StackSlot) -> StackView<'s, '_> {
+    //     self.try_new_block_at(slot).unwrap()
+    // }
 
     pub fn new_frame(&mut self) -> StackView<'s, '_> {
         let inner_state = self.stack.inner_state_at_top();
@@ -411,9 +411,9 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         Ok(())
     }
 
-    pub fn pop(&mut self) {
-        self.try_pop().unwrap();
-    }
+    // pub fn pop(&mut self) {
+    //     self.try_pop().unwrap();
+    // }
 
     pub fn make_variadic(&mut self) {
         self.stack.variadic = true;
@@ -430,9 +430,9 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         Ok(r)
     }
 
-    pub fn adjust_to(&mut self, height: StackSlot) -> bool {
-        self.try_adjust_to(height).unwrap()
-    }
+    // pub fn adjust_to(&mut self, height: StackSlot) -> bool {
+    //     self.try_adjust_to(height).unwrap()
+    // }
 
     pub fn try_give_name(&mut self, slot: StackSlot, name: &'s str) -> Result<(), GiveNameError> {
         let slot = self.slot_to_global(slot);
