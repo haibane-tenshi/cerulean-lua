@@ -38,7 +38,7 @@ impl<'rt> ActiveFrame<'rt> {
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use repr::opcode::OpCode::*;
-        use repr::opcode::{AriBinOp, AriUnaOp, BitBinOp, BitUnaOp, RelBinOp, StrBinOp};
+        use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
         use repr::table::TableRef;
 
         let Some(code) = self.next_code() else {
@@ -81,24 +81,26 @@ impl<'rt> ActiveFrame<'rt> {
 
                 ControlFlow::Continue(())
             }
-            AriUnaOp(op) => {
+            UnaOp(op) => {
                 let val = self.stack.pop()?;
 
-                let r = match val {
-                    Value::Int(val) => match op {
-                        AriUnaOp::Neg => Value::Int(-val),
+                let r = match op {
+                    UnaOp::AriNeg => match val {
+                        Value::Int(val) => Value::Int(-val),
+                        Value::Float(val) => Value::Float(-val),
+                        _ => return Err(RuntimeError),
                     },
-                    Value::Float(val) => match op {
-                        AriUnaOp::Neg => Value::Float(-val),
+                    UnaOp::BitNot => match val {
+                        Value::Int(val) => Value::Int(!val),
+                        _ => return Err(RuntimeError),
                     },
-                    _ => return Err(RuntimeError),
                 };
 
                 self.stack.push(r);
 
                 ControlFlow::Continue(())
             }
-            AriBinOp(op) => {
+            BinOp(BinOp::Ari(op)) => {
                 let rhs = self.stack.pop()?;
                 let lhs = self.stack.pop()?;
 
@@ -137,21 +139,7 @@ impl<'rt> ActiveFrame<'rt> {
 
                 ControlFlow::Continue(())
             }
-            BitUnaOp(op) => {
-                let val = self.stack.pop()?;
-
-                let r = match val {
-                    Value::Int(val) => match op {
-                        BitUnaOp::Not => Value::Int(!val),
-                    },
-                    _ => return Err(RuntimeError),
-                };
-
-                self.stack.push(r);
-
-                ControlFlow::Continue(())
-            }
-            BitBinOp(op) => {
+            BinOp(BinOp::Bit(op)) => {
                 let rhs = self.stack.pop()?;
                 let lhs = self.stack.pop()?;
 
@@ -192,7 +180,7 @@ impl<'rt> ActiveFrame<'rt> {
 
                 ControlFlow::Continue(())
             }
-            RelBinOp(op) => {
+            BinOp(BinOp::Rel(op)) => {
                 let rhs = self.stack.pop()?;
                 let lhs = self.stack.pop()?;
 
@@ -233,7 +221,7 @@ impl<'rt> ActiveFrame<'rt> {
 
                 ControlFlow::Continue(())
             }
-            StrBinOp(op) => {
+            BinOp(BinOp::Str(op)) => {
                 let rhs = self.stack.pop()?;
                 let lhs = self.stack.pop()?;
 
