@@ -98,6 +98,13 @@ impl<'fun> FunctionView<'fun> {
     }
 
     pub fn emit(&mut self, opcode: OpCode) -> Result<InstrId, InstrCountError> {
+        use OpCode::*;
+
+        self.fun.reachable = match opcode {
+            Return(_) | Jump { .. } | Loop { .. } | Panic => false,
+            _ => true,
+        };
+
         self.fun.opcodes.push(opcode)
     }
 
