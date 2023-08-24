@@ -22,6 +22,42 @@ pub enum OpCode {
     TabSet,
 }
 
+impl From<BinOp> for OpCode {
+    fn from(value: BinOp) -> Self {
+        OpCode::BinOp(value)
+    }
+}
+
+impl From<AriBinOp> for OpCode {
+    fn from(value: AriBinOp) -> Self {
+        OpCode::BinOp(value.into())
+    }
+}
+
+impl From<BitBinOp> for OpCode {
+    fn from(value: BitBinOp) -> Self {
+        OpCode::BinOp(value.into())
+    }
+}
+
+impl From<RelBinOp> for OpCode {
+    fn from(value: RelBinOp) -> Self {
+        OpCode::BinOp(value.into())
+    }
+}
+
+impl From<StrBinOp> for OpCode {
+    fn from(value: StrBinOp) -> Self {
+        OpCode::BinOp(value.into())
+    }
+}
+
+impl From<UnaOp> for OpCode {
+    fn from(value: UnaOp) -> Self {
+        OpCode::UnaOp(value)
+    }
+}
+
 impl Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use OpCode::*;
@@ -157,6 +193,30 @@ impl Display for BinOp {
             BinOp::Rel(t) => write!(f, "{}", t),
             BinOp::Str(t) => write!(f, "{}", t),
         }
+    }
+}
+
+impl From<AriBinOp> for BinOp {
+    fn from(value: AriBinOp) -> Self {
+        BinOp::Ari(value)
+    }
+}
+
+impl From<BitBinOp> for BinOp {
+    fn from(value: BitBinOp) -> Self {
+        BinOp::Bit(value)
+    }
+}
+
+impl From<RelBinOp> for BinOp {
+    fn from(value: RelBinOp) -> Self {
+        BinOp::Rel(value)
+    }
+}
+
+impl From<StrBinOp> for BinOp {
+    fn from(value: StrBinOp) -> Self {
+        BinOp::Str(value)
     }
 }
 

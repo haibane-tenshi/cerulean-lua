@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::parser::prelude::*;
+use repr::opcode::{BinOp, UnaOp};
 
 pub(crate) fn expr<'s, 'origin>(
     frag: Fragment<'s, 'origin>,
@@ -68,10 +69,7 @@ fn expr_impl<'s, 'origin>(
                         let r = expr_impl(rhs_bp, frag.new_fragment())
                             .parse_once(s)?
                             .map_output(|_| {
-                                let opcode = match op {
-                                    Prefix::Ari(op) => OpCode::AriUnaOp(op),
-                                    Prefix::Bit(op) => OpCode::BitUnaOp(op),
-                                };
+                                let opcode = OpCode::UnaOp(op.0);
 
                                 frag.emit_adjust_to(stack_start + 1);
                                 frag.emit(opcode);
@@ -122,10 +120,7 @@ fn expr_impl<'s, 'origin>(
                     frag.emit_adjust_to(stack_start + 1);
 
                     let maybe_opcode = match op {
-                        Infix::Ari(op) => Some(OpCode::AriBinOp(op)),
-                        Infix::Bit(op) => Some(OpCode::BitBinOp(op)),
-                        Infix::Rel(op) => Some(OpCode::RelBinOp(op)),
-                        Infix::Str(op) => Some(OpCode::StrBinOp(op)),
+                        Infix::BinOp(op) => Some(OpCode::BinOp(op)),
                         Infix::Logical(op) => {
                             let cond = match op {
                                 Logical::Or => true,
@@ -278,8 +273,8 @@ fn prefix_op(
     mut s: Lexer,
 ) -> Result<ParsingState<Lexer, Prefix, Complete, PrefixMismatchError>, LexError> {
     let op = match s.next_token()? {
-        Ok(Token::MinusSign) => Prefix::Ari(AriUnaOp::Neg),
-        Ok(Token::Tilde) => Prefix::Bit(BitUnaOp::Not),
+        Ok(Token::MinusSign) => Prefix(UnaOp::AriNeg),
+        Ok(Token::Tilde) => Prefix(UnaOp::BitNot),
         _ => {
             let span = s.span();
             return Ok(ParsingState::Failure(PrefixMismatchError { span }));
@@ -299,25 +294,25 @@ fn infix_op(
     mut s: Lexer,
 ) -> Result<ParsingState<Lexer, Infix, Complete, InfixMismatchError>, LexError> {
     let op = match s.next_token()? {
-        Ok(Token::PlusSign) => Infix::Ari(AriBinOp::Add),
-        Ok(Token::MinusSign) => Infix::Ari(AriBinOp::Sub),
-        Ok(Token::Asterisk) => Infix::Ari(AriBinOp::Mul),
-        Ok(Token::Slash) => Infix::Ari(AriBinOp::Div),
-        Ok(Token::DoubleSlash) => Infix::Ari(AriBinOp::FloorDiv),
-        Ok(Token::PercentSign) => Infix::Ari(AriBinOp::Rem),
-        Ok(Token::Circumflex) => Infix::Ari(AriBinOp::Exp),
-        Ok(Token::Ampersand) => Infix::Bit(BitBinOp::And),
-        Ok(Token::Pipe) => Infix::Bit(BitBinOp::Or),
-        Ok(Token::Tilde) => Infix::Bit(BitBinOp::Xor),
-        Ok(Token::DoubleAngleL) => Infix::Bit(BitBinOp::ShL),
-        Ok(Token::DoubleAngleR) => Infix::Bit(BitBinOp::ShR),
-        Ok(Token::DoubleEqualsSign) => Infix::Rel(RelBinOp::Eq),
-        Ok(Token::TildeEqualsSign) => Infix::Rel(RelBinOp::Neq),
-        Ok(Token::AngleL) => Infix::Rel(RelBinOp::Lt),
-        Ok(Token::AngleLEqualsSign) => Infix::Rel(RelBinOp::Le),
-        Ok(Token::AngleR) => Infix::Rel(RelBinOp::Gt),
-        Ok(Token::AngleREqualsSign) => Infix::Rel(RelBinOp::Ge),
-        Ok(Token::DoubleDot) => Infix::Str(StrBinOp::Concat),
+        Ok(Token::PlusSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Add)),
+        Ok(Token::MinusSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Sub)),
+        Ok(Token::Asterisk) => Infix::BinOp(BinOp::Ari(AriBinOp::Mul)),
+        Ok(Token::Slash) => Infix::BinOp(BinOp::Ari(AriBinOp::Div)),
+        Ok(Token::DoubleSlash) => Infix::BinOp(BinOp::Ari(AriBinOp::FloorDiv)),
+        Ok(Token::PercentSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Rem)),
+        Ok(Token::Circumflex) => Infix::BinOp(BinOp::Ari(AriBinOp::Exp)),
+        Ok(Token::Ampersand) => Infix::BinOp(BinOp::Bit(BitBinOp::And)),
+        Ok(Token::Pipe) => Infix::BinOp(BinOp::Bit(BitBinOp::Or)),
+        Ok(Token::Tilde) => Infix::BinOp(BinOp::Bit(BitBinOp::Xor)),
+        Ok(Token::DoubleAngleL) => Infix::BinOp(BinOp::Bit(BitBinOp::ShL)),
+        Ok(Token::DoubleAngleR) => Infix::BinOp(BinOp::Bit(BitBinOp::ShR)),
+        Ok(Token::DoubleEqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::Eq)),
+        Ok(Token::TildeEqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::Neq)),
+        Ok(Token::AngleL) => Infix::BinOp(BinOp::Rel(RelBinOp::Lt)),
+        Ok(Token::AngleLEqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::Le)),
+        Ok(Token::AngleR) => Infix::BinOp(BinOp::Rel(RelBinOp::Gt)),
+        Ok(Token::AngleREqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::Ge)),
+        Ok(Token::DoubleDot) => Infix::BinOp(BinOp::Str(StrBinOp::Concat)),
         Ok(Token::Or) => Infix::Logical(Logical::Or),
         Ok(Token::And) => Infix::Logical(Logical::And),
         _ => {
@@ -336,33 +331,27 @@ pub(crate) struct InfixMismatchError {
 }
 
 #[derive(Debug, Copy, Clone)]
-enum Prefix {
-    Ari(AriUnaOp),
-    Bit(BitUnaOp),
-}
+struct Prefix(UnaOp);
 
 impl Prefix {
     fn binding_power(self) -> ((), u64) {
-        match self {
-            Prefix::Ari(AriUnaOp::Neg) => ((), 24),
-            Prefix::Bit(BitUnaOp::Not) => ((), 24),
+        match self.0 {
+            UnaOp::AriNeg => ((), 24),
+            UnaOp::BitNot => ((), 24),
         }
     }
 }
 
 #[derive(Debug, Copy, Clone)]
 enum Infix {
-    Ari(AriBinOp),
-    Bit(BitBinOp),
-    Rel(RelBinOp),
-    Str(StrBinOp),
+    BinOp(BinOp),
     Logical(Logical),
 }
 
 impl Infix {
     fn binding_power(self) -> (u64, u64) {
         match self {
-            Infix::Ari(op) => {
+            Infix::BinOp(BinOp::Ari(op)) => {
                 use AriBinOp::*;
 
                 match op {
@@ -371,7 +360,7 @@ impl Infix {
                     Exp => (25, 26),
                 }
             }
-            Infix::Bit(op) => {
+            Infix::BinOp(BinOp::Bit(op)) => {
                 use BitBinOp::*;
 
                 match op {
@@ -381,8 +370,8 @@ impl Infix {
                     ShL | ShR => (13, 14),
                 }
             }
-            Infix::Rel(_) => (5, 6),
-            Infix::Str(_) => (15, 16),
+            Infix::BinOp(BinOp::Rel(_)) => (5, 6),
+            Infix::BinOp(BinOp::Str(_)) => (15, 16),
             Infix::Logical(op) => match op {
                 Logical::Or => (1, 2),
                 Logical::And => (3, 4),

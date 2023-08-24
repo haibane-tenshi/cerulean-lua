@@ -60,7 +60,7 @@ pub(crate) fn generic_for<'s, 'origin>(
 
                 frag.emit(OpCode::LoadStack(new_control));
                 frag.emit(OpCode::LoadConstant(nil));
-                frag.emit(OpCode::RelBinOp(RelBinOp::Eq));
+                frag.emit(RelBinOp::Eq.into());
                 frag.emit_jump_to(frag.id(), Some(true));
 
                 frag.emit(OpCode::LoadStack(new_control));

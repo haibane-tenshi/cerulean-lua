@@ -113,7 +113,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         zero_check.emit(OpCode::LoadStack(step));
                         zero_check.emit(OpCode::LoadConstant(zero));
-                        zero_check.emit(OpCode::RelBinOp(RelBinOp::Eq));
+                        zero_check.emit(RelBinOp::Eq.into());
                         zero_check.emit_jump_to(zero_check.id(), Some(false));
 
                         zero_check.emit(OpCode::LoadConstant(error_msg));
@@ -128,13 +128,13 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         positive_step.emit(OpCode::LoadStack(step));
                         positive_step.emit(OpCode::LoadConstant(zero));
-                        positive_step.emit(OpCode::RelBinOp(RelBinOp::Gt));
+                        positive_step.emit(RelBinOp::Gt.into());
                         positive_step.emit_jump_to(positive_step.id(), Some(false));
 
                         // Path: positive step.
                         positive_step.emit(OpCode::LoadStack(loop_var));
                         positive_step.emit(OpCode::LoadStack(limit));
-                        positive_step.emit(OpCode::RelBinOp(RelBinOp::Le));
+                        positive_step.emit(RelBinOp::Le.into());
                         positive_step.emit_jump_to(exit, Some(false));
                         positive_step.emit_jump_to(controls_id, None);
 
@@ -144,7 +144,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         // We assume total ordering for the variable.
                         controls.emit(OpCode::LoadStack(loop_var));
                         controls.emit(OpCode::LoadStack(limit));
-                        controls.emit(OpCode::RelBinOp(RelBinOp::Ge));
+                        controls.emit(RelBinOp::Ge.into());
                         controls.emit_jump_to(exit, Some(false));
 
                         controls.commit();
@@ -156,7 +156,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         frag.emit(OpCode::LoadStack(loop_var));
                         frag.emit(OpCode::LoadStack(limit));
-                        frag.emit(OpCode::RelBinOp(RelBinOp::Le));
+                        frag.emit(RelBinOp::Le.into());
                         frag.emit_jump_to(exit, Some(false));
 
                         frag
@@ -180,7 +180,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 // Increment control variable.
                 frag.emit(OpCode::LoadStack(loop_var));
                 step.load(&mut frag);
-                frag.emit(OpCode::AriBinOp(AriBinOp::Add));
+                frag.emit(AriBinOp::Add.into());
                 frag.emit(OpCode::StoreStack(loop_var));
                 frag.emit_loop_to();
 

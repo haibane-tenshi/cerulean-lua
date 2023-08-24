@@ -89,7 +89,6 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
                     self.stack.try_adjust_to(slot)?;
                     self.stack.make_variadic();
                 }
-
                 OpCode::LoadConstant(_) | OpCode::LoadStack(_) | OpCode::TabCreate => {
                     self.stack.try_push()?;
                 }
@@ -99,20 +98,15 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
                 OpCode::AdjustStack(slot) => {
                     self.stack.try_adjust_to(slot)?;
                 }
-                OpCode::AriUnaOp(_) | OpCode::BitUnaOp(_) => {
+                OpCode::UnaOp(_) => {
                     self.stack.try_pop()?;
                     self.stack.try_push()?;
                 }
-
-                OpCode::AriBinOp(_)
-                | OpCode::BitBinOp(_)
-                | OpCode::RelBinOp(_)
-                | OpCode::StrBinOp(_) => {
+                OpCode::BinOp(_) => {
                     self.stack.try_pop()?;
                     self.stack.try_pop()?;
                     self.stack.try_push()?;
                 }
-
                 OpCode::Jump { .. }
                 | OpCode::JumpIf { .. }
                 | OpCode::Loop { .. }
