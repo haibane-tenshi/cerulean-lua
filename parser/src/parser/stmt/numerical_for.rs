@@ -98,57 +98,71 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 (loop_var, limit, step)
             })
             .map_output(|(loop_var, limit, step)| {
-                // Loop controls.
-                let zero = outer_frag.const_table_mut().insert(Literal::Int(0));
+                // Emit loop controls.
 
-                // Panic if increment is 0.
-                if let StackSlotOrConstId::StackSlot(step) = step {
-                    let error_msg = outer_frag
-                        .const_table_mut()
-                        .insert(Literal::String("loop increment is 0".to_string()));
+                let frag = match step {
+                    StackSlotOrConstId::StackSlot(step) => {
+                        let zero = outer_frag.const_table_mut().insert(Literal::Int(0));
 
-                    let mut zero_check = outer_frag.new_fragment();
+                        let error_msg = outer_frag
+                            .const_table_mut()
+                            .insert(Literal::String("loop increment is 0".to_string()));
 
-                    zero_check.emit(OpCode::LoadStack(step));
-                    zero_check.emit(OpCode::LoadConstant(zero));
-                    zero_check.emit(OpCode::RelBinOp(RelBinOp::Eq));
-                    zero_check.emit_jump_to(zero_check.id(), Some(false));
+                        // Panic if increment is 0.
+                        let mut zero_check = outer_frag.new_fragment();
 
-                    // Panic path.
-                    zero_check.emit(OpCode::LoadConstant(error_msg));
-                    zero_check.emit(OpCode::Panic);
+                        zero_check.emit(OpCode::LoadStack(step));
+                        zero_check.emit(OpCode::LoadConstant(zero));
+                        zero_check.emit(OpCode::RelBinOp(RelBinOp::Eq));
+                        zero_check.emit_jump_to(zero_check.id(), Some(false));
 
-                    // Happy path.
-                    zero_check.commit();
-                }
+                        zero_check.emit(OpCode::LoadConstant(error_msg));
+                        zero_check.emit(OpCode::Panic);
 
-                let mut frag = outer_frag.new_fragment();
-                let mut controls = frag.new_fragment();
-                let controls_id = controls.id();
-                let mut positive_step = controls.new_fragment();
+                        zero_check.commit();
 
-                step.load(&mut positive_step);
-                positive_step.emit(OpCode::LoadConstant(zero));
-                positive_step.emit(OpCode::RelBinOp(RelBinOp::Gt));
-                positive_step.emit_jump_to(positive_step.id(), Some(false));
+                        let mut frag = outer_frag.new_fragment();
+                        let mut controls = frag.new_fragment();
+                        let controls_id = controls.id();
+                        let mut positive_step = controls.new_fragment();
 
-                // Path: positive step.
-                positive_step.emit(OpCode::LoadStack(loop_var));
-                positive_step.emit(OpCode::LoadStack(limit));
-                positive_step.emit(OpCode::RelBinOp(RelBinOp::Le));
-                positive_step.emit_jump_to(exit, Some(false));
-                positive_step.emit_jump_to(controls_id, None);
+                        positive_step.emit(OpCode::LoadStack(step));
+                        positive_step.emit(OpCode::LoadConstant(zero));
+                        positive_step.emit(OpCode::RelBinOp(RelBinOp::Gt));
+                        positive_step.emit_jump_to(positive_step.id(), Some(false));
 
-                positive_step.commit();
+                        // Path: positive step.
+                        positive_step.emit(OpCode::LoadStack(loop_var));
+                        positive_step.emit(OpCode::LoadStack(limit));
+                        positive_step.emit(OpCode::RelBinOp(RelBinOp::Le));
+                        positive_step.emit_jump_to(exit, Some(false));
+                        positive_step.emit_jump_to(controls_id, None);
 
-                // Path: negative step.
-                // We assume total ordering for the variable.
-                controls.emit(OpCode::LoadStack(loop_var));
-                controls.emit(OpCode::LoadStack(limit));
-                controls.emit(OpCode::RelBinOp(RelBinOp::Ge));
-                controls.emit_jump_to(exit, Some(false));
+                        positive_step.commit();
 
-                controls.commit();
+                        // Path: negative step.
+                        // We assume total ordering for the variable.
+                        controls.emit(OpCode::LoadStack(loop_var));
+                        controls.emit(OpCode::LoadStack(limit));
+                        controls.emit(OpCode::RelBinOp(RelBinOp::Ge));
+                        controls.emit_jump_to(exit, Some(false));
+
+                        controls.commit();
+
+                        frag
+                    }
+                    StackSlotOrConstId::ConstId(_) => {
+                        let mut frag = outer_frag.new_fragment();
+
+                        frag.emit(OpCode::LoadStack(loop_var));
+                        frag.emit(OpCode::LoadStack(limit));
+                        frag.emit(OpCode::RelBinOp(RelBinOp::Le));
+                        frag.emit_jump_to(exit, Some(false));
+
+                        frag
+                    }
+                };
+
                 (loop_var, step, frag)
             })
             .and_discard(token_do)?
