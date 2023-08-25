@@ -46,7 +46,7 @@ impl ConstTable {
         }
     }
 
-    fn apply_inner_state(&mut self, state: InnerState) {
+    fn apply(&mut self, state: InnerState) {
         let InnerState { constants } = state;
 
         for literal in self.constants.drain(constants..) {
@@ -95,6 +95,6 @@ impl<'a> ConstTableView<'a> {
 
 impl<'a> Drop for ConstTableView<'a> {
     fn drop(&mut self) {
-        self.constants.apply_inner_state(self.inner_state)
+        self.constants.apply(self.inner_state)
     }
 }

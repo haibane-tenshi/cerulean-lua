@@ -32,7 +32,7 @@ impl FuncTable {
         }
     }
 
-    fn apply_inner_state(&mut self, state: InnerState) {
+    fn apply(&mut self, state: InnerState) {
         let InnerState { functions } = state;
 
         self.functions.truncate(functions);
@@ -80,6 +80,6 @@ impl<'a> Drop for FuncTableView<'a> {
             inner_state,
         } = self;
 
-        func_table.apply_inner_state(*inner_state)
+        func_table.apply(*inner_state)
     }
 }
