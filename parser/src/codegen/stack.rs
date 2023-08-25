@@ -148,9 +148,7 @@ impl<'s> Stack<'s> {
     fn adjust_to(&mut self, slot: GlobalStackSlot) -> bool {
         use std::cmp::Ordering;
 
-        self.variadic = false;
-
-        match Ord::cmp(&self.len(), &slot) {
+        let r = match Ord::cmp(&self.len(), &slot) {
             Ordering::Equal => false,
             Ordering::Less => {
                 let count = Index::into(slot) - Index::into(self.len());
@@ -166,7 +164,12 @@ impl<'s> Stack<'s> {
 
                 true
             }
-        }
+        };
+
+        let r = self.variadic || r;
+        self.variadic = false;
+
+        r
     }
 
     fn inner_state(
@@ -202,8 +205,9 @@ impl<'s> Stack<'s> {
             top,
         } = state;
 
-        self.variadic = variadic;
+        // Order matters: adjust_to resets stack's variadic flag.
         self.adjust_to(top);
+        self.variadic = variadic;
         for slot in self
             .temporaries
             .range_mut(boundary..)
@@ -457,17 +461,23 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
     }
 
-    pub fn commit(self, preserve_idents: bool) {
-        if !preserve_idents {
-            for slot in self
-                .stack
-                .temporaries
-                .range_mut(self.inner_state.boundary..)
-                .iter_mut()
-            {
-                if let Some(ident) = slot.take() {
-                    self.stack.backlinks.pop(ident);
+    pub fn commit(self, kind: CommitKind) {
+        match kind {
+            CommitKind::Decl => (),
+            CommitKind::Expr => {
+                for slot in self
+                    .stack
+                    .temporaries
+                    .range_mut(self.inner_state.boundary..)
+                    .iter_mut()
+                {
+                    if let Some(ident) = slot.take() {
+                        self.stack.backlinks.pop(ident);
+                    }
                 }
+            }
+            CommitKind::Scope => {
+                self.stack.adjust_to(self.inner_state.boundary);
             }
         }
 
@@ -479,6 +489,12 @@ impl<'s, 'origin> Drop for StackView<'s, 'origin> {
     fn drop(&mut self) {
         self.stack.apply(self.inner_state)
     }
+}
+
+pub enum CommitKind {
+    Scope,
+    Expr,
+    Decl,
 }
 
 /// There are named temporaries above boundary.

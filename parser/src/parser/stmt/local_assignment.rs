@@ -47,7 +47,7 @@ pub(crate) fn local_assignment<'s, 'origin>(
                     frag.stack_mut().give_name(slot, ident);
                 }
 
-                frag.commit();
+                frag.commit_decl();
             })
             .collapse();
 

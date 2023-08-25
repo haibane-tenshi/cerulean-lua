@@ -20,7 +20,7 @@ pub(crate) fn prefix_expr<'s, 'origin>(
                     place.eval(&mut frag);
                 }
 
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(state)
@@ -44,7 +44,7 @@ pub(crate) fn place<'s, 'origin>(
         let state = match state {
             ParsingState::Success(s, output, success) => {
                 if let PrefixExpr::Place(place) = output {
-                    frag.commit();
+                    frag.commit_expr();
 
                     ParsingState::Success(s, place, success)
                 } else {
@@ -151,14 +151,14 @@ fn prefix_expr_impl<'s, 'origin>(
                 )?
                 .map_output(|expr| {
                     output = expr;
-                    frag.commit();
+                    frag.commit_expr();
                 });
 
             Ok(state)
         };
 
         let state = state.and(next.repeat())?.map_output(move |_| {
-            frag.commit();
+            frag.commit_expr();
             output
         });
 
@@ -197,7 +197,7 @@ fn func_call<'s, 'origin>(
             .map_output(move |_| {
                 frag.emit(OpCode::Invoke(invoke_target));
 
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(state)
@@ -226,7 +226,7 @@ fn args_par_expr<'s, 'origin>(
             .and(expr_list(frag.new_fragment()).optional())?
             .and(token_par_r)?
             .map_output(move |_| {
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(state)
@@ -253,7 +253,7 @@ fn args_str<'s, 'origin>(
         let state = literal_str(s)?.map_output(move |(value, _)| {
             frag.emit_load_literal(Literal::String(value.into_owned()));
 
-            frag.commit();
+            frag.commit_expr();
         });
 
         Ok(state)
@@ -312,7 +312,7 @@ fn field<'s, 'origin>(
             .map_output(move |ident| {
                 frag.emit_load_literal(Literal::String(ident.to_string()));
 
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(state)
@@ -348,7 +348,7 @@ fn index<'s, 'origin>(
             .and(expr_adjusted_to_1(frag.new_fragment()))?
             .and(token_bracket_r)?
             .map_output(move |_| {
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(state)

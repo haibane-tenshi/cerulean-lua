@@ -13,7 +13,7 @@ pub(crate) fn literal<'s, 'origin>(
         let r = crate::parser::basic::literal(s)?.map_output(move |(literal, _)| {
             frag.emit_load_literal(literal);
 
-            frag.commit();
+            frag.commit_expr();
         });
 
         Ok(r)

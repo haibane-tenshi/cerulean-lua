@@ -27,7 +27,7 @@ pub(crate) fn expr_adjusted_to<'s, 'origin>(
             .map_output(move |_| {
                 frag.emit_adjust_to(mark);
 
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(r)
@@ -69,7 +69,7 @@ pub(crate) fn par_expr<'s, 'origin>(
             .and(expr_adjusted_to_1(frag.new_fragment()))?
             .and(par_r)?
             .map_output(|_| {
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(r)
@@ -114,7 +114,7 @@ pub(crate) fn expr_list<'s, 'origin>(
 
         let r = state
             .and(next_part.repeat())?
-            .map_output(move |_| frag.commit());
+            .map_output(move |_| frag.commit_expr());
 
         Ok(r)
     }
@@ -143,7 +143,7 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
             .map_output(|_| {
                 frag.emit_adjust_to(mark);
 
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(r)

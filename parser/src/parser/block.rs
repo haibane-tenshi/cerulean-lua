@@ -40,7 +40,7 @@ pub(crate) fn inner_block<'s, 'origin>(
             .parse_once(s)?
             .and(return_(frag.new_fragment()).optional())?
             .map_output(move |_| {
-                frag.commit();
+                frag.commit_decl();
             });
 
         Ok(r)

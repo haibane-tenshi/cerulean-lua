@@ -79,7 +79,7 @@ fn expr_impl<'s, 'origin>(
                     }
                 })?
                 .map_output(|_| {
-                    frag.commit();
+                    frag.commit_expr();
                 });
 
             Ok(r)
@@ -158,7 +158,7 @@ fn expr_impl<'s, 'origin>(
                         frag.emit(opcode);
                     }
 
-                    frag.commit();
+                    frag.commit_expr();
                 })
                 .collapse();
 
@@ -168,7 +168,7 @@ fn expr_impl<'s, 'origin>(
         let r = state
             .and(next_part.repeat())?
             .map_output(|_| {
-                frag.commit();
+                frag.commit_expr();
             })
             .collapse();
 
@@ -262,7 +262,7 @@ fn atom<'s, 'origin>(
             .or(s.clone(), table(frag.new_fragment()))?
             .or(s, function(frag.new_fragment()))?
             .map_output(|_| {
-                frag.commit();
+                frag.commit_expr();
             });
 
         Ok(r)

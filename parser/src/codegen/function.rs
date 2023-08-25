@@ -132,10 +132,14 @@ impl<'fun> FunctionView<'fun> {
         }
     }
 
-    pub fn commit(self) -> Option<StackState> {
+    pub fn emit_jumps(&mut self) -> Option<StackState> {
         let mut stack_state = None;
 
         if let Some(to_backpatch) = self.fun.jumps.remove(&self.fragment_id) {
+            if !to_backpatch.is_empty() {
+                self.fun.reachable = true;
+            }
+
             let start = self.start();
             let end = self.len();
 
@@ -159,10 +163,17 @@ impl<'fun> FunctionView<'fun> {
             }
         }
 
+        stack_state
+    }
+
+    pub fn commit(self) {
+        debug_assert!(
+            !self.fun.jumps.contains_key(&self.fragment_id),
+            "jumps need to be manually emitted with `emit_jumps()` before performing commit"
+        );
+
         // Prevent drop impls from rolling back changes.
         std::mem::forget(self);
-
-        stack_state
     }
 }
 

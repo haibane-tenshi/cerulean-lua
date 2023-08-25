@@ -119,7 +119,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         zero_check.emit(OpCode::LoadConstant(error_msg));
                         zero_check.emit(OpCode::Panic);
 
-                        zero_check.commit();
+                        zero_check.commit_expr();
 
                         let mut frag = outer_frag.new_fragment();
                         let mut controls = frag.new_fragment();
@@ -138,7 +138,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         positive_step.emit_jump_to(exit, Some(false));
                         positive_step.emit_jump_to(controls_id, None);
 
-                        positive_step.commit();
+                        positive_step.commit_expr();
 
                         // Path: negative step.
                         // We assume total ordering for the variable.
@@ -147,7 +147,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         controls.emit(RelBinOp::Ge.into());
                         controls.emit_jump_to(exit, Some(false));
 
-                        controls.commit();
+                        controls.commit_expr();
 
                         frag
                     }
@@ -185,12 +185,12 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 frag.emit_loop_to();
 
                 // Clean up.
-                frag.commit();
+                frag.commit_scope();
             })
             .collapse();
 
         // Clean up.
-        let state = state.map_output(|_| outer_frag.commit());
+        let state = state.map_output(|_| outer_frag.commit_scope());
 
         Ok(state)
     }

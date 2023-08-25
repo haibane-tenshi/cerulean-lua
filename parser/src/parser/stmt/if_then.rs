@@ -38,14 +38,14 @@ pub(crate) fn if_then<'s, 'origin>(
 
                 frag.emit_jump_to(outer, None);
 
-                frag.commit();
+                frag.commit_scope();
                 Ok(state)
             })?
             .and((|s| else_if_clause(outer, frag.new_fragment()).parse_once(s)).repeat())?
             .and(else_clause(frag.new_fragment()).optional())?
             .and(token_end)?
             .map_output(|_| {
-                frag.commit();
+                frag.commit_scope();
             })
             .collapse();
 
@@ -100,13 +100,13 @@ fn else_if_clause<'s, 'origin>(
 
                 frag.emit_jump_to(outer, None);
 
-                frag.commit();
+                frag.commit_scope();
                 Ok(state)
             })?
             .collapse();
 
         let state = state.map_output(|_| {
-            frag.commit();
+            frag.commit_scope();
         });
 
         Ok(state)

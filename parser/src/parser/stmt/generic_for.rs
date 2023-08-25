@@ -89,7 +89,7 @@ pub(crate) fn generic_for<'s, 'origin>(
             .collapse();
 
         let state = state.map_output(move |_| {
-            outer_frag.commit();
+            outer_frag.commit_scope();
         });
 
         Ok(state)

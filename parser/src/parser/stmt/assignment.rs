@@ -54,7 +54,7 @@ pub(crate) fn assignment<'s, 'origin>(
                     }
                 }
 
-                frag.commit();
+                frag.commit_scope();
             })
             .collapse();
 
@@ -108,7 +108,7 @@ fn places<'s, 'origin>(
         };
 
         let state = state.and(next.repeat())?.map_output(move |_| {
-            frag.commit();
+            frag.commit_scope();
             r
         });
 

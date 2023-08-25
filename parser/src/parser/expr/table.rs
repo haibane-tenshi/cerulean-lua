@@ -30,7 +30,7 @@ pub(crate) fn table<'s, 'frag>(
             .then(|table_slot| field_list(table_slot, frag.new_fragment()).optional())?
             .and(curly_r)?
             .map_output(move |_| {
-                frag.commit();
+                frag.commit_expr();
             })
             .collapse();
 
@@ -96,7 +96,7 @@ fn field_list<'s, 'origin>(
             .and(next.repeat())?
             .and(field_sep.map_success(CompleteOr::Complete).optional())?
             .map_output(|_| {
-                frag.commit();
+                frag.commit_scope();
             });
 
         Ok(r)
@@ -127,7 +127,7 @@ fn field<'s, 'origin>(
                 index(table_slot, next_index, frag.new_fragment()).map_output(|_| FieldType::Index),
             )?
             .map_output(move |r| {
-                frag.commit();
+                frag.commit_scope();
                 r
             });
 
@@ -194,7 +194,7 @@ fn bracket<'s, 'origin>(
             .map_output(move |_| {
                 frag.emit(OpCode::TabSet);
 
-                frag.commit();
+                frag.commit_scope();
             })
             .collapse();
 
@@ -244,7 +244,7 @@ fn name<'s, 'origin>(
             .map_output(move |_| {
                 frag.emit(OpCode::TabSet);
 
-                frag.commit();
+                frag.commit_scope();
             })
             .collapse();
 
@@ -284,7 +284,7 @@ fn index<'s, 'origin>(
                 frag.emit(OpCode::TabSet);
                 frag.emit_adjust_to(start);
 
-                frag.commit();
+                frag.commit_scope();
             });
 
         Ok(r)

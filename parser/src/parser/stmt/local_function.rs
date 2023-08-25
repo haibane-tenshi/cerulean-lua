@@ -41,7 +41,7 @@ pub(crate) fn local_function<'s, 'origin>(
                 // Stack is already adjusted, we just need to silently write to correct slot here.
                 frag.emit_raw(OpCode::LoadConstant(const_id), false)?;
 
-                frag.commit();
+                frag.commit_decl();
                 Ok(())
             })?
             .collapse();

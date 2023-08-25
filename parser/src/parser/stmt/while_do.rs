@@ -47,11 +47,11 @@ pub(crate) fn while_do<'s, 'origin>(
             .and_discard(token_end)?
             .map_output(|mut frag| {
                 frag.emit_loop_to();
-                frag.commit();
+                frag.commit_scope();
             })
             .collapse();
 
-        let state = state.map_output(|_| outer_frag.commit());
+        let state = state.map_output(|_| outer_frag.commit_scope());
 
         Ok(state)
     }

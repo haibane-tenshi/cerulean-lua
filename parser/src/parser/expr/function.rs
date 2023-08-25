@@ -24,7 +24,7 @@ pub(crate) fn function<'s, 'origin>(
             .map_output(|(_, func_id)| {
                 frag.emit_load_literal(Literal::Function(func_id));
 
-                frag.commit();
+                frag.commit_expr();
             })
             .collapse();
 

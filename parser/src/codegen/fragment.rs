@@ -5,7 +5,7 @@ use crate::codegen::const_table::ConstTableView;
 use crate::codegen::func_table::FuncTableView;
 use crate::codegen::function::FunctionView;
 use crate::codegen::stack::{
-    BoundaryViolationError, NewBlockAtError, PopError, PushError, StackView,
+    BoundaryViolationError, CommitKind, NewBlockAtError, PopError, PushError, StackView,
 };
 use repr::index::{ConstCapacityError, InstrCountError, InstrId, StackSlot};
 use repr::literal::Literal;
@@ -286,11 +286,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.new_fragment_at(self.stack.boundary())
     }
 
-    fn commit_impl(self, preserve_stack: bool) {
+    pub fn commit(self, kind: CommitKind) {
         let Fragment {
             func_table,
             const_table,
-            fun,
+            mut fun,
             mut stack,
         } = self;
 
@@ -298,7 +298,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         const_table.commit();
 
         let sequence_state = fun.reachable().then(|| stack.state());
-        let jump_state = fun.commit();
+        let jump_state = fun.emit_jumps();
 
         let final_state = match (sequence_state, jump_state) {
             (Some(a), Some(b)) => Some(a | b),
@@ -310,15 +310,28 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack.apply(state);
         }
 
-        stack.commit(preserve_stack);
+        if matches!(kind, CommitKind::Scope) && fun.reachable() {
+            let need_adjustment = stack.try_adjust_to(stack.boundary()).unwrap();
+
+            if need_adjustment {
+                fun.emit(OpCode::AdjustStack(stack.boundary())).unwrap();
+            }
+        }
+
+        fun.commit();
+        stack.commit(kind);
     }
 
     pub fn commit_scope(self) {
-        self.commit_impl(false)
+        self.commit(CommitKind::Scope)
     }
 
-    pub fn commit(self) {
-        self.commit_impl(true)
+    pub fn commit_expr(self) {
+        self.commit(CommitKind::Expr)
+    }
+
+    pub fn commit_decl(self) {
+        self.commit(CommitKind::Decl)
     }
 }
 

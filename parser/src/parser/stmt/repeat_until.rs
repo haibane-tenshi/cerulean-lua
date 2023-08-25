@@ -47,7 +47,7 @@ pub(crate) fn repeat_until<'s, 'origin>(
             })
             .collapse();
 
-        let state = state.map_output(|_| outer_frag.commit());
+        let state = state.map_output(|_| outer_frag.commit_scope());
 
         Ok(state)
     }

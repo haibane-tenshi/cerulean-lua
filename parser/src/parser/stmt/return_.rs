@@ -30,7 +30,7 @@ pub(crate) fn return_<'s, 'origin>(
             )?
             .map_output(|slot| {
                 frag.emit(OpCode::Return(slot));
-                frag.commit();
+                frag.commit_scope();
             })
             .collapse();
 

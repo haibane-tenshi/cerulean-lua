@@ -123,7 +123,7 @@ fn parlist<'s, 'origin>(
         };
 
         let r = state.and(next.repeat())?.map_output(|_| {
-            stack.commit(true);
+            stack.commit(crate::codegen::stack::CommitKind::Decl);
             count
         });
 
