@@ -297,7 +297,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         func_table.commit();
         const_table.commit();
 
-        let sequence_state = fun.reachable().then(|| stack.state());
+        let sequence_state = fun.is_reachable().then(|| stack.state());
         let jump_state = fun.emit_jumps();
 
         let final_state = match (sequence_state, jump_state) {
@@ -310,7 +310,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack.apply(state);
         }
 
-        if matches!(kind, CommitKind::Scope) && fun.reachable() {
+        if matches!(kind, CommitKind::Scope) && fun.is_reachable() {
             let need_adjustment = stack.try_adjust_to(stack.boundary()).unwrap();
 
             if need_adjustment {

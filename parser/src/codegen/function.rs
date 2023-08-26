@@ -89,7 +89,7 @@ impl<'fun> FunctionView<'fun> {
         self.prev_state.start
     }
 
-    pub fn reachable(&self) -> bool {
+    pub fn is_reachable(&self) -> bool {
         self.fun.reachable
     }
 
@@ -100,7 +100,7 @@ impl<'fun> FunctionView<'fun> {
     pub fn emit(&mut self, opcode: OpCode) -> Result<InstrId, InstrCountError> {
         use OpCode::*;
 
-        self.fun.reachable = matches!(opcode, Return(_) | Jump { .. } | Loop { .. } | Panic);
+        self.fun.reachable &= matches!(opcode, Return(_) | Jump { .. } | Loop { .. } | Panic);
         self.fun.opcodes.push(opcode)
     }
 
@@ -179,6 +179,7 @@ impl<'fun> FunctionView<'fun> {
 
 impl<'fun> Drop for FunctionView<'fun> {
     fn drop(&mut self) {
-        self.fun.apply(self.prev_state)
+        self.fun.apply(self.prev_state);
+        self.fun.jumps.remove(&self.fragment_id);
     }
 }
