@@ -112,7 +112,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
                     CompleteOr::Complete(_) => {
                         let err = ParseFailure {
                             mode: FailureMode::Malformed,
-                            cause: ParseCause::ExpectedStatement,
+                            cause: ParseCause::ExpectedStmt(s.span()),
                         };
 
                         return Err(Error::Parse(err.into()));

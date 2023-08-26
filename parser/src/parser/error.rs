@@ -236,7 +236,7 @@ pub(crate) enum ParseCause {
     #[error("failed to parse function call arguments")]
     FunctionArgs(#[from] FnArgsParExprFailure),
     #[error("expected statement")]
-    ExpectedStatement,
+    ExpectedStmt(Span),
     #[error("failed to parse local assignment")]
     LocalAssignment(#[from] LocalAssignmentFailure),
     #[error("failed to parse local function declaration")]
@@ -384,7 +384,13 @@ impl ParseCause {
 
                 Diagnostic::error().with_message(msg).with_labels(labels)
             }
-            ParseCause::ExpectedStatement => Diagnostic::error().with_message("expected statement"),
+            ParseCause::ExpectedStmt(span) => {
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error()
+                    .with_labels(labels)
+                    .with_message("expected statement")
+            }
             ParseCause::LocalAssignment(err) => {
                 let (msg, span) = match err {
                     LocalAssignmentFailure::Local(err) => ("expected `local` keyword", err.span),

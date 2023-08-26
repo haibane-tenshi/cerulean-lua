@@ -41,8 +41,15 @@ pub(crate) fn statement<'s, 'origin>(
             .or_else(|| (s.clone(), local_function(frag.new_fragment())))?
             .or_else(|| (s.clone(), while_do(frag.new_fragment())))?
             .or_else(|| (s.clone(), do_end(frag.new_fragment())))?
-            .or_else(|| (s, repeat_until(frag.new_fragment())))?
-            .map_failure(|f| f.arrow(ParseFailure::from(ParseCause::ExpectedStatement)))
+            .or_else(|| (s.clone(), repeat_until(frag.new_fragment())))?
+            .map_failure(|f| {
+                let mut s = s;
+                let _ = s.next_token();
+
+                let err = ParseFailure::from(ParseCause::ExpectedStmt(s.span()));
+
+                f.arrow(err)
+            })
             .map_output(|_| frag.commit_decl());
 
         Ok(state)
@@ -51,9 +58,9 @@ pub(crate) fn statement<'s, 'origin>(
 
 fn semicolon(s: Lexer) -> Result<ParsingState<Lexer, (), Complete, ParseFailure>, LexError> {
     match_token(Token::Semicolon)
-        .map_failure(|_| ParseFailure {
+        .map_failure(|t: TokenMismatch| ParseFailure {
             mode: FailureMode::Mismatch,
-            cause: ParseCause::ExpectedStatement,
+            cause: ParseCause::ExpectedStmt(t.span),
         })
         .map_output(|_| ())
         .parse(s)
