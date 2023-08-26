@@ -92,6 +92,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
                 OpCode::LoadConstant(_) | OpCode::LoadStack(_) | OpCode::TabCreate => {
                     self.stack.try_push()?;
                 }
+                OpCode::LoadVariadic => {
+                    self.stack.make_variadic();
+                }
                 OpCode::StoreStack(_) => {
                     self.stack.try_pop()?;
                 }

@@ -136,3 +136,9 @@ impl<'a> StackView<'a> {
         Ok(())
     }
 }
+
+impl<'a> Extend<Value> for StackView<'a> {
+    fn extend<T: IntoIterator<Item = Value>>(&mut self, iter: T) {
+        self.stack.extend(iter)
+    }
+}

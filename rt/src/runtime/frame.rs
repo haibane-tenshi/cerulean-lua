@@ -64,6 +64,11 @@ impl<'rt> ActiveFrame<'rt> {
 
                 ControlFlow::Continue(())
             }
+            LoadVariadic => {
+                self.stack.extend(self.register_variadic.iter().cloned());
+
+                ControlFlow::Continue(())
+            }
             LoadStack(slot) => {
                 let value = self.stack.get(slot)?.clone();
                 self.stack.push(value);
