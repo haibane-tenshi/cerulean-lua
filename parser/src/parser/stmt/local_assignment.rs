@@ -95,6 +95,7 @@ fn ident_list(
     Ok(state)
 }
 
+#[derive(Debug)]
 enum IdentListSuccess {
     Comma,
     Ident(IdentMismatch),

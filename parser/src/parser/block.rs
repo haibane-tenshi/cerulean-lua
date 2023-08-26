@@ -37,19 +37,25 @@ pub(crate) fn inner_block<'s, 'origin>(
 
         let r = statement
             .repeat()
-            .parse_once(s.clone())?
-            .and(return_(frag.new_fragment()).optional())?
-            .map_success(|success| match success {
-                CompleteOr::Complete(Complete) => CompleteOr::Complete(Complete),
-                CompleteOr::Other(f) => {
-                    let mut s = s;
-                    let _ = s.next_token();
+            .parse_once(s)?
+            .and(|s: Lexer<'s>| -> Result<_, FailFast> {
+                let state = return_(frag.new_fragment())
+                    .optional()
+                    .parse_once(s.clone())?
+                    .map_success(|success| match success {
+                        CompleteOr::Complete(Complete) => CompleteOr::Complete(Complete),
+                        CompleteOr::Other(_) => {
+                            let mut s = s;
+                            let _ = s.next_token();
 
-                    let err: ParseFailure = ParseCause::ExpectedStmt(s.span()).into();
+                            let err: ParseFailure = ParseCause::ExpectedStmt(s.span()).into();
 
-                    CompleteOr::Other(f.arrow(err))
-                }
-            })
+                            CompleteOr::Other(err)
+                        }
+                    });
+
+                Ok(state)
+            })?
             .map_output(move |_| {
                 frag.commit_decl();
             });

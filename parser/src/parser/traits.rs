@@ -668,6 +668,7 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
     }
 }
 
+#[derive(Debug)]
 pub struct ParsingStateWithMode<Source, Output, Success, Failure> {
     mode: FailureMode,
     state: ParsingState<Source, Output, Success, Failure>,
