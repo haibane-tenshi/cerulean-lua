@@ -39,6 +39,7 @@ impl Function {
             codes,
             lines: Default::default(),
             height,
+            is_variadic: false,
         }
     }
 

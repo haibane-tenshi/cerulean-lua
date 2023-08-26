@@ -20,6 +20,7 @@ pub struct Frame {
     pub(crate) function_ptr: FunctionPtr,
     pub(crate) ip: InstrId,
     pub(crate) stack_start: ProtectedSize,
+    pub(crate) register_variadic: Vec<Value>,
 }
 
 #[derive(Debug)]
@@ -29,6 +30,7 @@ pub struct ActiveFrame<'rt> {
     pub(crate) opcodes: &'rt IndexSlice<InstrId, OpCode>,
     pub(crate) ip: InstrId,
     pub(crate) stack: StackView<'rt>,
+    pub(crate) register_variadic: Vec<Value>,
 }
 
 impl<'rt> ActiveFrame<'rt> {
@@ -334,6 +336,7 @@ impl<'rt> ActiveFrame<'rt> {
             function_ptr,
             ip,
             stack,
+            register_variadic,
             ..
         } = self;
 
@@ -343,6 +346,7 @@ impl<'rt> ActiveFrame<'rt> {
             function_ptr,
             ip,
             stack_start,
+            register_variadic,
         }
     }
 

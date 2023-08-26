@@ -54,7 +54,7 @@ where
             function_id: FunctionId(0),
         };
         let offset = rt.stack.top();
-        let frame = rt.make_frame(ptr, offset);
+        let frame = rt.prepare_frame(ptr, offset)?;
 
         rt.enter(frame)
     }

@@ -49,6 +49,7 @@ pub struct Function {
     pub codes: IndexVec<InstrId, OpCode>,
     pub lines: RleVec<u32>,
     pub height: u32,
+    pub is_variadic: bool,
 }
 
 impl Display for Function {

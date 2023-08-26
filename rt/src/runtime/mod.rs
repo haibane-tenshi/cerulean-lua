@@ -78,14 +78,46 @@ where
         }
     }
 
-    pub fn make_frame(&self, ptr: FunctionPtr, offset: StackSlot) -> Frame {
+    pub fn prepare_frame(
+        &mut self,
+        ptr: FunctionPtr,
+        offset: StackSlot,
+    ) -> Result<Frame, RuntimeError> {
+        use repr::chunk::Function;
+
         let stack_start = self.stack.protected_size() + offset;
 
-        Frame {
+        let function = self
+            .chunk_cache
+            .chunk(ptr.chunk_id)
+            .ok_or(RuntimeError)?
+            .get_function(ptr.function_id)
+            .ok_or(RuntimeError)?;
+
+        let Function {
+            height,
+            is_variadic,
+            ..
+        } = *function;
+
+        let call_height = StackSlot(0) + height;
+        let mut stack = self.stack.view(stack_start).ok_or(RuntimeError)?;
+
+        let register_variadic = if is_variadic {
+            stack.adjust_height_with_variadics(call_height)
+        } else {
+            stack.adjust_height(call_height);
+            Default::default()
+        };
+
+        let r = Frame {
             function_ptr: ptr,
             ip: Default::default(),
             stack_start,
-        }
+            register_variadic,
+        };
+
+        Ok(r)
     }
 
     pub fn activate(&mut self, frame: Frame) -> Result<ActiveFrame, RuntimeError>
@@ -100,6 +132,7 @@ where
             function_ptr,
             ip,
             stack_start,
+            register_variadic,
         } = frame;
 
         let chunk = chunk_cache
@@ -119,6 +152,7 @@ where
             opcodes,
             ip,
             stack,
+            register_variadic,
         };
 
         Ok(r)
@@ -142,7 +176,6 @@ where
                 ControlFlow::Break(ChangeFrame::Invoke(function_id, slot)) => {
                     let frame = active_frame.suspend();
                     let chunk_id = frame.function_ptr.chunk_id;
-                    let stack_start = frame.stack_start + slot;
 
                     self.frames.push(frame);
 
@@ -151,12 +184,7 @@ where
                         function_id,
                     };
 
-                    let frame = Frame {
-                        function_ptr,
-                        ip: Default::default(),
-                        stack_start,
-                    };
-
+                    let frame = self.prepare_frame(function_ptr, slot)?;
                     active_frame = self.activate(frame)?;
                 }
                 ControlFlow::Continue(()) => (),

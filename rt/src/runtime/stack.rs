@@ -113,12 +113,19 @@ impl<'a> StackView<'a> {
     }
 
     pub fn adjust_height(&mut self, height: StackSlot) {
+        self.adjust_height_with_variadics(height);
+    }
+
+    pub fn adjust_height_with_variadics(&mut self, height: StackSlot) -> Vec<Value> {
         let requested_height = self.protected_size.index(height);
 
         match requested_height.checked_sub(self.stack.len()) {
-            None => self.stack.truncate(requested_height),
-            Some(0) => (),
-            Some(n) => self.stack.extend(std::iter::repeat(Value::Nil).take(n)),
+            None => self.stack.split_off(requested_height),
+            Some(0) => Default::default(),
+            Some(n) => {
+                self.stack.extend(std::iter::repeat(Value::Nil).take(n));
+                Default::default()
+            }
         }
     }
 
