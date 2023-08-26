@@ -25,7 +25,7 @@ impl Function {
         FunctionView::new(self)
     }
 
-    pub fn resolve(self, height: u32) -> repr::chunk::Function {
+    pub fn resolve(self, height: u32, is_variadic: bool) -> repr::chunk::Function {
         let Function {
             opcodes: codes,
             jumps,
@@ -39,7 +39,7 @@ impl Function {
             codes,
             lines: Default::default(),
             height,
-            is_variadic: false,
+            is_variadic,
         }
     }
 

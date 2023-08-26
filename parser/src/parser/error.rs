@@ -327,6 +327,9 @@ impl ParseCause {
                         ("function parameters should be identifiers", err.span)
                     }
                     FuncBodyFailure::ArgListComma(err) => ("expected comma", err.span),
+                    FuncBodyFailure::ArgListVariadic(err) => {
+                        ("expected variadic argument", err.span)
+                    }
                     FuncBodyFailure::End(err) => ("expected `end` keyword", err.span),
                 };
 
@@ -588,6 +591,15 @@ pub(crate) type ParseFailureOrComplete = CompleteOr<ParseFailure>;
 pub(crate) enum CompleteOr<T> {
     Complete(Complete),
     Other(T),
+}
+
+impl<T> CompleteOr<T> {
+    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> CompleteOr<U> {
+        match self {
+            CompleteOr::Complete(t) => CompleteOr::Complete(t),
+            CompleteOr::Other(t) => CompleteOr::Other(f(t)),
+        }
+    }
 }
 
 impl<T> From<Complete> for CompleteOr<T> {

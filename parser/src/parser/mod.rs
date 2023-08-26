@@ -125,10 +125,10 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
 
     let func_table = {
         let mut func_table = func_table.resolve();
-        let mut script = script.resolve(0);
+        let script = script.resolve(0, true);
 
         // Put script where runtime expects it to find.
-        std::mem::swap(func_table.first_mut().unwrap(), &mut script);
+        let _ = std::mem::replace(func_table.first_mut().unwrap(), script);
 
         func_table
     };
