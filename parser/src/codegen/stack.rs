@@ -270,6 +270,8 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         let inner_state = stack.inner_state_at_top();
         let frame_base = stack.len();
 
+        debug_assert!(!stack.variadic, "constructing new view implies construction of new frame which cannot be done on top of variadic stack");
+
         StackView {
             stack,
             inner_state,
@@ -277,15 +279,25 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
     }
 
-    pub fn new_block(&mut self) -> StackView<'s, '_> {
+    pub fn try_new_block(&mut self) -> Result<StackView<'s, '_>, VariadicStackError> {
+        if self.stack.variadic {
+            return Err(VariadicStackError);
+        }
+
         let inner_state = self.stack.inner_state_at_top();
         let frame_base = self.frame_base;
 
-        StackView {
+        let r = StackView {
             stack: self.stack,
             inner_state,
             frame_base,
-        }
+        };
+
+        Ok(r)
+    }
+
+    pub fn new_block(&mut self) -> StackView<'s, '_> {
+        self.try_new_block().unwrap()
     }
 
     pub fn try_new_block_at(
@@ -318,6 +330,8 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         let inner_state = self.stack.inner_state_at_top();
         let frame_base = self.stack.len();
 
+        self.stack.variadic = false;
+
         StackView {
             stack: self.stack,
             inner_state,
@@ -325,7 +339,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
     }
 
-    fn len(&self) -> StackOffset {
+    fn frame_len(&self) -> StackOffset {
         self.stack.len() - self.frame_base
     }
 
@@ -341,7 +355,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 
     pub(super) fn raw_top(&self) -> StackSlot {
-        StackSlot::default() + self.len()
+        StackSlot::default() + self.frame_len()
     }
 
     pub fn state(&self) -> StackState {
