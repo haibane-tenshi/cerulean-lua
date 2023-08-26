@@ -35,7 +35,9 @@ use super::expr::function::FunctionFailure;
 use super::expr::table::TableFailure;
 use super::expr::ExprListError;
 use super::func_def::FuncBodyFailure;
-use super::prefix_expr::{FieldFailure, FnArgsParExprFailure, IndexFailure, VariableFailure};
+use super::prefix_expr::{
+    FieldFailure, FnArgsFailure, FnCallFailure, IndexFailure, VariableFailure,
+};
 use super::stmt::assignment::AssignmentFailure;
 use super::stmt::do_end::DoEndFailure;
 use super::stmt::generic_for::GenericForFailure;
@@ -232,9 +234,9 @@ pub(crate) enum ParseCause {
     #[error("failed to index into table")]
     TabIndex(#[from] IndexFailure),
     #[error("expected function call")]
-    FunctionCall,
+    FunctionCall(#[from] FnCallFailure),
     #[error("failed to parse function call arguments")]
-    FunctionArgs(#[from] FnArgsParExprFailure),
+    FunctionArgs(#[from] FnArgsFailure),
     #[error("expected statement")]
     ExpectedStmt(Span),
     #[error("failed to parse local assignment")]
@@ -373,11 +375,18 @@ impl ParseCause {
 
                 Diagnostic::error().with_message(msg).with_labels(labels)
             }
-            ParseCause::FunctionCall => Diagnostic::error().with_message("expected function call"),
+            ParseCause::FunctionCall(err) => {
+                let labels = vec![Label::primary((), err.span)];
+
+                Diagnostic::error()
+                    .with_labels(labels)
+                    .with_message("expected function call")
+            }
             ParseCause::FunctionArgs(err) => {
                 let (msg, span) = match err {
-                    FnArgsParExprFailure::ParL(err) => ("expected opnening parenthesis", err.span),
-                    FnArgsParExprFailure::ParR(err) => ("expected closing parenthesis", err.span),
+                    FnArgsFailure::ParL(err) => ("expected opnening parenthesis", err.span),
+                    FnArgsFailure::ParR(err) => ("expected closing parenthesis", err.span),
+                    FnArgsFailure::String(err) => ("expected string parameter", err.span),
                 };
 
                 let labels = vec![Label::primary((), span)];

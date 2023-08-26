@@ -105,7 +105,11 @@ pub(crate) fn literal_str(
             let span = s.span();
             ParsingState::Success(s, (r, span), Complete)
         }
-        Ok(_) | Err(Eof) => ParsingState::Failure(LiteralStrMismatch),
+        Ok(_) | Err(Eof) => {
+            let span = s.span();
+
+            ParsingState::Failure(LiteralStrMismatch { span })
+        }
     };
 
     Ok(r)
@@ -113,4 +117,6 @@ pub(crate) fn literal_str(
 
 #[derive(Debug, Error)]
 #[error("encountered unexpected token, expected literal string")]
-pub struct LiteralStrMismatch;
+pub struct LiteralStrMismatch {
+    pub(crate) span: Span,
+}

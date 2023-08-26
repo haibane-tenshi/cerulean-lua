@@ -91,6 +91,47 @@ pub(crate) struct PlaceFailure {
     pub(crate) span: logos::Span,
 }
 
+pub(crate) fn func_call<'s, 'origin>(
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = ParseFailure,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| -> Result<_, FailFast> {
+        let start = s.span().start;
+
+        let state = prefix_expr_impl(frag.new_fragment()).parse_once(s)?;
+
+        let state = match state {
+            ParsingState::Success(s, PrefixExpr::FnCall, success) => {
+                ParsingState::Success(s, (), success)
+            }
+            ParsingState::Success(s, _, _) => {
+                let end = s.span().end;
+
+                let err = FnCallFailure { span: start..end };
+
+                ParsingState::Failure(err.into())
+            }
+            ParsingState::Failure(failure) => ParsingState::Failure(failure),
+        };
+
+        // Function calls leave stack in variadic state, so we need to scope it when it is used as statement.
+        frag.commit_scope();
+
+        Ok(state)
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("failed to parse function call")]
+pub(crate) struct FnCallFailure {
+    pub(crate) span: logos::Span,
+}
+
 fn prefix_expr_impl<'s, 'origin>(
     mut frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -139,7 +180,7 @@ fn prefix_expr_impl<'s, 'origin>(
             // We are reusing the same stack slot to store it.
             frag.emit_adjust_to(stack_start + 1);
 
-            let state = func_call(stack_start, frag.new_fragment_at_boundary())
+            let state = func_args(stack_start, frag.new_fragment_at_boundary())
                 .parse_once(s.clone())?
                 .map_output(|_| PrefixExpr::FnCall)
                 .or_else(|| {
@@ -178,7 +219,7 @@ enum PrefixExpr {
     FnCall,
 }
 
-fn func_call<'s, 'origin>(
+fn func_args<'s, 'origin>(
     invoke_target: StackSlot,
     mut frag: Fragment<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -192,14 +233,7 @@ fn func_call<'s, 'origin>(
         let state = args_par_expr(frag.new_fragment())
             .parse_once(s.clone())?
             .or_else(|| (s.clone(), args_table(frag.new_fragment())))?
-            .or_else(|| {
-                let p = args_str(frag.new_fragment()).map_failure(|_| ParseFailure {
-                    mode: FailureMode::Mismatch,
-                    cause: ParseCause::FunctionCall,
-                });
-
-                (s, p)
-            })?
+            .or_else(|| (s, args_str(frag.new_fragment())))?
             .map_output(move |_| {
                 frag.emit(OpCode::Invoke(invoke_target));
 
@@ -222,10 +256,10 @@ fn args_par_expr<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::parser::expr::expr_list;
 
-        let token_par_l = match_token(Token::ParL)
-            .map_failure(|f| ParseFailure::from(FnArgsParExprFailure::ParL(f)));
-        let token_par_r = match_token(Token::ParR)
-            .map_failure(|f| ParseFailure::from(FnArgsParExprFailure::ParR(f)));
+        let token_par_l =
+            match_token(Token::ParL).map_failure(|f| ParseFailure::from(FnArgsFailure::ParL(f)));
+        let token_par_r =
+            match_token(Token::ParR).map_failure(|f| ParseFailure::from(FnArgsFailure::ParR(f)));
 
         let state = token_par_l
             .parse_once(s)?
@@ -241,9 +275,10 @@ fn args_par_expr<'s, 'origin>(
 
 #[derive(Debug, Error)]
 #[error("failed to parse function arguments")]
-pub enum FnArgsParExprFailure {
+pub enum FnArgsFailure {
     ParL(TokenMismatch),
     ParR(TokenMismatch),
+    String(LiteralStrMismatch),
 }
 
 fn args_str<'s, 'origin>(
@@ -252,15 +287,17 @@ fn args_str<'s, 'origin>(
     Lexer<'s>,
     Output = (),
     Success = Complete,
-    Failure = LiteralStrMismatch,
+    Failure = ParseFailure,
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let state = literal_str(s)?.map_output(move |(value, _)| {
-            frag.emit_load_literal(Literal::String(value.into_owned()));
+        let state = literal_str(s)?
+            .map_failure(|f| ParseFailure::from(FnArgsFailure::String(f)))
+            .map_output(move |(value, _)| {
+                frag.emit_load_literal(Literal::String(value.into_owned()));
 
-            frag.commit_expr();
-        });
+                frag.commit_expr();
+            });
 
         Ok(state)
     }
