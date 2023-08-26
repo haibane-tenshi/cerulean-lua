@@ -33,15 +33,15 @@ pub(crate) fn statement<'s, 'origin>(
 
         let state = semicolon(s.clone())?
             .map_success(ParseFailureOrComplete::Complete)
-            .or(s.clone(), local_assignment(frag.new_fragment()))?
-            .or(s.clone(), assignment(frag.new_fragment()))?
-            .or(s.clone(), if_then(frag.new_fragment()))?
-            .or(s.clone(), numerical_for(frag.new_fragment()))?
-            .or(s.clone(), generic_for(frag.new_fragment()))?
-            .or(s.clone(), local_function(frag.new_fragment()))?
-            .or(s.clone(), while_do(frag.new_fragment()))?
-            .or(s.clone(), do_end(frag.new_fragment()))?
-            .or(s, repeat_until(frag.new_fragment()))?
+            .or_else(|| (s.clone(), local_assignment(frag.new_fragment())))?
+            .or_else(|| (s.clone(), assignment(frag.new_fragment())))?
+            .or_else(|| (s.clone(), if_then(frag.new_fragment())))?
+            .or_else(|| (s.clone(), numerical_for(frag.new_fragment())))?
+            .or_else(|| (s.clone(), generic_for(frag.new_fragment())))?
+            .or_else(|| (s.clone(), local_function(frag.new_fragment())))?
+            .or_else(|| (s.clone(), while_do(frag.new_fragment())))?
+            .or_else(|| (s.clone(), do_end(frag.new_fragment())))?
+            .or_else(|| (s, repeat_until(frag.new_fragment())))?
             .map_failure(|f| f.arrow(ParseFailure::from(ParseCause::ExpectedStatement)))
             .map_output(|_| frag.commit_decl());
 

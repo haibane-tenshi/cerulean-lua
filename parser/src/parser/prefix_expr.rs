@@ -110,10 +110,11 @@ fn prefix_expr_impl<'s, 'origin>(
 
             let state = state
                 .map_output(|slot| PrefixExpr::Place(Place::Temporary(slot)))
-                .or(
-                    s,
-                    par_expr(frag.new_fragment()).map_output(|_| PrefixExpr::Expr),
-                )?;
+                .or_else(|| {
+                    let p = par_expr(frag.new_fragment()).map_output(|_| PrefixExpr::Expr);
+
+                    (s, p)
+                })?;
 
             Ok(state)
         };
@@ -141,14 +142,18 @@ fn prefix_expr_impl<'s, 'origin>(
             let state = func_call(stack_start, frag.new_fragment_at_boundary())
                 .parse_once(s.clone())?
                 .map_output(|_| PrefixExpr::FnCall)
-                .or(
-                    s.clone(),
-                    field(frag.new_fragment()).map_output(|_| PrefixExpr::Place(Place::TableField)),
-                )?
-                .or(
-                    s,
-                    index(frag.new_fragment()).map_output(|_| PrefixExpr::Place(Place::TableField)),
-                )?
+                .or_else(|| {
+                    let p = field(frag.new_fragment())
+                        .map_output(|_| PrefixExpr::Place(Place::TableField));
+
+                    (s.clone(), p)
+                })?
+                .or_else(|| {
+                    let p = index(frag.new_fragment())
+                        .map_output(|_| PrefixExpr::Place(Place::TableField));
+
+                    (s, p)
+                })?
                 .map_output(|expr| {
                     output = expr;
                     frag.commit_expr();
@@ -186,14 +191,15 @@ fn func_call<'s, 'origin>(
     move |s: Lexer<'s>| {
         let state = args_par_expr(frag.new_fragment())
             .parse_once(s.clone())?
-            .or(s.clone(), args_table(frag.new_fragment()))?
-            .or(
-                s,
-                args_str(frag.new_fragment()).map_failure(|_| ParseFailure {
+            .or_else(|| (s.clone(), args_table(frag.new_fragment())))?
+            .or_else(|| {
+                let p = args_str(frag.new_fragment()).map_failure(|_| ParseFailure {
                     mode: FailureMode::Mismatch,
                     cause: ParseCause::FunctionCall,
-                }),
-            )?
+                });
+
+                (s, p)
+            })?
             .map_output(move |_| {
                 frag.emit(OpCode::Invoke(invoke_target));
 

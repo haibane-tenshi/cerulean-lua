@@ -118,14 +118,17 @@ fn field<'s, 'origin>(
         let state = bracket(table_slot, frag.new_fragment())
             .parse_once(s.clone())?
             .map_output(|_| FieldType::Bracket)
-            .or(
-                s.clone(),
-                name(table_slot, frag.new_fragment()).map_output(|_| FieldType::Name),
-            )?
-            .or(
-                s,
-                index(table_slot, next_index, frag.new_fragment()).map_output(|_| FieldType::Index),
-            )?
+            .or_else(|| {
+                let p = name(table_slot, frag.new_fragment()).map_output(|_| FieldType::Name);
+
+                (s.clone(), p)
+            })?
+            .or_else(|| {
+                let p = index(table_slot, next_index, frag.new_fragment())
+                    .map_output(|_| FieldType::Index);
+
+                (s, p)
+            })?
             .map_output(move |r| {
                 frag.commit_scope();
                 r

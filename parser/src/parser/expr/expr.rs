@@ -88,7 +88,7 @@ fn expr_impl<'s, 'origin>(
         let state = prefix
             .parse_once(s.clone())?
             .map_success(CompleteOr::Other)
-            .or(s, atom(frag.new_fragment()))?
+            .or_else(|| (s, atom(frag.new_fragment())))?
             .with_mode(FailureMode::Ambiguous);
 
         // At this point there can be variadic number of values on stack.
@@ -258,9 +258,9 @@ fn atom<'s, 'origin>(
             // Discard failure, we should never observe this one as an error.
             .map_failure(|_| Complete)
             .map_success(ParseFailureOrComplete::Complete)
-            .or(s.clone(), prefix_expr(frag.new_fragment()))?
-            .or(s.clone(), table(frag.new_fragment()))?
-            .or(s, function(frag.new_fragment()))?
+            .or_else(|| (s.clone(), prefix_expr(frag.new_fragment())))?
+            .or_else(|| (s.clone(), table(frag.new_fragment())))?
+            .or_else(|| (s, function(frag.new_fragment())))?
             .map_output(|_| {
                 frag.commit_expr();
             });

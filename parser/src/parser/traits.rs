@@ -635,10 +635,9 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
         Ok(r)
     }
 
-    pub fn or<P>(
+    pub fn or_else<P>(
         self,
-        s: Source,
-        p: P,
+        f: impl FnOnce() -> (Source, P),
     ) -> Result<
         ParsingState<Source, Output, Success, <Failure as Arrow<P::Failure>>::Output>,
         P::FailFast,
@@ -651,12 +650,18 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
     {
         let r = match self {
             ParsingState::Success(s, output, success) => ParsingState::Success(s, output, success),
-            ParsingState::Failure(failure) => match p.parse_once(s)? {
-                ParsingState::Success(s, output, success) => {
-                    ParsingState::Success(s, output.into(), failure.arrow(success).into())
+            ParsingState::Failure(failure) => {
+                let (s, p) = f();
+
+                match p.parse_once(s)? {
+                    ParsingState::Success(s, output, success) => {
+                        ParsingState::Success(s, output.into(), failure.arrow(success).into())
+                    }
+                    ParsingState::Failure(failure2) => {
+                        ParsingState::Failure(failure.arrow(failure2))
+                    }
                 }
-                ParsingState::Failure(failure2) => ParsingState::Failure(failure.arrow(failure2)),
-            },
+            }
         };
 
         Ok(r)
@@ -832,10 +837,9 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
         Ok(r)
     }
 
-    pub fn or<P>(
+    pub fn or_else<P>(
         self,
-        s: Source,
-        p: P,
+        f: impl FnOnce() -> (Source, P),
     ) -> Result<
         ParsingStateWithMode<Source, Output, Success, <Failure as Arrow<P::Failure>>::Output>,
         P::FailFast,
@@ -848,7 +852,7 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
     {
         let r = ParsingStateWithMode {
             mode: self.mode,
-            state: self.state.or(s, p)?,
+            state: self.state.or_else(f)?,
         };
 
         Ok(r)
