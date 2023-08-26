@@ -36,7 +36,7 @@ use super::expr::table::TableFailure;
 use super::expr::ExprListError;
 use super::func_def::FuncBodyFailure;
 use super::prefix_expr::{
-    FieldFailure, FnArgsFailure, FnCallFailure, IndexFailure, VariableFailure,
+    FieldFailure, FnArgsFailure, FnCallFailure, IndexFailure, TabCallFailure, VariableFailure,
 };
 use super::stmt::assignment::AssignmentFailure;
 use super::stmt::do_end::DoEndFailure;
@@ -233,6 +233,8 @@ pub(crate) enum ParseCause {
     TabField(#[from] FieldFailure),
     #[error("failed to index into table")]
     TabIndex(#[from] IndexFailure),
+    #[error("failed to call table method")]
+    TabCall(#[from] TabCallFailure),
     #[error("expected function call")]
     FunctionCall(#[from] FnCallFailure),
     #[error("failed to parse function call arguments")]
@@ -369,6 +371,16 @@ impl ParseCause {
                 let (msg, span) = match err {
                     IndexFailure::BracketL(err) => ("expected opnening bracket", err.span),
                     IndexFailure::BracketR(err) => ("expected closing bracket", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::TabCall(err) => {
+                let (msg, span) = match err {
+                    TabCallFailure::Colon(err) => ("expected colon", err.span),
+                    TabCallFailure::Ident(err) => ("expected identifier", err.span),
                 };
 
                 let labels = vec![Label::primary((), span)];

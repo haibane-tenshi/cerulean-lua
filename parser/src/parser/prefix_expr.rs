@@ -168,7 +168,7 @@ fn prefix_expr_impl<'s, 'origin>(
         };
 
         let next = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let mut frag = frag.new_fragment_at(stack_start);
+            let mut frag = frag.new_fragment_at_boundary();
 
             // Evaluate place.
             if let PrefixExpr::Place(place) = output {
@@ -192,6 +192,12 @@ fn prefix_expr_impl<'s, 'origin>(
                 .or_else(|| {
                     let p = index(frag.new_fragment())
                         .map_output(|_| PrefixExpr::Place(Place::TableField));
+
+                    (s.clone(), p)
+                })?
+                .or_else(|| {
+                    let p = tab_call(stack_start, frag.new_fragment_at_boundary())
+                        .map_output(|_| PrefixExpr::FnCall);
 
                     (s, p)
                 })?
@@ -403,4 +409,54 @@ fn index<'s, 'origin>(
 pub(crate) enum IndexFailure {
     BracketL(TokenMismatch),
     BracketR(TokenMismatch),
+}
+
+fn tab_call<'s, 'origin>(
+    table: StackSlot,
+    mut frag: Fragment<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = (),
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let token_colon =
+            match_token(Token::Colon).map_failure(|f| ParseFailure::from(TabCallFailure::Colon(f)));
+        let ident = identifier.map_failure(|f| ParseFailure::from(TabCallFailure::Ident(f)));
+
+        let state = token_colon
+            .parse(s)?
+            .and_replace(ident)?
+            .map_output(|(ident, _)| {
+                let invoke_target = frag.stack().top();
+
+                frag.emit(OpCode::LoadStack(table));
+                frag.emit_load_literal(Literal::String(ident.into()));
+                frag.emit(OpCode::TabGet);
+
+                // Pass table itself as the first argument.
+                frag.emit(OpCode::LoadStack(table));
+
+                invoke_target
+            })
+            .then(|invoke_target| {
+                let frag = frag.new_fragment_at(invoke_target);
+
+                func_args(frag.stack().boundary(), frag)
+            })?
+            .map_output(move |_| {
+                frag.commit_expr();
+            });
+
+        Ok(state)
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("failure to parse table method call")]
+pub(crate) enum TabCallFailure {
+    Colon(TokenMismatch),
+    Ident(IdentMismatch),
 }
