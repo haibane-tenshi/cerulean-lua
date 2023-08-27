@@ -48,8 +48,7 @@ impl Display for Chunk {
 pub struct Function {
     pub codes: IndexVec<InstrId, OpCode>,
     pub lines: RleVec<u32>,
-    pub height: u32,
-    pub is_variadic: bool,
+    pub signature: Signature,
 }
 
 impl Display for Function {
@@ -60,7 +59,7 @@ impl Display for Function {
             Repeat,
         }
 
-        writeln!(f, "initial stack: {}", self.height)?;
+        writeln!(f, "initial stack: {}", self.signature.height)?;
 
         let iter = self.codes.iter().copied().enumerate().zip(
             self.lines
@@ -85,4 +84,10 @@ impl Display for Function {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct Signature {
+    pub height: u32,
+    pub is_variadic: bool,
 }

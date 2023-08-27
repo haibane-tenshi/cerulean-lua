@@ -1,5 +1,6 @@
 use crate::codegen::fragment::FragmentId;
 use crate::codegen::stack::StackState;
+use repr::chunk::Signature;
 use repr::index::{InstrCountError, InstrId};
 use repr::index_vec::IndexVec;
 use repr::opcode::OpCode;
@@ -10,14 +11,16 @@ pub struct Function {
     opcodes: IndexVec<InstrId, OpCode>,
     jumps: HashMap<FragmentId, Vec<(InstrId, StackState)>>,
     reachable: bool,
+    signature: Signature,
 }
 
 impl Function {
-    pub fn new() -> Self {
+    pub fn new(signature: Signature) -> Self {
         Function {
             opcodes: Default::default(),
             jumps: Default::default(),
             reachable: true,
+            signature,
         }
     }
 
@@ -25,11 +28,12 @@ impl Function {
         FunctionView::new(self)
     }
 
-    pub fn resolve(self, height: u32, is_variadic: bool) -> repr::chunk::Function {
+    pub fn resolve(self) -> repr::chunk::Function {
         let Function {
             opcodes: codes,
             jumps,
             reachable: _,
+            signature,
         } = self;
 
         // Fixme: jumps not adjusted on rollback leading to panic here
@@ -38,8 +42,7 @@ impl Function {
         repr::chunk::Function {
             codes,
             lines: Default::default(),
-            height,
-            is_variadic,
+            signature,
         }
     }
 
@@ -92,6 +95,10 @@ impl<'fun> FunctionView<'fun> {
 
     pub fn is_reachable(&self) -> bool {
         self.fun.reachable
+    }
+
+    pub fn signature(&self) -> Signature {
+        self.fun.signature
     }
 
     pub fn len(&self) -> InstrId {

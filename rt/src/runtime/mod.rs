@@ -94,16 +94,12 @@ where
             .get_function(ptr.function_id)
             .ok_or(RuntimeError)?;
 
-        let Function {
-            height,
-            is_variadic,
-            ..
-        } = *function;
+        let Function { signature, .. } = *function;
 
-        let call_height = StackSlot(0) + height;
+        let call_height = StackSlot(0) + signature.height;
         let mut stack = self.stack.view(stack_start).ok_or(RuntimeError)?;
 
-        let register_variadic = if is_variadic {
+        let register_variadic = if signature.is_variadic {
             stack.adjust_height_with_variadics(call_height)
         } else {
             stack.adjust_height(call_height);

@@ -85,24 +85,28 @@ impl From<FailFast> for Error {
 
 pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::const_table::ConstTable;
+    use crate::codegen::fragment::Frame;
     use crate::codegen::func_table::FuncTable;
-    use crate::codegen::function::Function;
     use crate::codegen::stack::Stack;
     use crate::parser::block::block;
+    use repr::chunk::Signature;
 
     // Reserve 0-th slot in table for the script itself.
     let mut func_table = FuncTable::with_script();
     let mut const_table = ConstTable::new();
-    let mut script = Function::new();
     let mut stack = Stack::new();
+    let signature = Signature {
+        height: 0,
+        is_variadic: true,
+    };
 
-    let fragment = Fragment::new(
+    let mut frame = Frame::new(
         func_table.view(),
         const_table.view(),
-        script.view(),
         stack.view(),
+        signature,
     );
-    let state = block(fragment).parse_once(s)?;
+    let state = block(frame.new_fragment()).parse_once(s)?;
 
     match state {
         ParsingState::Success(mut s, _, reason) => {
@@ -124,8 +128,8 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     }
 
     let func_table = {
+        let script = frame.commit().resolve();
         let mut func_table = func_table.resolve();
-        let script = script.resolve(0, true);
 
         // Put script where runtime expects it to find.
         let _ = std::mem::replace(func_table.first_mut().unwrap(), script);

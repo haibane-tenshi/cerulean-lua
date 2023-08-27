@@ -1,5 +1,6 @@
 use crate::codegen::stack::StackView;
 use crate::parser::prelude::*;
+use repr::chunk::Signature;
 use repr::index::FunctionId;
 use thiserror::Error;
 
@@ -13,7 +14,6 @@ pub(crate) fn func_body<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use crate::codegen::function::Function;
         use crate::parser::block::block;
         use FuncBodyFailure::*;
 
@@ -21,43 +21,43 @@ pub(crate) fn func_body<'s, 'origin>(
         let token_par_r = match_token(Token::ParR).map_failure(|f| ParseFailure::from(ParR(f)));
         let token_end = match_token(Token::End).map_failure(|f| ParseFailure::from(End(f)));
 
-        // Start function
-        let mut func = Function::new();
-        let mut frag = outer_frag.new_function(func.view());
-
-        // Currently this slot contains pointer to function itself.
-        // In the future we will put environment here instead.
-        frag.stack_mut().push();
+        // At the moment extra slot is occupied by the function pointer itself.
+        let frame_base = outer_frag.stack().top();
+        outer_frag.stack_mut().push();
 
         let state = token_par_l
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and_replace(parlist(frag.stack_mut().new_block()).optional())?
+            .and_replace(parlist(outer_frag.stack_mut().new_block()).optional())?
             .map_success(|success| success.map(|f| ParseFailure::from(FuncBodyFailure::from(f))))
             .with_mode(FailureMode::Malformed)
             .and_discard(token_par_r)?
-            .and_discard(block(frag.new_fragment()))?
+            .then(|signature| {
+                let outer_frag = &mut outer_frag;
+                move |s: Lexer<'s>| -> Result<_, FailFast> {
+                    let mut signature = signature.unwrap_or_default();
+                    // At the moment extra slot is occupied by the function pointer itself.
+                    signature.height += 1;
+
+                    let mut frame = outer_frag.new_frame(signature, frame_base);
+
+                    let state = block(frame.new_fragment())
+                        .parse_once(s)?
+                        .map_output(|_| frame.commit().resolve());
+
+                    Ok(state)
+                }
+            })?
             .and_discard(token_end)?
-            .inspect(|_| {
-                // Cannot capture both `frag` and `func` in the same closure.
-                frag.commit_scope();
-            })
-            .try_map_output(move |param_count| -> Result<_, CodegenError> {
-                let (param_count, is_variadic) = param_count.unwrap_or((0, false));
-
-                // An extra stack slot is taken by function pointer itself.
-                let height = param_count + 1;
-
-                // Finish function.
-                // frag.commit_scope();
-                let func = func.resolve(height, is_variadic);
+            .try_map_output(|func| -> Result<_, CodegenError> {
                 let func_id = outer_frag.func_table_mut().push(func)?;
-
-                // Drop outer fragment to make sure we didn't mess up current function.
-                drop(outer_frag);
 
                 Ok(func_id)
             })?
+            .map_output(|r| {
+                outer_frag.commit_scope();
+                r
+            })
             .collapse();
 
         Ok(state)
@@ -94,7 +94,7 @@ fn parlist<'s, 'origin>(
     mut stack: StackView<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (u32, bool),
+    Output = Signature,
     Success = CompleteOr<ParListMismatch>,
     Failure = ParListMismatch,
     FailFast = FailFast,
@@ -139,7 +139,10 @@ fn parlist<'s, 'origin>(
             .map_output(|is_variadic| {
                 stack.commit(crate::codegen::stack::CommitKind::Decl);
 
-                (count, is_variadic)
+                Signature {
+                    height: count,
+                    is_variadic,
+                }
             });
 
         Ok(state)

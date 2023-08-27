@@ -326,9 +326,13 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     //     self.try_new_block_at(slot).unwrap()
     // }
 
-    pub fn new_frame(&mut self) -> StackView<'s, '_> {
-        let inner_state = self.stack.inner_state_at_top();
-        let frame_base = self.stack.len();
+    pub fn new_frame(&mut self, frame_base: StackSlot) -> StackView<'s, '_> {
+        let frame_base = self.slot_to_global(frame_base);
+        let inner_state = InnerState {
+            variadic: self.stack.variadic,
+            boundary: frame_base,
+            top: frame_base,
+        };
 
         self.stack.variadic = false;
 

@@ -3,10 +3,11 @@ use thiserror::Error;
 
 use crate::codegen::const_table::ConstTableView;
 use crate::codegen::func_table::FuncTableView;
-use crate::codegen::function::FunctionView;
+use crate::codegen::function::{Function, FunctionView};
 use crate::codegen::stack::{
     BoundaryViolationError, CommitKind, NewBlockAtError, PopError, PushError, StackView,
 };
+use repr::chunk::Signature;
 use repr::index::{ConstCapacityError, InstrCountError, InstrId, StackSlot};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
@@ -32,19 +33,19 @@ pub struct Fragment<'s, 'origin> {
 }
 
 impl<'s, 'origin> Fragment<'s, 'origin> {
-    pub fn new(
-        func_table: FuncTableView<'origin>,
-        const_table: ConstTableView<'origin>,
-        fun: FunctionView<'origin>,
-        stack: StackView<'s, 'origin>,
-    ) -> Self {
-        Fragment {
-            func_table,
-            const_table,
-            fun,
-            stack,
-        }
-    }
+    // pub fn new(
+    //     func_table: FuncTableView<'origin>,
+    //     const_table: ConstTableView<'origin>,
+    //     fun: FunctionView<'origin>,
+    //     stack: StackView<'s, 'origin>,
+    // ) -> Self {
+    //     Fragment {
+    //         func_table,
+    //         const_table,
+    //         fun,
+    //         stack,
+    //     }
+    // }
 
     pub fn id(&self) -> FragmentId {
         self.fun.id()
@@ -214,7 +215,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     //     self.fun.len()
     // }
 
-    pub fn new_function<'a>(&'a mut self, func: FunctionView<'a>) -> Fragment<'s, 'a> {
+    pub fn new_frame(&mut self, signature: Signature, frame_base: StackSlot) -> Frame<'s, '_> {
         let Fragment {
             func_table,
             const_table,
@@ -224,14 +225,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
         let func_table = func_table.new_view();
         let const_table = const_table.new_view();
-        let stack = stack.new_frame();
+        let stack = stack.new_frame(frame_base);
 
-        Fragment {
-            func_table,
-            const_table,
-            fun: func,
-            stack,
-        }
+        Frame::new(func_table, const_table, stack, signature)
     }
 
     pub fn new_fragment(&mut self) -> Fragment<'s, '_> {
@@ -355,4 +351,52 @@ pub enum EmitLoadLiteralError {
     Emit(#[from] EmitError),
     #[error(transparent)]
     Literal(#[from] ConstCapacityError),
+}
+
+#[derive(Debug)]
+pub struct Frame<'s, 'origin> {
+    func_table: FuncTableView<'origin>,
+    const_table: ConstTableView<'origin>,
+    fun: Function,
+    stack: StackView<'s, 'origin>,
+}
+
+impl<'s, 'origin> Frame<'s, 'origin> {
+    pub fn new(
+        func_table: FuncTableView<'origin>,
+        const_table: ConstTableView<'origin>,
+        stack: StackView<'s, 'origin>,
+        signature: Signature,
+    ) -> Self {
+        Frame {
+            func_table,
+            const_table,
+            stack,
+            fun: Function::new(signature),
+        }
+    }
+
+    pub fn new_fragment(&mut self) -> Fragment<'s, '_> {
+        Fragment {
+            func_table: self.func_table.new_view(),
+            const_table: self.const_table.new_view(),
+            fun: self.fun.view(),
+            stack: self.stack.new_block(),
+        }
+    }
+
+    pub fn commit(self) -> Function {
+        let Frame {
+            func_table,
+            const_table,
+            fun,
+            stack,
+        } = self;
+
+        func_table.commit();
+        const_table.commit();
+        stack.commit(CommitKind::Scope);
+
+        fun
+    }
 }
