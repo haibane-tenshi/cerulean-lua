@@ -35,15 +35,15 @@ pub(crate) fn local_function<'s, 'origin>(
                 frag.stack_mut().give_name(slot, ident);
             })
             .and_replace(func_body(frag.new_fragment()))?
-            .try_map_output(|func_id| -> Result<_, CodegenError> {
+            .map_output(|func_id| {
                 let const_id = frag.const_table_mut().insert(Literal::Function(func_id));
 
                 // Stack is already adjusted, we just need to silently write to correct slot here.
-                frag.emit_raw(OpCode::LoadConstant(const_id), false)?;
+                frag.emit_raw(OpCode::LoadConstant(const_id), false)
+                    .unwrap();
 
                 frag.commit_decl();
-                Ok(())
-            })?
+            })
             .collapse();
 
         Ok(state)

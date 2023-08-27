@@ -49,13 +49,10 @@ pub(crate) fn func_body<'s, 'origin>(
                 }
             })?
             .and_discard(token_end)?
-            .try_map_output(|func| -> Result<_, CodegenError> {
-                let func_id = outer_frag.func_table_mut().push(func)?;
-
-                Ok(func_id)
-            })?
-            .map_output(|r| {
+            .map_output(|func| {
+                let r = outer_frag.func_table_mut().push(func).unwrap();
                 outer_frag.commit_scope();
+
                 r
             })
             .collapse();

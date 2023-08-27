@@ -67,6 +67,10 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &mut self.stack
     }
 
+    pub fn signature(&self) -> Signature {
+        self.fun.signature()
+    }
+
     pub fn emit_raw(&mut self, instr: OpCode, adjust_stack: bool) -> Result<InstrId, EmitError> {
         if adjust_stack {
             match instr {

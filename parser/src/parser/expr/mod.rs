@@ -3,6 +3,7 @@ pub(crate) mod expr;
 pub(crate) mod function;
 pub(crate) mod literal;
 pub(crate) mod table;
+pub(crate) mod variadic;
 
 use thiserror::Error;
 

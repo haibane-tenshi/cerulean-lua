@@ -27,12 +27,12 @@
 use std::ops::{BitOr, BitOrAssign};
 
 use logos::Span;
-use repr::index::{ConstCapacityError, FunctionCapacityError, InstrCountError};
 use thiserror::Error;
 
 use super::expr::expr::ExprFailure;
 use super::expr::function::FunctionFailure;
 use super::expr::table::TableFailure;
+use super::expr::variadic::VariadicExprError;
 use super::expr::ExprListError;
 use super::func_def::FuncBodyFailure;
 use super::prefix_expr::{
@@ -48,11 +48,6 @@ use super::stmt::numerical_for::NumericalForFailure;
 use super::stmt::repeat_until::RepeatUntilFailure;
 use super::stmt::return_::ReturnFailure;
 use super::stmt::while_do::WhileDoFailure;
-use crate::codegen::fragment::{EmitError, EmitLoadLiteralError};
-use crate::codegen::stack::{
-    BoundaryViolationError, GiveNameError, PopError, PushError, StackOverflowError,
-    VariadicStackError,
-};
 
 pub use std::convert::Infallible as Never;
 
@@ -98,78 +93,12 @@ impl LexError {
 
 #[derive(Debug, Error)]
 #[error("codegen error")]
-pub struct CodegenError;
+pub enum CodegenError {
+    #[error("malformed variadic expression")]
+    VariadicExpr(#[from] VariadicExprError),
 
-impl From<VariadicStackError> for CodegenError {
-    fn from(_: VariadicStackError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<StackOverflowError> for CodegenError {
-    fn from(_: StackOverflowError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<PushError> for CodegenError {
-    fn from(_: PushError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<PopError> for CodegenError {
-    fn from(_: PopError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<BoundaryViolationError> for CodegenError {
-    fn from(_: BoundaryViolationError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<GiveNameError> for CodegenError {
-    fn from(_: GiveNameError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<ConstCapacityError> for CodegenError {
-    fn from(_: ConstCapacityError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<EmitError> for CodegenError {
-    fn from(_: EmitError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<EmitLoadLiteralError> for CodegenError {
-    fn from(_: EmitLoadLiteralError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<InstrCountError> for CodegenError {
-    fn from(_: InstrCountError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<FunctionCapacityError> for CodegenError {
-    fn from(_: FunctionCapacityError) -> Self {
-        CodegenError
-    }
-}
-
-impl From<VariableFailure> for CodegenError {
-    fn from(_: VariableFailure) -> Self {
-        CodegenError
-    }
+    #[error("failed to resolve variable name")]
+    VariableFailure(#[from] VariableFailure),
 }
 
 #[derive(Debug, Error)]

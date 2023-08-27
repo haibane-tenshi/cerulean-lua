@@ -250,7 +250,7 @@ fn atom<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use super::{function::function, literal::literal, table::table};
+        use super::{function::function, literal::literal, table::table, variadic::variadic};
         use crate::parser::prefix_expr::prefix_expr;
 
         let r = literal(frag.new_fragment())
@@ -258,6 +258,12 @@ fn atom<'s, 'origin>(
             // Discard failure, we should never observe this one as an error.
             .map_failure(|_| Complete)
             .map_success(ParseFailureOrComplete::Complete)
+            .or_else(|| {
+                (
+                    s.clone(),
+                    variadic(frag.new_fragment()).map_failure(|_| Complete),
+                )
+            })?
             .or_else(|| (s.clone(), prefix_expr(frag.new_fragment())))?
             .or_else(|| (s.clone(), table(frag.new_fragment())))?
             .or_else(|| (s, function(frag.new_fragment())))?

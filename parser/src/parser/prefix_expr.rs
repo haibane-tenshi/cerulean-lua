@@ -334,7 +334,7 @@ fn variable<'s, 'a>(
 
 #[derive(Debug, Error)]
 #[error("failed to parse variable")]
-pub(crate) enum VariableFailure {
+pub enum VariableFailure {
     #[error("upvalues are not yet supported")]
     UnsupportedUpvalue,
     #[error("globals are not yet supported")]
