@@ -659,6 +659,15 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             }
         }
 
+        let InnerState {
+            frame_base,
+            boundary,
+            ..
+        } = self.inner_state;
+
+        self.stack.stack.frame_base = frame_base;
+        self.stack.boundary = boundary;
+
         std::mem::forget(self)
     }
 }
