@@ -44,11 +44,13 @@ pub(crate) fn local_assignment<'s, 'origin>(
             .map_output(|idents| {
                 let count: u32 = idents.len().try_into().unwrap();
 
+                frag.emit_adjust_to(stack_start + count);
+
+                // Apply names.
+                frag.stack_mut().adjust_to(stack_start);
                 for ident in idents {
                     frag.stack_mut().push(Some(ident));
                 }
-
-                frag.emit_adjust_to(stack_start + count);
 
                 frag.commit();
             })
