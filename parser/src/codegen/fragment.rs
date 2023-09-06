@@ -54,6 +54,14 @@ impl<'s, 'origin> Core<'s, 'origin> {
         self.fragment(CommitKind::Decl)
     }
 
+    pub fn fragment_at(self, kind: CommitKind, slot: FragmentStackSlot) -> Fragment<'s, 'origin> {
+        Fragment::new_at(self, kind, slot)
+    }
+
+    pub fn scope_at(self, slot: FragmentStackSlot) -> Fragment<'s, 'origin> {
+        self.fragment_at(CommitKind::Scope, slot)
+    }
+
     pub fn frame(self, signature: Signature) -> Frame<'s, 'origin> {
         Frame::new(self, signature)
     }

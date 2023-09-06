@@ -242,13 +242,13 @@ fn name<'s, 'origin>(
         let equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(NameSetter(EqualsSign(f))));
 
-        let mut frag = core.scope();
+        let mut frag = core.scope_at(table_slot);
 
         let state = ident
             .parse(s)?
             .with_mode(FailureMode::Ambiguous)
             .map_output(|(ident, _)| {
-                frag.emit(OpCode::LoadStack(frag.stack_slot(table_slot)));
+                frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
                 frag.emit_load_literal(Literal::String(ident.to_string()));
             })
             .and(equals_sign)?
