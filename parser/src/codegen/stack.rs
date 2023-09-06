@@ -496,7 +496,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
 
         stack.stack.stack.variadic = false;
         stack.stack.frame_base = frame_base;
-        stack.boundary = boundary;
+        stack.boundary = StackSlot(0);
 
         assert_eq!(
             stack.iter().find(|t| t.is_some()),
