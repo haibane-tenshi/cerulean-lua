@@ -294,9 +294,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         }
     }
 
-    pub fn new_frame(&mut self, signature: Signature) -> Frame<'s, '_> {
-        Frame::new(self.new_core(), signature)
-    }
+    // pub fn new_frame(&mut self, signature: Signature) -> Frame<'s, '_> {
+    //     Frame::new(self.new_core(), signature)
+    // }
 
     pub fn new_fragment(&mut self, kind: CommitKind) -> Fragment<'s, '_> {
         Fragment::new(self.new_core(), kind)

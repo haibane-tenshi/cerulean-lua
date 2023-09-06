@@ -496,9 +496,9 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         StackView { stack, inner_state }
     }
 
-    pub fn new_view(&mut self) -> StackView<'s, '_> {
-        StackView::new_block(self.borrow())
-    }
+    // pub fn new_view(&mut self) -> StackView<'s, '_> {
+    //     StackView::new_block(self.borrow())
+    // }
 
     pub fn borrow(&mut self) -> &mut Stack<'s> {
         self.stack
@@ -508,9 +508,9 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         self.stack.fragment_to_frame(slot)
     }
 
-    pub fn is_variadic(&self) -> bool {
-        self.stack.is_variadic()
-    }
+    // pub fn is_variadic(&self) -> bool {
+    //     self.stack.is_variadic()
+    // }
 
     pub fn state(&self) -> StackState {
         if self.stack.is_variadic() {
