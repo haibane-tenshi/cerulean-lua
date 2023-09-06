@@ -47,27 +47,29 @@ pub(crate) fn generic_for<'s, 'origin>(
                 // Currently unimplemented.
                 let _close = top + 3;
 
-                let nil = outer_frag.const_table_mut().insert(Literal::Nil);
-
                 let mut frag = outer_frag.new_scope();
-                let new_control = frag.stack().len();
+                let mark = frag.stack().len();
                 let count: u32 = names.len().try_into().unwrap();
-                let var_height = new_control + count;
-                let new_control = frag.stack_slot(new_control);
+                let iterator = frag.stack_slot(mark);
 
                 frag.emit(OpCode::LoadStack(iter));
                 frag.emit(OpCode::LoadStack(state));
                 frag.emit(OpCode::LoadStack(control));
-                frag.emit(OpCode::Invoke(new_control));
+                frag.emit(OpCode::Invoke(iterator));
 
+                frag.emit_adjust_to(mark + count);
+
+                // Assign names.
+                frag.stack_mut().adjust_to(mark);
                 for name in names {
                     frag.stack_mut().push(Some(name));
                 }
 
-                frag.emit_adjust_to(var_height);
+                // First output of iterator is the new value for control variable.
+                let new_control = iterator;
 
                 frag.emit(OpCode::LoadStack(new_control));
-                frag.emit(OpCode::LoadConstant(nil));
+                frag.emit_load_literal(Literal::Nil);
                 frag.emit(RelBinOp::Eq.into());
                 frag.emit_jump_to(frag.id(), Some(true));
 

@@ -508,6 +508,10 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         self.stack.fragment_to_frame(slot)
     }
 
+    pub fn is_variadic(&self) -> bool {
+        self.stack.is_variadic()
+    }
+
     pub fn state(&self) -> StackState {
         if self.stack.is_variadic() {
             StackState::Variadic
