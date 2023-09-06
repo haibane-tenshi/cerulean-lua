@@ -13,7 +13,7 @@ pub(crate) use expr::expr;
 
 pub(crate) fn expr_adjusted_to<'s, 'origin>(
     count: u32,
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -22,21 +22,21 @@ pub(crate) fn expr_adjusted_to<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mark = frag.stack().top() + count;
-        let r = expr(frag.new_fragment())
-            .parse_once(s)?
-            .map_output(move |_| {
-                frag.emit_adjust_to(mark);
+        let mut frag = core.expr();
 
-                frag.commit_expr();
-            });
+        let mark = frag.stack().len() + count;
+        let r = expr(frag.new_core()).parse_once(s)?.map_output(move |_| {
+            frag.emit_adjust_to(mark);
+
+            frag.commit();
+        });
 
         Ok(r)
     }
 }
 
 pub(crate) fn expr_adjusted_to_1<'s, 'origin>(
-    frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -44,11 +44,11 @@ pub(crate) fn expr_adjusted_to_1<'s, 'origin>(
     Failure = ParseFailure,
     FailFast = FailFast,
 > + 'origin {
-    move |s: Lexer<'s>| expr_adjusted_to(1, frag).parse_once(s)
+    move |s: Lexer<'s>| expr_adjusted_to(1, core).parse_once(s)
 }
 
 pub(crate) fn par_expr<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -65,15 +65,17 @@ pub(crate) fn par_expr<'s, 'origin>(
         let par_r =
             match_token(Token::ParR).map_failure(|f| ParseFailure::from(ExprFailure::ParR(f)));
 
-        let r = par_l
+        let mut frag = core.expr();
+
+        let state = par_l
             .parse(s)?
-            .and(expr_adjusted_to_1(frag.new_fragment()))?
+            .and(expr_adjusted_to_1(frag.new_core()))?
             .and(par_r)?
             .map_output(|_| {
-                frag.commit_expr();
+                frag.commit();
             });
 
-        Ok(r)
+        Ok(state)
     }
 }
 
@@ -82,7 +84,7 @@ pub(crate) fn par_expr<'s, 'origin>(
 pub enum ParExprFailure {}
 
 pub(crate) fn expr_list<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -91,9 +93,11 @@ pub(crate) fn expr_list<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut mark = frag.stack().top() + 1;
+        let mut frag = core.expr();
 
-        let state = expr(frag.new_fragment()).parse_once(s)?;
+        let mut mark = frag.stack().len() + 1;
+
+        let state = expr(frag.new_core()).parse_once(s)?;
 
         let next_part = |s: Lexer<'s>| -> Result<_, FailFast> {
             let token_comma = match_token(Token::Comma)
@@ -105,7 +109,7 @@ pub(crate) fn expr_list<'s, 'origin>(
                     // Expressions inside comma lists are adjusted to 1.
                     frag.emit_adjust_to(mark);
                 })
-                .and(expr(frag.new_fragment_at(mark)))?
+                .and(expr(frag.new_core()))?
                 .map_output(|_| {
                     mark += 1;
                 });
@@ -115,7 +119,7 @@ pub(crate) fn expr_list<'s, 'origin>(
 
         let r = state
             .and(next_part.repeat())?
-            .map_output(move |_| frag.commit_expr());
+            .map_output(move |_| frag.commit());
 
         Ok(r)
     }
@@ -129,7 +133,7 @@ pub(crate) enum ExprListError {
 
 pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
     count: u32,
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -138,14 +142,14 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mark = frag.stack().top() + count;
-        let r = expr_list(frag.new_fragment())
-            .parse_once(s)?
-            .map_output(|_| {
-                frag.emit_adjust_to(mark);
+        let mut frag = core.expr();
 
-                frag.commit_expr();
-            });
+        let mark = frag.stack().len() + count;
+        let r = expr_list(frag.new_core()).parse_once(s)?.map_output(|_| {
+            frag.emit_adjust_to(mark);
+
+            frag.commit();
+        });
 
         Ok(r)
     }

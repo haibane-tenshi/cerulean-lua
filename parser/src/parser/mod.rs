@@ -100,13 +100,13 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
         is_variadic: true,
     };
 
-    let mut frame = Frame::new(
+    let mut frame = Frame::script(
         func_table.view(),
         const_table.view(),
         stack.view(),
         signature,
     );
-    let state = block(frame.new_fragment()).parse_once(s)?;
+    let state = block(frame.new_core()).parse_once(s)?;
 
     match state {
         ParsingState::Success(mut s, _, reason) => {

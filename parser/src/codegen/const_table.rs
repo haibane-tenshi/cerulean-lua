@@ -76,8 +76,8 @@ impl<'a> ConstTableView<'a> {
         }
     }
 
-    pub fn new_view(&mut self) -> ConstTableView<'_> {
-        ConstTableView::new(self.constants)
+    pub fn borrow(&mut self) -> &mut ConstTable {
+        self.constants
     }
 
     pub fn try_insert(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {

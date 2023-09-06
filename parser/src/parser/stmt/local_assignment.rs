@@ -2,7 +2,7 @@ use crate::parser::prelude::*;
 use thiserror::Error;
 
 pub(crate) fn local_assignment<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -18,7 +18,9 @@ pub(crate) fn local_assignment<'s, 'origin>(
         let token_equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::EqualsSign(f)));
 
-        let stack_start = frag.stack().top();
+        let mut frag = core.decl();
+
+        let stack_start = frag.stack().len();
 
         let state = token_local
             .parse_once(s)?
@@ -32,7 +34,7 @@ pub(crate) fn local_assignment<'s, 'origin>(
                     let state = token_equals_sign
                         .parse(s)?
                         .with_mode(FailureMode::Malformed)
-                        .and_discard(expr_list(frag.new_fragment()))?
+                        .and_discard(expr_list(frag.new_core()))?
                         .collapse();
 
                     Ok(state)
@@ -41,13 +43,14 @@ pub(crate) fn local_assignment<'s, 'origin>(
             )?
             .map_output(|idents| {
                 let count: u32 = idents.len().try_into().unwrap();
-                frag.emit_adjust_to(stack_start + count);
 
-                for (ident, slot) in idents.into_iter().zip((stack_start.0..).map(StackSlot)) {
-                    frag.stack_mut().give_name(slot, ident);
+                for ident in idents {
+                    frag.stack_mut().push(Some(ident));
                 }
 
-                frag.commit_decl();
+                frag.emit_adjust_to(stack_start + count);
+
+                frag.commit();
             })
             .collapse();
 

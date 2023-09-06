@@ -2,7 +2,7 @@ use crate::parser::prelude::*;
 use thiserror::Error;
 
 pub(crate) fn do_end<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -13,6 +13,8 @@ pub(crate) fn do_end<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::parser::block::block;
 
+        let mut frag = core.scope();
+
         let token_do =
             match_token(Token::Do).map_failure(|f| ParseFailure::from(DoEndFailure::Do(f)));
         let token_end =
@@ -21,10 +23,10 @@ pub(crate) fn do_end<'s, 'origin>(
         let state = token_do
             .parse_once(s)?
             .with_mode(FailureMode::Malformed)
-            .and(block(frag.new_fragment()))?
+            .and(block(frag.new_core()))?
             .and(token_end)?
             .map_output(move |_| {
-                frag.commit_scope();
+                frag.commit();
             })
             .collapse();
 

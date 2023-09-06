@@ -2,7 +2,7 @@ use crate::parser::prelude::*;
 use thiserror::Error;
 
 pub(crate) fn local_function<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -20,6 +20,8 @@ pub(crate) fn local_function<'s, 'origin>(
         let identifier =
             identifier.map_failure(|f| ParseFailure::from(LocalFunctionFailure::Ident(f)));
 
+        let mut frag = core.decl();
+
         let state = token_local
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
@@ -31,18 +33,16 @@ pub(crate) fn local_function<'s, 'origin>(
                 // This is relevant for recursive functions.
                 // We only need to introduce the name:
                 // it will get assigned to after function body is parsed.
-                let slot = frag.stack_mut().push();
-                frag.stack_mut().give_name(slot, ident);
+                frag.stack_mut().push(Some(ident));
             })
-            .and_replace(func_body(frag.new_fragment()))?
+            .and_replace(func_body(frag.new_core()))?
             .map_output(|func_id| {
                 let const_id = frag.const_table_mut().insert(Literal::Function(func_id));
 
                 // Stack is already adjusted, we just need to silently write to correct slot here.
-                frag.emit_raw(OpCode::LoadConstant(const_id), false)
-                    .unwrap();
+                frag.fun_mut().emit(OpCode::LoadConstant(const_id)).unwrap();
 
-                frag.commit_decl();
+                frag.commit();
             })
             .collapse();
 

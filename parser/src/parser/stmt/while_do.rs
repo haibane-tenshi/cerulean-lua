@@ -2,7 +2,7 @@ use crate::parser::prelude::*;
 use thiserror::Error;
 
 pub(crate) fn while_do<'s, 'origin>(
-    mut outer_frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -21,13 +21,15 @@ pub(crate) fn while_do<'s, 'origin>(
         let token_end =
             match_token(Token::End).map_failure(|f| ParseFailure::from(WhileDoFailure::End(f)));
 
+        let mut outer_frag = core.scope();
+
         let state = token_while
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|_| outer_frag.new_fragment())
+            .map_output(|_| outer_frag.new_scope())
             .then(|mut frag| {
                 move |s| -> Result<_, FailFast> {
-                    Ok(expr_adjusted_to_1(frag.new_fragment())
+                    Ok(expr_adjusted_to_1(frag.new_core())
                         .parse_once(s)?
                         .map_output(|_| frag))
                 }
@@ -39,19 +41,17 @@ pub(crate) fn while_do<'s, 'origin>(
             })
             .then(|mut frag| {
                 move |s| -> Result<_, FailFast> {
-                    Ok(block(frag.new_fragment())
-                        .parse_once(s)?
-                        .map_output(|_| frag))
+                    Ok(block(frag.new_core()).parse_once(s)?.map_output(|_| frag))
                 }
             })?
             .and_discard(token_end)?
             .map_output(|mut frag| {
                 frag.emit_loop_to();
-                frag.commit_scope();
+                frag.commit();
             })
             .collapse();
 
-        let state = state.map_output(|_| outer_frag.commit_scope());
+        let state = state.map_output(|_| outer_frag.commit());
 
         Ok(state)
     }

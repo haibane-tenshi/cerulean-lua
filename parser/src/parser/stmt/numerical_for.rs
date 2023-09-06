@@ -20,7 +20,7 @@ impl StackSlotOrConstId {
 }
 
 pub(crate) fn numerical_for<'s, 'origin>(
-    mut outer_frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -46,6 +46,8 @@ pub(crate) fn numerical_for<'s, 'origin>(
             .map_failure(|f| ParseFailure::from(NumericalForFailure::Ident(f)))
             .map_output(|(ident, _)| ident);
 
+        let mut outer_frag = core.scope();
+
         let exit = outer_frag.id();
 
         let state = token_for
@@ -56,19 +58,21 @@ pub(crate) fn numerical_for<'s, 'origin>(
             .with_mode(FailureMode::Malformed)
             .then(|ident| {
                 |s| -> Result<_, FailFast> {
-                    let loop_var = outer_frag.stack().top();
-                    let status = expr_adjusted_to_1(outer_frag.new_fragment())
+                    let loop_var = outer_frag.stack_slot(outer_frag.stack().len());
+                    let status = expr_adjusted_to_1(outer_frag.new_core())
                         .parse_once(s)?
                         .map_output(|_| loop_var);
-                    outer_frag.stack_mut().give_name(loop_var, ident);
+                    // Assign name.
+                    outer_frag.stack_mut().pop();
+                    outer_frag.stack_mut().push(Some(ident));
 
                     Ok(status)
                 }
             })?
             .and_discard(token_comma)?
             .and(|s| -> Result<_, FailFast> {
-                let limit = outer_frag.stack().top();
-                let status = expr_adjusted_to_1(outer_frag.new_fragment())
+                let limit = outer_frag.stack_slot(outer_frag.stack().len());
+                let status = expr_adjusted_to_1(outer_frag.new_core())
                     .parse_once(s)?
                     .map_output(|_| limit);
 
@@ -76,10 +80,10 @@ pub(crate) fn numerical_for<'s, 'origin>(
             })?
             .and(
                 (|s| -> Result<_, FailFast> {
-                    let step = outer_frag.stack().top();
+                    let step = outer_frag.stack_slot(outer_frag.stack().len());
                     let status = token_comma
                         .parse(s)?
-                        .and(expr_adjusted_to_1(outer_frag.new_fragment()))?
+                        .and(expr_adjusted_to_1(outer_frag.new_core()))?
                         .map_output(|_| step);
 
                     Ok(status)
@@ -109,7 +113,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                             .insert(Literal::String("loop increment is 0".to_string()));
 
                         // Panic if increment is 0.
-                        let mut zero_check = outer_frag.new_fragment();
+                        let mut zero_check = outer_frag.new_expr();
 
                         zero_check.emit(OpCode::LoadStack(step));
                         zero_check.emit(OpCode::LoadConstant(zero));
@@ -119,12 +123,12 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         zero_check.emit(OpCode::LoadConstant(error_msg));
                         zero_check.emit(OpCode::Panic);
 
-                        zero_check.commit_expr();
+                        zero_check.commit();
 
-                        let mut frag = outer_frag.new_fragment();
-                        let mut controls = frag.new_fragment();
+                        let mut frag = outer_frag.new_scope();
+                        let mut controls = frag.new_expr();
                         let controls_id = controls.id();
-                        let mut positive_step = controls.new_fragment();
+                        let mut positive_step = controls.new_expr();
 
                         positive_step.emit(OpCode::LoadStack(step));
                         positive_step.emit(OpCode::LoadConstant(zero));
@@ -138,7 +142,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         positive_step.emit_jump_to(exit, Some(false));
                         positive_step.emit_jump_to(controls_id, None);
 
-                        positive_step.commit_expr();
+                        positive_step.commit();
 
                         // Path: negative step.
                         // We assume total ordering for the variable.
@@ -147,12 +151,12 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         controls.emit(RelBinOp::Ge.into());
                         controls.emit_jump_to(exit, Some(false));
 
-                        controls.commit_expr();
+                        controls.commit();
 
                         frag
                     }
                     StackSlotOrConstId::ConstId(_) => {
-                        let mut frag = outer_frag.new_fragment();
+                        let mut frag = outer_frag.new_scope();
 
                         frag.emit(OpCode::LoadStack(loop_var));
                         frag.emit(OpCode::LoadStack(limit));
@@ -168,7 +172,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
             .and_discard(token_do)?
             .then(|(loop_var, step, mut frag)| {
                 move |s| -> Result<_, FailFast> {
-                    let state = block(frag.new_fragment())
+                    let state = block(frag.new_core())
                         .parse_once(s)?
                         .map_output(|_| (loop_var, step, frag));
 
@@ -185,12 +189,12 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 frag.emit_loop_to();
 
                 // Clean up.
-                frag.commit_scope();
+                frag.commit();
             })
             .collapse();
 
         // Clean up.
-        let state = state.map_output(|_| outer_frag.commit_scope());
+        let state = state.map_output(|_| outer_frag.commit());
 
         Ok(state)
     }

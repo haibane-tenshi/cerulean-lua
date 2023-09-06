@@ -3,7 +3,7 @@ use crate::parser::prelude::*;
 use thiserror::Error;
 
 pub(crate) fn assignment<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -17,9 +17,11 @@ pub(crate) fn assignment<'s, 'origin>(
         let token_equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(AssignmentFailure::EqualsSign(f)));
 
-        let mut places_start = frag.stack().top();
+        let mut frag = core.scope();
 
-        let state = places(frag.new_fragment())
+        let mut places_start = frag.stack().len();
+
+        let state = places(frag.new_core())
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
             .and_discard(token_equals_sign)?
@@ -27,8 +29,8 @@ pub(crate) fn assignment<'s, 'origin>(
             .then(|places| {
                 |s| {
                     let count = places.len().try_into().unwrap();
-                    let expr_start = frag.stack().top();
-                    expr_list_adjusted_to(count, frag.new_fragment())
+                    let expr_start = frag.stack().len();
+                    expr_list_adjusted_to(count, frag.new_core())
                         .map_output(|_| (expr_start, places))
                         .parse_once(s)
                 }
@@ -42,8 +44,8 @@ pub(crate) fn assignment<'s, 'origin>(
                             frag.emit(OpCode::StoreStack(slot));
                         }
                         Place::TableField => {
-                            let table = places_start;
-                            let field = places_start + 1;
+                            let table = frag.stack_slot(places_start);
+                            let field = table + 1;
                             places_start += 2;
 
                             frag.emit(OpCode::LoadStack(table));
@@ -54,7 +56,7 @@ pub(crate) fn assignment<'s, 'origin>(
                     }
                 }
 
-                frag.commit_scope();
+                frag.commit();
             })
             .collapse();
 
@@ -73,7 +75,7 @@ pub(crate) enum AssignmentFailure {
 }
 
 fn places<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Vec<Place>,
@@ -84,7 +86,9 @@ fn places<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::parser::prefix_expr::place;
 
-        let (first, state) = match place(frag.new_fragment()).parse_once(s)? {
+        let mut frag = core.scope();
+
+        let (first, state) = match place(frag.new_core()).parse_once(s)? {
             ParsingState::Success(s, output, success) => {
                 (output, ParsingState::Success(s, (), success))
             }
@@ -99,7 +103,7 @@ fn places<'s, 'origin>(
 
             let state = token_comma
                 .parse_once(s)?
-                .and_with(place(frag.new_fragment()), |_, place| place)?
+                .and_with(place(frag.new_core()), |_, place| place)?
                 .map_output(|place| {
                     r.push(place);
                 });
@@ -108,7 +112,7 @@ fn places<'s, 'origin>(
         };
 
         let state = state.and(next.repeat())?.map_output(move |_| {
-            frag.commit_scope();
+            frag.commit();
             r
         });
 

@@ -12,7 +12,7 @@ pub(crate) mod while_do;
 use crate::parser::prelude::*;
 
 pub(crate) fn statement<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -32,18 +32,20 @@ pub(crate) fn statement<'s, 'origin>(
         use repeat_until::repeat_until;
         use while_do::while_do;
 
+        let mut frag = core.decl();
+
         let state = semicolon(s.clone())?
             .map_success(ParseFailureOrComplete::Complete)
-            .or_else(|| (s.clone(), local_assignment(frag.new_fragment())))?
-            .or_else(|| (s.clone(), assignment(frag.new_fragment())))?
-            .or_else(|| (s.clone(), if_then(frag.new_fragment())))?
-            .or_else(|| (s.clone(), numerical_for(frag.new_fragment())))?
-            .or_else(|| (s.clone(), generic_for(frag.new_fragment())))?
-            .or_else(|| (s.clone(), local_function(frag.new_fragment())))?
-            .or_else(|| (s.clone(), func_call(frag.new_fragment())))?
-            .or_else(|| (s.clone(), while_do(frag.new_fragment())))?
-            .or_else(|| (s.clone(), do_end(frag.new_fragment())))?
-            .or_else(|| (s.clone(), repeat_until(frag.new_fragment())))?
+            .or_else(|| (s.clone(), local_assignment(frag.new_core())))?
+            .or_else(|| (s.clone(), assignment(frag.new_core())))?
+            .or_else(|| (s.clone(), if_then(frag.new_core())))?
+            .or_else(|| (s.clone(), numerical_for(frag.new_core())))?
+            .or_else(|| (s.clone(), generic_for(frag.new_core())))?
+            .or_else(|| (s.clone(), local_function(frag.new_core())))?
+            .or_else(|| (s.clone(), func_call(frag.new_core())))?
+            .or_else(|| (s.clone(), while_do(frag.new_core())))?
+            .or_else(|| (s.clone(), do_end(frag.new_core())))?
+            .or_else(|| (s.clone(), repeat_until(frag.new_core())))?
             .map_failure(|f| {
                 let mut s = s;
                 let _ = s.next_token();
@@ -52,7 +54,7 @@ pub(crate) fn statement<'s, 'origin>(
 
                 f.arrow(err)
             })
-            .map_output(|_| frag.commit_decl());
+            .map_output(|_| frag.commit());
 
         Ok(state)
     }

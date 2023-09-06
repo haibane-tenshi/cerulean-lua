@@ -5,7 +5,7 @@ use repr::index::FunctionId;
 use thiserror::Error;
 
 pub(crate) fn func_body<'s, 'origin>(
-    mut outer_frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = FunctionId,
@@ -21,14 +21,16 @@ pub(crate) fn func_body<'s, 'origin>(
         let token_par_r = match_token(Token::ParR).map_failure(|f| ParseFailure::from(ParR(f)));
         let token_end = match_token(Token::End).map_failure(|f| ParseFailure::from(End(f)));
 
+        let mut outer_frag = core.scope();
+
         // At the moment extra slot is occupied by the function pointer itself.
-        let frame_base = outer_frag.stack().top();
-        outer_frag.stack_mut().push();
+        let frame_base = outer_frag.stack().len();
+        outer_frag.stack_mut().push(None);
 
         let state = token_par_l
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and_replace(parlist(outer_frag.stack_mut().new_block()).optional())?
+            .and_replace(parlist(outer_frag.stack_mut().new_view()).optional())?
             .map_success(|success| success.map(|f| ParseFailure::from(FuncBodyFailure::from(f))))
             .with_mode(FailureMode::Malformed)
             .and_discard(token_par_r)?
@@ -41,7 +43,7 @@ pub(crate) fn func_body<'s, 'origin>(
 
                     let mut frame = outer_frag.new_frame(signature, frame_base);
 
-                    let state = block(frame.new_fragment())
+                    let state = block(frame.new_core())
                         .parse_once(s)?
                         .map_output(|_| frame.commit().resolve());
 
@@ -51,7 +53,7 @@ pub(crate) fn func_body<'s, 'origin>(
             .and_discard(token_end)?
             .map_output(|func| {
                 let r = outer_frag.func_table_mut().push(func).unwrap();
-                outer_frag.commit_scope();
+                outer_frag.commit();
 
                 r
             })
@@ -104,8 +106,7 @@ fn parlist<'s, 'origin>(
         let mut ident = identifier
             .map_failure(ParListMismatch::Ident)
             .map_output(|(ident, _)| {
-                let slot = stack.push();
-                stack.give_name(slot, ident);
+                stack.push(Some(ident));
                 count += 1;
             });
 

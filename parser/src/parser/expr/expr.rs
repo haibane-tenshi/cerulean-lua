@@ -4,7 +4,7 @@ use crate::parser::prelude::*;
 use repr::opcode::{BinOp, UnaOp};
 
 pub(crate) fn expr<'s, 'origin>(
-    frag: Fragment<'s, 'origin>,
+    frag: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -46,7 +46,7 @@ pub(crate) enum ExprFailure {
 
 fn expr_impl<'s, 'origin>(
     min_bp: u64,
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -55,10 +55,11 @@ fn expr_impl<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let stack_start = frag.stack().top();
+        let mut frag = core.expr();
+        let stack_start = frag.stack().len();
 
         let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let mut frag = frag.new_fragment();
+            let mut frag = frag.new_expr();
             let r = prefix_op(s)?
                 .map_failure(|f| ParseFailure::from(ExprFailure::Prefix(f)))
                 .then(|op| {
@@ -66,7 +67,7 @@ fn expr_impl<'s, 'origin>(
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
                         let ((), rhs_bp) = op.binding_power();
 
-                        let r = expr_impl(rhs_bp, frag.new_fragment())
+                        let r = expr_impl(rhs_bp, frag.new_core())
                             .parse_once(s)?
                             .map_output(|_| {
                                 let opcode = OpCode::UnaOp(op.0);
@@ -79,7 +80,7 @@ fn expr_impl<'s, 'origin>(
                     }
                 })?
                 .map_output(|_| {
-                    frag.commit_expr();
+                    frag.commit();
                 });
 
             Ok(r)
@@ -88,7 +89,7 @@ fn expr_impl<'s, 'origin>(
         let state = prefix
             .parse_once(s.clone())?
             .map_success(CompleteOr::Other)
-            .or_else(|| (s, atom(frag.new_fragment())))?
+            .or_else(|| (s, atom(frag.new_core())))?
             .with_mode(FailureMode::Ambiguous);
 
         // At this point there can be variadic number of values on stack.
@@ -99,7 +100,7 @@ fn expr_impl<'s, 'origin>(
             ParsingState<Lexer<'s>, (), ExprSuccess, ExprSuccess>,
             FailFast,
         > {
-            let mut frag = frag.new_fragment_at(stack_start);
+            let mut frag = frag.new_expr_at(stack_start);
             let r = infix_op(s)?
                 .map_failure(|failure| ExprSuccess::Parsing(ExprFailure::Infix(failure).into()))
                 .with_mode(FailureMode::Malformed)
@@ -136,14 +137,14 @@ fn expr_impl<'s, 'origin>(
                         }
                     };
 
-                    let rhs_top = frag.stack().top() + 1;
+                    let rhs_top = frag.stack().len() + 1;
 
                     (maybe_opcode, rhs_top, op)
                 })
                 .then(|(maybe_opcode, rhs_top, op)| {
                     let frag = &mut frag;
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
-                        let r = expr_impl(op.binding_power().1, frag.new_fragment())
+                        let r = expr_impl(op.binding_power().1, frag.new_core())
                             .parse_once(s)?
                             .map_output(|_| (maybe_opcode, rhs_top));
 
@@ -158,7 +159,7 @@ fn expr_impl<'s, 'origin>(
                         frag.emit(opcode);
                     }
 
-                    frag.commit_expr();
+                    frag.commit();
                 })
                 .collapse();
 
@@ -168,7 +169,7 @@ fn expr_impl<'s, 'origin>(
         let r = state
             .and(next_part.repeat())?
             .map_output(|_| {
-                frag.commit_expr();
+                frag.commit();
             })
             .collapse();
 
@@ -241,7 +242,7 @@ where
 }
 
 fn atom<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -253,7 +254,9 @@ fn atom<'s, 'origin>(
         use super::{function::function, literal::literal, table::table, variadic::variadic};
         use crate::parser::prefix_expr::prefix_expr;
 
-        let r = literal(frag.new_fragment())
+        let mut frag = core.expr();
+
+        let r = literal(frag.new_core())
             .parse_once(s.clone())?
             // Discard failure, we should never observe this one as an error.
             .map_failure(|_| Complete)
@@ -261,14 +264,14 @@ fn atom<'s, 'origin>(
             .or_else(|| {
                 (
                     s.clone(),
-                    variadic(frag.new_fragment()).map_failure(|_| Complete),
+                    variadic(frag.new_core()).map_failure(|_| Complete),
                 )
             })?
-            .or_else(|| (s.clone(), prefix_expr(frag.new_fragment())))?
-            .or_else(|| (s.clone(), table(frag.new_fragment())))?
-            .or_else(|| (s, function(frag.new_fragment())))?
+            .or_else(|| (s.clone(), prefix_expr(frag.new_core())))?
+            .or_else(|| (s.clone(), table(frag.new_core())))?
+            .or_else(|| (s, function(frag.new_core())))?
             .map_output(|_| {
-                frag.commit_expr();
+                frag.commit();
             });
 
         Ok(r)

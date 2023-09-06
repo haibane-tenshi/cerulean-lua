@@ -1,11 +1,13 @@
 use std::ops::Add;
 use thiserror::Error;
 
-use crate::codegen::const_table::ConstTableView;
-use crate::codegen::func_table::FuncTableView;
+use crate::codegen::const_table::{ConstTable, ConstTableView};
+use crate::codegen::func_table::{FuncTable, FuncTableView};
 use crate::codegen::function::{Function, FunctionView};
+use crate::codegen::jumps::{Jumps, JumpsView};
+use crate::codegen::reachability::Reachability;
 use crate::codegen::stack::{
-    BoundaryViolationError, CommitKind, NewBlockAtError, PopError, PushError, StackView,
+    BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
 };
 use repr::chunk::Signature;
 use repr::index::{ConstCapacityError, InstrCountError, InstrId, StackSlot};
@@ -25,30 +27,109 @@ impl Add<u32> for FragmentId {
 }
 
 #[derive(Debug)]
+pub struct Core<'s, 'origin> {
+    fragment_id: FragmentId,
+    func_table: &'origin mut FuncTable,
+    const_table: &'origin mut ConstTable,
+    fun: &'origin mut Function,
+    stack: &'origin mut Stack<'s>,
+    jumps: &'origin mut Jumps,
+    reachability: Reachability,
+}
+
+impl<'s, 'origin> Core<'s, 'origin> {
+    pub fn fragment(self, kind: CommitKind) -> Fragment<'s, 'origin> {
+        Fragment::new(self, kind)
+    }
+
+    pub fn scope(self) -> Fragment<'s, 'origin> {
+        self.fragment(CommitKind::Scope)
+    }
+
+    pub fn expr(self) -> Fragment<'s, 'origin> {
+        self.fragment(CommitKind::Expr)
+    }
+
+    pub fn decl(self) -> Fragment<'s, 'origin> {
+        self.fragment(CommitKind::Decl)
+    }
+}
+
+#[derive(Debug)]
 pub struct Fragment<'s, 'origin> {
+    fragment_id: FragmentId,
     func_table: FuncTableView<'origin>,
     const_table: ConstTableView<'origin>,
     fun: FunctionView<'origin>,
     stack: StackView<'s, 'origin>,
+    jumps: JumpsView<'origin>,
+    reachability: Reachability,
+    kind: CommitKind,
 }
 
 impl<'s, 'origin> Fragment<'s, 'origin> {
-    // pub fn new(
-    //     func_table: FuncTableView<'origin>,
-    //     const_table: ConstTableView<'origin>,
-    //     fun: FunctionView<'origin>,
-    //     stack: StackView<'s, 'origin>,
-    // ) -> Self {
-    //     Fragment {
-    //         func_table,
-    //         const_table,
-    //         fun,
-    //         stack,
-    //     }
-    // }
+    pub fn new(core: Core<'s, 'origin>, kind: CommitKind) -> Self {
+        let Core {
+            fragment_id,
+            func_table,
+            const_table,
+            fun,
+            stack,
+            jumps,
+            reachability,
+        } = core;
+
+        let fragment_id = fragment_id + 1;
+        let func_table = func_table.view();
+        let const_table = const_table.view();
+        let fun = fun.view();
+        let stack = stack.view();
+        let jumps = jumps.view(fragment_id, fun.len());
+
+        Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            fun,
+            stack,
+            jumps,
+            reachability,
+            kind,
+        }
+    }
+
+    pub fn new_at(core: Core<'s, 'origin>, kind: CommitKind, slot: FragmentStackSlot) -> Self {
+        let Core {
+            fragment_id,
+            func_table,
+            const_table,
+            fun,
+            stack,
+            jumps,
+            reachability,
+        } = core;
+
+        let fragment_id = fragment_id + 1;
+        let func_table = func_table.view();
+        let const_table = const_table.view();
+        let fun = fun.view();
+        let stack = stack.view_at(slot);
+        let jumps = jumps.view(fragment_id, fun.len());
+
+        Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            fun,
+            stack,
+            jumps,
+            reachability,
+            kind,
+        }
+    }
 
     pub fn id(&self) -> FragmentId {
-        self.fun.id()
+        self.fragment_id
     }
 
     pub fn const_table_mut(&mut self) -> &mut ConstTableView<'origin> {
@@ -67,87 +148,37 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &mut self.stack
     }
 
+    pub fn fun_mut(&mut self) -> &mut FunctionView<'origin> {
+        &mut self.fun
+    }
+
     pub fn signature(&self) -> Signature {
         self.fun.signature()
     }
 
-    pub fn emit_raw(&mut self, instr: OpCode, adjust_stack: bool) -> Result<InstrId, EmitError> {
-        if adjust_stack {
-            match instr {
-                // This opcode never returns, so stack manipulation is irrelevant.
-                // Any opcodes after this one are either unreachable,
-                // or in case we get there through jumps,
-                // presumably this instruction should be the end of the fragment.
-                // Anyway, stack space must be manually brought into consistent state.
-                OpCode::Return(_) => (),
-                // This opcode never returns, however it grabs the top value as panic message.
-                OpCode::Panic => {
-                    self.stack.try_pop()?;
-                }
-                OpCode::Invoke(slot) => {
-                    if slot > self.stack.raw_top() {
-                        return Err(EmitError::InvokeOutsideStackBoundary);
-                    }
-
-                    // Stack space at `slot` and above is consumed during invocation.
-                    // Function returns are always variadic.
-                    self.stack.try_adjust_to(slot)?;
-                    self.stack.make_variadic();
-                }
-                OpCode::LoadConstant(_) | OpCode::LoadStack(_) | OpCode::TabCreate => {
-                    self.stack.try_push()?;
-                }
-                OpCode::LoadVariadic => {
-                    self.stack.make_variadic();
-                }
-                OpCode::StoreStack(_) => {
-                    self.stack.try_pop()?;
-                }
-                OpCode::AdjustStack(slot) => {
-                    self.stack.try_adjust_to(slot)?;
-                }
-                OpCode::UnaOp(_) => {
-                    self.stack.try_pop()?;
-                    self.stack.try_push()?;
-                }
-                OpCode::BinOp(_) => {
-                    self.stack.try_pop()?;
-                    self.stack.try_pop()?;
-                    self.stack.try_push()?;
-                }
-                OpCode::Jump { .. }
-                | OpCode::JumpIf { .. }
-                | OpCode::Loop { .. }
-                | OpCode::LoopIf { .. } => (),
-                OpCode::TabGet => {
-                    self.stack.try_pop()?;
-                    self.stack.try_pop()?;
-                    self.stack.try_push()?;
-                }
-                OpCode::TabSet => {
-                    self.stack.try_pop()?;
-                    self.stack.try_pop()?;
-                    self.stack.try_pop()?;
-                }
-            }
-        }
-
-        self.fun.emit(instr).map_err(Into::into)
+    pub fn stack_slot(&self, slot: FragmentStackSlot) -> StackSlot {
+        self.stack.fragment_to_frame(slot)
     }
 
     pub fn try_emit(&mut self, instr: OpCode) -> Result<InstrId, EmitError> {
-        self.emit_raw(instr, true)
+        self.stack.emit(&instr)?;
+        self.reachability.emit(&instr);
+        let r = self.fun.emit(instr)?;
+
+        Ok(r)
     }
 
     pub fn emit(&mut self, instr: OpCode) -> InstrId {
         self.try_emit(instr).unwrap()
     }
 
-    pub fn try_emit_adjust_to(&mut self, slot: StackSlot) -> Result<Option<InstrId>, EmitError> {
-        let need_adjustment = self.stack.try_adjust_to(slot)?;
-
-        let instr_id = if need_adjustment {
-            let id = self.emit_raw(OpCode::AdjustStack(slot), false)?;
+    pub fn try_emit_adjust_to(
+        &mut self,
+        slot: FragmentStackSlot,
+    ) -> Result<Option<InstrId>, EmitError> {
+        let instr_id = if self.stack.need_adjustment_to(slot) {
+            let slot = self.stack.fragment_to_frame(slot);
+            let id = self.try_emit(OpCode::AdjustStack(slot))?;
             Some(id)
         } else {
             None
@@ -156,7 +187,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn emit_adjust_to(&mut self, slot: StackSlot) -> Option<InstrId> {
+    pub fn emit_adjust_to(&mut self, slot: FragmentStackSlot) -> Option<InstrId> {
         self.try_emit_adjust_to(slot).unwrap()
     }
 
@@ -176,7 +207,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         };
 
         let instr_id = self.try_emit(opcode)?;
-        self.fun.register_jump(target, instr_id, self.stack.state());
+        self.jumps
+            .register_jump(target, instr_id, self.stack.state());
 
         Ok(instr_id)
     }
@@ -186,7 +218,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 
     pub fn try_emit_loop_to(&mut self) -> Result<(), EmitError> {
-        self.try_emit_adjust_to(self.stack.boundary())?;
+        self.try_emit_adjust_to(FragmentStackSlot(0))?;
         let offset = self.fun.len() - self.fun.start() + 1;
         self.try_emit(OpCode::Loop { offset })?;
 
@@ -219,89 +251,92 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     //     self.fun.len()
     // }
 
-    pub fn new_frame(&mut self, signature: Signature, frame_base: StackSlot) -> Frame<'s, '_> {
+    pub fn new_core(&mut self) -> Core<'s, '_> {
         let Fragment {
-            func_table,
-            const_table,
-            fun: _,
-            stack,
-        } = self;
-
-        let func_table = func_table.new_view();
-        let const_table = const_table.new_view();
-        let stack = stack.new_frame(frame_base);
-
-        Frame::new(func_table, const_table, stack, signature)
-    }
-
-    pub fn new_fragment(&mut self) -> Fragment<'s, '_> {
-        let Fragment {
+            fragment_id,
             func_table,
             const_table,
             fun,
             stack,
+            jumps,
+            reachability,
+            kind: _,
         } = self;
 
-        let func_table = func_table.new_view();
-        let const_table = const_table.new_view();
-        let fun = fun.new_block();
-        let stack = stack.new_block();
+        let fragment_id = *fragment_id;
+        let func_table = func_table.borrow();
+        let const_table = const_table.borrow();
+        let fun = fun.borrow();
+        let stack = stack.borrow();
+        let jumps = jumps.borrow();
+        let reachability = *reachability;
 
-        Fragment {
+        Core {
+            fragment_id,
             func_table,
             const_table,
             fun,
             stack,
+            jumps,
+            reachability,
         }
     }
 
-    pub fn try_new_fragment_at(
+    pub fn new_frame(
         &mut self,
-        slot: StackSlot,
-    ) -> Result<Fragment<'s, '_>, NewBlockAtError> {
+        signature: Signature,
+        frame_base: FragmentStackSlot,
+    ) -> Frame<'s, '_> {
+        Frame::new(self.new_core(), signature, frame_base)
+    }
+
+    pub fn new_fragment(&mut self, kind: CommitKind) -> Fragment<'s, '_> {
+        Fragment::new(self.new_core(), kind)
+    }
+
+    pub fn new_scope(&mut self) -> Fragment<'s, '_> {
+        self.new_fragment(CommitKind::Scope)
+    }
+
+    pub fn new_expr(&mut self) -> Fragment<'s, '_> {
+        self.new_fragment(CommitKind::Expr)
+    }
+
+    pub fn new_fragment_at(
+        &mut self,
+        kind: CommitKind,
+        slot: FragmentStackSlot,
+    ) -> Fragment<'s, '_> {
+        Fragment::new_at(self.new_core(), kind, slot)
+    }
+
+    pub fn new_expr_at(&mut self, slot: FragmentStackSlot) -> Fragment<'s, '_> {
+        self.new_fragment_at(CommitKind::Expr, slot)
+    }
+
+    pub fn new_fragment_at_boundary(&mut self, kind: CommitKind) -> Fragment<'s, '_> {
+        self.new_fragment_at(kind, FragmentStackSlot(0))
+    }
+
+    pub fn commit(self) {
         let Fragment {
-            func_table,
-            const_table,
-            fun,
-            stack,
-        } = self;
-
-        let func_table = func_table.new_view();
-        let const_table = const_table.new_view();
-        let fun = fun.new_block();
-        let stack = stack.try_new_block_at(slot)?;
-
-        let r = Fragment {
-            func_table,
-            const_table,
-            fun,
-            stack,
-        };
-
-        Ok(r)
-    }
-
-    pub fn new_fragment_at(&mut self, slot: StackSlot) -> Fragment<'s, '_> {
-        self.try_new_fragment_at(slot).unwrap()
-    }
-
-    pub fn new_fragment_at_boundary(&mut self) -> Fragment<'s, '_> {
-        self.new_fragment_at(self.stack.boundary())
-    }
-
-    pub fn commit(self, kind: CommitKind) {
-        let Fragment {
+            fragment_id: _,
             func_table,
             const_table,
             mut fun,
             mut stack,
+            jumps,
+            reachability,
+            kind,
         } = self;
+
+        let is_reachable = reachability.commit();
 
         func_table.commit();
         const_table.commit();
 
-        let sequence_state = fun.is_reachable().then(|| stack.state());
-        let jump_state = fun.emit_jumps();
+        let sequence_state = is_reachable.then(|| stack.state());
+        let jump_state = jumps.commit(&mut fun);
 
         let final_state = match (sequence_state, jump_state) {
             (Some(a), Some(b)) => Some(a | b),
@@ -313,28 +348,16 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack.apply(state);
         }
 
-        if matches!(kind, CommitKind::Scope) && fun.is_reachable() {
-            let need_adjustment = stack.try_adjust_to(stack.boundary()).unwrap();
-
-            if need_adjustment {
-                fun.emit(OpCode::AdjustStack(stack.boundary())).unwrap();
-            }
+        if matches!(kind, CommitKind::Scope)
+            && final_state.is_some()
+            && stack.need_adjustment_to(FragmentStackSlot(0))
+        {
+            let slot = stack.fragment_to_frame(FragmentStackSlot(0));
+            fun.emit(OpCode::AdjustStack(slot)).unwrap();
         }
 
         fun.commit();
         stack.commit(kind);
-    }
-
-    pub fn commit_scope(self) {
-        self.commit(CommitKind::Scope)
-    }
-
-    pub fn commit_expr(self) {
-        self.commit(CommitKind::Expr)
-    }
-
-    pub fn commit_decl(self) {
-        self.commit(CommitKind::Decl)
     }
 }
 
@@ -361,12 +384,38 @@ pub enum EmitLoadLiteralError {
 pub struct Frame<'s, 'origin> {
     func_table: FuncTableView<'origin>,
     const_table: ConstTableView<'origin>,
-    fun: Function,
     stack: StackView<'s, 'origin>,
+    fun: Function,
+    jumps: Jumps,
 }
 
 impl<'s, 'origin> Frame<'s, 'origin> {
     pub fn new(
+        core: Core<'s, 'origin>,
+        signature: Signature,
+        frame_base: FragmentStackSlot,
+    ) -> Self {
+        let Core {
+            func_table,
+            const_table,
+            stack,
+            ..
+        } = core;
+
+        let func_table = func_table.view();
+        let const_table = const_table.view();
+        let stack = stack.frame(frame_base);
+
+        Frame {
+            func_table,
+            const_table,
+            stack,
+            fun: Function::new(signature),
+            jumps: Jumps::new(),
+        }
+    }
+
+    pub fn script(
         func_table: FuncTableView<'origin>,
         const_table: ConstTableView<'origin>,
         stack: StackView<'s, 'origin>,
@@ -377,15 +426,33 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             const_table,
             stack,
             fun: Function::new(signature),
+            jumps: Jumps::new(),
         }
     }
 
-    pub fn new_fragment(&mut self) -> Fragment<'s, '_> {
-        Fragment {
-            func_table: self.func_table.new_view(),
-            const_table: self.const_table.new_view(),
-            fun: self.fun.view(),
-            stack: self.stack.new_block(),
+    pub fn new_core(&mut self) -> Core<'s, '_> {
+        let Frame {
+            func_table,
+            const_table,
+            stack,
+            fun,
+            jumps,
+        } = self;
+
+        let fragment_id = FragmentId::default();
+        let func_table = func_table.borrow();
+        let const_table = const_table.borrow();
+        let stack = stack.borrow();
+        let reachability = Reachability::new();
+
+        Core {
+            fragment_id,
+            func_table,
+            const_table,
+            fun,
+            stack,
+            jumps,
+            reachability,
         }
     }
 
@@ -393,8 +460,9 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let Frame {
             func_table,
             const_table,
-            fun,
             stack,
+            fun,
+            jumps: _,
         } = self;
 
         func_table.commit();

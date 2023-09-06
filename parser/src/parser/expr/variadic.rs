@@ -3,7 +3,7 @@ use logos::Span;
 use thiserror::Error;
 
 pub(crate) fn variadic<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -12,6 +12,8 @@ pub(crate) fn variadic<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
+        let mut frag = core.expr();
+
         let state = match_token(Token::TripleDot)
             .parse(s)?
             .try_map_output(|span| {
@@ -25,7 +27,7 @@ pub(crate) fn variadic<'s, 'origin>(
             })?
             .map_output(move |_| {
                 frag.emit(OpCode::LoadVariadic);
-                frag.commit_expr();
+                frag.commit();
             });
 
         Ok(state)

@@ -1,7 +1,7 @@
 use crate::parser::prelude::*;
 
 pub(crate) fn block<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -10,18 +10,18 @@ pub(crate) fn block<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let state = inner_block(frag.new_fragment())
-            .parse_once(s)?
-            .map_output(|_| {
-                frag.commit_scope();
-            });
+        let mut frag = core.scope();
+
+        let state = inner_block(frag.new_core()).parse_once(s)?.map_output(|_| {
+            frag.commit();
+        });
 
         Ok(state)
     }
 }
 
 pub(crate) fn inner_block<'s, 'origin>(
-    mut frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -33,13 +33,15 @@ pub(crate) fn inner_block<'s, 'origin>(
         use crate::parser::stmt::return_::return_;
         use crate::parser::stmt::statement;
 
-        let statement = |s: Lexer<'s>| statement(frag.new_fragment()).parse_once(s);
+        let mut frag = core.decl();
 
-        let r = statement
+        let statement = |s: Lexer<'s>| statement(frag.new_core()).parse_once(s);
+
+        let state = statement
             .repeat()
             .parse_once(s)?
             .and(|s: Lexer<'s>| -> Result<_, FailFast> {
-                let state = return_(frag.new_fragment())
+                let state = return_(frag.new_core())
                     .optional()
                     .parse_once(s.clone())?
                     .map_success(|success| match success {
@@ -57,9 +59,9 @@ pub(crate) fn inner_block<'s, 'origin>(
                 Ok(state)
             })?
             .map_output(move |_| {
-                frag.commit_decl();
+                frag.commit();
             });
 
-        Ok(r)
+        Ok(state)
     }
 }

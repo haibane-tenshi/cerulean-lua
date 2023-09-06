@@ -2,7 +2,7 @@ use crate::parser::prelude::*;
 use thiserror::Error;
 
 pub(crate) fn generic_for<'s, 'origin>(
-    mut outer_frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -23,6 +23,8 @@ pub(crate) fn generic_for<'s, 'origin>(
         let token_end =
             match_token(Token::End).map_failure(|f| ParseFailure::from(GenericForFailure::End(f)));
 
+        let mut outer_frag = core.scope();
+
         let state = token_for
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
@@ -33,8 +35,8 @@ pub(crate) fn generic_for<'s, 'origin>(
             .and_discard(token_in)?
             .with_mode(FailureMode::Malformed)
             .and(|s| {
-                let top = outer_frag.stack().top();
-                expr_list_adjusted_to(4, outer_frag.new_fragment())
+                let top = outer_frag.stack_slot(outer_frag.stack().len());
+                expr_list_adjusted_to(4, outer_frag.new_core())
                     .map_output(|_| top)
                     .parse_once(s)
             })?
@@ -47,16 +49,22 @@ pub(crate) fn generic_for<'s, 'origin>(
 
                 let nil = outer_frag.const_table_mut().insert(Literal::Nil);
 
-                let mut frag = outer_frag.new_fragment();
-                let new_control = frag.stack().top();
+                let mut frag = outer_frag.new_scope();
+                let new_control = frag.stack().len();
+                let count: u32 = names.len().try_into().unwrap();
+                let var_height = new_control + count;
+                let new_control = frag.stack_slot(new_control);
 
                 frag.emit(OpCode::LoadStack(iter));
                 frag.emit(OpCode::LoadStack(state));
                 frag.emit(OpCode::LoadStack(control));
                 frag.emit(OpCode::Invoke(new_control));
 
-                let count: u32 = names.len().try_into().unwrap();
-                frag.emit_adjust_to(new_control + count);
+                for name in names {
+                    frag.stack_mut().push(Some(name));
+                }
+
+                frag.emit_adjust_to(var_height);
 
                 frag.emit(OpCode::LoadStack(new_control));
                 frag.emit(OpCode::LoadConstant(nil));
@@ -66,30 +74,23 @@ pub(crate) fn generic_for<'s, 'origin>(
                 frag.emit(OpCode::LoadStack(new_control));
                 frag.emit(OpCode::StoreStack(control));
 
-                // Assign names
-                for (name, slot) in names.into_iter().zip((new_control.0..).map(StackSlot)) {
-                    frag.stack_mut().give_name(slot, name);
-                }
-
                 frag
             })
             .and_discard(token_do)?
             .then(|mut frag| {
                 |s| -> Result<_, FailFast> {
-                    Ok(block(frag.new_fragment())
-                        .parse_once(s)?
-                        .map_output(|_| frag))
+                    Ok(block(frag.new_core()).parse_once(s)?.map_output(|_| frag))
                 }
             })?
             .and_discard(token_end)?
             .map_output(|mut frag| {
                 frag.emit_loop_to();
-                frag.commit_scope();
+                frag.commit();
             })
             .collapse();
 
         let state = state.map_output(move |_| {
-            outer_frag.commit_scope();
+            outer_frag.commit();
         });
 
         Ok(state)

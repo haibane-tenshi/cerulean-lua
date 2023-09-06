@@ -2,7 +2,7 @@ use crate::parser::prelude::*;
 use thiserror::Error;
 
 pub(crate) fn repeat_until<'s, 'origin>(
-    mut outer_frag: Fragment<'s, 'origin>,
+    core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = (),
@@ -19,13 +19,15 @@ pub(crate) fn repeat_until<'s, 'origin>(
         let token_until = match_token(Token::Until)
             .map_failure(|f| ParseFailure::from(RepeatUntilFailure::Until(f)));
 
+        let mut outer_frag = core.scope();
+
         let state = token_repeat
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|_| outer_frag.new_fragment())
+            .map_output(|_| outer_frag.new_scope())
             .then(|mut frag| {
                 |s| -> Result<_, FailFast> {
-                    let state = inner_block(frag.new_fragment())
+                    let state = inner_block(frag.new_core())
                         .parse_once(s)?
                         .map_output(|_| frag);
                     Ok(state)
@@ -34,7 +36,7 @@ pub(crate) fn repeat_until<'s, 'origin>(
             .and_discard(token_until)?
             .then(|mut frag| {
                 |s| -> Result<_, FailFast> {
-                    let state = expr_adjusted_to_1(frag.new_fragment())
+                    let state = expr_adjusted_to_1(frag.new_core())
                         .parse_once(s)?
                         .map_output(|_| frag);
                     Ok(state)
@@ -43,11 +45,11 @@ pub(crate) fn repeat_until<'s, 'origin>(
             .map_output(|mut frag| {
                 frag.emit_jump_to(frag.id(), Some(true));
                 frag.emit_loop_to();
-                frag.commit_scope();
+                frag.commit();
             })
             .collapse();
 
-        let state = state.map_output(|_| outer_frag.commit_scope());
+        let state = state.map_output(|_| outer_frag.commit());
 
         Ok(state)
     }

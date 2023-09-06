@@ -1,8 +1,12 @@
+use super::fragment::EmitError;
 use repr::index::StackSlot;
 use repr::index_vec::{Index, IndexVec};
+use repr::opcode::OpCode;
 use std::collections::HashMap;
 use std::ops::{Add, AddAssign, BitOr, Sub, SubAssign};
 use thiserror::Error;
+
+pub(crate) use repr::index::StackOffset;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 struct GlobalStackSlot(pub u32);
@@ -71,7 +75,68 @@ impl Sub for GlobalStackSlot {
     }
 }
 
-pub(crate) use repr::index::StackOffset;
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
+pub struct FragmentStackSlot(pub(crate) u32);
+
+// impl FragmentStackSlot {
+//     pub fn checked_sub(self, other: Self) -> Option<StackOffset> {
+//         let inner = self.0.checked_sub(other.0)?;
+//         Some(StackOffset(inner))
+//     }
+// }
+
+impl AddAssign<StackOffset> for FragmentStackSlot {
+    fn add_assign(&mut self, rhs: StackOffset) {
+        self.0 += rhs.0
+    }
+}
+
+impl Add<StackOffset> for FragmentStackSlot {
+    type Output = Self;
+
+    fn add(mut self, rhs: StackOffset) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl AddAssign<u32> for FragmentStackSlot {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs;
+    }
+}
+
+impl Add<u32> for FragmentStackSlot {
+    type Output = Self;
+
+    fn add(mut self, rhs: u32) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl SubAssign<StackOffset> for FragmentStackSlot {
+    fn sub_assign(&mut self, rhs: StackOffset) {
+        self.0 -= rhs.0;
+    }
+}
+
+impl Sub<StackOffset> for FragmentStackSlot {
+    type Output = Self;
+
+    fn sub(mut self, rhs: StackOffset) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+
+impl Sub for FragmentStackSlot {
+    type Output = StackOffset;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        StackOffset(self.0 - rhs.0)
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum StackState {
@@ -93,56 +158,56 @@ impl BitOr for StackState {
 }
 
 #[derive(Debug, Default)]
-pub struct Stack<'s> {
+struct UnqualifiedStack<'s> {
     temporaries: IndexVec<GlobalStackSlot, Option<&'s str>>,
-    variadic: bool,
     backlinks: Backlinks<'s>,
+    variadic: bool,
 }
 
-impl<'s> Stack<'s> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn view(&mut self) -> StackView<'s, '_> {
-        StackView::new(self)
-    }
-
+impl<'s> UnqualifiedStack<'s> {
     fn len(&self) -> GlobalStackSlot {
         self.temporaries.len()
     }
 
-    fn push(&mut self) -> Result<GlobalStackSlot, StackOverflowError> {
-        self.temporaries.push(None)
+    fn push(&mut self, name: Option<&'s str>) -> Result<GlobalStackSlot, PushError> {
+        if self.variadic {
+            return Err(VariadicStackError.into());
+        }
+
+        let slot = self.temporaries.push(name)?;
+        if let Some(name) = name {
+            self.backlinks.add(slot, name);
+        }
+
+        Ok(slot)
     }
 
-    fn pop(&mut self) -> Option<()> {
-        let name = self.temporaries.pop()?;
+    fn pop(&mut self) -> Result<(), PopError> {
+        if self.variadic {
+            return Err(VariadicStackError.into());
+        }
 
-        if let Some(name) = name {
+        if let Some(name) = self.temporaries.pop().ok_or(BoundaryViolationError)? {
             self.backlinks.pop(name)
         }
-
-        Some(())
-    }
-
-    fn give_name(&mut self, slot: GlobalStackSlot, name: &'s str) -> Result<(), GiveNameError> {
-        let Some(place) = self.temporaries.get_mut(slot) else {
-            return Err(GiveNameError::MissingTemporary)
-        };
-
-        if place.is_some() {
-            return Err(GiveNameError::NameAlias);
-        }
-
-        *place = Some(name);
-        self.backlinks.add(slot, name);
 
         Ok(())
     }
 
+    fn make_variadic(&mut self) {
+        self.variadic = true;
+    }
+
+    fn is_variadic(&self) -> bool {
+        self.variadic
+    }
+
     fn lookup(&self, name: &'s str) -> Option<GlobalStackSlot> {
         self.backlinks.get(name)
+    }
+
+    fn need_adjustment_to(&self, slot: GlobalStackSlot) -> bool {
+        self.len() != slot || self.variadic
     }
 
     fn adjust_to(&mut self, slot: GlobalStackSlot) -> bool {
@@ -171,51 +236,184 @@ impl<'s> Stack<'s> {
 
         r
     }
+}
 
-    fn inner_state(
-        &self,
-        boundary: GlobalStackSlot,
-    ) -> Result<InnerState, PassingNamedTemporariesError> {
-        if self
-            .temporaries
-            .range(boundary..)
-            .iter()
-            .any(Option::is_some)
-        {
-            return Err(PassingNamedTemporariesError);
-        }
+#[derive(Debug, Default)]
+struct StackFrame<'s> {
+    stack: UnqualifiedStack<'s>,
+    frame_base: GlobalStackSlot,
+}
 
-        let r = InnerState {
-            variadic: self.variadic,
-            boundary,
-            top: self.len(),
-        };
-
-        Ok(r)
+impl<'s> StackFrame<'s> {
+    fn frame_to_global(&self, slot: StackSlot) -> GlobalStackSlot {
+        self.frame_base + (slot - StackSlot::default())
     }
 
-    fn inner_state_at_top(&self) -> InnerState {
-        self.inner_state(self.len()).unwrap()
+    fn global_to_frame(&self, slot: GlobalStackSlot) -> Option<StackSlot> {
+        let offset = slot.checked_sub(self.frame_base)?;
+        let r = StackSlot::default() + offset;
+
+        Some(r)
+    }
+
+    fn len(&self) -> StackSlot {
+        self.global_to_frame(self.stack.len()).unwrap()
+    }
+
+    fn push(&mut self, name: Option<&'s str>) -> Result<StackSlot, PushError> {
+        self.stack
+            .push(name)
+            .map(|slot| self.global_to_frame(slot).unwrap())
+    }
+
+    fn pop(&mut self) -> Result<(), PopError> {
+        if self.stack.len() <= self.frame_base {
+            return Err(BoundaryViolationError.into());
+        }
+
+        self.stack.pop()
+    }
+
+    fn make_variadic(&mut self) {
+        self.stack.make_variadic()
+    }
+
+    fn is_variadic(&self) -> bool {
+        self.stack.is_variadic()
+    }
+
+    fn lookup(&self, name: &str) -> NameLookup {
+        match self.stack.lookup(name) {
+            Some(slot) => match self.global_to_frame(slot) {
+                Some(slot) => NameLookup::Local(slot),
+                None => NameLookup::Upvalue,
+            },
+            None => NameLookup::Global,
+        }
+    }
+
+    fn need_adjustment_to(&self, slot: StackSlot) -> bool {
+        self.stack.need_adjustment_to(self.frame_to_global(slot))
+    }
+
+    fn adjust_to(&mut self, slot: StackSlot) -> bool {
+        self.stack.adjust_to(self.frame_to_global(slot))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Stack<'s> {
+    stack: StackFrame<'s>,
+    boundary: StackSlot,
+}
+
+impl<'s> Stack<'s> {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn view(&mut self) -> StackView<'s, '_> {
+        StackView::new_block(self)
+    }
+
+    pub fn view_at(&mut self, slot: FragmentStackSlot) -> StackView<'s, '_> {
+        StackView::new_block_at(self, slot)
+    }
+
+    pub fn frame(&mut self, frame_base: FragmentStackSlot) -> StackView<'s, '_> {
+        StackView::new_frame(self, frame_base)
+    }
+
+    fn fragment_to_frame(&self, slot: FragmentStackSlot) -> StackSlot {
+        self.boundary + (slot - FragmentStackSlot::default())
+    }
+
+    fn frame_to_fragment(&self, slot: StackSlot) -> Option<FragmentStackSlot> {
+        let offset = slot.checked_sub(self.boundary)?;
+        let r = FragmentStackSlot::default() + offset;
+
+        Some(r)
+    }
+
+    fn len(&self) -> FragmentStackSlot {
+        self.frame_to_fragment(self.stack.len()).unwrap()
+    }
+
+    fn push(&mut self, name: Option<&'s str>) -> Result<FragmentStackSlot, PushError> {
+        self.stack
+            .push(name)
+            .map(|slot| self.frame_to_fragment(slot).unwrap())
+    }
+
+    fn pop(&mut self) -> Result<(), PopError> {
+        if self.stack.len() <= self.boundary {
+            return Err(BoundaryViolationError.into());
+        }
+
+        self.stack.pop()
+    }
+
+    fn make_variadic(&mut self) {
+        self.stack.make_variadic()
+    }
+
+    fn is_variadic(&self) -> bool {
+        self.stack.is_variadic()
+    }
+
+    fn lookup(&self, name: &'s str) -> NameLookup {
+        self.stack.lookup(name)
+    }
+
+    fn need_adjustment_to(&self, slot: FragmentStackSlot) -> bool {
+        self.stack.need_adjustment_to(self.fragment_to_frame(slot))
+    }
+
+    fn adjust_to(&mut self, slot: FragmentStackSlot) -> bool {
+        self.stack.adjust_to(self.fragment_to_frame(slot))
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Option<&'s str>> {
+        let start = self.stack.frame_to_global(self.boundary);
+
+        self.stack.stack.temporaries.range(start..).iter()
+    }
+
+    fn remove_idents(&mut self) {
+        let start = self.stack.frame_to_global(self.boundary);
+
+        for slot in self.stack.stack.temporaries.range_mut(start..).iter_mut() {
+            if let Some(name) = slot.take() {
+                self.stack.stack.backlinks.pop(name)
+            }
+        }
+    }
+
+    fn inner_state(&self) -> InnerState {
+        InnerState {
+            frame_base: self.stack.frame_base,
+            variadic: self.stack.stack.variadic,
+            boundary: self.boundary,
+            top: self.len(),
+        }
     }
 
     fn apply(&mut self, state: InnerState) {
         let InnerState {
+            frame_base,
             variadic,
             boundary,
             top,
         } = state;
 
+        // Reset any names that were assigned as part of current block.
+        self.remove_idents();
+
         // Order matters: adjust_to resets stack's variadic flag.
+        self.stack.frame_base = frame_base;
+        self.boundary = boundary;
         self.adjust_to(top);
-        self.variadic = variadic;
-        for slot in self
-            .temporaries
-            .range_mut(boundary..)
-            .iter_mut()
-            .filter(|temp| temp.is_some())
-        {
-            *slot = None;
-        }
+        self.stack.stack.variadic = variadic;
     }
 }
 
@@ -247,8 +445,9 @@ impl<'s> Backlinks<'s> {
 #[derive(Debug, Copy, Clone)]
 struct InnerState {
     variadic: bool,
-    boundary: GlobalStackSlot,
-    top: GlobalStackSlot,
+    frame_base: GlobalStackSlot,
+    boundary: StackSlot,
+    top: FragmentStackSlot,
 }
 
 #[derive(Debug)]
@@ -262,111 +461,69 @@ pub enum NameLookup {
 pub struct StackView<'s, 'origin> {
     stack: &'origin mut Stack<'s>,
     inner_state: InnerState,
-    frame_base: GlobalStackSlot,
 }
 
 impl<'s, 'origin> StackView<'s, 'origin> {
-    pub fn new(stack: &'origin mut Stack<'s>) -> Self {
-        let inner_state = stack.inner_state_at_top();
-        let frame_base = stack.len();
-
-        debug_assert!(!stack.variadic, "constructing new view implies construction of new frame which cannot be done on top of variadic stack");
-
-        StackView {
-            stack,
-            inner_state,
-            frame_base,
-        }
+    pub fn new_block<'a>(stack: &'a mut Stack<'s>) -> StackView<'s, 'a> {
+        StackView::new_block_at(stack, stack.len())
     }
 
-    pub fn try_new_block(&mut self) -> Result<StackView<'s, '_>, VariadicStackError> {
-        if self.stack.variadic {
-            return Err(VariadicStackError);
-        }
+    pub fn new_block_at<'a>(
+        stack: &'a mut Stack<'s>,
+        slot: FragmentStackSlot,
+    ) -> StackView<'s, 'a> {
+        let inner_state = stack.inner_state();
 
-        let inner_state = self.stack.inner_state_at_top();
-        let frame_base = self.frame_base;
+        stack.boundary = stack.fragment_to_frame(slot);
 
-        let r = StackView {
-            stack: self.stack,
-            inner_state,
-            frame_base,
-        };
+        assert_eq!(
+            stack.iter().find(|t| t.is_some()),
+            None,
+            "transferred portion of stack cannot contain named temporaries"
+        );
 
-        Ok(r)
+        StackView { stack, inner_state }
     }
 
-    pub fn new_block(&mut self) -> StackView<'s, '_> {
-        self.try_new_block().unwrap()
+    pub fn new_frame<'a>(
+        stack: &'a mut Stack<'s>,
+        frame_base: FragmentStackSlot,
+    ) -> StackView<'s, 'a> {
+        let inner_state = stack.inner_state();
+
+        let boundary = stack.fragment_to_frame(frame_base);
+        let frame_base = stack.stack.frame_to_global(boundary);
+
+        stack.stack.stack.variadic = false;
+        stack.stack.frame_base = frame_base;
+        stack.boundary = boundary;
+
+        assert_eq!(
+            stack.iter().find(|t| t.is_some()),
+            None,
+            "transferred portion of stack cannot contain named temporaries"
+        );
+
+        StackView { stack, inner_state }
     }
 
-    pub fn try_new_block_at(
-        &mut self,
-        slot: StackSlot,
-    ) -> Result<StackView<'s, '_>, NewBlockAtError> {
-        let boundary = self.slot_to_global(slot);
-
-        if boundary < self.inner_state.boundary {
-            return Err(BoundaryViolationError.into());
-        }
-
-        let inner_state = self.stack.inner_state(boundary)?;
-        let frame_base = self.frame_base;
-
-        let r = StackView {
-            stack: self.stack,
-            inner_state,
-            frame_base,
-        };
-
-        Ok(r)
+    pub fn new_view(&mut self) -> StackView<'s, '_> {
+        StackView::new_block(self.borrow())
     }
 
-    // pub fn new_block_at(&mut self, slot: StackSlot) -> StackView<'s, '_> {
-    //     self.try_new_block_at(slot).unwrap()
-    // }
-
-    pub fn new_frame(&mut self, frame_base: StackSlot) -> StackView<'s, '_> {
-        let frame_base = self.slot_to_global(frame_base);
-        let inner_state = InnerState {
-            variadic: self.stack.variadic,
-            boundary: frame_base,
-            top: frame_base,
-        };
-
-        self.stack.variadic = false;
-
-        StackView {
-            stack: self.stack,
-            inner_state,
-            frame_base,
-        }
+    pub fn borrow(&mut self) -> &mut Stack<'s> {
+        self.stack
     }
 
-    fn frame_len(&self) -> StackOffset {
-        self.stack.len() - self.frame_base
-    }
-
-    fn slot_to_global(&self, slot: StackSlot) -> GlobalStackSlot {
-        self.frame_base + (slot - StackSlot::default())
-    }
-
-    fn slot_to_frame(&self, slot: GlobalStackSlot) -> Option<StackSlot> {
-        let offset = slot.checked_sub(self.frame_base)?;
-        let r = StackSlot::default() + offset;
-
-        Some(r)
-    }
-
-    pub(super) fn raw_top(&self) -> StackSlot {
-        StackSlot::default() + self.frame_len()
+    pub fn fragment_to_frame(&self, slot: FragmentStackSlot) -> StackSlot {
+        self.stack.fragment_to_frame(slot)
     }
 
     pub fn state(&self) -> StackState {
-        if self.stack.variadic {
+        if self.stack.is_variadic() {
             StackState::Variadic
         } else {
-            StackState::Finite(self.raw_top())
+            StackState::Finite(self.stack.fragment_to_frame(self.stack.len()))
         }
     }
 
@@ -376,7 +533,11 @@ impl<'s, 'origin> StackView<'s, 'origin> {
                 self.make_variadic();
             }
             StackState::Finite(height) => {
-                self.try_adjust_to(height)?;
+                let height = self
+                    .stack
+                    .frame_to_fragment(height)
+                    .ok_or(BoundaryViolationError)?;
+                self.adjust_to(height);
             }
         }
 
@@ -387,115 +548,121 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         self.try_apply(state).unwrap()
     }
 
-    pub fn try_top(&self) -> Result<StackSlot, VariadicStackError> {
-        match self.state() {
-            StackState::Finite(top) => Ok(top),
-            StackState::Variadic => Err(VariadicStackError),
-        }
+    pub fn len(&self) -> FragmentStackSlot {
+        self.stack.len()
     }
 
-    pub fn top(&self) -> StackSlot {
-        self.try_top().unwrap()
+    pub fn try_push(&mut self, name: Option<&'s str>) -> Result<FragmentStackSlot, PushError> {
+        self.stack.push(name)
     }
 
-    pub fn boundary(&self) -> StackSlot {
-        self.slot_to_frame(self.inner_state.boundary).unwrap()
-    }
-
-    pub fn try_push(&mut self) -> Result<StackSlot, PushError> {
-        if self.stack.variadic {
-            return Err(VariadicStackError.into());
-        }
-
-        let slot = self.stack.push()?;
-        let r = StackSlot::default() + (slot - self.frame_base);
-
-        Ok(r)
-    }
-
-    pub fn push(&mut self) -> StackSlot {
-        self.try_push().unwrap()
+    pub fn push(&mut self, name: Option<&'s str>) -> FragmentStackSlot {
+        self.try_push(name).unwrap()
     }
 
     pub fn try_pop(&mut self) -> Result<(), PopError> {
-        if self.stack.variadic {
-            return Err(VariadicStackError.into());
-        }
+        self.stack.pop()
+    }
 
-        if self.stack.len() == self.inner_state.boundary {
-            return Err(BoundaryViolationError.into());
-        }
+    pub fn pop(&mut self) {
+        self.try_pop().unwrap();
+    }
 
-        self.stack
-            .pop()
-            .expect("there should be boundary violation error for empty stack");
+    pub fn emit(&mut self, opcode: &OpCode) -> Result<(), EmitError> {
+        match opcode {
+            // This opcode never returns, so stack manipulation is irrelevant.
+            // Any opcodes after this one are either unreachable,
+            // or in case we get there through jumps,
+            // presumably this instruction should be the end of the fragment.
+            // Anyway, stack space must be manually brought into consistent state.
+            OpCode::Return(_) => (),
+            // This opcode never returns, however it grabs the top value as panic message.
+            OpCode::Panic => {
+                self.try_pop()?;
+            }
+            OpCode::Invoke(slot) => {
+                let height = self
+                    .stack
+                    .frame_to_fragment(*slot)
+                    .ok_or(BoundaryViolationError)?;
+
+                if height > self.len() {
+                    return Err(EmitError::InvokeOutsideStackBoundary);
+                }
+
+                // Stack space at `slot` and above is consumed during invocation.
+                // Function returns are always variadic.
+                self.adjust_to(height);
+                self.make_variadic();
+            }
+            OpCode::LoadConstant(_) | OpCode::LoadStack(_) | OpCode::TabCreate => {
+                self.try_push(None)?;
+            }
+            OpCode::LoadVariadic => {
+                self.make_variadic();
+            }
+            OpCode::StoreStack(_) => {
+                self.try_pop()?;
+            }
+            OpCode::AdjustStack(slot) => {
+                let height = self
+                    .stack
+                    .frame_to_fragment(*slot)
+                    .ok_or(BoundaryViolationError)?;
+                self.adjust_to(height);
+            }
+            OpCode::UnaOp(_) => {
+                self.try_pop()?;
+                self.try_push(None)?;
+            }
+            OpCode::BinOp(_) => {
+                self.try_pop()?;
+                self.try_pop()?;
+                self.try_push(None)?;
+            }
+            OpCode::Jump { .. }
+            | OpCode::JumpIf { .. }
+            | OpCode::Loop { .. }
+            | OpCode::LoopIf { .. } => (),
+            OpCode::TabGet => {
+                self.try_pop()?;
+                self.try_pop()?;
+                self.try_push(None)?;
+            }
+            OpCode::TabSet => {
+                self.try_pop()?;
+                self.try_pop()?;
+                self.try_pop()?;
+            }
+        }
 
         Ok(())
     }
 
-    // pub fn pop(&mut self) {
-    //     self.try_pop().unwrap();
-    // }
-
     pub fn make_variadic(&mut self) {
-        self.stack.variadic = true;
+        self.stack.make_variadic();
     }
 
-    pub fn try_adjust_to(&mut self, height: StackSlot) -> Result<bool, BoundaryViolationError> {
-        let height = self.slot_to_global(height);
-        if height < self.inner_state.boundary {
-            return Err(BoundaryViolationError);
-        };
-
-        let r = self.stack.adjust_to(height);
-
-        Ok(r)
+    pub fn need_adjustment_to(&self, slot: FragmentStackSlot) -> bool {
+        self.stack.need_adjustment_to(slot)
     }
 
-    // pub fn adjust_to(&mut self, height: StackSlot) -> bool {
-    //     self.try_adjust_to(height).unwrap()
-    // }
-
-    pub fn try_give_name(&mut self, slot: StackSlot, name: &'s str) -> Result<(), GiveNameError> {
-        let slot = self.slot_to_global(slot);
-        if slot < self.inner_state.boundary {
-            return Err(BoundaryViolationError.into());
-        };
-
-        self.stack.give_name(slot, name)
-    }
-
-    pub fn give_name(&mut self, slot: StackSlot, name: &'s str) {
-        self.try_give_name(slot, name).unwrap()
+    pub fn adjust_to(&mut self, height: FragmentStackSlot) -> bool {
+        self.stack.adjust_to(height)
     }
 
     pub fn lookup(&self, name: &'s str) -> NameLookup {
-        match self.stack.lookup(name) {
-            Some(slot) => match self.slot_to_frame(slot) {
-                Some(slot) => NameLookup::Local(slot),
-                None => NameLookup::Upvalue,
-            },
-            None => NameLookup::Global,
-        }
+        self.stack.lookup(name)
     }
 
     pub fn commit(self, kind: CommitKind) {
         match kind {
             CommitKind::Decl => (),
             CommitKind::Expr => {
-                for slot in self
-                    .stack
-                    .temporaries
-                    .range_mut(self.inner_state.boundary..)
-                    .iter_mut()
-                {
-                    if let Some(ident) = slot.take() {
-                        self.stack.backlinks.pop(ident);
-                    }
-                }
+                self.stack.remove_idents();
             }
             CommitKind::Scope => {
-                self.stack.adjust_to(self.inner_state.boundary);
+                self.stack.adjust_to(FragmentStackSlot(0));
             }
         }
 
@@ -509,6 +676,7 @@ impl<'s, 'origin> Drop for StackView<'s, 'origin> {
     }
 }
 
+#[derive(Debug)]
 pub enum CommitKind {
     Scope,
     Expr,
@@ -553,16 +721,4 @@ pub enum PopError {
 
     #[error("locally accessible stack is empty")]
     Boundary(#[from] BoundaryViolationError),
-}
-
-#[derive(Debug, Error)]
-pub enum GiveNameError {
-    #[error("cannot attach names to temporaries beyond local stack")]
-    Boundary(#[from] BoundaryViolationError),
-
-    #[error("stack slot is unoccupied")]
-    MissingTemporary,
-
-    #[error("temporary already have a name")]
-    NameAlias,
 }
