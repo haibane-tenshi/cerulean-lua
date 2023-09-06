@@ -320,8 +320,8 @@ impl<'s> Stack<'s> {
         StackView::new_block_at(self, slot)
     }
 
-    pub fn frame(&mut self, frame_base: FragmentStackSlot) -> StackView<'s, '_> {
-        StackView::new_frame(self, frame_base)
+    pub fn frame(&mut self) -> StackView<'s, '_> {
+        StackView::new_frame(self)
     }
 
     fn fragment_to_frame(&self, slot: FragmentStackSlot) -> StackSlot {
@@ -485,24 +485,13 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         StackView { stack, inner_state }
     }
 
-    pub fn new_frame<'a>(
-        stack: &'a mut Stack<'s>,
-        frame_base: FragmentStackSlot,
-    ) -> StackView<'s, 'a> {
+    pub fn new_frame<'a>(stack: &'a mut Stack<'s>) -> StackView<'s, 'a> {
         let inner_state = stack.inner_state();
-
-        let boundary = stack.fragment_to_frame(frame_base);
-        let frame_base = stack.stack.frame_to_global(boundary);
+        let frame_base = stack.stack.stack.temporaries.len();
 
         stack.stack.stack.variadic = false;
         stack.stack.frame_base = frame_base;
         stack.boundary = StackSlot(0);
-
-        assert_eq!(
-            stack.iter().find(|t| t.is_some()),
-            None,
-            "transferred portion of stack cannot contain named temporaries"
-        );
 
         StackView { stack, inner_state }
     }

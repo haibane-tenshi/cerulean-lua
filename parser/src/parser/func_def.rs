@@ -1,4 +1,3 @@
-use crate::codegen::stack::StackView;
 use crate::parser::prelude::*;
 use repr::chunk::Signature;
 use repr::index::FunctionId;
@@ -23,28 +22,32 @@ pub(crate) fn func_body<'s, 'origin>(
 
         let mut outer_frag = core.scope();
 
-        // At the moment extra slot is occupied by the function pointer itself.
-        let frame_base = outer_frag.stack().len();
-        outer_frag.stack_mut().push(None);
-
         let state = token_par_l
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and_replace(parlist(outer_frag.stack_mut().new_view()).optional())?
+            .and_replace(parlist().optional())?
             .map_success(|success| success.map(|f| ParseFailure::from(FuncBodyFailure::from(f))))
             .with_mode(FailureMode::Malformed)
             .and_discard(token_par_r)?
             .then(|signature| {
                 let outer_frag = &mut outer_frag;
                 move |s: Lexer<'s>| -> Result<_, FailFast> {
-                    let mut signature = signature.unwrap_or_default();
+                    let (idents, mut signature) = signature.unwrap_or_default();
                     // At the moment extra slot is occupied by the function pointer itself.
                     signature.height += 1;
 
-                    let mut frame = outer_frag.new_frame(signature, frame_base);
+                    let mut frame = outer_frag.new_core().frame(signature);
+                    let mut frag = frame.new_core().scope();
 
-                    let state = block(frame.new_core())
+                    frag.stack_mut().push(None);
+
+                    for ident in idents {
+                        frag.stack_mut().push(Some(ident));
+                    }
+
+                    let state = block(frag.new_core())
                         .parse_once(s)?
+                        .map_output(|_| frag.commit())
                         .map_output(|_| frame.commit().resolve());
 
                     Ok(state)
@@ -89,25 +92,22 @@ impl From<ParListMismatch> for FuncBodyFailure {
     }
 }
 
-fn parlist<'s, 'origin>(
-    mut stack: StackView<'s, 'origin>,
-) -> impl ParseOnce<
+fn parlist<'s, 'origin>() -> impl ParseOnce<
     Lexer<'s>,
-    Output = Signature,
+    Output = (Vec<&'s str>, Signature),
     Success = CompleteOr<ParListMismatch>,
     Failure = ParListMismatch,
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut count = 0;
+        let mut idents = Vec::new();
 
         let token_comma = match_token(Token::Comma).map_failure(ParListMismatch::Comma);
         let token_variadic = match_token(Token::TripleDot).map_failure(ParListMismatch::Variadic);
         let mut ident = identifier
             .map_failure(ParListMismatch::Ident)
             .map_output(|(ident, _)| {
-                stack.push(Some(ident));
-                count += 1;
+                idents.push(ident);
             });
 
         let state = ident
@@ -135,12 +135,14 @@ fn parlist<'s, 'origin>(
             .map_output(|t: Option<_>| t.is_some())
             .or_else(|| (s, token_variadic.map_output(|_| true)))?
             .map_output(|is_variadic| {
-                stack.commit(crate::codegen::stack::CommitKind::Decl);
+                let height = idents.len().try_into().unwrap();
 
-                Signature {
-                    height: count,
+                let signature = Signature {
+                    height,
                     is_variadic,
-                }
+                };
+
+                (idents, signature)
             });
 
         Ok(state)

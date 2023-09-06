@@ -53,6 +53,10 @@ impl<'s, 'origin> Core<'s, 'origin> {
     pub fn decl(self) -> Fragment<'s, 'origin> {
         self.fragment(CommitKind::Decl)
     }
+
+    pub fn frame(self, signature: Signature) -> Frame<'s, 'origin> {
+        Frame::new(self, signature)
+    }
 }
 
 #[derive(Debug)]
@@ -282,12 +286,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         }
     }
 
-    pub fn new_frame(
-        &mut self,
-        signature: Signature,
-        frame_base: FragmentStackSlot,
-    ) -> Frame<'s, '_> {
-        Frame::new(self.new_core(), signature, frame_base)
+    pub fn new_frame(&mut self, signature: Signature) -> Frame<'s, '_> {
+        Frame::new(self.new_core(), signature)
     }
 
     pub fn new_fragment(&mut self, kind: CommitKind) -> Fragment<'s, '_> {
@@ -390,11 +390,7 @@ pub struct Frame<'s, 'origin> {
 }
 
 impl<'s, 'origin> Frame<'s, 'origin> {
-    pub fn new(
-        core: Core<'s, 'origin>,
-        signature: Signature,
-        frame_base: FragmentStackSlot,
-    ) -> Self {
+    pub fn new(core: Core<'s, 'origin>, signature: Signature) -> Self {
         let Core {
             func_table,
             const_table,
@@ -404,7 +400,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
 
         let func_table = func_table.view();
         let const_table = const_table.view();
-        let stack = stack.frame(frame_base);
+        let stack = stack.frame();
 
         Frame {
             func_table,
