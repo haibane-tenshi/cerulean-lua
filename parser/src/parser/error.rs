@@ -42,6 +42,7 @@ use super::stmt::assignment::AssignmentFailure;
 use super::stmt::do_end::DoEndFailure;
 use super::stmt::generic_for::GenericForFailure;
 use super::stmt::if_then::IfThenFailure;
+use super::stmt::label::LabelFailure;
 use super::stmt::local_assignment::LocalAssignmentFailure;
 use super::stmt::local_function::LocalFunctionFailure;
 use super::stmt::numerical_for::NumericalForFailure;
@@ -49,6 +50,7 @@ use super::stmt::repeat_until::RepeatUntilFailure;
 use super::stmt::return_::ReturnFailure;
 use super::stmt::while_do::WhileDoFailure;
 use crate::codegen::fragment::UnresolvedGotoError;
+use crate::codegen::labels::{DuplicateLabelError, IllFormedGotoError, PushLabelError};
 
 pub use std::convert::Infallible as Never;
 
@@ -103,6 +105,19 @@ pub enum CodegenError {
 
     #[error("missing label for goto statement")]
     UnresolvedGoto(#[from] UnresolvedGotoError),
+
+    DuplicateLabel(#[from] DuplicateLabelError),
+
+    IllFormedGoto(#[from] IllFormedGotoError),
+}
+
+impl From<PushLabelError> for CodegenError {
+    fn from(value: PushLabelError) -> Self {
+        match value {
+            PushLabelError::DuplicateLabel(err) => err.into(),
+            PushLabelError::IllFormedGoto(err) => err.into(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -194,6 +209,8 @@ pub(crate) enum ParseCause {
     DoEnd(#[from] DoEndFailure),
     #[error("failed to parse return statement")]
     Return(#[from] ReturnFailure),
+    #[error("failed to parse label statement")]
+    Label(#[from] LabelFailure),
 }
 
 impl ParseCause {
@@ -457,6 +474,16 @@ impl ParseCause {
             ParseCause::Return(err) => {
                 let (msg, span) = match err {
                     ReturnFailure::Return(err) => ("expected `return` keyword", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::Label(err) => {
+                let (msg, span) = match err {
+                    LabelFailure::DoubleColon(err) => ("expected `::`", err.span),
+                    LabelFailure::Ident(err) => ("expected identifier", err.span),
                 };
 
                 let labels = vec![Label::primary((), span)];

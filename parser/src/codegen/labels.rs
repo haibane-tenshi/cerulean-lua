@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 use crate::codegen::function::FunctionView;
 use crate::codegen::stack::CommitKind;
 use repr::index::InstrId;
@@ -146,7 +148,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
             .iter()
             .any(|other| other.name == label.name)
         {
-            return Err(PushLabelError::DuplicateLabel);
+            return Err(DuplicateLabelError.into());
         }
 
         self.labels.up_jumps.push(label);
@@ -159,7 +161,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
         let valid = pending[scope..].partition_point(|instr| *instr < self.labels.last_binding);
 
         if !(scope..valid).is_empty() {
-            return Err(PushLabelError::IllFormedGoto);
+            return Err(IllFormedGotoError.into());
         }
 
         for instr_id in pending.drain(valid..) {
@@ -221,7 +223,18 @@ impl<'s, 'origin> Drop for LabelsView<'s, 'origin> {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("label with the same identifier already exists")]
+pub struct DuplicateLabelError;
+
+#[derive(Debug, Error)]
+#[error("attempted to goto jump over veriable declaration")]
+pub struct IllFormedGotoError;
+
+#[derive(Debug, Error)]
 pub enum PushLabelError {
-    DuplicateLabel,
-    IllFormedGoto,
+    #[error(transparent)]
+    DuplicateLabel(#[from] DuplicateLabelError),
+    #[error(transparent)]
+    IllFormedGoto(#[from] IllFormedGotoError),
 }

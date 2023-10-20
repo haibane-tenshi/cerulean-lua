@@ -2,6 +2,7 @@ pub(crate) mod assignment;
 pub(crate) mod do_end;
 pub(crate) mod generic_for;
 pub(crate) mod if_then;
+pub(crate) mod label;
 pub(crate) mod local_assignment;
 pub(crate) mod local_function;
 pub(crate) mod numerical_for;
@@ -26,6 +27,7 @@ pub(crate) fn statement<'s, 'origin>(
         use do_end::do_end;
         use generic_for::generic_for;
         use if_then::if_then;
+        use label::label;
         use local_assignment::local_assignment;
         use local_function::local_function;
         use numerical_for::numerical_for;
@@ -46,6 +48,7 @@ pub(crate) fn statement<'s, 'origin>(
             .or_else(|| (s.clone(), while_do(frag.new_core())))?
             .or_else(|| (s.clone(), do_end(frag.new_core())))?
             .or_else(|| (s.clone(), repeat_until(frag.new_core())))?
+            .or_else(|| (s.clone(), label(frag.new_core())))?
             .map_failure(|f| {
                 let mut s = s;
                 let _ = s.next_token();
