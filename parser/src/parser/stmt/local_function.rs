@@ -33,7 +33,7 @@ pub(crate) fn local_function<'s, 'origin>(
                 // This is relevant for recursive functions.
                 // We only need to introduce the name:
                 // it will get assigned to after function body is parsed.
-                frag.stack_mut().push(Some(ident));
+                frag.push_temporary(Some(ident));
             })
             .and_replace(func_body(frag.new_core()))?
             .map_output(|func_id| {

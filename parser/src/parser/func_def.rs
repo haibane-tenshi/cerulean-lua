@@ -39,10 +39,10 @@ pub(crate) fn func_body<'s, 'origin>(
                     let mut frame = outer_frag.new_core().frame(signature);
                     let mut frag = frame.new_core().scope();
 
-                    frag.stack_mut().push(None);
+                    frag.push_temporary(None);
 
                     for ident in idents {
-                        frag.stack_mut().push(Some(ident));
+                        frag.push_temporary(Some(ident));
                     }
 
                     let state = block(frag.new_core())

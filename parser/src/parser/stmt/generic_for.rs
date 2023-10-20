@@ -60,9 +60,9 @@ pub(crate) fn generic_for<'s, 'origin>(
                 frag.emit_adjust_to(mark + count);
 
                 // Assign names.
-                frag.stack_mut().adjust_to(mark);
+                frag.adjust_stack_to(mark);
                 for name in names {
-                    frag.stack_mut().push(Some(name));
+                    frag.push_temporary(Some(name));
                 }
 
                 // First output of iterator is the new value for control variable.

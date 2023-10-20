@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Label<'s> {
-    name: &'s str,
-    target: InstrId,
+    pub name: &'s str,
+    pub target: InstrId,
 }
 
 #[derive(Debug)]
@@ -131,10 +131,14 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
             .find_map(|label| (label.name == name).then_some(label.target))
     }
 
+    pub fn push_last_binding(&mut self, marker: InstrId) {
+        self.labels.last_binding = marker;
+    }
+
     pub fn push_label(
         &mut self,
         label: Label<'s>,
-        fun: &mut FunctionView<'s>,
+        mut fun: FunctionView,
     ) -> Result<(), PushLabelError> {
         if self
             .labels
@@ -170,6 +174,8 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
         if pending.is_empty() {
             self.labels.down_jumps.remove(label.name);
         }
+
+        fun.commit();
 
         Ok(())
     }

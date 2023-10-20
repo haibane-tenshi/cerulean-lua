@@ -16,6 +16,10 @@ impl Reachability {
         self.reachable &= matches!(opcode, Return(_) | Jump { .. } | Loop { .. } | Panic);
     }
 
+    pub fn make_reachable(&mut self) {
+        self.reachable = true;
+    }
+
     pub fn commit(self) -> bool {
         self.reachable
     }

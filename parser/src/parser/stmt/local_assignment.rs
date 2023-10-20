@@ -47,9 +47,9 @@ pub(crate) fn local_assignment<'s, 'origin>(
                 frag.emit_adjust_to(stack_start + count);
 
                 // Apply names.
-                frag.stack_mut().adjust_to(stack_start);
+                frag.adjust_stack_to(stack_start);
                 for ident in idents {
-                    frag.stack_mut().push(Some(ident));
+                    frag.push_temporary(Some(ident));
                 }
 
                 frag.commit();

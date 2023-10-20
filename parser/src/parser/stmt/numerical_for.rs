@@ -63,8 +63,8 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         .parse_once(s)?
                         .map_output(|_| loop_var);
                     // Assign name.
-                    outer_frag.stack_mut().pop();
-                    outer_frag.stack_mut().push(Some(ident));
+                    outer_frag.pop_temporary();
+                    outer_frag.push_temporary(Some(ident));
 
                     Ok(status)
                 }

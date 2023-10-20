@@ -5,7 +5,7 @@ use crate::codegen::const_table::{ConstTable, ConstTableView};
 use crate::codegen::func_table::{FuncTable, FuncTableView};
 use crate::codegen::function::{Function, FunctionView};
 use crate::codegen::jumps::{Jumps, JumpsView};
-use crate::codegen::labels::{Labels, LabelsView};
+use crate::codegen::labels::{Labels, LabelsView, PushLabelError};
 use crate::codegen::reachability::Reachability;
 use crate::codegen::stack::{
     BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
@@ -173,9 +173,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &self.stack
     }
 
-    pub fn stack_mut(&mut self) -> &mut StackView<'s, 'origin> {
-        &mut self.stack
-    }
+    // pub fn stack_mut(&mut self) -> &mut StackView<'s, 'origin> {
+    //     &mut self.stack
+    // }
 
     pub fn fun_mut(&mut self) -> &mut FunctionView<'origin> {
         &mut self.fun
@@ -195,6 +195,23 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let r = self.fun.emit(instr)?;
 
         Ok(r)
+    }
+
+    pub fn push_temporary(&mut self, name: Option<&'s str>) -> FragmentStackSlot {
+        if name.is_some() {
+            let marker = self.fun.len();
+            self.labels.push_last_binding(marker);
+        }
+
+        self.stack.push(name)
+    }
+
+    pub fn pop_temporary(&mut self) {
+        self.stack.pop()
+    }
+
+    pub fn adjust_stack_to(&mut self, height: FragmentStackSlot) -> bool {
+        self.stack.adjust_to(height)
     }
 
     pub fn emit(&mut self, instr: OpCode) -> InstrId {
@@ -270,6 +287,41 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
     pub fn emit_load_literal(&mut self, literal: Literal) -> InstrId {
         self.try_emit_load_literal(literal).unwrap()
+    }
+
+    pub fn try_emit_label(&mut self, label: &'s str) -> Result<InstrId, PushLabelError> {
+        use super::labels::Label;
+
+        // Since it is possible to reach label from unknown future point,
+        // stack is effectively in variadic state.
+        // We need to forecefully adjust it.
+        let stack_top = self.stack().len();
+        self.stack.make_variadic();
+        let instr_id = self.emit_adjust_to(stack_top).unwrap();
+
+        let label = Label {
+            name: label,
+            target: instr_id,
+        };
+        self.labels.push_label(label, self.fun.borrow().view())?;
+
+        // Unfortunally, we don't have a luxury to perform full codeflow analysis.
+        // To keep things simple we assume that labels are always reachable.
+        // This worsens codegen in some cases, but those should be rather rare.
+        self.reachability.make_reachable();
+
+        Ok(instr_id)
+    }
+
+    pub fn try_emit_goto(&mut self, label: &'s str) -> Result<InstrId, EmitError> {
+        let target = self.fun.len();
+
+        let opcode = self.labels.goto(label, target);
+        self.try_emit(opcode)
+    }
+
+    pub fn emit_goto(&mut self, label: &'s str) -> InstrId {
+        self.try_emit_goto(label).unwrap()
     }
 
     // pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
