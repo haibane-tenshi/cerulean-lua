@@ -48,7 +48,8 @@ pub(crate) fn func_body<'s, 'origin>(
                     let state = block(frag.new_core())
                         .parse_once(s)?
                         .map_output(|_| frag.commit())
-                        .map_output(|_| frame.commit().resolve());
+                        .try_map_output(|_| frame.commit())?
+                        .map_output(|fun| fun.resolve());
 
                     Ok(state)
                 }

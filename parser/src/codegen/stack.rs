@@ -678,7 +678,7 @@ impl<'s, 'origin> Drop for StackView<'s, 'origin> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommitKind {
     Scope,
     Expr,

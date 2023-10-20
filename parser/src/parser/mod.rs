@@ -128,7 +128,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     }
 
     let func_table = {
-        let script = frame.commit().resolve();
+        let script = frame.commit().map_err(CodegenError::from)?.resolve();
         let mut func_table = func_table.resolve();
 
         // Put script where runtime expects it to find.

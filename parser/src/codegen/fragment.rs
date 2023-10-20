@@ -5,6 +5,7 @@ use crate::codegen::const_table::{ConstTable, ConstTableView};
 use crate::codegen::func_table::{FuncTable, FuncTableView};
 use crate::codegen::function::{Function, FunctionView};
 use crate::codegen::jumps::{Jumps, JumpsView};
+use crate::codegen::labels::{Labels, LabelsView};
 use crate::codegen::reachability::Reachability;
 use crate::codegen::stack::{
     BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
@@ -34,6 +35,7 @@ pub struct Core<'s, 'origin> {
     fun: &'origin mut Function,
     stack: &'origin mut Stack<'s>,
     jumps: &'origin mut Jumps,
+    labels: &'origin mut Labels<'s>,
     reachability: Reachability,
 }
 
@@ -75,6 +77,7 @@ pub struct Fragment<'s, 'origin> {
     fun: FunctionView<'origin>,
     stack: StackView<'s, 'origin>,
     jumps: JumpsView<'origin>,
+    labels: LabelsView<'s, 'origin>,
     reachability: Reachability,
     kind: CommitKind,
 }
@@ -88,6 +91,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fun,
             stack,
             jumps,
+            labels,
             reachability,
         } = core;
 
@@ -97,6 +101,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let fun = fun.view();
         let stack = stack.view();
         let jumps = jumps.view(fragment_id, fun.len());
+        let labels = if kind == CommitKind::Scope {
+            labels.view_scope(fun.len())
+        } else {
+            labels.view_expr()
+        };
 
         Fragment {
             fragment_id,
@@ -105,6 +114,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fun,
             stack,
             jumps,
+            labels,
             reachability,
             kind,
         }
@@ -118,6 +128,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fun,
             stack,
             jumps,
+            labels,
             reachability,
         } = core;
 
@@ -127,6 +138,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let fun = fun.view();
         let stack = stack.view_at(slot);
         let jumps = jumps.view(fragment_id, fun.len());
+        let labels = if kind == CommitKind::Scope {
+            labels.view_scope(fun.len())
+        } else {
+            labels.view_expr()
+        };
 
         Fragment {
             fragment_id,
@@ -135,6 +151,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fun,
             stack,
             jumps,
+            labels,
             reachability,
             kind,
         }
@@ -271,6 +288,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fun,
             stack,
             jumps,
+            labels,
             reachability,
             kind: _,
         } = self;
@@ -281,6 +299,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let fun = fun.borrow();
         let stack = stack.borrow();
         let jumps = jumps.borrow();
+        let labels = labels.borrow();
         let reachability = *reachability;
 
         Core {
@@ -290,6 +309,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fun,
             stack,
             jumps,
+            labels,
             reachability,
         }
     }
@@ -334,6 +354,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             mut fun,
             mut stack,
             jumps,
+            labels,
             reachability,
             kind,
         } = self;
@@ -364,6 +385,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fun.emit(OpCode::AdjustStack(slot)).unwrap();
         }
 
+        labels.commit(kind);
         fun.commit();
         stack.commit(kind);
     }
@@ -395,6 +417,7 @@ pub struct Frame<'s, 'origin> {
     stack: StackView<'s, 'origin>,
     fun: Function,
     jumps: Jumps,
+    labels: Labels<'s>,
 }
 
 impl<'s, 'origin> Frame<'s, 'origin> {
@@ -409,13 +432,17 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let func_table = func_table.view();
         let const_table = const_table.view();
         let stack = stack.frame();
+        let fun = Function::new(signature);
+        let jumps = Jumps::new();
+        let labels = Labels::new(InstrId(0));
 
         Frame {
             func_table,
             const_table,
             stack,
-            fun: Function::new(signature),
-            jumps: Jumps::new(),
+            fun,
+            jumps,
+            labels,
         }
     }
 
@@ -431,6 +458,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             stack,
             fun: Function::new(signature),
             jumps: Jumps::new(),
+            labels: Labels::new(InstrId(0)),
         }
     }
 
@@ -441,6 +469,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             stack,
             fun,
             jumps,
+            labels,
         } = self;
 
         let fragment_id = FragmentId::default();
@@ -456,23 +485,33 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             fun,
             stack,
             jumps,
+            labels,
             reachability,
         }
     }
 
-    pub fn commit(self) -> Function {
+    pub fn commit(self) -> Result<Function, UnresolvedGotoError> {
         let Frame {
             func_table,
             const_table,
             stack,
             fun,
             jumps: _,
+            labels,
         } = self;
 
         func_table.commit();
         const_table.commit();
         stack.commit(CommitKind::Scope);
 
-        fun
+        if labels.is_resolved() {
+            Ok(fun)
+        } else {
+            Err(UnresolvedGotoError)
+        }
     }
 }
+
+#[derive(Debug, Error)]
+#[error("goto statement is missing its label")]
+pub struct UnresolvedGotoError;

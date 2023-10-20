@@ -48,6 +48,7 @@ use super::stmt::numerical_for::NumericalForFailure;
 use super::stmt::repeat_until::RepeatUntilFailure;
 use super::stmt::return_::ReturnFailure;
 use super::stmt::while_do::WhileDoFailure;
+use crate::codegen::fragment::UnresolvedGotoError;
 
 pub use std::convert::Infallible as Never;
 
@@ -99,6 +100,9 @@ pub enum CodegenError {
 
     #[error("failed to resolve variable name")]
     VariableFailure(#[from] VariableFailure),
+
+    #[error("missing label for goto statement")]
+    UnresolvedGoto(#[from] UnresolvedGotoError),
 }
 
 #[derive(Debug, Error)]
