@@ -41,6 +41,7 @@ use super::prefix_expr::{
 use super::stmt::assignment::AssignmentFailure;
 use super::stmt::do_end::DoEndFailure;
 use super::stmt::generic_for::GenericForFailure;
+use super::stmt::goto::GotoFailure;
 use super::stmt::if_then::IfThenFailure;
 use super::stmt::label::LabelFailure;
 use super::stmt::local_assignment::LocalAssignmentFailure;
@@ -211,6 +212,8 @@ pub(crate) enum ParseCause {
     Return(#[from] ReturnFailure),
     #[error("failed to parse label statement")]
     Label(#[from] LabelFailure),
+    #[error("failed to parse goto statement")]
+    Goto(#[from] GotoFailure),
 }
 
 impl ParseCause {
@@ -484,6 +487,16 @@ impl ParseCause {
                 let (msg, span) = match err {
                     LabelFailure::DoubleColon(err) => ("expected `::`", err.span),
                     LabelFailure::Ident(err) => ("expected identifier", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::Goto(err) => {
+                let (msg, span) = match err {
+                    GotoFailure::Goto(err) => ("expected `goto` keyword", err.span),
+                    GotoFailure::Ident(err) => ("expected identifier", err.span),
                 };
 
                 let labels = vec![Label::primary((), span)];
