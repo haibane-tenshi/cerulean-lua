@@ -87,7 +87,6 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::const_table::ConstTable;
     use crate::codegen::fragment::Frame;
     use crate::codegen::func_table::FuncTable;
-    use crate::codegen::loop_stack::LoopStack;
     use crate::codegen::stack::Stack;
     use crate::parser::block::block;
     use repr::chunk::Signature;
@@ -96,7 +95,6 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     let mut func_table = FuncTable::with_script();
     let mut const_table = ConstTable::new();
     let mut stack = Stack::new();
-    let mut loop_stack = LoopStack::new();
     let signature = Signature {
         height: 0,
         is_variadic: true,
@@ -106,7 +104,6 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
         func_table.view(),
         const_table.view(),
         stack.view(),
-        loop_stack.view(),
         signature,
     );
     let state = block(frame.new_core()).parse_once(s)?;
