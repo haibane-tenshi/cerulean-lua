@@ -158,6 +158,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                     }
                     StackSlotOrConstId::ConstId(_) => {
                         let mut frag = outer_frag.new_scope();
+                        frag.mark_as_loop();
 
                         frag.emit(OpCode::LoadStack(loop_var));
                         frag.emit(OpCode::LoadStack(limit));

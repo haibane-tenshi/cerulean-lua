@@ -39,6 +39,7 @@ use super::prefix_expr::{
     FieldFailure, FnArgsFailure, FnCallFailure, IndexFailure, TabCallFailure, VariableFailure,
 };
 use super::stmt::assignment::AssignmentFailure;
+use super::stmt::break_::BreakFailure;
 use super::stmt::do_end::DoEndFailure;
 use super::stmt::generic_for::GenericForFailure;
 use super::stmt::goto::GotoFailure;
@@ -50,7 +51,7 @@ use super::stmt::numerical_for::NumericalForFailure;
 use super::stmt::repeat_until::RepeatUntilFailure;
 use super::stmt::return_::ReturnFailure;
 use super::stmt::while_do::WhileDoFailure;
-use crate::codegen::fragment::UnresolvedGotoError;
+use crate::codegen::fragment::{BreakOutsideLoopError, UnresolvedGotoError};
 use crate::codegen::labels::{DuplicateLabelError, IllFormedGotoError, PushLabelError};
 
 pub use std::convert::Infallible as Never;
@@ -110,6 +111,8 @@ pub enum CodegenError {
     DuplicateLabel(#[from] DuplicateLabelError),
 
     IllFormedGoto(#[from] IllFormedGotoError),
+
+    BreakOusideLoop(#[from] BreakOutsideLoopError),
 }
 
 impl From<PushLabelError> for CodegenError {
@@ -214,6 +217,8 @@ pub(crate) enum ParseCause {
     Label(#[from] LabelFailure),
     #[error("failed to parse goto statement")]
     Goto(#[from] GotoFailure),
+    #[error("failed to parse break statement")]
+    Break(#[from] BreakFailure),
 }
 
 impl ParseCause {
@@ -497,6 +502,15 @@ impl ParseCause {
                 let (msg, span) = match err {
                     GotoFailure::Goto(err) => ("expected `goto` keyword", err.span),
                     GotoFailure::Ident(err) => ("expected identifier", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::Break(err) => {
+                let (msg, span) = match err {
+                    BreakFailure::Break(err) => ("expected `break` keyword", err.span),
                 };
 
                 let labels = vec![Label::primary((), span)];

@@ -1,4 +1,5 @@
 pub(crate) mod assignment;
+pub(crate) mod break_;
 pub(crate) mod do_end;
 pub(crate) mod generic_for;
 pub(crate) mod goto;
@@ -25,6 +26,7 @@ pub(crate) fn statement<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::parser::prefix_expr::func_call;
         use assignment::assignment;
+        use break_::break_;
         use do_end::do_end;
         use generic_for::generic_for;
         use goto::goto;
@@ -48,6 +50,7 @@ pub(crate) fn statement<'s, 'origin>(
             .or_else(|| (s.clone(), local_function(frag.new_core())))?
             .or_else(|| (s.clone(), func_call(frag.new_core())))?
             .or_else(|| (s.clone(), while_do(frag.new_core())))?
+            .or_else(|| (s.clone(), break_(frag.new_core())))?
             .or_else(|| (s.clone(), do_end(frag.new_core())))?
             .or_else(|| (s.clone(), repeat_until(frag.new_core())))?
             .or_else(|| (s.clone(), label(frag.new_core())))?
