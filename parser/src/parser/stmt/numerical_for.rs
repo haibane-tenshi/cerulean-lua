@@ -126,6 +126,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         zero_check.commit();
 
                         let mut frag = outer_frag.new_scope();
+                        frag.mark_as_loop();
                         let mut controls = frag.new_expr();
                         let controls_id = controls.id();
                         let mut positive_step = controls.new_expr();

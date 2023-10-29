@@ -48,6 +48,7 @@ pub(crate) fn generic_for<'s, 'origin>(
                 let _close = top + 3;
 
                 let mut frag = outer_frag.new_scope();
+                frag.mark_as_loop();
                 let mark = frag.stack().len();
                 let count: u32 = names.len().try_into().unwrap();
                 let iterator = frag.stack_slot(mark);

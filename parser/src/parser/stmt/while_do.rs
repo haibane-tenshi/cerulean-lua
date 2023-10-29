@@ -26,7 +26,12 @@ pub(crate) fn while_do<'s, 'origin>(
         let state = token_while
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|_| outer_frag.new_scope())
+            .map_output(|_| {
+                let mut frag = outer_frag.new_scope();
+                frag.mark_as_loop();
+
+                frag
+            })
             .then(|mut frag| {
                 move |s| -> Result<_, FailFast> {
                     Ok(expr_adjusted_to_1(frag.new_core())

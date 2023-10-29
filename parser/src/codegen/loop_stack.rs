@@ -39,6 +39,12 @@ impl LoopStack {
         }
     }
 
+    fn push(&mut self, id: FragmentId) {
+        if self.loops.last().copied() != Some(id) {
+            self.loops.push(id)
+        }
+    }
+
     fn innermost_loop(&self) -> Option<FragmentId> {
         if self.loops.len() > self.frame_base {
             self.loops.last().copied()
@@ -74,6 +80,10 @@ pub struct LoopStackView<'a> {
 impl<'a> LoopStackView<'a> {
     pub fn borrow(&mut self) -> &mut LoopStack {
         self.stack
+    }
+
+    pub fn push(&mut self, id: FragmentId) {
+        self.stack.push(id)
     }
 
     pub fn innermost_loop(&self) -> Option<FragmentId> {

@@ -198,6 +198,10 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.stack.fragment_to_frame(slot)
     }
 
+    pub fn mark_as_loop(&mut self) {
+        self.loop_stack.push(self.id())
+    }
+
     pub fn try_emit(&mut self, instr: OpCode) -> Result<InstrId, EmitError> {
         self.stack.emit(&instr)?;
         self.reachability.emit(&instr);
@@ -331,6 +335,16 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
     pub fn emit_goto(&mut self, label: &'s str) -> InstrId {
         self.try_emit_goto(label).unwrap()
+    }
+
+    pub fn emit_break(&mut self) -> Result<InstrId, BreakOutsideLoopError> {
+        let target = self
+            .loop_stack
+            .innermost_loop()
+            .ok_or(BreakOutsideLoopError)?;
+        let instr_id = self.emit_jump_to(target, None);
+
+        Ok(instr_id)
     }
 
     // pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
@@ -592,3 +606,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
 #[derive(Debug, Error)]
 #[error("goto statement is missing its label")]
 pub struct UnresolvedGotoError;
+
+#[derive(Debug, Error)]
+#[error("break statement is used outside a loop")]
+pub struct BreakOutsideLoopError;

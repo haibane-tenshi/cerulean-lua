@@ -24,7 +24,12 @@ pub(crate) fn repeat_until<'s, 'origin>(
         let state = token_repeat
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|_| outer_frag.new_scope())
+            .map_output(|_| {
+                let mut frag = outer_frag.new_scope();
+                frag.mark_as_loop();
+
+                frag
+            })
             .then(|mut frag| {
                 |s| -> Result<_, FailFast> {
                     let state = inner_block(frag.new_core())
