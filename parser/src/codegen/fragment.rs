@@ -6,6 +6,7 @@ use crate::codegen::func_table::{FuncTable, FuncTableView};
 use crate::codegen::function::{Function, FunctionView};
 use crate::codegen::jumps::{Jumps, JumpsView};
 use crate::codegen::labels::{Labels, LabelsView, PushLabelError};
+use crate::codegen::loop_stack::{LoopStack, LoopStackView};
 use crate::codegen::reachability::Reachability;
 use crate::codegen::stack::{
     BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
@@ -36,6 +37,7 @@ pub struct Core<'s, 'origin> {
     stack: &'origin mut Stack<'s>,
     jumps: &'origin mut Jumps,
     labels: &'origin mut Labels<'s>,
+    loop_stack: &'origin mut LoopStack,
     reachability: Reachability,
 }
 
@@ -78,6 +80,7 @@ pub struct Fragment<'s, 'origin> {
     stack: StackView<'s, 'origin>,
     jumps: JumpsView<'origin>,
     labels: LabelsView<'s, 'origin>,
+    loop_stack: LoopStackView<'origin>,
     reachability: Reachability,
     kind: CommitKind,
 }
@@ -92,6 +95,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
         } = core;
 
@@ -106,6 +110,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         } else {
             labels.view_expr()
         };
+        let loop_stack = loop_stack.view();
 
         Fragment {
             fragment_id,
@@ -115,6 +120,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
             kind,
         }
@@ -129,6 +135,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
         } = core;
 
@@ -143,6 +150,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         } else {
             labels.view_expr()
         };
+        let loop_stack = loop_stack.view();
 
         Fragment {
             fragment_id,
@@ -152,6 +160,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
             kind,
         }
@@ -341,6 +350,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
             kind: _,
         } = self;
@@ -352,6 +362,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let stack = stack.borrow();
         let jumps = jumps.borrow();
         let labels = labels.borrow();
+        let loop_stack = loop_stack.borrow();
         let reachability = *reachability;
 
         Core {
@@ -362,6 +373,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
         }
     }
@@ -407,6 +419,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             mut stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
             kind,
         } = self;
@@ -415,6 +428,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
         func_table.commit();
         const_table.commit();
+        loop_stack.commit();
 
         let sequence_state = is_reachable.then(|| stack.state());
         let jump_state = jumps.commit(&mut fun);
@@ -470,6 +484,7 @@ pub struct Frame<'s, 'origin> {
     fun: Function,
     jumps: Jumps,
     labels: Labels<'s>,
+    loop_stack: LoopStackView<'origin>,
 }
 
 impl<'s, 'origin> Frame<'s, 'origin> {
@@ -478,6 +493,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             func_table,
             const_table,
             stack,
+            loop_stack,
             ..
         } = core;
 
@@ -487,6 +503,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let fun = Function::new(signature);
         let jumps = Jumps::new();
         let labels = Labels::new(InstrId(0));
+        let loop_stack = loop_stack.frame();
 
         Frame {
             func_table,
@@ -495,6 +512,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             fun,
             jumps,
             labels,
+            loop_stack,
         }
     }
 
@@ -502,6 +520,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         func_table: FuncTableView<'origin>,
         const_table: ConstTableView<'origin>,
         stack: StackView<'s, 'origin>,
+        loop_stack: LoopStackView<'origin>,
         signature: Signature,
     ) -> Self {
         Frame {
@@ -511,6 +530,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             fun: Function::new(signature),
             jumps: Jumps::new(),
             labels: Labels::new(InstrId(0)),
+            loop_stack,
         }
     }
 
@@ -522,12 +542,14 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             fun,
             jumps,
             labels,
+            loop_stack,
         } = self;
 
         let fragment_id = FragmentId::default();
         let func_table = func_table.borrow();
         let const_table = const_table.borrow();
         let stack = stack.borrow();
+        let loop_stack = loop_stack.borrow();
         let reachability = Reachability::new();
 
         Core {
@@ -538,6 +560,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             stack,
             jumps,
             labels,
+            loop_stack,
             reachability,
         }
     }
@@ -550,11 +573,13 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             fun,
             jumps: _,
             labels,
+            loop_stack,
         } = self;
 
         func_table.commit();
         const_table.commit();
         stack.commit(CommitKind::Scope);
+        loop_stack.commit();
 
         if labels.is_resolved() {
             Ok(fun)
