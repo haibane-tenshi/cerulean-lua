@@ -202,16 +202,17 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
 
     pub fn commit(mut self, kind: CommitKind) {
         let LabelsView { labels, prev_state } = &mut self;
-        labels.scope = prev_state.scope;
 
         if kind == CommitKind::Scope {
             let in_scope = labels
                 .up_jumps
-                .partition_point(|label| label.target < prev_state.scope);
+                .partition_point(|label| label.target < labels.scope);
             labels.up_jumps.truncate(in_scope);
 
             labels.last_binding = prev_state.last_binding;
         }
+
+        labels.scope = prev_state.scope;
 
         std::mem::forget(self)
     }
