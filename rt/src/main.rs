@@ -1,25 +1,25 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
+
+use repr::chunk::Chunk;
 
 #[derive(Debug, Parser)]
 struct Cli {
-    path: PathBuf,
+    #[clap(subcommand)]
+    command: Command,
 }
 
-fn main() -> Result<()> {
+#[derive(Debug, Subcommand)]
+enum Command {
+    Run { path: PathBuf },
+    Compile { path: PathBuf },
+}
+
+fn load_from_file(path: &Path) -> Result<Chunk> {
     use logos::Logos;
     use parser::lex::Token;
-    use rt::chunk_cache::single::{Main, SingleChunk};
-    use rt::runtime::Runtime;
-
-    let logger = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
-        .finish();
-    tracing::subscriber::set_global_default(logger)?;
-
-    let Cli { path } = Cli::try_parse()?;
 
     let data = std::fs::read_to_string(path)?;
     let lexer = Token::lexer(&data);
@@ -38,11 +38,36 @@ fn main() -> Result<()> {
             return Err(anyhow::Error::msg("failed to parse input"));
         }
     };
-    let chunk_cache = SingleChunk::new(chunk);
 
-    let mut runtime = Runtime::new(chunk_cache);
+    Ok(chunk)
+}
 
-    runtime.view().invoke(rt::ffi::call_script(&Main))?;
+fn main() -> Result<()> {
+    let logger = tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+        .finish();
+    tracing::subscriber::set_global_default(logger)?;
+
+    let Cli { command } = Cli::try_parse()?;
+
+    match command {
+        Command::Run { path } => {
+            use rt::chunk_cache::single::{Main, SingleChunk};
+            use rt::runtime::Runtime;
+
+            let chunk = load_from_file(&path)?;
+            let chunk_cache = SingleChunk::new(chunk);
+
+            let mut runtime = Runtime::new(chunk_cache);
+
+            runtime.view().invoke(rt::ffi::call_script(&Main))?;
+        }
+        Command::Compile { path } => {
+            let chunk = load_from_file(&path)?;
+
+            println!("{chunk}");
+        }
+    }
 
     Ok(())
 }
