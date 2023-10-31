@@ -7,7 +7,7 @@ pub(crate) fn expr<'s, 'origin>(
     frag: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -49,7 +49,7 @@ fn expr_impl<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ExprSuccess,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -58,35 +58,7 @@ fn expr_impl<'s, 'origin>(
         let mut frag = core.expr();
         let stack_start = frag.stack().len();
 
-        let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let mut frag = frag.new_expr();
-            let r = prefix_op(s)?
-                .map_failure(|f| ParseFailure::from(ExprFailure::Prefix(f)))
-                .then(|op| {
-                    let frag = &mut frag;
-                    move |s: Lexer<'s>| -> Result<_, FailFast> {
-                        let ((), rhs_bp) = op.binding_power();
-
-                        let r = expr_impl(rhs_bp, frag.new_core())
-                            .parse_once(s)?
-                            .map_output(|_| {
-                                let opcode = OpCode::UnaOp(op.0);
-
-                                frag.emit_adjust_to(stack_start + 1);
-                                frag.emit(opcode);
-                            });
-
-                        Ok(r)
-                    }
-                })?
-                .map_output(|_| {
-                    frag.commit();
-                });
-
-            Ok(r)
-        };
-
-        let state = prefix
+        let state = prefix_expr(frag.new_core())
             .parse_once(s.clone())?
             .map_success(CompleteOr::Other)
             .or_else(|| (s, atom(frag.new_core())))?
@@ -97,15 +69,15 @@ fn expr_impl<'s, 'origin>(
         // We cannot trim it yet, outside context might expect those values.
 
         let next_part = |s: Lexer<'s>| -> Result<
-            ParsingState<Lexer<'s>, (), ExprSuccess, ExprSuccess>,
+            ParsingState<Lexer<'s>, Spanned<()>, ExprSuccess, ExprSuccess>,
             FailFast,
         > {
             let mut frag = frag.new_expr_at(stack_start);
-            let r = infix_op(s)?
+            let state = infix_op(s)?
                 .map_failure(|failure| ExprSuccess::Parsing(ExprFailure::Infix(failure).into()))
                 .with_mode(FailureMode::Malformed)
                 .transform(|op| {
-                    let (lhs_bp, _rhs_bp) = op.binding_power();
+                    let (lhs_bp, _rhs_bp) = op.value.binding_power();
 
                     if lhs_bp < min_bp {
                         Err(ExprSuccess::LessTightlyBound)
@@ -116,6 +88,8 @@ fn expr_impl<'s, 'origin>(
                 .map_output(|op| {
                     // At this point we 100% know that we are parsing an infix operator.
                     // It implies that we HAVE to adjust both operands to 1 value before doing op itself.
+
+                    let (op, span) = op.take();
 
                     // Adjust left operand.
                     frag.emit_adjust_to(stack_start + 1);
@@ -139,19 +113,19 @@ fn expr_impl<'s, 'origin>(
 
                     let rhs_top = frag.stack().len() + 1;
 
-                    (maybe_opcode, rhs_top, op)
+                    (maybe_opcode, rhs_top, op, span)
                 })
-                .then(|(maybe_opcode, rhs_top, op)| {
+                .then(|(maybe_opcode, rhs_top, op, span)| {
                     let frag = &mut frag;
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
-                        let r = expr_impl(op.binding_power().1, frag.new_core())
+                        let state = expr_impl(op.binding_power().1, frag.new_core())
                             .parse_once(s)?
-                            .map_output(|_| (maybe_opcode, rhs_top));
+                            .map_output(|output| (maybe_opcode, rhs_top, discard(span, output)));
 
-                        Ok(r)
+                        Ok(state)
                     }
                 })?
-                .map_output(move |(maybe_opcode, rhs_top)| {
+                .map_output(move |(maybe_opcode, rhs_top, span)| {
                     // Adjust right operand.
                     frag.emit_adjust_to(rhs_top);
 
@@ -160,15 +134,17 @@ fn expr_impl<'s, 'origin>(
                     }
 
                     frag.commit();
+
+                    span
                 })
                 .collapse();
 
-            Ok(r)
+            Ok(state)
         };
 
         let r = state
-            .and(next_part.repeat())?
-            .map_output(|_| {
+            .and(next_part.repeat_with(discard).optional(), opt_discard)?
+            .inspect(|_| {
                 frag.commit();
             })
             .collapse();
@@ -241,11 +217,55 @@ where
     }
 }
 
+fn prefix_expr<'s, 'origin>(
+    core: Core<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = Spanned<()>,
+    Success = ExprSuccess,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    |s: Lexer<'s>| {
+        let mut frag = core.expr();
+
+        let state = prefix_op(s)?
+            .map_failure(|f| ParseFailure::from(ExprFailure::Prefix(f)))
+            .then(|op| {
+                let (op, r) = op.take();
+
+                let frag = &mut frag;
+                move |s: Lexer<'s>| -> Result<_, FailFast> {
+                    let ((), rhs_bp) = op.binding_power();
+                    let stack_start = frag.stack().len();
+
+                    let r = expr_impl(rhs_bp, frag.new_core())
+                        .parse_once(s)?
+                        .map_output(|output| {
+                            let opcode = OpCode::UnaOp(op.0);
+
+                            frag.emit_adjust_to(stack_start + 1);
+                            frag.emit(opcode);
+
+                            discard(r, output)
+                        });
+
+                    Ok(r)
+                }
+            })?
+            .inspect(|_| {
+                frag.commit();
+            });
+
+        Ok(state)
+    }
+}
+
 fn atom<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailureOrComplete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -270,7 +290,7 @@ fn atom<'s, 'origin>(
             .or_else(|| (s.clone(), prefix_expr(frag.new_core())))?
             .or_else(|| (s.clone(), table(frag.new_core())))?
             .or_else(|| (s, function(frag.new_core())))?
-            .map_output(|_| {
+            .inspect(|_| {
                 frag.commit();
             });
 
@@ -280,7 +300,7 @@ fn atom<'s, 'origin>(
 
 fn prefix_op(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Prefix, Complete, PrefixMismatchError>, LexError> {
+) -> Result<ParsingState<Lexer, Spanned<Prefix>, Complete, PrefixMismatchError>, LexError> {
     let op = match s.next_token()? {
         Ok(Token::MinusSign) => Prefix(UnaOp::AriNeg),
         Ok(Token::Tilde) => Prefix(UnaOp::BitNot),
@@ -292,7 +312,12 @@ fn prefix_op(
         }
     };
 
-    Ok(ParsingState::Success(s, op, Complete))
+    let r = Spanned {
+        value: op,
+        span: s.span(),
+    };
+
+    Ok(ParsingState::Success(s, r, Complete))
 }
 
 #[derive(Debug, Error)]
@@ -303,7 +328,7 @@ pub(crate) struct PrefixMismatchError {
 
 fn infix_op(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Infix, Complete, InfixMismatchError>, LexError> {
+) -> Result<ParsingState<Lexer, Spanned<Infix>, Complete, InfixMismatchError>, LexError> {
     let op = match s.next_token()? {
         Ok(Token::PlusSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Add)),
         Ok(Token::MinusSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Sub)),
@@ -332,7 +357,12 @@ fn infix_op(
         }
     };
 
-    Ok(ParsingState::Success(s, op, Complete))
+    let r = Spanned {
+        value: op,
+        span: s.span(),
+    };
+
+    Ok(ParsingState::Success(s, r, Complete))
 }
 
 #[derive(Debug, Error)]

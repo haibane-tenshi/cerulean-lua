@@ -5,7 +5,7 @@ pub(crate) fn do_end<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -23,9 +23,9 @@ pub(crate) fn do_end<'s, 'origin>(
         let state = token_do
             .parse_once(s)?
             .with_mode(FailureMode::Malformed)
-            .and(block(frag.new_core()))?
-            .and(token_end)?
-            .map_output(move |_| {
+            .and(block(frag.new_core()), opt_discard)?
+            .and(token_end, discard)?
+            .inspect(move |_| {
                 frag.commit();
             })
             .collapse();

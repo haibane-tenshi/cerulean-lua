@@ -6,7 +6,7 @@ pub(crate) fn break_<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -19,11 +19,11 @@ pub(crate) fn break_<'s, 'origin>(
 
         let state = token_break
             .parse(s)?
-            .try_map_output(|_| -> Result<_, CodegenError> {
+            .try_map_output(|span| -> Result<_, CodegenError> {
                 frag.emit_break()?;
                 frag.commit();
 
-                Ok(())
+                Ok(span)
             })?;
 
         Ok(state)

@@ -9,7 +9,7 @@ pub(crate) fn match_token<'s>(
     token: Token<'static>,
 ) -> impl Parse<
     Lexer<'s>,
-    Output = Span,
+    Output = Spanned<()>,
     Success = Complete,
     Failure = TokenMismatch,
     FailFast = LexError,
@@ -17,8 +17,12 @@ pub(crate) fn match_token<'s>(
     move |mut s: Lexer<'s>| {
         let r = match s.next_token()? {
             Ok(t) if t == token => {
-                let span = s.span();
-                ParsingState::Success(s, span, Complete)
+                let r = Spanned {
+                    value: (),
+                    span: s.span(),
+                };
+
+                ParsingState::Success(s, r, Complete)
             }
             Ok(_) | Err(Eof) => {
                 let err = TokenMismatch { span: s.span() };
@@ -38,11 +42,14 @@ pub struct TokenMismatch {
 
 pub(crate) fn identifier(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, (&str, Span), Complete, IdentMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, Spanned<&str>, Complete, IdentMismatch>, LexError> {
     let r = match s.next_token()? {
         Ok(Token::Ident(ident)) => {
-            let span = s.span();
-            ParsingState::Success(s, (ident, span), Complete)
+            let r = Spanned {
+                value: ident,
+                span: s.span(),
+            };
+            ParsingState::Success(s, r, Complete)
         }
         Ok(_) | Err(Eof) => {
             let span = s.span();
@@ -67,7 +74,7 @@ impl From<Never> for IdentMismatch {
 
 pub(crate) fn literal(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, (Literal, Span), Complete, LiteralMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, Spanned<Literal>, Complete, LiteralMismatch>, LexError> {
     let literal = match s.next_token()? {
         Ok(Token::Nil) => Literal::Nil,
         Ok(Token::True) => Literal::Bool(true),
@@ -87,9 +94,13 @@ pub(crate) fn literal(
         }
         Ok(_) | Err(Eof) => return Ok(ParsingState::Failure(LiteralMismatch)),
     };
-    let span = s.span();
 
-    Ok(ParsingState::Success(s, (literal, span), Complete))
+    let r = Spanned {
+        value: literal,
+        span: s.span(),
+    };
+
+    Ok(ParsingState::Success(s, r, Complete))
 }
 
 #[derive(Debug, Error)]
@@ -98,12 +109,15 @@ pub struct LiteralMismatch;
 
 pub(crate) fn literal_str(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, (Cow<str>, Span), Complete, LiteralStrMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, Spanned<Cow<str>>, Complete, LiteralStrMismatch>, LexError> {
     let r = match s.next_token()? {
         Ok(Token::ShortLiteralString(raw_str)) => {
-            let r = raw_str.unescape().map_err(|_| LexError::Str(s.span()))?;
-            let span = s.span();
-            ParsingState::Success(s, (r, span), Complete)
+            let literal_str = raw_str.unescape().map_err(|_| LexError::Str(s.span()))?;
+            let r = Spanned {
+                value: literal_str,
+                span: s.span(),
+            };
+            ParsingState::Success(s, r, Complete)
         }
         Ok(_) | Err(Eof) => {
             let span = s.span();

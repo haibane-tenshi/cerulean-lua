@@ -5,7 +5,7 @@ pub(crate) fn local_function<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -25,24 +25,29 @@ pub(crate) fn local_function<'s, 'origin>(
         let state = token_local
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and(token_function)?
+            .and(token_function, discard)?
             .with_mode(FailureMode::Malformed)
-            .and_with(identifier, |_, (ident, _)| ident)?
-            .map_output(|ident| {
+            .and(identifier, replace)?
+            .map_output(|output| {
                 // Lua disambiguates this case by introducing local variable first and assigning to it later.
                 // This is relevant for recursive functions.
                 // We only need to introduce the name:
                 // it will get assigned to after function body is parsed.
+                let (ident, span) = output.take();
                 frag.push_temporary(Some(ident));
+
+                span
             })
-            .and_replace(func_body(frag.new_core()))?
-            .map_output(|func_id| {
+            .and(func_body(frag.new_core()), replace)?
+            .map_output(|output| {
+                let (func_id, span) = output.take();
                 let const_id = frag.const_table_mut().insert(Literal::Function(func_id));
 
                 // Stack is already adjusted, we just need to silently write to correct slot here.
                 frag.fun_mut().emit(OpCode::LoadConstant(const_id)).unwrap();
-
                 frag.commit();
+
+                span
             })
             .collapse();
 

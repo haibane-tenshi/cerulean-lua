@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::ops::Range;
+
 use super::error::{Arrow, FailureMode, WithMode};
 
 type ArrowT<T, U> = <T as Arrow<U>>::Output;
@@ -338,14 +340,12 @@ impl<P, F, Source> ParseOnce<Source> for RepeatWith<P, F>
 where
     Source: Clone,
     P: ParseMut<Source>,
-    P::Output: Default,
     P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
-    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
     F: FnMut(P::Output, P::Output) -> P::Output,
 {
     type Output = P::Output;
     type Success = ArrowT<P::Success, P::Failure>;
-    type Failure = std::convert::Infallible;
+    type Failure = P::Failure;
     type FailFast = P::FailFast;
 
     fn parse_once(
@@ -362,8 +362,6 @@ where
     Source: Clone,
     P: ParseMut<Source>,
     P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
-    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
-    P::Output: Default,
     F: FnMut(P::Output, P::Output) -> P::Output,
 {
     fn parse_mut(
@@ -373,9 +371,7 @@ where
     {
         let (mut s, mut output, mut success) = match self.parser.parse_mut(s.clone())? {
             ParsingState::Success(s, output, reason) => (s, output, reason),
-            ParsingState::Failure(failure) => {
-                return Ok(ParsingState::Success(s, Default::default(), failure.into()))
-            }
+            ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
         };
 
         let reason = loop {
@@ -402,11 +398,10 @@ where
     Source: Clone,
     P: ParseMut<Source>,
     P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
-    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
 {
     type Output = ();
     type Success = ArrowT<P::Success, P::Failure>;
-    type Failure = std::convert::Infallible;
+    type Failure = P::Failure;
     type FailFast = P::FailFast;
 
     fn parse_once(
@@ -423,7 +418,6 @@ where
     Source: Clone,
     P: ParseMut<Source>,
     P::Success: Arrow<P::Success, Output = P::Success> + Arrow<P::Failure>,
-    P::Failure: Into<ArrowT<P::Success, P::Failure>>,
 {
     fn parse_mut(
         &mut self,
@@ -547,7 +541,7 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
         self
     }
 
-    pub fn and_with<P, Out>(
+    pub fn and<P, Out>(
         self,
         p: P,
         f: impl FnOnce(Output, P::Output) -> Out,
@@ -561,51 +555,6 @@ impl<Source, Output, Success, Failure> ParsingState<Source, Output, Success, Fai
         <Success as Arrow<P::Failure>>::Output: Into<Failure>,
     {
         self.then(|output| p.map_output(|output2| f(output, output2)))
-    }
-
-    pub fn and<P>(
-        self,
-        p: P,
-    ) -> Result<
-        ParsingState<Source, (Output, P::Output), <Success as Arrow<P::Success>>::Output, Failure>,
-        P::FailFast,
-    >
-    where
-        P: ParseOnce<Source>,
-        Success: Arrow<P::Success> + Arrow<P::Failure>,
-        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
-    {
-        self.and_with(p, |out, out2| (out, out2))
-    }
-
-    pub fn and_discard<P>(
-        self,
-        p: P,
-    ) -> Result<
-        ParsingState<Source, Output, <Success as Arrow<P::Success>>::Output, Failure>,
-        P::FailFast,
-    >
-    where
-        P: ParseOnce<Source>,
-        Success: Arrow<P::Success> + Arrow<P::Failure>,
-        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
-    {
-        self.and_with(p, |out, _| out)
-    }
-
-    pub fn and_replace<P>(
-        self,
-        p: P,
-    ) -> Result<
-        ParsingState<Source, P::Output, <Success as Arrow<P::Success>>::Output, Failure>,
-        P::FailFast,
-    >
-    where
-        P: ParseOnce<Source>,
-        Success: Arrow<P::Success> + Arrow<P::Failure>,
-        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
-    {
-        self.and_with(p, |_, out| out)
     }
 
     pub fn then<P>(
@@ -742,7 +691,7 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
         }
     }
 
-    pub fn and_with<P, Out>(
+    pub fn and<P, Out>(
         self,
         p: P,
         f: impl FnOnce(Output, P::Output) -> Out,
@@ -757,59 +706,6 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
         Failure: WithMode,
     {
         self.then(|out| p.map_output(|out2| f(out, out2)))
-    }
-
-    pub fn and<P>(
-        self,
-        p: P,
-    ) -> Result<
-        ParsingStateWithMode<
-            Source,
-            (Output, P::Output),
-            <Success as Arrow<P::Success>>::Output,
-            Failure,
-        >,
-        P::FailFast,
-    >
-    where
-        P: ParseOnce<Source>,
-        Success: Arrow<P::Success> + Arrow<P::Failure>,
-        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
-        Failure: WithMode,
-    {
-        self.and_with(p, |out, out2| (out, out2))
-    }
-
-    pub fn and_discard<P>(
-        self,
-        p: P,
-    ) -> Result<
-        ParsingStateWithMode<Source, Output, <Success as Arrow<P::Success>>::Output, Failure>,
-        P::FailFast,
-    >
-    where
-        P: ParseOnce<Source>,
-        Success: Arrow<P::Success> + Arrow<P::Failure>,
-        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
-        Failure: WithMode,
-    {
-        self.and_with(p, |out, _| out)
-    }
-
-    pub fn and_replace<P>(
-        self,
-        p: P,
-    ) -> Result<
-        ParsingStateWithMode<Source, P::Output, <Success as Arrow<P::Success>>::Output, Failure>,
-        P::FailFast,
-    >
-    where
-        P: ParseOnce<Source>,
-        Success: Arrow<P::Success> + Arrow<P::Failure>,
-        <Success as Arrow<P::Failure>>::Output: Into<Failure>,
-        Failure: WithMode,
-    {
-        self.and_with(p, |_, out| out)
     }
 
     pub fn then<P>(
@@ -857,5 +753,97 @@ impl<Source, Output, Success, Failure> ParsingStateWithMode<Source, Output, Succ
         };
 
         Ok(r)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Spanned<T> {
+    pub value: T,
+    pub span: Range<usize>,
+}
+
+impl<T> Spanned<T> {
+    pub fn replace<U>(self, new_value: U) -> (T, Spanned<U>) {
+        let Spanned { value, span } = self;
+
+        let r = Spanned {
+            value: new_value,
+            span,
+        };
+
+        (value, r)
+    }
+
+    pub fn take(self) -> (T, Spanned<()>) {
+        self.replace(())
+    }
+
+    pub fn put<U>(self, u: U) -> Spanned<U> {
+        self.replace(u).1
+    }
+
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Spanned<U> {
+        let Spanned { value, span } = self;
+
+        Spanned {
+            value: f(value),
+            span,
+        }
+    }
+}
+
+pub fn keep<T, U>(t: Spanned<T>, u: Spanned<U>) -> Spanned<(T, U)> {
+    let Spanned {
+        value: t,
+        span: span_t,
+    } = t;
+
+    let Spanned {
+        value: u,
+        span: span_u,
+    } = u;
+
+    Spanned {
+        value: (t, u),
+        span: span_t.start..span_u.end,
+    }
+}
+
+pub fn replace<T, U>(t: Spanned<T>, u: Spanned<U>) -> Spanned<U> {
+    let Spanned { span, value } = u;
+
+    Spanned {
+        value,
+        span: t.span.start..span.end,
+    }
+}
+
+pub fn discard<T, U>(t: Spanned<T>, u: Spanned<U>) -> Spanned<T> {
+    let Spanned { span, value } = t;
+
+    Spanned {
+        value,
+        span: span.start..u.span.end,
+    }
+}
+
+pub fn opt_keep<T, U>(t: Spanned<T>, u: Option<Spanned<U>>) -> Spanned<(T, Option<U>)> {
+    match u {
+        Some(u) => keep(t, u.map(Some)),
+        None => t.map(|t| (t, None)),
+    }
+}
+
+pub fn opt_discard<T, U>(t: Spanned<T>, u: Option<Spanned<U>>) -> Spanned<T> {
+    match u {
+        Some(u) => discard(t, u),
+        None => t,
+    }
+}
+
+pub fn opt_replace<T, U>(t: Spanned<T>, u: Option<Spanned<U>>) -> Spanned<Option<U>> {
+    match u {
+        Some(u) => replace(t, u.map(Some)),
+        None => t.map(|_| None),
     }
 }

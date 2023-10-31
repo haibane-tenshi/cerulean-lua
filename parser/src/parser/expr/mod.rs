@@ -16,7 +16,7 @@ pub(crate) fn expr_adjusted_to<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -25,7 +25,7 @@ pub(crate) fn expr_adjusted_to<'s, 'origin>(
         let mut frag = core.expr();
 
         let mark = frag.stack().len() + count;
-        let r = expr(frag.new_core()).parse_once(s)?.map_output(move |_| {
+        let r = expr(frag.new_core()).parse_once(s)?.inspect(move |_| {
             frag.emit_adjust_to(mark);
 
             frag.commit();
@@ -39,7 +39,7 @@ pub(crate) fn expr_adjusted_to_1<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -51,7 +51,7 @@ pub(crate) fn par_expr<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -69,9 +69,9 @@ pub(crate) fn par_expr<'s, 'origin>(
 
         let state = par_l
             .parse(s)?
-            .and(expr_adjusted_to_1(frag.new_core()))?
-            .and(par_r)?
-            .map_output(|_| {
+            .and(expr_adjusted_to_1(frag.new_core()), discard)?
+            .and(par_r, discard)?
+            .inspect(|_| {
                 frag.commit();
             });
 
@@ -87,7 +87,7 @@ pub(crate) fn expr_list<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -105,12 +105,12 @@ pub(crate) fn expr_list<'s, 'origin>(
 
             let r = token_comma
                 .parse(s)?
-                .map_output(|_| {
+                .inspect(|_| {
                     // Expressions inside comma lists are adjusted to 1.
                     frag.emit_adjust_to(mark);
                 })
-                .and(expr(frag.new_core()))?
-                .map_output(|_| {
+                .and(expr(frag.new_core()), discard)?
+                .inspect(|_| {
                     mark += 1;
                 });
 
@@ -118,8 +118,8 @@ pub(crate) fn expr_list<'s, 'origin>(
         };
 
         let r = state
-            .and(next_part.repeat())?
-            .map_output(move |_| frag.commit());
+            .and(next_part.repeat_with(discard).optional(), opt_discard)?
+            .inspect(move |_| frag.commit());
 
         Ok(r)
     }
@@ -136,7 +136,7 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -145,7 +145,7 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
         let mut frag = core.expr();
 
         let mark = frag.stack().len() + count;
-        let r = expr_list(frag.new_core()).parse_once(s)?.map_output(|_| {
+        let r = expr_list(frag.new_core()).parse_once(s)?.inspect(|_| {
             frag.emit_adjust_to(mark);
 
             frag.commit();

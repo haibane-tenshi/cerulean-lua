@@ -23,7 +23,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -42,9 +42,8 @@ pub(crate) fn numerical_for<'s, 'origin>(
             match_token(Token::Do).map_failure(|f| ParseFailure::from(NumericalForFailure::Do(f)));
         let token_end = match_token(Token::End)
             .map_failure(|f| ParseFailure::from(NumericalForFailure::End(f)));
-        let identifier = identifier
-            .map_failure(|f| ParseFailure::from(NumericalForFailure::Ident(f)))
-            .map_output(|(ident, _)| ident);
+        let identifier =
+            identifier.map_failure(|f| ParseFailure::from(NumericalForFailure::Ident(f)));
 
         let mut outer_frag = core.scope();
 
@@ -53,44 +52,54 @@ pub(crate) fn numerical_for<'s, 'origin>(
         let state = token_for
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and_replace(identifier)?
-            .and_discard(token_equals_sign)?
+            .and(identifier, replace)?
+            .and(token_equals_sign, discard)?
             .with_mode(FailureMode::Malformed)
             .then(|ident| {
                 |s| -> Result<_, FailFast> {
                     let loop_var = outer_frag.stack_slot(outer_frag.stack().len());
                     let status = expr_adjusted_to_1(outer_frag.new_core())
                         .parse_once(s)?
-                        .map_output(|_| loop_var);
-                    // Assign name.
-                    outer_frag.pop_temporary();
-                    outer_frag.push_temporary(Some(ident));
+                        .map_output(|output| {
+                            // Assign name.
+                            let (ident, span) = ident.take();
+                            outer_frag.pop_temporary();
+                            outer_frag.push_temporary(Some(ident));
+
+                            replace(span, output.replace(loop_var).1)
+                        });
 
                     Ok(status)
                 }
             })?
-            .and_discard(token_comma)?
-            .and(|s| -> Result<_, FailFast> {
-                let limit = outer_frag.stack_slot(outer_frag.stack().len());
-                let status = expr_adjusted_to_1(outer_frag.new_core())
-                    .parse_once(s)?
-                    .map_output(|_| limit);
+            .and(token_comma, discard)?
+            .and(
+                |s| -> Result<_, FailFast> {
+                    let limit = outer_frag.stack_slot(outer_frag.stack().len());
+                    let status = expr_adjusted_to_1(outer_frag.new_core())
+                        .parse_once(s)?
+                        .map_output(|span| span.replace(limit).1);
 
-                Ok(status)
-            })?
+                    Ok(status)
+                },
+                keep,
+            )?
             .and(
                 (|s| -> Result<_, FailFast> {
                     let step = outer_frag.stack_slot(outer_frag.stack().len());
                     let status = token_comma
                         .parse(s)?
-                        .and(expr_adjusted_to_1(outer_frag.new_core()))?
-                        .map_output(|_| step);
+                        .and(expr_adjusted_to_1(outer_frag.new_core()), discard)?
+                        .map_output(|span| span.replace(step).1);
 
                     Ok(status)
                 })
                 .optional(),
+                opt_keep,
             )?
-            .map_output(|((loop_var, limit), step)| {
+            .map_output(|output| {
+                let (((loop_var, limit), step), span) = output.take();
+
                 let step = match step {
                     Some(slot) => StackSlotOrConstId::StackSlot(slot),
                     None => {
@@ -99,9 +108,9 @@ pub(crate) fn numerical_for<'s, 'origin>(
                     }
                 };
 
-                (loop_var, limit, step)
+                (loop_var, limit, step, span)
             })
-            .map_output(|(loop_var, limit, step)| {
+            .map_output(|(loop_var, limit, step, span)| {
                 // Emit loop controls.
 
                 let frag = match step {
@@ -169,20 +178,24 @@ pub(crate) fn numerical_for<'s, 'origin>(
                     }
                 };
 
-                (loop_var, step, frag)
+                span.replace((loop_var, step, frag)).1
             })
-            .and_discard(token_do)?
-            .then(|(loop_var, step, mut frag)| {
+            .and(token_do, discard)?
+            .then(|output| {
                 move |s| -> Result<_, FailFast> {
-                    let state = block(frag.new_core())
-                        .parse_once(s)?
-                        .map_output(|_| (loop_var, step, frag));
+                    let ((loop_var, step, mut frag), span) = output.take();
+
+                    let state = block(frag.new_core()).parse_once(s)?.map_output(|output| {
+                        opt_discard(span, output).replace((loop_var, step, frag)).1
+                    });
 
                     Ok(state)
                 }
             })?
-            .and_discard(token_end)?
-            .map_output(|(loop_var, step, mut frag)| {
+            .and(token_end, discard)?
+            .map_output(|output| {
+                let ((loop_var, step, mut frag), span) = output.take();
+
                 // Increment control variable.
                 frag.emit(OpCode::LoadStack(loop_var));
                 step.load(&mut frag);
@@ -192,11 +205,13 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                 // Clean up.
                 frag.commit();
+
+                span
             })
             .collapse();
 
         // Clean up.
-        let state = state.map_output(|_| outer_frag.commit());
+        let state = state.inspect(|_| outer_frag.commit());
 
         Ok(state)
     }

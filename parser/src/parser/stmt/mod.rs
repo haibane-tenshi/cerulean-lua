@@ -18,7 +18,7 @@ pub(crate) fn statement<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailureOrComplete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -63,18 +63,19 @@ pub(crate) fn statement<'s, 'origin>(
 
                 f.arrow(err)
             })
-            .map_output(|_| frag.commit());
+            .inspect(|_| frag.commit());
 
         Ok(state)
     }
 }
 
-fn semicolon(s: Lexer) -> Result<ParsingState<Lexer, (), Complete, ParseFailure>, LexError> {
+fn semicolon(
+    s: Lexer,
+) -> Result<ParsingState<Lexer, Spanned<()>, Complete, ParseFailure>, LexError> {
     match_token(Token::Semicolon)
         .map_failure(|t: TokenMismatch| ParseFailure {
             mode: FailureMode::Mismatch,
             cause: ParseCause::ExpectedStmt(t.span),
         })
-        .map_output(|_| ())
         .parse(s)
 }

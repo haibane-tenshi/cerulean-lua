@@ -6,7 +6,10 @@ pub(crate) use crate::parser::error::{
     Arrow, CodegenError, Complete, CompleteOr, FailFast, FailureMode, LexError, Never, ParseCause,
     ParseFailure, ParseFailureOrComplete, WithMode,
 };
-pub(crate) use crate::parser::traits::{Parse, ParseMut, ParseOnce, ParsingState};
+pub(crate) use crate::parser::traits::{
+    discard, keep, opt_discard, opt_keep, opt_replace, replace, Parse, ParseMut, ParseOnce,
+    ParsingState, Spanned,
+};
 pub(crate) use crate::parser::{Eof, NextToken};
 pub(crate) use repr::index::{ConstId, InstrId, StackSlot};
 pub(crate) use repr::literal::Literal;

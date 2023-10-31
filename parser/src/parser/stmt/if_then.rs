@@ -6,7 +6,7 @@ pub(crate) fn if_then<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -29,25 +29,33 @@ pub(crate) fn if_then<'s, 'origin>(
         let state = token_if
             .parse_once(s)?
             .with_mode(FailureMode::Malformed)
-            .and(expr_adjusted_to_1(frag.new_core()))?
-            .and(token_then)?
-            .and(|s| -> Result<_, FailFast> {
-                use crate::codegen::stack::CommitKind;
-                let mut frag = frag.new_fragment_at_boundary(CommitKind::Scope);
+            .and(expr_adjusted_to_1(frag.new_core()), discard)?
+            .and(token_then, discard)?
+            .and(
+                |s| -> Result<_, FailFast> {
+                    use crate::codegen::stack::CommitKind;
+                    let mut frag = frag.new_fragment_at_boundary(CommitKind::Scope);
 
-                frag.emit_jump_to(frag.id(), Some(false));
+                    frag.emit_jump_to(frag.id(), Some(false));
 
-                let state = block(frag.new_core()).parse_once(s)?;
+                    let state = block(frag.new_core()).parse_once(s)?;
 
-                frag.emit_jump_to(outer, None);
+                    frag.emit_jump_to(outer, None);
 
-                frag.commit();
-                Ok(state)
-            })?
-            .and((|s| else_if_clause(outer, frag.new_core()).parse_once(s)).repeat())?
-            .and(else_clause(frag.new_core()).optional())?
-            .and(token_end)?
-            .map_output(|_| {
+                    frag.commit();
+                    Ok(state)
+                },
+                opt_discard,
+            )?
+            .and(
+                (|s| else_if_clause(outer, frag.new_core()).parse_once(s))
+                    .repeat_with(discard)
+                    .optional(),
+                opt_discard,
+            )?
+            .and(else_clause(frag.new_core()).optional(), opt_discard)?
+            .and(token_end, discard)?
+            .inspect(|_| {
                 frag.commit();
             })
             .collapse();
@@ -75,7 +83,7 @@ fn else_if_clause<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = CompleteOr<ParseFailure>,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -94,24 +102,27 @@ fn else_if_clause<'s, 'origin>(
         let state = token_elseif
             .parse_once(s)?
             .with_mode(FailureMode::Malformed)
-            .and(expr_adjusted_to_1(frag.new_core()))?
-            .and(token_then)?
-            .and(|s| -> Result<_, FailFast> {
-                use crate::codegen::stack::CommitKind;
-                let mut frag = frag.new_fragment_at_boundary(CommitKind::Scope);
+            .and(expr_adjusted_to_1(frag.new_core()), discard)?
+            .and(token_then, discard)?
+            .and(
+                |s| -> Result<_, FailFast> {
+                    use crate::codegen::stack::CommitKind;
+                    let mut frag = frag.new_fragment_at_boundary(CommitKind::Scope);
 
-                frag.emit_jump_to(frag.id(), Some(false));
+                    frag.emit_jump_to(frag.id(), Some(false));
 
-                let state = block(frag.new_core()).parse_once(s)?;
+                    let state = block(frag.new_core()).parse_once(s)?;
 
-                frag.emit_jump_to(outer, None);
+                    frag.emit_jump_to(outer, None);
 
-                frag.commit();
-                Ok(state)
-            })?
+                    frag.commit();
+                    Ok(state)
+                },
+                opt_discard,
+            )?
             .collapse();
 
-        let state = state.map_output(|_| {
+        let state = state.inspect(|_| {
             frag.commit();
         });
 
@@ -123,7 +134,7 @@ fn else_clause<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = CompleteOr<ParseFailure>,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -137,8 +148,7 @@ fn else_clause<'s, 'origin>(
         let state = token_else
             .parse_once(s)?
             .with_mode(FailureMode::Malformed)
-            .and(block(core))?
-            .map_output(|_| ())
+            .and(block(core), opt_discard)?
             .collapse();
 
         Ok(state)

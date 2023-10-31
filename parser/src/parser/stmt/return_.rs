@@ -6,7 +6,7 @@ pub(crate) fn return_<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailureOrComplete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -23,16 +23,21 @@ pub(crate) fn return_<'s, 'origin>(
         let state = token_return
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|_| frag.stack().len())
-            .and_discard(expr_list(frag.new_core()).optional())?
-            .and_discard(
+            .map_output(|span| span.replace(frag.stack().len()).1)
+            .and(expr_list(frag.new_core()).optional(), opt_discard)?
+            .and(
                 token_semicolon
                     .optional()
                     .map_success(ParseFailureOrComplete::Complete),
+                opt_discard,
             )?
-            .map_output(|slot| {
+            .map_output(|output| {
+                let (slot, span) = output.take();
+
                 frag.emit(OpCode::Return(frag.stack_slot(slot)));
                 frag.commit();
+
+                span
             })
             .collapse();
 

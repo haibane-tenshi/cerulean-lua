@@ -6,7 +6,7 @@ pub(crate) fn function<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -22,11 +22,18 @@ pub(crate) fn function<'s, 'origin>(
         let r = token_function
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .and(func_body(frag.new_core()))?
-            .map_output(|(_, func_id)| {
+            .and(func_body(frag.new_core()), replace)?
+            .map_output(|r| {
+                let Spanned {
+                    value: func_id,
+                    span,
+                } = r;
+
                 frag.emit_load_literal(Literal::Function(func_id));
 
                 frag.commit();
+
+                Spanned { value: (), span }
             })
             .collapse();
 

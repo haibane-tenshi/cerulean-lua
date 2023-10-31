@@ -7,7 +7,7 @@ pub(crate) fn func_body<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = FunctionId,
+    Output = Spanned<FunctionId>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -25,13 +25,14 @@ pub(crate) fn func_body<'s, 'origin>(
         let state = token_par_l
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and_replace(parlist().optional())?
+            .and(parlist().optional(), opt_replace)?
             .map_success(|success| success.map(|f| ParseFailure::from(FuncBodyFailure::from(f))))
             .with_mode(FailureMode::Malformed)
-            .and_discard(token_par_r)?
-            .then(|signature| {
+            .and(token_par_r, discard)?
+            .then(|output| {
                 let outer_frag = &mut outer_frag;
                 move |s: Lexer<'s>| -> Result<_, FailFast> {
+                    let (signature, span) = output.take();
                     let (idents, mut signature) = signature.unwrap_or_default();
                     // At the moment extra slot is occupied by the function pointer itself.
                     signature.height += 1;
@@ -47,19 +48,25 @@ pub(crate) fn func_body<'s, 'origin>(
 
                     let state = block(frag.new_core())
                         .parse_once(s)?
-                        .map_output(|_| frag.commit())
-                        .try_map_output(|_| frame.commit())?
-                        .map_output(|fun| fun.resolve());
+                        .inspect(|_| frag.commit())
+                        .try_map_output(|output| -> Result<_, CodegenError> {
+                            let span = opt_discard(span, output);
+                            let fun = frame.commit()?.resolve();
+                            let r = span.replace(fun).1;
+
+                            Ok(r)
+                        })?;
 
                     Ok(state)
                 }
             })?
-            .and_discard(token_end)?
-            .map_output(|func| {
-                let r = outer_frag.func_table_mut().push(func).unwrap();
+            .and(token_end, discard)?
+            .map_output(|output| {
+                let (func, span) = output.take();
+                let function_id = outer_frag.func_table_mut().push(func).unwrap();
                 outer_frag.commit();
 
-                r
+                span.replace(function_id).1
             })
             .collapse();
 
@@ -95,7 +102,7 @@ impl From<ParListMismatch> for FuncBodyFailure {
 
 fn parlist<'s, 'origin>() -> impl ParseOnce<
     Lexer<'s>,
-    Output = (Vec<&'s str>, Signature),
+    Output = Spanned<(Vec<&'s str>, Signature)>,
     Success = CompleteOr<ParListMismatch>,
     Failure = ParListMismatch,
     FailFast = FailFast,
@@ -106,36 +113,44 @@ fn parlist<'s, 'origin>() -> impl ParseOnce<
         let token_comma = match_token(Token::Comma).map_failure(ParListMismatch::Comma);
         let token_variadic = match_token(Token::TripleDot).map_failure(ParListMismatch::Variadic);
         let mut ident = identifier
-            .map_failure(ParListMismatch::Ident)
-            .map_output(|(ident, _)| {
+            .map_output(|output: Spanned<_>| {
+                let (ident, span) = output.take();
                 idents.push(ident);
-            });
+                span
+            })
+            .map_failure(ParListMismatch::Ident);
 
         let state = ident
             .parse_mut(s.clone())?
             .and(
                 (|s: Lexer<'s>| -> Result<_, FailFast> {
-                    let state = token_comma.parse(s)?.and(ident.as_mut())?;
+                    let state = token_comma.parse(s)?.and(ident.as_mut(), discard)?;
 
                     Ok(state)
                 })
-                .repeat(),
+                .repeat_with(discard)
+                .optional(),
+                opt_discard,
             )?
-            .and_replace(
+            .and(
                 (|s: Lexer<'s>| -> Result<_, FailFast> {
-                    let state = token_comma
-                        .parse(s)?
-                        .and(token_variadic)?
-                        .map_output(|_| ());
+                    let state = token_comma.parse(s)?.and(token_variadic, discard)?;
 
                     Ok(state)
                 })
                 .map_success(CompleteOr::Complete)
                 .optional(),
+                opt_replace,
             )?
-            .map_output(|t: Option<_>| t.is_some())
-            .or_else(|| (s, token_variadic.map_output(|_| true)))?
-            .map_output(|is_variadic| {
+            .map_output(|output| output.map(|t| t.is_some()))
+            .or_else(|| {
+                (
+                    s,
+                    token_variadic.map_output(|output: Spanned<_>| output.map(|_| true)),
+                )
+            })?
+            .map_output(|output| {
+                let (is_variadic, span) = output.take();
                 let height = idents.len().try_into().unwrap();
 
                 let signature = Signature {
@@ -143,7 +158,7 @@ fn parlist<'s, 'origin>() -> impl ParseOnce<
                     is_variadic,
                 };
 
-                (idents, signature)
+                span.put((idents, signature))
             });
 
         Ok(state)

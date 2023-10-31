@@ -6,7 +6,7 @@ pub(crate) fn label<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -21,13 +21,15 @@ pub(crate) fn label<'s, 'origin>(
         let state = token_double_colon
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .and_replace(identifier)?
-            .and_discard(token_double_colon)?
-            .try_map_output(|(label, _)| -> Result<_, CodegenError> {
+            .and(identifier, replace)?
+            .and(token_double_colon, discard)?
+            .try_map_output(|output| -> Result<_, CodegenError> {
+                let (label, span) = output.take();
+
                 frag.try_emit_label(label)?;
                 frag.commit();
 
-                Ok(())
+                Ok(span)
             })?
             .collapse();
 

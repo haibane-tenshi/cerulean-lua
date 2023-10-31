@@ -5,7 +5,7 @@ pub(crate) fn while_do<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -26,37 +26,45 @@ pub(crate) fn while_do<'s, 'origin>(
         let state = token_while
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|_| {
+            .map_output(|span| {
                 let mut frag = outer_frag.new_scope();
                 frag.mark_as_loop();
 
-                frag
+                (frag, span)
             })
-            .then(|mut frag| {
+            .then(|(mut frag, span)| {
                 move |s| -> Result<_, FailFast> {
                     Ok(expr_adjusted_to_1(frag.new_core())
                         .parse_once(s)?
-                        .map_output(|_| frag))
+                        .map_output(|output| discard(span, output).replace(frag).1))
                 }
             })?
-            .and_discard(token_do)?
-            .map_output(|mut frag| {
+            .and(token_do, discard)?
+            .map_output(|mut output| {
+                let frag = &mut output.value;
                 frag.emit_jump_to(frag.id(), Some(false));
-                frag
+                output
             })
-            .then(|mut frag| {
+            .then(|output| {
                 move |s| -> Result<_, FailFast> {
-                    Ok(block(frag.new_core()).parse_once(s)?.map_output(|_| frag))
+                    let (mut frag, span) = output.take();
+
+                    Ok(block(frag.new_core())
+                        .parse_once(s)?
+                        .map_output(|output| opt_discard(span, output).put(frag)))
                 }
             })?
-            .and_discard(token_end)?
-            .map_output(|mut frag| {
+            .and(token_end, discard)?
+            .map_output(|output| {
+                let (mut frag, span) = output.take();
                 frag.emit_loop_to();
                 frag.commit();
+
+                span
             })
             .collapse();
 
-        let state = state.map_output(|_| outer_frag.commit());
+        let state = state.inspect(|_| outer_frag.commit());
 
         Ok(state)
     }

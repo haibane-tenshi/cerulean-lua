@@ -6,7 +6,7 @@ pub(crate) fn goto<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -21,10 +21,14 @@ pub(crate) fn goto<'s, 'origin>(
         let state = token_goto
             .parse(s)?
             .with_mode(FailureMode::Malformed)
-            .and_replace(identifier)?
-            .map_output(|(label, _)| {
+            .and(identifier, replace)?
+            .map_output(|output| {
+                let (label, span) = output.take();
+
                 frag.emit_goto(label);
                 frag.commit();
+
+                span
             })
             .collapse();
 

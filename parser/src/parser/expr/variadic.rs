@@ -6,7 +6,7 @@ pub(crate) fn variadic<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = Complete,
     Failure = TokenMismatch,
     FailFast = FailFast,
@@ -16,16 +16,16 @@ pub(crate) fn variadic<'s, 'origin>(
 
         let state = match_token(Token::TripleDot)
             .parse(s)?
-            .try_map_output(|span| {
+            .try_map_output(|r| {
                 if frag.signature().is_variadic {
-                    Ok(())
+                    Ok(r)
                 } else {
-                    let err = VariadicExprError { span };
+                    let err = VariadicExprError { span: r.span };
 
                     Err(CodegenError::VariadicExpr(err))
                 }
             })?
-            .map_output(move |_| {
+            .inspect(move |_| {
                 frag.emit(OpCode::LoadVariadic);
                 frag.commit();
             });

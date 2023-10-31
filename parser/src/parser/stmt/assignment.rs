@@ -6,7 +6,7 @@ pub(crate) fn assignment<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = (),
+    Output = Spanned<()>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -24,18 +24,20 @@ pub(crate) fn assignment<'s, 'origin>(
         let state = places(frag.new_core())
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and_discard(token_equals_sign)?
+            .and(token_equals_sign, discard)?
             .with_mode(FailureMode::Malformed)
             .then(|places| {
                 |s| {
+                    let (places, span) = places.take();
+
                     let count = places.len().try_into().unwrap();
                     let expr_start = frag.stack().len();
                     expr_list_adjusted_to(count, frag.new_core())
-                        .map_output(|_| (expr_start, places))
+                        .map_output(|output| (expr_start, places, discard(span, output)))
                         .parse_once(s)
                 }
             })?
-            .map_output(move |(expr_start, places)| {
+            .map_output(move |(expr_start, places, span)| {
                 let expr_slots = (expr_start.0..).map(StackSlot);
                 for (expr_slot, place) in expr_slots.zip(places) {
                     match place {
@@ -57,6 +59,8 @@ pub(crate) fn assignment<'s, 'origin>(
                 }
 
                 frag.commit();
+
+                span
             })
             .collapse();
 
@@ -78,7 +82,7 @@ fn places<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Vec<Place>,
+    Output = Spanned<Vec<Place>>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -90,7 +94,9 @@ fn places<'s, 'origin>(
 
         let (first, state) = match place(frag.new_core()).parse_once(s)? {
             ParsingState::Success(s, output, success) => {
-                (output, ParsingState::Success(s, (), success))
+                let (place, span) = output.take();
+
+                (place, ParsingState::Success(s, span, success))
             }
             ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
         };
@@ -103,18 +109,24 @@ fn places<'s, 'origin>(
 
             let state = token_comma
                 .parse_once(s)?
-                .and_with(place(frag.new_core()), |_, place| place)?
+                .and(place(frag.new_core()), replace)?
                 .map_output(|place| {
+                    let (place, span) = place.take();
                     r.push(place);
+
+                    span
                 });
 
             Ok(state)
         };
 
-        let state = state.and(next.repeat())?.map_output(move |_| {
-            frag.commit();
-            r
-        });
+        let state = state
+            .and(next.repeat_with(discard).optional(), opt_discard)?
+            .map_output(move |span| {
+                frag.commit();
+
+                span.replace(r).1
+            });
 
         Ok(state)
     }
