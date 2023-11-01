@@ -40,23 +40,23 @@ pub(crate) fn statement<'s, 'origin>(
 
         let mut frag = core.decl();
 
-        let state = semicolon(s.clone())?
+        let state = Source(s)
+            .or(semicolon)?
             .map_success(ParseFailureOrComplete::Complete)
-            .or_else(|| (s.clone(), local_assignment(frag.new_core())))?
-            .or_else(|| (s.clone(), assignment(frag.new_core())))?
-            .or_else(|| (s.clone(), if_then(frag.new_core())))?
-            .or_else(|| (s.clone(), numerical_for(frag.new_core())))?
-            .or_else(|| (s.clone(), generic_for(frag.new_core())))?
-            .or_else(|| (s.clone(), local_function(frag.new_core())))?
-            .or_else(|| (s.clone(), func_call(frag.new_core())))?
-            .or_else(|| (s.clone(), while_do(frag.new_core())))?
-            .or_else(|| (s.clone(), break_(frag.new_core())))?
-            .or_else(|| (s.clone(), do_end(frag.new_core())))?
-            .or_else(|| (s.clone(), repeat_until(frag.new_core())))?
-            .or_else(|| (s.clone(), label(frag.new_core())))?
-            .or_else(|| (s.clone(), goto(frag.new_core())))?
-            .map_failure(|f| {
-                let mut s = s;
+            .or(local_assignment(frag.new_core()))?
+            .or(assignment(frag.new_core()))?
+            .or(if_then(frag.new_core()))?
+            .or(numerical_for(frag.new_core()))?
+            .or(generic_for(frag.new_core()))?
+            .or(local_function(frag.new_core()))?
+            .or(func_call(frag.new_core()))?
+            .or(while_do(frag.new_core()))?
+            .or(break_(frag.new_core()))?
+            .or(do_end(frag.new_core()))?
+            .or(repeat_until(frag.new_core()))?
+            .or(label(frag.new_core()))?
+            .or(goto(frag.new_core()))?
+            .else_failure(|mut s, f| {
                 let _ = s.next_token();
 
                 let err = ParseFailure::from(ParseCause::ExpectedStmt(s.span()));
@@ -71,7 +71,7 @@ pub(crate) fn statement<'s, 'origin>(
 
 fn semicolon(
     s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<()>, Complete, ParseFailure>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<()>, Complete, ParseFailure>, LexError> {
     match_token(Token::Semicolon)
         .map_failure(|t: TokenMismatch| ParseFailure {
             mode: FailureMode::Mismatch,

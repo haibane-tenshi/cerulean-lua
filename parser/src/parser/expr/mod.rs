@@ -103,8 +103,8 @@ pub(crate) fn expr_list<'s, 'origin>(
             let token_comma = match_token(Token::Comma)
                 .map_failure(|f| ParseFailure::from(ExprListError::Comma(f)));
 
-            let r = token_comma
-                .parse(s)?
+            let r = Source(s)
+                .and(token_comma)?
                 .inspect(|_| {
                     // Expressions inside comma lists are adjusted to 1.
                     frag.emit_adjust_to(mark);

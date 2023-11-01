@@ -124,7 +124,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
                 }
             }
         }
-        ParsingState::Failure(failure) => match failure {},
+        ParsingState::Failure(_, failure) => match failure {},
     }
 
     let func_table = {

@@ -8,7 +8,7 @@ pub(crate) use crate::parser::error::{
 };
 pub(crate) use crate::parser::traits::{
     discard, keep, opt_discard, opt_keep, opt_replace, replace, Parse, ParseMut, ParseOnce,
-    ParsingState, Spanned,
+    ParsingState, Source, Spanned,
 };
 pub(crate) use crate::parser::{Eof, NextToken};
 pub(crate) use repr::index::{ConstId, InstrId, StackSlot};

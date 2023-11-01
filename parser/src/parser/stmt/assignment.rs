@@ -96,9 +96,12 @@ fn places<'s, 'origin>(
             ParsingState::Success(s, output, success) => {
                 let (place, span) = output.take();
 
-                (place, ParsingState::Success(s, span, success))
+                (
+                    place,
+                    ParsingState::<_, (), _, _, _>::Success(s, span, success),
+                )
             }
-            ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
+            ParsingState::Failure(_, failure) => return Ok(ParsingState::Failure((), failure)),
         };
 
         let mut r = vec![first];

@@ -131,14 +131,18 @@ pub(crate) enum GenericForFailure {
 
 fn name_list<'s>(
     s: Lexer<'s>,
-) -> Result<ParsingState<Lexer<'s>, Spanned<Vec<&str>>, NameListSuccess, IdentMismatch>, LexError> {
+) -> Result<ParsingState<Lexer<'s>, (), Spanned<Vec<&str>>, NameListSuccess, IdentMismatch>, LexError>
+{
     let (ident, state) = match identifier(s)? {
         ParsingState::Success(s, output, success) => {
             let (ident, span) = output.take();
 
-            (ident, ParsingState::Success(s, span, success))
+            (
+                ident,
+                ParsingState::<_, (), _, _, _>::Success(s, span, success),
+            )
         }
-        ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
+        ParsingState::Failure(s, failure) => return Ok(ParsingState::Failure(s, failure)),
     };
 
     let mut r = vec![ident];

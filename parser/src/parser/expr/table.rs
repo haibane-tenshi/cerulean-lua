@@ -19,8 +19,8 @@ pub(crate) fn table<'s, 'frag>(
 
         let mut frag = core.expr();
 
-        let state = curly_l
-            .parse(s)?
+        let state = Source(s)
+            .and(curly_l)?
             .with_mode(FailureMode::Malformed)
             .map_output(|r| {
                 let table_slot = frag.stack().len();
@@ -144,21 +144,14 @@ fn field<'s, 'origin>(
     move |s: Lexer<'s>| {
         let mut frag = core.scope();
 
-        let state = bracket(table_slot, frag.new_core())
-            .parse_once(s.clone())?
+        let state = Source(s)
+            .or(bracket(table_slot, frag.new_core()))?
             .map_output(|output| output.replace(FieldType::Bracket).1)
-            .or_else(|| {
-                let p = name(table_slot, frag.new_core())
-                    .map_output(|output: Spanned<_>| output.replace(FieldType::Name).1);
-
-                (s.clone(), p)
-            })?
-            .or_else(|| {
-                let p = index(table_slot, next_index, frag.new_core())
-                    .map_output(|output: Spanned<_>| output.replace(FieldType::Index).1);
-
-                (s, p)
-            })?
+            .or(name(table_slot, frag.new_core())
+                .map_output(|output: Spanned<_>| output.replace(FieldType::Name).1))?
+            .or(index(table_slot, next_index, frag.new_core())
+                .map_output(|output: Spanned<_>| output.replace(FieldType::Index).1))?
+            .map_fsource(|_| ())
             .inspect(move |_| {
                 frag.commit();
             });
@@ -175,7 +168,7 @@ enum FieldType {
 
 fn field_sep(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<()>, Complete, FieldSepMismatchError>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<()>, Complete, FieldSepMismatchError>, LexError> {
     let r = match s.next_token()? {
         Ok(Token::Comma | Token::Semicolon) => {
             let r = Spanned {
@@ -184,7 +177,7 @@ fn field_sep(
             };
             ParsingState::Success(s, r, Complete)
         }
-        Ok(_) | Err(Eof) => ParsingState::Failure(FieldSepMismatchError),
+        Ok(_) | Err(Eof) => ParsingState::Failure((), FieldSepMismatchError),
     };
 
     Ok(r)

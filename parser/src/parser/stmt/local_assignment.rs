@@ -78,14 +78,18 @@ pub enum LocalAssignmentFailure {
 
 fn ident_list(
     s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<Vec<&str>>, IdentListSuccess, IdentMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<Vec<&str>>, IdentListSuccess, IdentMismatch>, LexError>
+{
     let (ident, state) = match identifier(s)? {
         ParsingState::Success(s, output, success) => {
             let (ident, span) = output.take();
 
-            (ident, ParsingState::Success(s, span, success))
+            (
+                ident,
+                ParsingState::<_, (), _, _, _>::Success(s, span, success),
+            )
         }
-        ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
+        ParsingState::Failure(s, failure) => return Ok(ParsingState::Failure(s, failure)),
     };
 
     let mut r = vec![ident];

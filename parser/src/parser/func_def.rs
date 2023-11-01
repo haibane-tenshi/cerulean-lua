@@ -22,10 +22,10 @@ pub(crate) fn func_body<'s, 'origin>(
 
         let mut outer_frag = core.scope();
 
-        let state = token_par_l
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_par_l)?
             .with_mode(FailureMode::Ambiguous)
-            .and(parlist().optional(), opt_replace)?
+            .and(arg_list().optional(), opt_replace)?
             .map_success(|success| success.map(|f| ParseFailure::from(FuncBodyFailure::from(f))))
             .with_mode(FailureMode::Malformed)
             .and(token_par_r, discard)?
@@ -100,7 +100,7 @@ impl From<ParListMismatch> for FuncBodyFailure {
     }
 }
 
-fn parlist<'s, 'origin>() -> impl ParseOnce<
+fn arg_list<'s, 'origin>() -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<(Vec<&'s str>, Signature)>,
     Success = CompleteOr<ParListMismatch>,
@@ -120,35 +120,36 @@ fn parlist<'s, 'origin>() -> impl ParseOnce<
             })
             .map_failure(ParListMismatch::Ident);
 
-        let state = ident
-            .parse_mut(s.clone())?
-            .and(
-                (|s: Lexer<'s>| -> Result<_, FailFast> {
-                    let state = token_comma.parse(s)?.and(ident.as_mut(), discard)?;
+        let state = Source(s)
+            .or(|s: Lexer<'s>| -> Result<_, FailFast> {
+                let state = Source(s)
+                    .and(ident.as_mut())?
+                    .and(
+                        (|s: Lexer<'s>| -> Result<_, FailFast> {
+                            let state = Source(s).and(token_comma)?.and(ident.as_mut(), discard)?;
 
-                    Ok(state)
-                })
-                .repeat_with(discard)
-                .optional(),
-                opt_discard,
-            )?
-            .and(
-                (|s: Lexer<'s>| -> Result<_, FailFast> {
-                    let state = token_comma.parse(s)?.and(token_variadic, discard)?;
+                            Ok(state)
+                        })
+                        .repeat_with(discard)
+                        .optional(),
+                        opt_discard,
+                    )?
+                    .and(
+                        (|s: Lexer<'s>| -> Result<_, FailFast> {
+                            let state = Source(s).and(token_comma)?.and(token_variadic, discard)?;
 
-                    Ok(state)
-                })
-                .map_success(CompleteOr::Complete)
-                .optional(),
-                opt_replace,
-            )?
-            .map_output(|output| output.map(|t| t.is_some()))
-            .or_else(|| {
-                (
-                    s,
-                    token_variadic.map_output(|output: Spanned<_>| output.map(|_| true)),
-                )
+                            Ok(state)
+                        })
+                        .map_success(CompleteOr::Complete)
+                        .optional(),
+                        opt_replace,
+                    )?
+                    .map_output(|output| output.map(|t| t.is_some()));
+
+                Ok(state)
             })?
+            .or(token_variadic.map_output(|output: Spanned<_>| output.map(|_| true)))?
+            .map_fsource(|_| ())
             .map_output(|output| {
                 let (is_variadic, span) = output.take();
                 let height = idents.len().try_into().unwrap();

@@ -26,7 +26,7 @@ pub(crate) fn match_token<'s>(
             }
             Ok(_) | Err(Eof) => {
                 let err = TokenMismatch { span: s.span() };
-                ParsingState::Failure(err)
+                ParsingState::Failure((), err)
             }
         };
 
@@ -42,7 +42,7 @@ pub struct TokenMismatch {
 
 pub(crate) fn identifier(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<&str>, Complete, IdentMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<&str>, Complete, IdentMismatch>, LexError> {
     let r = match s.next_token()? {
         Ok(Token::Ident(ident)) => {
             let r = Spanned {
@@ -53,7 +53,7 @@ pub(crate) fn identifier(
         }
         Ok(_) | Err(Eof) => {
             let span = s.span();
-            ParsingState::Failure(IdentMismatch { span })
+            ParsingState::Failure((), IdentMismatch { span })
         }
     };
 
@@ -74,7 +74,7 @@ impl From<Never> for IdentMismatch {
 
 pub(crate) fn literal(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<Literal>, Complete, LiteralMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<Literal>, Complete, LiteralMismatch>, LexError> {
     let literal = match s.next_token()? {
         Ok(Token::Nil) => Literal::Nil,
         Ok(Token::True) => Literal::Bool(true),
@@ -92,7 +92,7 @@ pub(crate) fn literal(
                 .to_string();
             Literal::String(r)
         }
-        Ok(_) | Err(Eof) => return Ok(ParsingState::Failure(LiteralMismatch)),
+        Ok(_) | Err(Eof) => return Ok(ParsingState::Failure((), LiteralMismatch)),
     };
 
     let r = Spanned {
@@ -109,7 +109,7 @@ pub struct LiteralMismatch;
 
 pub(crate) fn literal_str(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<Cow<str>>, Complete, LiteralStrMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<Cow<str>>, Complete, LiteralStrMismatch>, LexError> {
     let r = match s.next_token()? {
         Ok(Token::ShortLiteralString(raw_str)) => {
             let literal_str = raw_str.unescape().map_err(|_| LexError::Str(s.span()))?;
@@ -122,7 +122,7 @@ pub(crate) fn literal_str(
         Ok(_) | Err(Eof) => {
             let span = s.span();
 
-            ParsingState::Failure(LiteralStrMismatch { span })
+            ParsingState::Failure((), LiteralStrMismatch { span })
         }
     };
 

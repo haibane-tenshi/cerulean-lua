@@ -58,10 +58,9 @@ fn expr_impl<'s, 'origin>(
         let mut frag = core.expr();
         let stack_start = frag.stack().len();
 
-        let state = prefix_expr(frag.new_core())
-            .parse_once(s.clone())?
-            .map_success(CompleteOr::Other)
-            .or_else(|| (s, atom(frag.new_core())))?
+        let state = Source(s)
+            .or(prefix_expr(frag.new_core()).map_success(CompleteOr::Other))?
+            .or(atom(frag.new_core()))?
             .with_mode(FailureMode::Ambiguous);
 
         // At this point there can be variadic number of values on stack.
@@ -69,7 +68,7 @@ fn expr_impl<'s, 'origin>(
         // We cannot trim it yet, outside context might expect those values.
 
         let next_part = |s: Lexer<'s>| -> Result<
-            ParsingState<Lexer<'s>, Spanned<()>, ExprSuccess, ExprSuccess>,
+            ParsingState<Lexer<'s>, (), Spanned<()>, ExprSuccess, ExprSuccess>,
             FailFast,
         > {
             let mut frag = frag.new_expr_at(stack_start);
@@ -276,20 +275,16 @@ fn atom<'s, 'origin>(
 
         let mut frag = core.expr();
 
-        let r = literal(frag.new_core())
-            .parse_once(s.clone())?
+        let r = Source(s)
+            .or(literal(frag.new_core()))?
             // Discard failure, we should never observe this one as an error.
             .map_failure(|_| Complete)
             .map_success(ParseFailureOrComplete::Complete)
-            .or_else(|| {
-                (
-                    s.clone(),
-                    variadic(frag.new_core()).map_failure(|_| Complete),
-                )
-            })?
-            .or_else(|| (s.clone(), prefix_expr(frag.new_core())))?
-            .or_else(|| (s.clone(), table(frag.new_core())))?
-            .or_else(|| (s, function(frag.new_core())))?
+            .or(variadic(frag.new_core()).map_failure(|_| Complete))?
+            .or(prefix_expr(frag.new_core()))?
+            .or(table(frag.new_core()))?
+            .or(function(frag.new_core()))?
+            .map_fsource(|_| ())
             .inspect(|_| {
                 frag.commit();
             });
@@ -300,7 +295,7 @@ fn atom<'s, 'origin>(
 
 fn prefix_op(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<Prefix>, Complete, PrefixMismatchError>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<Prefix>, Complete, PrefixMismatchError>, LexError> {
     let op = match s.next_token()? {
         Ok(Token::MinusSign) => Prefix(UnaOp::AriNeg),
         Ok(Token::Tilde) => Prefix(UnaOp::BitNot),
@@ -308,7 +303,7 @@ fn prefix_op(
         Ok(Token::Not) => Prefix(UnaOp::LogNot),
         _ => {
             let span = s.span();
-            return Ok(ParsingState::Failure(PrefixMismatchError { span }));
+            return Ok(ParsingState::Failure((), PrefixMismatchError { span }));
         }
     };
 
@@ -328,7 +323,7 @@ pub(crate) struct PrefixMismatchError {
 
 fn infix_op(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, Spanned<Infix>, Complete, InfixMismatchError>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<Infix>, Complete, InfixMismatchError>, LexError> {
     let op = match s.next_token()? {
         Ok(Token::PlusSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Add)),
         Ok(Token::MinusSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Sub)),
@@ -353,7 +348,7 @@ fn infix_op(
         Ok(Token::And) => Infix::Logical(Logical::And),
         _ => {
             let span = s.span();
-            return Ok(ParsingState::Failure(InfixMismatchError { span }));
+            return Ok(ParsingState::Failure((), InfixMismatchError { span }));
         }
     };
 

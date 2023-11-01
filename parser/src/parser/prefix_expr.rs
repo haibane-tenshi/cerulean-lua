@@ -66,10 +66,10 @@ pub(crate) fn place<'s, 'origin>(
                         cause: ParseCause::from(AssignmentFailure::from(failure)),
                     };
 
-                    ParsingState::Failure(err)
+                    ParsingState::Failure((), err)
                 }
             }
-            ParsingState::Failure(failure) => ParsingState::Failure(failure),
+            ParsingState::Failure(s, failure) => ParsingState::Failure(s, failure),
         };
 
         Ok(state)
@@ -148,33 +148,19 @@ fn prefix_expr_impl<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use crate::parser::expr::par_expr;
-
         let mut frag = core.expr();
 
         let stack_start = frag.stack().len();
 
-        let prefix = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let state = variable(&frag).parse(s.clone())?.map_failure(|_| Complete);
-
-            let state = state
-                .map_output(|slot| slot.map(|slot| PrefixExpr::Place(Place::Temporary(slot))))
-                .or_else(|| {
-                    let p = par_expr(frag.new_core())
-                        .map_output(|span: Spanned<_>| span.map(|_| PrefixExpr::Expr));
-
-                    (s, p)
-                })?;
-
-            Ok(state)
-        };
-
-        let (mut expr_type, state) = match prefix.parse_once(s)? {
+        let (mut expr_type, state) = match head(frag.new_core()).parse_once(s)? {
             ParsingState::Success(s, output, success) => {
                 let (expr_type, span) = output.take();
-                (expr_type, ParsingState::Success(s, span, success))
+                (
+                    expr_type,
+                    ParsingState::<_, (), _, _, _>::Success(s, span, success),
+                )
             }
-            ParsingState::Failure(failure) => return Ok(ParsingState::Failure(failure)),
+            ParsingState::Failure(s, failure) => return Ok(ParsingState::Failure(s, failure)),
         };
 
         let next = |s: Lexer<'s>| -> Result<_, FailFast> {
@@ -191,29 +177,8 @@ fn prefix_expr_impl<'s, 'origin>(
             // We are reusing the same stack slot to store it.
             frag.emit_adjust_to(stack_start + 1);
 
-            let state = func_args(stack_start, frag.new_core())
-                .parse_once(s.clone())?
-                .map_output(|span| span.map(|_| PrefixExpr::FnCall))
-                .or_else(|| {
-                    let p = field(frag.new_core()).map_output(|span: Spanned<_>| {
-                        span.map(|_| PrefixExpr::Place(Place::TableField))
-                    });
-
-                    (s.clone(), p)
-                })?
-                .or_else(|| {
-                    let p = index(frag.new_core()).map_output(|span: Spanned<_>| {
-                        span.map(|_| PrefixExpr::Place(Place::TableField))
-                    });
-
-                    (s.clone(), p)
-                })?
-                .or_else(|| {
-                    let p = tab_call(stack_start, frag.new_core())
-                        .map_output(|span: Spanned<_>| span.map(|_| PrefixExpr::FnCall));
-
-                    (s, p)
-                })?
+            let state = Source(s)
+                .and(tail_segment(stack_start, frag.new_core()))?
                 .map_output(|output| {
                     let (expr, span) = output.take();
                     expr_type = expr;
@@ -242,12 +207,60 @@ enum PrefixExpr {
     FnCall,
 }
 
+fn head<'s, 'origin>(
+    core: Core<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = Spanned<PrefixExpr>,
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::expr::par_expr;
+
+        let mut frag = core.expr();
+
+        let state = Source(s)
+            .or(variable(&frag).map_failure(|_| Complete))?
+            .or(par_expr(frag.new_core())
+                .map_output(|span: Spanned<_>| span.map(|_| PrefixExpr::Expr)))?
+            .map_fsource(|_| ());
+
+        Ok(state)
+    }
+}
+
+fn tail_segment<'s, 'origin>(
+    stack_start: FragmentStackSlot,
+    core: Core<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = Spanned<PrefixExpr>,
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let mut frag = core.expr();
+
+        let state = Source(s)
+            .or(func_args(stack_start, frag.new_core()))?
+            .or(field(frag.new_core()))?
+            .or(index(frag.new_core()))?
+            .or(tab_call(stack_start, frag.new_core()))?
+            .map_fsource(|_| ());
+
+        Ok(state)
+    }
+}
+
 fn func_args<'s, 'origin>(
     invoke_target: FragmentStackSlot,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<()>,
+    Output = Spanned<PrefixExpr>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -257,15 +270,17 @@ fn func_args<'s, 'origin>(
 
         let mut frag = Fragment::new_at(core, CommitKind::Expr, invoke_target);
 
-        let state = args_par_expr(frag.new_core())
-            .parse_once(s.clone())?
-            .or_else(|| (s.clone(), args_table(frag.new_core())))?
-            .or_else(|| (s, args_str(frag.new_core())))?
+        let state = Source(s)
+            .or(args_par_expr(frag.new_core()))?
+            .or(args_table(frag.new_core()))?
+            .or(args_str(frag.new_core()))?
+            .map_fsource(|_| ())
             .inspect(move |_| {
                 frag.emit(OpCode::Invoke(frag.stack_slot(FragmentStackSlot(0))));
 
                 frag.commit();
-            });
+            })
+            .map_output(|span| span.put(PrefixExpr::FnCall));
 
         Ok(state)
     }
@@ -342,7 +357,7 @@ fn variable<'s, 'a>(
     frag: &'a Fragment<'s, '_>,
 ) -> impl Parse<
     Lexer<'s>,
-    Output = Spanned<StackSlot>,
+    Output = Spanned<PrefixExpr>,
     Success = Complete,
     Failure = IdentMismatch,
     FailFast = FailFast,
@@ -351,7 +366,7 @@ fn variable<'s, 'a>(
         let state = identifier(s)?.try_map_output(|output| {
             let (ident, span) = output.take();
             match frag.stack().lookup(ident) {
-                NameLookup::Local(slot) => Ok(span.put(slot)),
+                NameLookup::Local(slot) => Ok(span.put(PrefixExpr::Place(Place::Temporary(slot)))),
                 NameLookup::Upvalue => Err(VariableFailure::UnsupportedUpvalue),
                 NameLookup::Global => Err(VariableFailure::UnsupportedGlobal),
             }
@@ -374,7 +389,7 @@ fn field<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<()>,
+    Output = Spanned<PrefixExpr>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -394,7 +409,7 @@ fn field<'s, 'origin>(
                 frag.emit_load_literal(Literal::String(ident.to_string()));
 
                 frag.commit();
-                span
+                span.put(PrefixExpr::Place(Place::TableField))
             });
 
         Ok(state)
@@ -412,7 +427,7 @@ fn index<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<()>,
+    Output = Spanned<PrefixExpr>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -433,7 +448,8 @@ fn index<'s, 'origin>(
             .and(token_bracket_r, discard)?
             .inspect(move |_| {
                 frag.commit();
-            });
+            })
+            .map_output(|span| span.put(PrefixExpr::Place(Place::TableField)));
 
         Ok(state)
     }
@@ -451,7 +467,7 @@ fn tab_call<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<()>,
+    Output = Spanned<PrefixExpr>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -487,7 +503,8 @@ fn tab_call<'s, 'origin>(
             })?
             .inspect(move |_| {
                 frag.commit();
-            });
+            })
+            .map_output(|span| span.put(PrefixExpr::FnCall));
 
         Ok(state)
     }
