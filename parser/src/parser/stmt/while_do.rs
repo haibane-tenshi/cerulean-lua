@@ -21,50 +21,27 @@ pub(crate) fn while_do<'s, 'origin>(
         let token_end =
             match_token(Token::End).map_failure(|f| ParseFailure::from(WhileDoFailure::End(f)));
 
-        let mut outer_frag = core.scope();
+        let mut envelope = core.scope();
+        let envelope_id = envelope.id();
+        let mut loop_body = envelope.new_scope();
+        loop_body.mark_as_loop();
 
-        let state = token_while
-            .parse(s)?
+        let state = Source(s)
+            .and(token_while)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|span| {
-                let mut frag = outer_frag.new_scope();
-                frag.mark_as_loop();
-
-                (frag, span)
-            })
-            .then(|(mut frag, span)| {
-                move |s| -> Result<_, FailFast> {
-                    Ok(expr_adjusted_to_1(frag.new_core())
-                        .parse_once(s)?
-                        .map_output(|output| discard(span, output).replace(frag).1))
-                }
-            })?
+            .and(expr_adjusted_to_1(loop_body.new_core()), discard)?
             .and(token_do, discard)?
-            .map_output(|mut output| {
-                let frag = &mut output.value;
-                frag.emit_jump_to(frag.id(), Some(false));
-                output
+            .inspect(|_| {
+                loop_body.emit_jump_to(envelope_id, Some(false));
             })
-            .then(|output| {
-                move |s| -> Result<_, FailFast> {
-                    let (mut frag, span) = output.take();
-
-                    Ok(block(frag.new_core())
-                        .parse_once(s)?
-                        .map_output(|output| opt_discard(span, output).put(frag)))
-                }
-            })?
+            .and(block(loop_body.new_core()), opt_discard)?
             .and(token_end, discard)?
-            .map_output(|output| {
-                let (mut frag, span) = output.take();
-                frag.emit_loop_to();
-                frag.commit();
-
-                span
+            .inspect(|_| {
+                loop_body.emit_loop_to();
+                loop_body.commit();
             })
+            .inspect(|_| envelope.commit())
             .collapse();
-
-        let state = state.inspect(|_| outer_frag.commit());
 
         Ok(state)
     }

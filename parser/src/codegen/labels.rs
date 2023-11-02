@@ -154,7 +154,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
         self.labels.up_jumps.push(label);
 
         let Some(pending) = self.labels.down_jumps.get_mut(label.name) else {
-            return Ok(())
+            return Ok(());
         };
 
         let scope = pending.partition_point(|instr| *instr < self.labels.scope);

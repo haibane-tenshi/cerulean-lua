@@ -19,21 +19,17 @@ pub(crate) fn function<'s, 'origin>(
         let token_function = match_token(Token::Function)
             .map_failure(|f| ParseFailure::from(FunctionFailure::Function(f)));
 
-        let r = token_function
-            .parse(s)?
+        let r = Source(s)
+            .and(token_function)?
             .with_mode(FailureMode::Malformed)
             .and(func_body(frag.new_core()), replace)?
-            .map_output(|r| {
-                let Spanned {
-                    value: func_id,
-                    span,
-                } = r;
+            .map_output(|output| {
+                let (func_id, span) = output.take();
 
                 frag.emit_load_literal(Literal::Function(func_id));
-
                 frag.commit();
 
-                Spanned { value: (), span }
+                span
             })
             .collapse();
 

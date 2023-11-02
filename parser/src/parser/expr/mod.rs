@@ -67,8 +67,8 @@ pub(crate) fn par_expr<'s, 'origin>(
 
         let mut frag = core.expr();
 
-        let state = par_l
-            .parse(s)?
+        let state = Source(s)
+            .and(par_l)?
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .and(par_r, discard)?
             .inspect(|_| {
@@ -93,35 +93,36 @@ pub(crate) fn expr_list<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut frag = core.expr();
+        let token_comma =
+            match_token(Token::Comma).map_failure(|f| ParseFailure::from(ExprListError::Comma(f)));
 
+        let mut frag = core.expr();
         let mut mark = frag.stack().len() + 1;
 
-        let state = expr(frag.new_core()).parse_once(s)?;
+        let state = Source(s)
+            .and(expr(frag.new_core()))?
+            .and(
+                (|s: Lexer<'s>| -> Result<_, FailFast> {
+                    let state = Source(s)
+                        .and(token_comma)?
+                        .inspect(|_| {
+                            // Expressions inside comma lists are adjusted to 1.
+                            frag.emit_adjust_to(mark);
+                        })
+                        .and(expr(frag.new_core()), discard)?
+                        .inspect(|_| {
+                            mark += 1;
+                        });
 
-        let next_part = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let token_comma = match_token(Token::Comma)
-                .map_failure(|f| ParseFailure::from(ExprListError::Comma(f)));
-
-            let r = Source(s)
-                .and(token_comma)?
-                .inspect(|_| {
-                    // Expressions inside comma lists are adjusted to 1.
-                    frag.emit_adjust_to(mark);
+                    Ok(state)
                 })
-                .and(expr(frag.new_core()), discard)?
-                .inspect(|_| {
-                    mark += 1;
-                });
-
-            Ok(r)
-        };
-
-        let r = state
-            .and(next_part.repeat_with(discard).optional(), opt_discard)?
+                .repeat_with(discard)
+                .optional(),
+                opt_discard,
+            )?
             .inspect(move |_| frag.commit());
 
-        Ok(r)
+        Ok(state)
     }
 }
 
@@ -145,7 +146,7 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
         let mut frag = core.expr();
 
         let mark = frag.stack().len() + count;
-        let r = expr_list(frag.new_core()).parse_once(s)?.inspect(|_| {
+        let r = Source(s).and(expr_list(frag.new_core()))?.inspect(|_| {
             frag.emit_adjust_to(mark);
 
             frag.commit();

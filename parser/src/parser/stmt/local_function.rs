@@ -22,8 +22,8 @@ pub(crate) fn local_function<'s, 'origin>(
 
         let mut frag = core.decl();
 
-        let state = token_local
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_local)?
             .with_mode(FailureMode::Ambiguous)
             .and(token_function, discard)?
             .with_mode(FailureMode::Malformed)
@@ -31,8 +31,6 @@ pub(crate) fn local_function<'s, 'origin>(
             .map_output(|output| {
                 // Lua disambiguates this case by introducing local variable first and assigning to it later.
                 // This is relevant for recursive functions.
-                // We only need to introduce the name:
-                // it will get assigned to after function body is parsed.
                 let (ident, span) = output.take();
                 frag.push_temporary(Some(ident));
 
@@ -41,10 +39,10 @@ pub(crate) fn local_function<'s, 'origin>(
             .and(func_body(frag.new_core()), replace)?
             .map_output(|output| {
                 let (func_id, span) = output.take();
-                let const_id = frag.const_table_mut().insert(Literal::Function(func_id));
 
-                // Stack is already adjusted, we just need to silently write to correct slot here.
-                frag.fun_mut().emit(OpCode::LoadConstant(const_id)).unwrap();
+                frag.emit_load_literal(Literal::Function(func_id));
+                // Stack is already adjusted, remove unnecessary temporary.
+                frag.pop_temporary();
                 frag.commit();
 
                 span

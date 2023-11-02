@@ -44,7 +44,7 @@ impl<'rt> ActiveFrame<'rt> {
         use repr::table::TableRef;
 
         let Some(code) = self.next_code() else {
-            return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())))
+            return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
         };
 
         let r = match code {

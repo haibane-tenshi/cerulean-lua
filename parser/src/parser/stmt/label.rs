@@ -18,8 +18,8 @@ pub(crate) fn label<'s, 'origin>(
 
         let mut frag = core.decl();
 
-        let state = token_double_colon
-            .parse(s)?
+        let state = Source(s)
+            .and(token_double_colon)?
             .with_mode(FailureMode::Malformed)
             .and(identifier, replace)?
             .and(token_double_colon, discard)?

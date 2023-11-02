@@ -29,6 +29,7 @@ use std::ops::{BitOr, BitOrAssign};
 use logos::Span;
 use thiserror::Error;
 
+use super::basic::IdentMismatch;
 use super::expr::expr::ExprFailure;
 use super::expr::function::FunctionFailure;
 use super::expr::table::TableFailure;
@@ -619,6 +620,14 @@ impl<T> Arrow<Never> for T {
     type Output = Never;
 
     fn arrow(self, other: Never) -> Self::Output {
+        other
+    }
+}
+
+impl Arrow<IdentMismatch> for Complete {
+    type Output = IdentMismatch;
+
+    fn arrow(self, other: IdentMismatch) -> Self::Output {
         other
     }
 }

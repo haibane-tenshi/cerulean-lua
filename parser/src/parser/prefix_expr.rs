@@ -41,36 +41,30 @@ pub(crate) fn place<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let start = s.span().start;
-
         let mut frag = core.expr();
 
-        let state = prefix_expr_impl(frag.new_core()).parse_once(s)?;
-
-        let state = match state {
-            ParsingState::Success(s, output, success) => {
+        let state = prefix_expr_impl(frag.new_core())
+            .parse_once(s)?
+            .transform(|output| {
                 let (expr_type, span) = output.take();
 
                 if let PrefixExpr::Place(place) = expr_type {
                     frag.commit();
 
-                    ParsingState::Success(s, span.replace(place).1, success)
+                    Ok(span.put(place))
                 } else {
                     use super::stmt::assignment::AssignmentFailure;
 
-                    let end = s.span().end;
-                    let failure = PlaceFailure { span: start..end };
+                    let failure = PlaceFailure { span: span.span };
 
                     let err = ParseFailure {
                         mode: FailureMode::Mismatch,
                         cause: ParseCause::from(AssignmentFailure::from(failure)),
                     };
 
-                    ParsingState::Failure((), err)
+                    Err(err)
                 }
-            }
-            ParsingState::Failure(s, failure) => ParsingState::Failure(s, failure),
-        };
+            });
 
         Ok(state)
     }
@@ -109,6 +103,7 @@ pub(crate) fn func_call<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| -> Result<_, FailFast> {
+        // Function calls leave stack in variadic state, so we need to scope it when it is used as statement.
         let mut frag = core.scope();
 
         let state = prefix_expr_impl(frag.new_core())
@@ -125,7 +120,6 @@ pub(crate) fn func_call<'s, 'origin>(
                 }
             });
 
-        // Function calls leave stack in variadic state, so we need to scope it when it is used as statement.
         frag.commit();
 
         Ok(state)
@@ -149,52 +143,49 @@ fn prefix_expr_impl<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         let mut frag = core.expr();
-
         let stack_start = frag.stack().len();
+        // Need this as workaround for repeat unable to use output values to construct parsers.
+        let mut expr_type = PrefixExpr::Expr;
 
-        let (mut expr_type, state) = match head(frag.new_core()).parse_once(s)? {
-            ParsingState::Success(s, output, success) => {
-                let (expr_type, span) = output.take();
-                (
-                    expr_type,
-                    ParsingState::<_, (), _, _, _>::Success(s, span, success),
-                )
-            }
-            ParsingState::Failure(s, failure) => return Ok(ParsingState::Failure(s, failure)),
-        };
+        let state = Source(s)
+            .and(head(frag.new_core()).map_output(|output: Spanned<_>| {
+                let (expr, span) = output.take();
+                expr_type = expr;
+                span
+            }))?
+            .and(
+                (|s: Lexer<'s>| -> Result<_, FailFast> {
+                    use crate::codegen::stack::CommitKind;
+                    let mut frag = frag.new_fragment_at_boundary(CommitKind::Expr);
 
-        let next = |s: Lexer<'s>| -> Result<_, FailFast> {
-            use crate::codegen::stack::CommitKind;
-            let mut frag = frag.new_fragment_at_boundary(CommitKind::Expr);
+                    // Evaluate place.
+                    if let PrefixExpr::Place(place) = expr_type {
+                        place.eval(&mut frag);
+                    }
 
-            // Evaluate place.
-            if let PrefixExpr::Place(place) = expr_type {
-                place.eval(&mut frag);
-            }
+                    // Adjust stack.
+                    // Prefix expressions (except the very last one) always evaluate to 1 value.
+                    // We are reusing the same stack slot to store it.
+                    frag.emit_adjust_to(stack_start + 1);
 
-            // Adjust stack.
-            // Prefix expressions (except the very last one) always evaluate to 1 value.
-            // We are reusing the same stack slot to store it.
-            frag.emit_adjust_to(stack_start + 1);
+                    let state = Source(s)
+                        .and(tail_segment(stack_start, frag.new_core()).map_output(
+                            |output: Spanned<_>| {
+                                let (expr, span) = output.take();
+                                expr_type = expr;
+                                span
+                            },
+                        ))?
+                        .inspect(|_| frag.commit());
 
-            let state = Source(s)
-                .and(tail_segment(stack_start, frag.new_core()))?
-                .map_output(|output| {
-                    let (expr, span) = output.take();
-                    expr_type = expr;
-                    frag.commit();
-                    span
-                });
-
-            Ok(state)
-        };
-
-        let state = state
-            .and(next.repeat_with(discard).optional(), opt_discard)?
-            .map_output(move |span| {
-                frag.commit();
-                span.put(expr_type)
-            });
+                    Ok(state)
+                })
+                .repeat_with(discard)
+                .optional(),
+                opt_discard,
+            )?
+            .inspect(|_| frag.commit())
+            .map_output(|span| span.put(expr_type));
 
         Ok(state)
     }
@@ -242,7 +233,9 @@ fn tail_segment<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut frag = core.expr();
+        use crate::codegen::stack::CommitKind;
+        // Need to include previous stack as it contains temporary with callable/table ref.
+        let mut frag = core.fragment_at(CommitKind::Expr, stack_start);
 
         let state = Source(s)
             .or(func_args(stack_start, frag.new_core()))?
@@ -305,8 +298,8 @@ fn args_par_expr<'s, 'origin>(
 
         let mut frag = core.expr();
 
-        let state = token_par_l
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_par_l)?
             .and(expr_list(frag.new_core()).optional(), opt_discard)?
             .and(token_par_r, discard)?
             .inspect(move |_| {
@@ -401,8 +394,8 @@ fn field<'s, 'origin>(
 
         let mut frag = core.expr();
 
-        let state = token_dot
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_dot)?
             .and(identifier, replace)?
             .map_output(move |output| {
                 let (ident, span) = output.take();
@@ -442,8 +435,8 @@ fn index<'s, 'origin>(
 
         let mut frag = core.expr();
 
-        let state = token_bracket_l
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_bracket_l)?
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .and(token_bracket_r, discard)?
             .inspect(move |_| {
@@ -481,10 +474,10 @@ fn tab_call<'s, 'origin>(
 
         let mut frag = Fragment::new_at(core, CommitKind::Expr, table);
 
-        let state = token_colon
-            .parse(s)?
+        let state = Source(s)
+            .and(token_colon)?
             .and(ident, replace)?
-            .map_output(|output| {
+            .then(|output| {
                 let (ident, span) = output.take();
                 let invoke_target = frag.stack().len();
                 let table = frag.stack_slot(FragmentStackSlot(0));
@@ -496,9 +489,6 @@ fn tab_call<'s, 'origin>(
                 // Pass table itself as the first argument.
                 frag.emit(OpCode::LoadStack(table));
 
-                (invoke_target, span)
-            })
-            .then(|(invoke_target, span)| {
                 func_args(invoke_target, frag.new_core()).map_output(|output| discard(span, output))
             })?
             .inspect(move |_| {

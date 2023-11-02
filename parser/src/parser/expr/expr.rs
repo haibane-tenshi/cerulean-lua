@@ -59,7 +59,7 @@ fn expr_impl<'s, 'origin>(
         let stack_start = frag.stack().len();
 
         let state = Source(s)
-            .or(prefix_expr(frag.new_core()).map_success(CompleteOr::Other))?
+            .or(head_expr(frag.new_core()).map_success(CompleteOr::Other))?
             .or(atom(frag.new_core()))?
             .with_mode(FailureMode::Ambiguous);
 
@@ -216,7 +216,7 @@ where
     }
 }
 
-fn prefix_expr<'s, 'origin>(
+fn head_expr<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,

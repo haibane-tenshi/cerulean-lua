@@ -22,94 +22,80 @@ pub(crate) fn generic_for<'s, 'origin>(
             match_token(Token::Do).map_failure(|f| ParseFailure::from(GenericForFailure::Do(f)));
         let token_end =
             match_token(Token::End).map_failure(|f| ParseFailure::from(GenericForFailure::End(f)));
+        let name_list = name_list.map_failure(|f| ParseFailure::from(GenericForFailure::Ident(f)));
 
-        let mut outer_frag = core.scope();
+        let mut envelope = core.scope();
 
-        let state = token_for
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_for)?
             .with_mode(FailureMode::Ambiguous)
-            .and(
-                name_list.map_failure(|f| ParseFailure::from(GenericForFailure::Ident(f))),
-                replace,
-            )?
+            .and(name_list, replace)?
             .and(token_in, discard)?
             .with_mode(FailureMode::Malformed)
             .and(
                 |s| {
-                    let top = outer_frag.stack_slot(outer_frag.stack().len());
-                    expr_list_adjusted_to(4, outer_frag.new_core())
+                    let top = envelope.stack_slot(envelope.stack().len());
+                    expr_list_adjusted_to(4, envelope.new_core())
                         .map_output(|span: Spanned<_>| span.put(top))
                         .parse_once(s)
                 },
                 keep,
             )?
-            .map_output(|output| {
-                let ((names, top), span) = output.take();
-
-                let iter = top;
-                let state = top + 1;
-                let control = top + 2;
-                // Currently unimplemented.
-                let _close = top + 3;
-
-                let mut frag = outer_frag.new_scope();
-                frag.mark_as_loop();
-                let mark = frag.stack().len();
-                let count: u32 = names.len().try_into().unwrap();
-                let iterator = frag.stack_slot(mark);
-
-                frag.emit(OpCode::LoadStack(iter));
-                frag.emit(OpCode::LoadStack(state));
-                frag.emit(OpCode::LoadStack(control));
-                frag.emit(OpCode::Invoke(iterator));
-
-                frag.emit_adjust_to(mark + count);
-
-                // Assign names.
-                frag.adjust_stack_to(mark);
-                for name in names {
-                    frag.push_temporary(Some(name));
-                }
-
-                // First output of iterator is the new value for control variable.
-                let new_control = iterator;
-
-                frag.emit(OpCode::LoadStack(new_control));
-                frag.emit_load_literal(Literal::Nil);
-                frag.emit(RelBinOp::Eq.into());
-                frag.emit_jump_to(frag.id(), Some(true));
-
-                frag.emit(OpCode::LoadStack(new_control));
-                frag.emit(OpCode::StoreStack(control));
-
-                span.replace(frag).1
-            })
-            .and(token_do, discard)?
-            .then(|frag| {
+            .then(|output| {
                 |s| -> Result<_, FailFast> {
-                    let (mut frag, span) = frag.take();
+                    let ((names, top), span) = output.take();
 
-                    let state = block(frag.new_core())
-                        .parse_once(s)?
-                        .map_output(|output| opt_replace(span, output).put(frag));
+                    let iter = top;
+                    let state = top + 1;
+                    let control = top + 2;
+                    // Currently unimplemented.
+                    let _close = top + 3;
+
+                    let mut loop_body = envelope.new_scope();
+                    loop_body.mark_as_loop();
+                    let mark = loop_body.stack().len();
+                    let count: u32 = names.len().try_into().unwrap();
+                    let iterator = loop_body.stack_slot(mark);
+
+                    loop_body.emit(OpCode::LoadStack(iter));
+                    loop_body.emit(OpCode::LoadStack(state));
+                    loop_body.emit(OpCode::LoadStack(control));
+                    loop_body.emit(OpCode::Invoke(iterator));
+
+                    loop_body.emit_adjust_to(mark + count);
+
+                    // Assign names.
+                    loop_body.adjust_stack_to(mark);
+                    for name in names {
+                        loop_body.push_temporary(Some(name));
+                    }
+
+                    // First output of iterator is the new value for control variable.
+                    let new_control = iterator;
+
+                    loop_body.emit(OpCode::LoadStack(new_control));
+                    loop_body.emit_load_literal(Literal::Nil);
+                    loop_body.emit(RelBinOp::Eq.into());
+                    loop_body.emit_jump_to(loop_body.id(), Some(true));
+
+                    loop_body.emit(OpCode::LoadStack(new_control));
+                    loop_body.emit(OpCode::StoreStack(control));
+
+                    let state = Source(s)
+                        .and(token_do)?
+                        .and(block(loop_body.new_core()), opt_discard)?
+                        .and(token_end, discard)?
+                        .inspect(|_| {
+                            loop_body.emit_loop_to();
+                            loop_body.commit();
+                        })
+                        .map_output(|output| discard(span, output));
 
                     Ok(state)
                 }
             })?
-            .and(token_end, discard)?
-            .map_output(|output| {
-                let (mut frag, span) = output.take();
-
-                frag.emit_loop_to();
-                frag.commit();
-
-                span
-            })
-            .collapse();
-
-        let state = state.inspect(move |_| {
-            outer_frag.commit();
-        });
+            .collapse()
+            .inspect(move |_| envelope.commit());
 
         Ok(state)
     }
@@ -133,38 +119,30 @@ fn name_list<'s>(
     s: Lexer<'s>,
 ) -> Result<ParsingState<Lexer<'s>, (), Spanned<Vec<&str>>, NameListSuccess, IdentMismatch>, LexError>
 {
-    let (ident, state) = match identifier(s)? {
-        ParsingState::Success(s, output, success) => {
-            let (ident, span) = output.take();
+    let mut result = Vec::new();
+    let token_comma = match_token(Token::Comma).map_failure(|_| NameListSuccess::Comma);
+    let mut identifier = identifier.map_output(|output: Spanned<_>| {
+        let (ident, span) = output.take();
+        result.push(ident);
+        span
+    });
 
-            (
-                ident,
-                ParsingState::<_, (), _, _, _>::Success(s, span, success),
-            )
-        }
-        ParsingState::Failure(s, failure) => return Ok(ParsingState::Failure(s, failure)),
-    };
+    let state = Source(s)
+        .and(identifier.as_mut())?
+        .and(
+            (|s| {
+                let state = Source(s).and(token_comma)?.and(
+                    identifier.as_mut().map_failure(NameListSuccess::Ident),
+                    discard,
+                )?;
 
-    let mut r = vec![ident];
-
-    let next = |s: Lexer<'s>| -> Result<_, LexError> {
-        let state = match_token(Token::Comma)
-            .parse(s)?
-            .map_failure(|_| NameListSuccess::Comma)
-            .and(identifier.map_failure(NameListSuccess::Ident), replace)?
-            .map_output(|output| {
-                let (ident, span) = output.take();
-                r.push(ident);
-
-                span
-            });
-
-        Ok(state)
-    };
-
-    let state = state
-        .and(next.repeat_with(discard).optional(), opt_discard)?
-        .map_output(|span| span.replace(r).1);
+                Ok(state)
+            })
+            .repeat_with(discard)
+            .optional(),
+            opt_discard,
+        )?
+        .map_output(|span| span.put(result));
 
     Ok(state)
 }
@@ -172,6 +150,12 @@ fn name_list<'s>(
 enum NameListSuccess {
     Comma,
     Ident(IdentMismatch),
+}
+
+impl From<Never> for NameListSuccess {
+    fn from(value: Never) -> Self {
+        match value {}
+    }
 }
 
 impl Arrow<NameListSuccess> for Complete {

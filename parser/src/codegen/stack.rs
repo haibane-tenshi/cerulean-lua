@@ -427,7 +427,7 @@ impl<'s> Backlinks<'s> {
 
     fn pop(&mut self, name: &'s str) {
         let Some(backlink) = self.0.get_mut(&name) else {
-            return
+            return;
         };
 
         backlink.pop();

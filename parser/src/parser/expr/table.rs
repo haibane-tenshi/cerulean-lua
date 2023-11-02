@@ -22,18 +22,13 @@ pub(crate) fn table<'s, 'frag>(
         let state = Source(s)
             .and(curly_l)?
             .with_mode(FailureMode::Malformed)
-            .map_output(|r| {
+            .then(|span| {
                 let table_slot = frag.stack().len();
                 frag.emit(OpCode::TabCreate);
 
-                r.replace(table_slot).1
-            })
-            .then(|table_slot| {
-                let (table_slot, r) = table_slot.take();
-
                 field_list(table_slot, frag.new_core())
                     .optional()
-                    .map_output(|output| opt_discard(r, output))
+                    .map_output(|output| opt_discard(span, output))
             })?
             .and(curly_r, discard)?
             .inspect(move |_| {
@@ -70,63 +65,45 @@ fn field_list<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut frag = core.scope();
-
-        let mut next_index = 1;
-        let first_field = |s: Lexer<'s>| -> Result<_, FailFast> {
-            let r = field(table_slot, next_index, frag.new_core()).parse_once(s)?;
-
-            if let ParsingState::Success(
-                _,
-                Spanned {
-                    value: FieldType::Index,
-                    ..
-                },
-                _,
-            ) = &r
-            {
-                next_index += 1
-            }
-
-            Ok(r)
-        };
-
         let field_sep = field_sep.map_failure(|f| ParseFailure::from(TableFailure::Sep(f)));
 
-        let state = first_field.parse_once(s)?;
+        let mut frag = core.scope();
+        let mut next_index = 1;
 
-        let next = |s: Lexer<'s>| {
-            let field = |s: Lexer<'s>| -> Result<_, FailFast> {
-                let state = field(table_slot, next_index, frag.new_core())
-                    .parse_once(s)?
-                    .map_output(|output| {
-                        let (field_type, r) = output.take();
+        let state = Source(s)
+            .and(field(table_slot, next_index, frag.new_core()))?
+            .map_output(|output| {
+                let (field_type, span) = output.take();
+                if let FieldType::Index = field_type {
+                    next_index += 1;
+                }
 
-                        if matches!(field_type, FieldType::Index) {
-                            next_index += 1;
-                        }
+                span
+            })
+            .and(
+                (|s| -> Result<_, FailFast> {
+                    let state = Source(s)
+                        .and(field_sep)?
+                        .and(field(table_slot, next_index, frag.new_core()), replace)?
+                        .inspect(|output| {
+                            if let FieldType::Index = output.value {
+                                next_index += 1;
+                            }
+                        });
 
-                        r
-                    });
-
-                Ok(state)
-            };
-
-            field_sep.parse(s)?.and(field, replace)
-        };
-
-        let r = state
-            .and(next.repeat_with(discard).optional(), opt_replace)?
-            .map_output(|output| output.put(()))
+                    Ok(state)
+                })
+                .repeat_with(discard)
+                .optional(),
+                opt_discard,
+            )?
             .and(
                 field_sep.map_success(CompleteOr::Complete).optional(),
                 opt_discard,
             )?
-            .inspect(|_| {
-                frag.commit();
-            });
+            .inspect(|_| frag.commit());
 
-        Ok(r)
+        Ok(state)
     }
 }
 
@@ -146,11 +123,8 @@ fn field<'s, 'origin>(
 
         let state = Source(s)
             .or(bracket(table_slot, frag.new_core()))?
-            .map_output(|output| output.replace(FieldType::Bracket).1)
-            .or(name(table_slot, frag.new_core())
-                .map_output(|output: Spanned<_>| output.replace(FieldType::Name).1))?
-            .or(index(table_slot, next_index, frag.new_core())
-                .map_output(|output: Spanned<_>| output.replace(FieldType::Index).1))?
+            .or(name(table_slot, frag.new_core()))?
+            .or(index(table_slot, next_index, frag.new_core()))?
             .map_fsource(|_| ())
             .inspect(move |_| {
                 frag.commit();
@@ -192,7 +166,7 @@ fn bracket<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<()>,
+    Output = Spanned<FieldType>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -211,8 +185,8 @@ fn bracket<'s, 'origin>(
 
         let mut frag = core.scope();
 
-        let state = bracket_l
-            .parse(s)?
+        let state = Source(s)
+            .and(bracket_l)?
             .with_mode(FailureMode::Malformed)
             .inspect(|_| {
                 frag.emit(OpCode::LoadStack(frag.stack_slot(table_slot)));
@@ -226,7 +200,8 @@ fn bracket<'s, 'origin>(
 
                 frag.commit();
             })
-            .collapse();
+            .collapse()
+            .map_output(|span| span.put(FieldType::Bracket));
 
         Ok(state)
     }
@@ -247,7 +222,7 @@ fn name<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<()>,
+    Output = Spanned<FieldType>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -263,8 +238,8 @@ fn name<'s, 'origin>(
 
         let mut frag = core.scope_at(table_slot);
 
-        let state = ident
-            .parse(s)?
+        let state = Source(s)
+            .and(ident)?
             .with_mode(FailureMode::Ambiguous)
             .map_output(|r| {
                 let (ident, r) = r.take();
@@ -282,7 +257,8 @@ fn name<'s, 'origin>(
 
                 frag.commit();
             })
-            .collapse();
+            .collapse()
+            .map_output(|span| span.put(FieldType::Name));
 
         Ok(state)
     }
@@ -302,7 +278,7 @@ fn index<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<()>,
+    Output = Spanned<FieldType>,
     Success = ParseFailure,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -323,7 +299,8 @@ fn index<'s, 'origin>(
                 frag.emit_adjust_to(start);
 
                 frag.commit();
-            });
+            })
+            .map_output(|span| span.put(FieldType::Index));
 
         Ok(r)
     }

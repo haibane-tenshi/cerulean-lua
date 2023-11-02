@@ -17,23 +17,21 @@ pub(crate) fn local_assignment<'s, 'origin>(
             .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Local(f)));
         let token_equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::EqualsSign(f)));
+        let ident_list =
+            ident_list.map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Ident(f)));
 
         let mut frag = core.decl();
-
         let stack_start = frag.stack().len();
 
-        let state = token_local
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_local)?
             .with_mode(FailureMode::Ambiguous)
-            .and(
-                ident_list.map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Ident(f))),
-                replace,
-            )?
+            .and(ident_list, replace)?
             .with_mode(FailureMode::Malformed)
             .and(
                 (|s| -> Result<_, FailFast> {
-                    let state = token_equals_sign
-                        .parse(s)?
+                    let state = Source(s)
+                        .and(token_equals_sign)?
                         .with_mode(FailureMode::Malformed)
                         .and(expr_list(frag.new_core()), discard)?
                         .collapse();
@@ -80,39 +78,30 @@ fn ident_list(
     s: Lexer,
 ) -> Result<ParsingState<Lexer, (), Spanned<Vec<&str>>, IdentListSuccess, IdentMismatch>, LexError>
 {
-    let (ident, state) = match identifier(s)? {
-        ParsingState::Success(s, output, success) => {
-            let (ident, span) = output.take();
+    let mut result = Vec::new();
+    let token_comma = match_token(Token::Comma).map_failure(|_| IdentListSuccess::Comma);
+    let mut identifier = identifier.map_output(|output: Spanned<_>| {
+        let (ident, span) = output.take();
+        result.push(ident);
+        span
+    });
 
-            (
-                ident,
-                ParsingState::<_, (), _, _, _>::Success(s, span, success),
-            )
-        }
-        ParsingState::Failure(s, failure) => return Ok(ParsingState::Failure(s, failure)),
-    };
+    let state = Source(s)
+        .and(identifier.as_mut())?
+        .and(
+            (|s| {
+                let state = Source(s).and(token_comma)?.and(
+                    identifier.as_mut().map_failure(IdentListSuccess::Ident),
+                    discard,
+                )?;
 
-    let mut r = vec![ident];
-
-    let next = |s| -> Result<_, LexError> {
-        let token_comma = match_token(Token::Comma).map_failure(|_| IdentListSuccess::Comma);
-
-        let state = token_comma
-            .parse_once(s)?
-            .and(identifier.map_failure(IdentListSuccess::Ident), replace)?
-            .map_output(|output| {
-                let (ident, span) = output.take();
-                r.push(ident);
-
-                span
-            });
-
-        Ok(state)
-    };
-
-    let state = state
-        .and(next.repeat_with(discard).optional(), opt_discard)?
-        .map_output(|span| span.replace(r).1);
+                Ok(state)
+            })
+            .repeat_with(discard)
+            .optional(),
+            opt_discard,
+        )?
+        .map_output(|span| span.put(result));
 
     Ok(state)
 }

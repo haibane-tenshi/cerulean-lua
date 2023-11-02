@@ -164,7 +164,7 @@ where
                     tracing::trace!(stack = ?self.stack, "adjusted stack upon function return");
 
                     let Some(frame) = self.frames.pop() else {
-                        break
+                        break;
                     };
 
                     active_frame = self.activate(frame)?;

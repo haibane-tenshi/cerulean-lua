@@ -18,8 +18,8 @@ pub(crate) fn goto<'s, 'origin>(
 
         let mut frag = core.decl();
 
-        let state = token_goto
-            .parse(s)?
+        let state = Source(s)
+            .and(token_goto)?
             .with_mode(FailureMode::Malformed)
             .and(identifier, replace)?
             .map_output(|output| {

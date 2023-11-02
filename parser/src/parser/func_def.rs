@@ -20,7 +20,7 @@ pub(crate) fn func_body<'s, 'origin>(
         let token_par_r = match_token(Token::ParR).map_failure(|f| ParseFailure::from(ParR(f)));
         let token_end = match_token(Token::End).map_failure(|f| ParseFailure::from(End(f)));
 
-        let mut outer_frag = core.scope();
+        let mut envelope = core.scope();
 
         let state = Source(s)
             .and(token_par_l)?
@@ -30,14 +30,14 @@ pub(crate) fn func_body<'s, 'origin>(
             .with_mode(FailureMode::Malformed)
             .and(token_par_r, discard)?
             .then(|output| {
-                let outer_frag = &mut outer_frag;
+                let envelope = &mut envelope;
                 move |s: Lexer<'s>| -> Result<_, FailFast> {
                     let (signature, span) = output.take();
                     let (idents, mut signature) = signature.unwrap_or_default();
                     // At the moment extra slot is occupied by the function pointer itself.
                     signature.height += 1;
 
-                    let mut frame = outer_frag.new_core().frame(signature);
+                    let mut frame = envelope.new_core().frame(signature);
                     let mut frag = frame.new_core().scope();
 
                     frag.push_temporary(None);
@@ -52,7 +52,7 @@ pub(crate) fn func_body<'s, 'origin>(
                         .try_map_output(|output| -> Result<_, CodegenError> {
                             let span = opt_discard(span, output);
                             let fun = frame.commit()?.resolve();
-                            let r = span.replace(fun).1;
+                            let r = span.put(fun);
 
                             Ok(r)
                         })?;
@@ -63,10 +63,10 @@ pub(crate) fn func_body<'s, 'origin>(
             .and(token_end, discard)?
             .map_output(|output| {
                 let (func, span) = output.take();
-                let function_id = outer_frag.func_table_mut().push(func).unwrap();
-                outer_frag.commit();
+                let function_id = envelope.func_table_mut().push(func).unwrap();
+                envelope.commit();
 
-                span.replace(function_id).1
+                span.put(function_id)
             })
             .collapse();
 

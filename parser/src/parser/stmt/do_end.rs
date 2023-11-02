@@ -20,8 +20,8 @@ pub(crate) fn do_end<'s, 'origin>(
         let token_end =
             match_token(Token::End).map_failure(|f| ParseFailure::from(DoEndFailure::End(f)));
 
-        let state = token_do
-            .parse_once(s)?
+        let state = Source(s)
+            .and(token_do)?
             .with_mode(FailureMode::Malformed)
             .and(block(frag.new_core()), opt_discard)?
             .and(token_end, discard)?
