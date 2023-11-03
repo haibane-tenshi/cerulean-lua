@@ -154,6 +154,10 @@ impl<I, T> IndexSlice<I, T> {
     pub fn iter_mut(&mut self) -> std::slice::IterMut<T> {
         self.1.iter_mut()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.1.is_empty()
+    }
 }
 
 impl<I, T> IndexSlice<I, T>

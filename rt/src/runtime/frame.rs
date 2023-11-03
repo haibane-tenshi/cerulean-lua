@@ -1,36 +1,222 @@
-use repr::index::{ConstId, FunctionId, InstrId, StackSlot};
-use repr::index_vec::IndexSlice;
+use std::hash::Hash;
+use std::ops::Deref;
+use std::rc::Rc;
+
+use repr::chunk::Chunk;
+use repr::index::{ConstId, FunctionId, InstrId, StackSlot, UpvalueSlot};
+use repr::index_vec::{IndexSlice, IndexVec};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
-use repr::value::Value;
 
-use super::stack::{ProtectedSize, StackView};
-use crate::chunk_cache::FunctionPtr;
+use super::stack::UpvalueId;
+use super::stack::{RawStackSlot, StackView};
+use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
+use super::RuntimeView;
+use super::Value;
+use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::RuntimeError;
 
 pub type ControlFlow = std::ops::ControlFlow<ChangeFrame>;
 
 pub enum ChangeFrame {
     Return(StackSlot),
-    Invoke(FunctionId, StackSlot),
+    Invoke(ClosureRef, StackSlot),
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct FunctionPtr {
+    pub chunk_id: ChunkId,
+    pub function_id: FunctionId,
+}
+
+impl FunctionPtr {
+    pub(crate) fn construct_closure<C>(
+        self,
+        rt: &mut RuntimeView<C>,
+    ) -> Result<Closure, RuntimeError>
+    where
+        C: ChunkCache,
+    {
+        let signature = &rt
+            .chunk_cache
+            .chunk(self.chunk_id)
+            .ok_or(RuntimeError)?
+            .get_function(self.function_id)
+            .ok_or(RuntimeError)?
+            .signature;
+
+        if signature.upvalues.is_empty() {
+            let r = Closure {
+                fn_ptr: self,
+                upvalues: Default::default(),
+            };
+
+            Ok(r)
+        } else {
+            Err(RuntimeError)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Closure {
+    fn_ptr: FunctionPtr,
+    upvalues: IndexVec<UpvalueSlot, UpvalueId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClosureRef(Rc<Closure>);
+
+impl ClosureRef {
+    pub fn new(closure: Closure) -> Self {
+        ClosureRef(Rc::new(closure))
+    }
+
+    pub(crate) fn construct_frame<C>(
+        self,
+        rt: &mut RuntimeView<C>,
+        start: StackSlot,
+    ) -> Result<Frame, RuntimeError>
+    where
+        C: ChunkCache,
+    {
+        use repr::chunk::Function;
+
+        let function = rt
+            .chunk_cache
+            .chunk(self.fn_ptr.chunk_id)
+            .ok_or(RuntimeError)?
+            .get_function(self.fn_ptr.function_id)
+            .ok_or(RuntimeError)?;
+
+        let Function { signature, .. } = function;
+
+        // Adjust stack, move varargs into register if needed.
+        let stack_start = rt.stack.protected_size() + start;
+        let call_height = StackSlot(0) + signature.height;
+        let mut stack = rt.stack.view(stack_start).ok_or(RuntimeError)?;
+
+        let register_variadic = if signature.is_variadic {
+            stack.adjust_height_with_variadics(call_height)
+        } else {
+            stack.adjust_height(call_height);
+            Default::default()
+        };
+
+        // Load upvalues onto upvalue stack.
+        let upvalue_start = rt.upvalue_stack.protected_size();
+        rt.upvalue_stack.extend(
+            self.upvalues
+                .iter()
+                .map(|upvalue_id| rt.stack.get_upvalue(*upvalue_id).unwrap().clone()),
+        );
+
+        let r = Frame {
+            closure: self,
+            ip: Default::default(),
+            stack_start,
+            upvalue_start,
+            register_variadic,
+        };
+
+        Ok(r)
+    }
+}
+
+impl PartialEq for ClosureRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for ClosureRef {}
+
+impl Hash for ClosureRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.0).hash(state);
+    }
+}
+
+impl Deref for ClosureRef {
+    type Target = Closure;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
 }
 
 #[derive(Debug)]
 pub struct Frame {
-    pub(crate) function_ptr: FunctionPtr,
-    pub(crate) ip: InstrId,
-    pub(crate) stack_start: ProtectedSize,
-    pub(crate) register_variadic: Vec<Value>,
+    closure: ClosureRef,
+    ip: InstrId,
+    stack_start: RawStackSlot,
+    upvalue_start: RawUpvalueSlot,
+    register_variadic: Vec<Value>,
+}
+
+impl Frame {
+    pub(crate) fn activate<'a, 'rt, C>(
+        self,
+        rt: &'a mut RuntimeView<'rt, C>,
+    ) -> Result<ActiveFrame<'a>, RuntimeError>
+    where
+        C: ChunkCache,
+    {
+        let RuntimeView {
+            chunk_cache,
+            stack,
+            upvalue_stack,
+            ..
+        } = rt;
+
+        let Frame {
+            closure,
+            ip,
+            stack_start,
+            upvalue_start,
+            register_variadic,
+        } = self;
+
+        let fn_ptr = closure.fn_ptr;
+
+        let chunk = chunk_cache.chunk(fn_ptr.chunk_id).ok_or(RuntimeError)?;
+        let function = chunk.get_function(fn_ptr.function_id).ok_or(RuntimeError)?;
+
+        let constants = &chunk.constants;
+        let opcodes = &function.codes;
+        let stack = stack.view(stack_start).unwrap();
+
+        // Restore upvalue stack and update its values.
+        let mut upvalue_stack = upvalue_stack.view(upvalue_start).unwrap();
+        for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter_mut()) {
+            *upvalue = stack.get_upvalue(upvalue_id).unwrap().clone();
+        }
+
+        let r = ActiveFrame {
+            closure,
+            chunk,
+            constants,
+            opcodes,
+            ip,
+            stack,
+            upvalue_stack,
+            register_variadic,
+        };
+
+        Ok(r)
+    }
 }
 
 #[derive(Debug)]
 pub struct ActiveFrame<'rt> {
-    pub(crate) function_ptr: FunctionPtr,
-    pub(crate) constants: &'rt IndexSlice<ConstId, Literal>,
-    pub(crate) opcodes: &'rt IndexSlice<InstrId, OpCode>,
-    pub(crate) ip: InstrId,
-    pub(crate) stack: StackView<'rt>,
-    pub(crate) register_variadic: Vec<Value>,
+    closure: ClosureRef,
+    chunk: &'rt Chunk,
+    constants: &'rt IndexSlice<ConstId, Literal>,
+    opcodes: &'rt IndexSlice<InstrId, OpCode>,
+    ip: InstrId,
+    stack: StackView<'rt>,
+    upvalue_stack: UpvalueView<'rt>,
+    register_variadic: Vec<Value>,
 }
 
 impl<'rt> ActiveFrame<'rt> {
@@ -41,7 +227,7 @@ impl<'rt> ActiveFrame<'rt> {
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
-        use repr::table::TableRef;
+        use repr::value::table::TableRef;
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
@@ -50,12 +236,12 @@ impl<'rt> ActiveFrame<'rt> {
         let r = match code {
             Panic => return Err(RuntimeError),
             Invoke(slot) => {
-                let func_id = match self.stack.get(slot) {
-                    Ok(Value::Function(func_id)) => *func_id,
+                let closure = match self.stack.get(slot) {
+                    Ok(Value::Function(closure)) => closure.clone(),
                     _ => return Err(RuntimeError),
                 };
 
-                ControlFlow::Break(ChangeFrame::Invoke(func_id, slot))
+                ControlFlow::Break(ChangeFrame::Invoke(closure, slot))
             }
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             LoadConstant(index) => {
@@ -336,26 +522,69 @@ impl<'rt> ActiveFrame<'rt> {
         Some(r)
     }
 
+    pub fn construct_closure(&mut self, fn_id: FunctionId) -> Result<Closure, RuntimeError> {
+        let fn_ptr = FunctionPtr {
+            chunk_id: self.closure.fn_ptr.chunk_id,
+            function_id: fn_id,
+        };
+
+        let signature = &self
+            .chunk
+            .get_function(fn_id)
+            .ok_or(RuntimeError)?
+            .signature;
+
+        // To fix: remove this later when IndexVec is fixed.
+        let mut upvalues = IndexVec::new();
+        for value in signature.upvalues.iter().map(|&source| {
+            use repr::chunk::UpvalueSource;
+
+            match source {
+                UpvalueSource::Temporary(slot) => self.stack.mark_as_upvalue(slot),
+                UpvalueSource::Upvalue(slot) => {
+                    self.closure.upvalues.get(slot).copied().ok_or(RuntimeError)
+                }
+            }
+        }) {
+            let value = value?;
+            let _ = upvalues.push(value);
+        }
+
+        let r = Closure { fn_ptr, upvalues };
+
+        Ok(r)
+    }
+
     pub fn suspend(self) -> Frame {
         let ActiveFrame {
-            function_ptr,
+            closure,
             ip,
-            stack,
+            mut stack,
+            upvalue_stack,
             register_variadic,
             ..
         } = self;
 
         let stack_start = stack.protected_size();
+        let upvalue_start = upvalue_stack.protected_size();
+
+        for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter()) {
+            *stack.get_upvalue_mut(upvalue_id).unwrap() = upvalue.clone();
+        }
 
         Frame {
-            function_ptr,
+            closure,
             ip,
             stack_start,
+            upvalue_start,
             register_variadic,
         }
     }
 
     pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError> {
-        self.stack.drop_under(drop_under)
+        self.stack.drop_under(drop_under)?;
+        self.upvalue_stack.clear();
+
+        Ok(())
     }
 }

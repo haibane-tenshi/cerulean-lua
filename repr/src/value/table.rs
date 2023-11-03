@@ -8,17 +8,28 @@ use thiserror::Error;
 
 use crate::value::Value;
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Table {
-    data: HashMap<KeyValue, Value>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct Table<Closure>
+where
+    Closure: Eq + Hash,
+{
+    data: HashMap<KeyValue<Closure>, Value<Closure>>,
 }
 
-impl Table {
-    pub fn get(&self, key: KeyValue) -> Value {
+impl<Closure> Table<Closure>
+where
+    Closure: Eq + Hash + Clone,
+{
+    pub fn get(&self, key: KeyValue<Closure>) -> Value<Closure> {
         self.data.get(&key).cloned().unwrap_or_default()
     }
+}
 
-    pub fn set(&mut self, key: KeyValue, value: Value) {
+impl<Closure> Table<Closure>
+where
+    Closure: Eq + Hash,
+{
+    pub fn set(&mut self, key: KeyValue<Closure>, value: Value<Closure>) {
         if value == Value::Nil {
             self.data.remove(&key);
         } else {
@@ -34,23 +45,40 @@ impl Table {
     }
 }
 
+impl<Closure> Default for Table<Closure>
+where
+    Closure: Eq + Hash,
+{
+    fn default() -> Self {
+        Self {
+            data: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum KeyValue {
+pub enum KeyValue<Closure>
+where
+    Closure: Eq + Hash,
+{
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
     String(String),
-    Table(TableRef),
+    Table(TableRef<Closure>),
 }
 
 #[derive(Debug, Error)]
 #[error("value cannot be used to index tables")]
 pub struct InvalidTableKeyError;
 
-impl TryFrom<Value> for KeyValue {
+impl<Closure> TryFrom<Value<Closure>> for KeyValue<Closure>
+where
+    Closure: Eq + Hash,
+{
     type Error = InvalidTableKeyError;
 
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Closure>) -> Result<Self, Self::Error> {
         let r = match value {
             Value::Bool(t) => KeyValue::Bool(t),
             Value::Int(t) => KeyValue::Int(t),
@@ -67,8 +95,11 @@ impl TryFrom<Value> for KeyValue {
     }
 }
 
-impl From<KeyValue> for Value {
-    fn from(value: KeyValue) -> Self {
+impl<Closure> From<KeyValue<Closure>> for Value<Closure>
+where
+    Closure: Eq + Hash,
+{
+    fn from(value: KeyValue<Closure>) -> Self {
         match value {
             KeyValue::Bool(t) => Value::Bool(t),
             KeyValue::Int(t) => Value::Int(t),
@@ -79,32 +110,52 @@ impl From<KeyValue> for Value {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct TableRef(Rc<RefCell<Table>>);
+#[derive(Debug, Clone)]
+pub struct TableRef<Closure>(Rc<RefCell<Table<Closure>>>)
+where
+    Closure: Eq + Hash;
 
-impl TableRef {
+impl<Closure> TableRef<Closure>
+where
+    Closure: Eq + Hash,
+{
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn borrow(&self) -> Result<Ref<Table>, BorrowError> {
+    pub fn borrow(&self) -> Result<Ref<Table<Closure>>, BorrowError> {
         self.0.try_borrow()
     }
 
-    pub fn borrow_mut(&self) -> Result<RefMut<Table>, BorrowMutError> {
+    pub fn borrow_mut(&self) -> Result<RefMut<Table<Closure>>, BorrowMutError> {
         self.0.try_borrow_mut()
     }
 }
 
-impl PartialEq for TableRef {
+impl<Closure> Default for TableRef<Closure>
+where
+    Closure: Eq + Hash,
+{
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<Closure> PartialEq for TableRef<Closure>
+where
+    Closure: Eq + Hash,
+{
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl Eq for TableRef {}
+impl<Closure> Eq for TableRef<Closure> where Closure: Eq + Hash {}
 
-impl Hash for TableRef {
+impl<Closure> Hash for TableRef<Closure>
+where
+    Closure: Eq + Hash,
+{
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.0).hash(state)
     }

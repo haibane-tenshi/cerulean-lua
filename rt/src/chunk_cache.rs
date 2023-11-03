@@ -1,5 +1,4 @@
 use repr::chunk::Chunk;
-use repr::index::FunctionId;
 
 pub trait ChunkCache {
     fn chunk(&self, id: ChunkId) -> Option<&Chunk>;
@@ -18,12 +17,6 @@ pub trait KeyedChunkCache<Q: ?Sized>: ChunkCache {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ChunkId(pub usize);
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct FunctionPtr {
-    pub chunk_id: ChunkId,
-    pub function_id: FunctionId,
-}
 
 pub mod single {
     use super::{ChunkCache, ChunkId, KeyedChunkCache};

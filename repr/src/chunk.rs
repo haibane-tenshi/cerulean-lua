@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use rle_vec::RleVec;
 
-use crate::index::{ConstId, FunctionId, InstrId};
+use crate::index::{ConstId, FunctionId, InstrId, StackSlot, UpvalueSlot};
 use crate::index_vec::IndexVec;
 use crate::literal::Literal;
 use crate::opcode::OpCode;
@@ -86,8 +86,15 @@ impl Display for Function {
     }
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Signature {
     pub height: u32,
     pub is_variadic: bool,
+    pub upvalues: IndexVec<UpvalueSlot, UpvalueSource>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UpvalueSource {
+    Temporary(StackSlot),
+    Upvalue(UpvalueSlot),
 }

@@ -1,22 +1,29 @@
 mod frame;
 mod stack;
+mod upvalue_stack;
 
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
 use repr::index::StackSlot;
-use repr::value::Value;
+use repr::value::Value as ReprValue;
 
-use crate::chunk_cache::{ChunkCache, FunctionPtr};
+use crate::chunk_cache::ChunkCache;
 use crate::ffi::LuaFfiOnce;
 use crate::RuntimeError;
-use frame::{ActiveFrame, ChangeFrame, Frame};
-use stack::StackView;
+use frame::{ChangeFrame, Frame};
+use stack::{Stack, StackView};
+use upvalue_stack::UpvalueView;
+
+pub use frame::{Closure, ClosureRef, FunctionPtr};
+
+pub type Value = ReprValue<ClosureRef>;
 
 pub struct Runtime<C> {
     chunk_cache: C,
     frames: Vec<Frame>,
-    stack: Vec<Value>,
+    stack: Stack,
+    upvalue_stack: Vec<Value>,
 }
 
 impl<C> Runtime<C>
@@ -30,6 +37,7 @@ where
             chunk_cache,
             frames: Default::default(),
             stack: Default::default(),
+            upvalue_stack: Default::default(),
         }
     }
 
@@ -38,15 +46,18 @@ where
             chunk_cache,
             frames,
             stack,
+            upvalue_stack,
         } = self;
 
         let frames = FrameStackView::new(frames);
         let stack = StackView::new(stack);
+        let upvalue_stack = UpvalueView::new(upvalue_stack);
 
         RuntimeView {
             chunk_cache,
             frames,
             stack,
+            upvalue_stack,
         }
     }
 }
@@ -55,6 +66,7 @@ pub struct RuntimeView<'rt, C> {
     pub chunk_cache: &'rt mut C,
     frames: FrameStackView<'rt>,
     pub stack: StackView<'rt>,
+    upvalue_stack: UpvalueView<'rt>,
 }
 
 impl<'rt, C> RuntimeView<'rt, C>
@@ -66,96 +78,24 @@ where
             chunk_cache,
             frames,
             stack,
+            upvalue_stack,
         } = self;
 
         let frames = frames.view();
         let stack = stack.view_over();
+        let upvalue_stack = upvalue_stack.view_over();
 
         RuntimeView {
             chunk_cache,
             frames,
             stack,
+            upvalue_stack,
         }
     }
 
-    pub fn prepare_frame(
-        &mut self,
-        ptr: FunctionPtr,
-        offset: StackSlot,
-    ) -> Result<Frame, RuntimeError> {
-        use repr::chunk::Function;
-
-        let stack_start = self.stack.protected_size() + offset;
-
-        let function = self
-            .chunk_cache
-            .chunk(ptr.chunk_id)
-            .ok_or(RuntimeError)?
-            .get_function(ptr.function_id)
-            .ok_or(RuntimeError)?;
-
-        let Function { signature, .. } = *function;
-
-        let call_height = StackSlot(0) + signature.height;
-        let mut stack = self.stack.view(stack_start).ok_or(RuntimeError)?;
-
-        let register_variadic = if signature.is_variadic {
-            stack.adjust_height_with_variadics(call_height)
-        } else {
-            stack.adjust_height(call_height);
-            Default::default()
-        };
-
-        let r = Frame {
-            function_ptr: ptr,
-            ip: Default::default(),
-            stack_start,
-            register_variadic,
-        };
-
-        Ok(r)
-    }
-
-    pub fn activate(&mut self, frame: Frame) -> Result<ActiveFrame, RuntimeError>
-    where
-        C: ChunkCache,
-    {
-        let RuntimeView {
-            chunk_cache, stack, ..
-        } = self;
-
-        let Frame {
-            function_ptr,
-            ip,
-            stack_start,
-            register_variadic,
-        } = frame;
-
-        let chunk = chunk_cache
-            .chunk(function_ptr.chunk_id)
-            .ok_or(RuntimeError)?;
-        let function = chunk
-            .get_function(function_ptr.function_id)
-            .ok_or(RuntimeError)?;
-
-        let constants = &chunk.constants;
-        let opcodes = &function.codes;
-        let stack = stack.view(stack_start).unwrap();
-
-        let r = ActiveFrame {
-            function_ptr,
-            constants,
-            opcodes,
-            ip,
-            stack,
-            register_variadic,
-        };
-
-        Ok(r)
-    }
-
-    pub fn enter(&mut self, frame: Frame) -> Result<(), RuntimeError> {
-        let mut active_frame = self.activate(frame)?;
+    pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError> {
+        let frame = closure.construct_frame(self, start)?;
+        let mut active_frame = frame.activate(self)?;
 
         loop {
             match active_frame.step()? {
@@ -167,21 +107,14 @@ where
                         break;
                     };
 
-                    active_frame = self.activate(frame)?;
+                    active_frame = frame.activate(self)?;
                 }
-                ControlFlow::Break(ChangeFrame::Invoke(function_id, slot)) => {
+                ControlFlow::Break(ChangeFrame::Invoke(closure, start)) => {
                     let frame = active_frame.suspend();
-                    let chunk_id = frame.function_ptr.chunk_id;
-
                     self.frames.push(frame);
 
-                    let function_ptr = FunctionPtr {
-                        chunk_id,
-                        function_id,
-                    };
-
-                    let frame = self.prepare_frame(function_ptr, slot)?;
-                    active_frame = self.activate(frame)?;
+                    let frame = closure.construct_frame(self, start)?;
+                    active_frame = frame.activate(self)?;
                 }
                 ControlFlow::Continue(()) => (),
             }

@@ -46,7 +46,7 @@ where
     C: ChunkCache,
 {
     move |mut rt: RuntimeView<'_, C>| {
-        use crate::chunk_cache::FunctionPtr;
+        use crate::runtime::{ClosureRef, FunctionPtr};
         use repr::index::FunctionId;
 
         let ptr = FunctionPtr {
@@ -54,9 +54,10 @@ where
             function_id: FunctionId(0),
         };
         let offset = rt.stack.top();
-        let frame = rt.prepare_frame(ptr, offset)?;
+        let closure = ptr.construct_closure(&mut rt)?;
+        let closure = ClosureRef::new(closure);
 
-        rt.enter(frame)
+        rt.enter(closure, offset)
     }
 }
 
