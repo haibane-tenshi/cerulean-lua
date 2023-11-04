@@ -1,7 +1,13 @@
-use repr::chunk::Signature;
-use repr::index::{InstrCountError, InstrId};
+use repr::chunk::UpvalueSource;
+use repr::index::{InstrCountError, InstrId, UpvalueSlot};
 use repr::index_vec::IndexVec;
 use repr::opcode::OpCode;
+
+#[derive(Debug, Clone, Default)]
+pub struct Signature {
+    pub height: u32,
+    pub is_variadic: bool,
+}
 
 #[derive(Debug)]
 pub struct Function {
@@ -21,11 +27,21 @@ impl Function {
         FunctionView::new(self)
     }
 
-    pub fn resolve(self) -> repr::chunk::Function {
+    pub fn resolve(self, upvalues: IndexVec<UpvalueSlot, UpvalueSource>) -> repr::chunk::Function {
         let Function {
             opcodes: codes,
-            signature,
+            signature:
+                Signature {
+                    height,
+                    is_variadic,
+                },
         } = self;
+
+        let signature = repr::chunk::Signature {
+            height,
+            is_variadic,
+            upvalues,
+        };
 
         repr::chunk::Function {
             codes,

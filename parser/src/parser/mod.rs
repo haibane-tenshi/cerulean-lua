@@ -87,9 +87,9 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::const_table::ConstTable;
     use crate::codegen::fragment::Frame;
     use crate::codegen::func_table::FuncTable;
+    use crate::codegen::function::Signature;
     use crate::codegen::stack::Stack;
     use crate::parser::block::block;
-    use repr::chunk::Signature;
 
     // Reserve 0-th slot in table for the script itself.
     let mut func_table = FuncTable::with_script();
@@ -98,7 +98,6 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     let signature = Signature {
         height: 0,
         is_variadic: true,
-        upvalues: Default::default(),
     };
 
     let mut frame = Frame::script(
@@ -129,7 +128,12 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     }
 
     let func_table = {
-        let script = frame.commit().map_err(CodegenError::from)?.resolve();
+        let (script, upvalues) = frame.commit().map_err(CodegenError::from)?;
+        if !upvalues.resolve().is_empty() {
+            return Err(Error::Codegen(CodegenError::UnresolvedUpvalue));
+        }
+
+        let script = script.resolve(Default::default());
         let mut func_table = func_table.resolve();
 
         // Put script where runtime expects it to find.

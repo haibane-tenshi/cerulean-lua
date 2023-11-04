@@ -114,6 +114,9 @@ pub enum CodegenError {
     IllFormedGoto(#[from] IllFormedGotoError),
 
     BreakOusideLoop(#[from] BreakOutsideLoopError),
+
+    #[error("identifier is deduced to be an upvalue, but scripts cannot accept upvalues")]
+    UnresolvedUpvalue,
 }
 
 impl From<PushLabelError> for CodegenError {

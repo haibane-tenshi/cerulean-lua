@@ -1,5 +1,5 @@
+use crate::codegen::function::Signature;
 use crate::parser::prelude::*;
-use repr::chunk::Signature;
 use repr::index::FunctionId;
 use thiserror::Error;
 
@@ -51,11 +51,20 @@ pub(crate) fn func_body<'s, 'origin>(
                         .inspect(|_| frag.commit())
                         .try_map_output(|output| -> Result<_, CodegenError> {
                             let span = opt_discard(span, output);
-                            let fun = frame.commit()?.resolve();
-                            let r = span.put(fun);
-
-                            Ok(r)
-                        })?;
+                            let (func, upvalues) = frame.commit()?;
+                            Ok((func, upvalues, span))
+                        })?
+                        .map_output(|(func, upvalues, span)| {
+                            let upvalues = upvalues
+                                .resolve()
+                                .into_iter()
+                                .map(|ident| envelope.capture_variable(ident))
+                                .collect::<Vec<_>>()
+                                .try_into()
+                                .unwrap();
+                            let func = func.resolve(upvalues);
+                            span.put(func)
+                        });
 
                     Ok(state)
                 }
@@ -157,7 +166,6 @@ fn arg_list<'s, 'origin>() -> impl ParseOnce<
                 let signature = Signature {
                     height,
                     is_variadic,
-                    upvalues: todo!(),
                 };
 
                 span.put((idents, signature))

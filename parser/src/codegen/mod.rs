@@ -7,3 +7,4 @@ pub(crate) mod labels;
 pub(crate) mod loop_stack;
 pub(crate) mod reachability;
 pub(crate) mod stack;
+pub(crate) mod upvalues;

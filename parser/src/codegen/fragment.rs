@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::codegen::const_table::{ConstTable, ConstTableView};
 use crate::codegen::func_table::{FuncTable, FuncTableView};
-use crate::codegen::function::{Function, FunctionView};
+use crate::codegen::function::{Function, FunctionView, Signature};
 use crate::codegen::jumps::{Jumps, JumpsView};
 use crate::codegen::labels::{Labels, LabelsView, PushLabelError};
 use crate::codegen::loop_stack::LoopStack;
@@ -11,7 +11,8 @@ use crate::codegen::reachability::Reachability;
 use crate::codegen::stack::{
     BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
 };
-use repr::chunk::Signature;
+use crate::codegen::upvalues::{Upvalues, UpvaluesView};
+use repr::chunk::UpvalueSource;
 use repr::index::{ConstCapacityError, InstrCountError, InstrId, StackSlot};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
@@ -34,6 +35,7 @@ pub struct Core<'s, 'origin> {
     func_table: &'origin mut FuncTable,
     const_table: &'origin mut ConstTable,
     fun: &'origin mut Function,
+    upvalues: &'origin mut Upvalues<'s>,
     stack: &'origin mut Stack<'s>,
     jumps: &'origin mut Jumps,
     labels: &'origin mut Labels<'s>,
@@ -77,6 +79,7 @@ pub struct Fragment<'s, 'origin> {
     func_table: FuncTableView<'origin>,
     const_table: ConstTableView<'origin>,
     fun: FunctionView<'origin>,
+    upvalues: UpvaluesView<'s, 'origin>,
     stack: StackView<'s, 'origin>,
     jumps: JumpsView<'origin>,
     labels: LabelsView<'s, 'origin>,
@@ -92,6 +95,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             func_table,
             const_table,
             fun,
+            upvalues,
             stack,
             jumps,
             labels,
@@ -103,6 +107,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let func_table = func_table.view();
         let const_table = const_table.view();
         let fun = fun.view();
+        let upvalues = upvalues.view();
         let stack = stack.view();
         let jumps = jumps.view(fragment_id, fun.len());
         let labels = if kind == CommitKind::Scope {
@@ -116,6 +121,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             func_table,
             const_table,
             fun,
+            upvalues,
             stack,
             jumps,
             labels,
@@ -131,6 +137,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             func_table,
             const_table,
             fun,
+            upvalues,
             stack,
             jumps,
             labels,
@@ -142,6 +149,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let func_table = func_table.view();
         let const_table = const_table.view();
         let fun = fun.view();
+        let upvalues = upvalues.view();
         let stack = stack.view_at(slot);
         let jumps = jumps.view(fragment_id, fun.len());
         let labels = if kind == CommitKind::Scope {
@@ -155,6 +163,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             func_table,
             const_table,
             fun,
+            upvalues,
             stack,
             jumps,
             labels,
@@ -180,13 +189,22 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &self.stack
     }
 
-    // pub fn stack_mut(&mut self) -> &mut StackView<'s, 'origin> {
-    //     &mut self.stack
-    // }
+    pub fn capture_variable(&mut self, ident: &'s str) -> UpvalueSource {
+        use super::stack::NameLookup;
 
-    // pub fn fun_mut(&mut self) -> &mut FunctionView<'origin> {
-    //     &mut self.fun
-    // }
+        match self.stack.lookup(ident) {
+            NameLookup::Local(slot) => UpvalueSource::Temporary(slot),
+            NameLookup::Upvalue => {
+                let slot = self.upvalues.register(ident);
+                UpvalueSource::Upvalue(slot)
+            }
+            NameLookup::Global => {
+                // Might need fixing later if another option for UpvalueSource is introduced.
+                let slot = self.upvalues.register("_ENV");
+                UpvalueSource::Upvalue(slot)
+            }
+        }
+    }
 
     pub fn signature(&self) -> &Signature {
         self.fun.signature()
@@ -359,6 +377,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             func_table,
             const_table,
             fun,
+            upvalues,
             stack,
             jumps,
             labels,
@@ -371,6 +390,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let func_table = func_table.borrow();
         let const_table = const_table.borrow();
         let fun = fun.borrow();
+        let upvalues = upvalues.borrow();
         let stack = stack.borrow();
         let jumps = jumps.borrow();
         let labels = labels.borrow();
@@ -382,6 +402,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             func_table,
             const_table,
             fun,
+            upvalues,
             stack,
             jumps,
             labels,
@@ -428,6 +449,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             func_table,
             const_table,
             mut fun,
+            upvalues,
             mut stack,
             jumps,
             labels,
@@ -464,6 +486,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
         labels.commit(kind);
         fun.commit();
+        upvalues.commit();
         stack.commit(kind);
     }
 }
@@ -493,6 +516,7 @@ pub struct Frame<'s, 'origin> {
     const_table: ConstTableView<'origin>,
     stack: StackView<'s, 'origin>,
     fun: Function,
+    upvalues: Upvalues<'s>,
     jumps: Jumps,
     labels: Labels<'s>,
 }
@@ -510,6 +534,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let const_table = const_table.view();
         let stack = stack.frame();
         let fun = Function::new(signature);
+        let upvalues = Upvalues::new();
         let jumps = Jumps::new();
         let labels = Labels::new(InstrId(0));
 
@@ -518,6 +543,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             const_table,
             stack,
             fun,
+            upvalues,
             jumps,
             labels,
         }
@@ -534,6 +560,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             const_table,
             stack,
             fun: Function::new(signature),
+            upvalues: Upvalues::new(),
             jumps: Jumps::new(),
             labels: Labels::new(InstrId(0)),
         }
@@ -545,6 +572,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             const_table,
             stack,
             fun,
+            upvalues,
             jumps,
             labels,
         } = self;
@@ -561,6 +589,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             func_table,
             const_table,
             fun,
+            upvalues,
             stack,
             jumps,
             labels,
@@ -569,12 +598,13 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         }
     }
 
-    pub fn commit(self) -> Result<Function, UnresolvedGotoError> {
+    pub fn commit(self) -> Result<(Function, Upvalues<'s>), UnresolvedGotoError> {
         let Frame {
             func_table,
             const_table,
             stack,
             fun,
+            upvalues,
             jumps: _,
             labels,
         } = self;
@@ -584,7 +614,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         stack.commit(CommitKind::Scope);
 
         if labels.is_resolved() {
-            Ok(fun)
+            Ok((fun, upvalues))
         } else {
             Err(UnresolvedGotoError)
         }
