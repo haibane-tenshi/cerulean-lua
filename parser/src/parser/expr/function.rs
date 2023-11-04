@@ -26,7 +26,7 @@ pub(crate) fn function<'s, 'origin>(
             .map_output(|output| {
                 let (func_id, span) = output.take();
 
-                frag.emit_load_literal(Literal::Function(func_id));
+                frag.emit(OpCode::MakeClosure(func_id));
                 frag.commit();
 
                 span

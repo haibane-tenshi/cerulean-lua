@@ -19,6 +19,18 @@ pub use frame::{Closure, ClosureRef, FunctionPtr};
 
 pub type Value = ReprValue<ClosureRef>;
 
+impl From<Closure> for Value {
+    fn from(value: Closure) -> Self {
+        ClosureRef::new(value).into()
+    }
+}
+
+impl From<ClosureRef> for Value {
+    fn from(value: ClosureRef) -> Self {
+        Value::Function(value)
+    }
+}
+
 pub struct Runtime<C> {
     chunk_cache: C,
     frames: Vec<Frame>,

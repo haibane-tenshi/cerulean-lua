@@ -588,13 +588,17 @@ impl<'s, 'origin> StackView<'s, 'origin> {
                 self.adjust_to(height);
                 self.make_variadic();
             }
-            OpCode::LoadConstant(_) | OpCode::LoadStack(_) | OpCode::TabCreate => {
+            OpCode::LoadConstant(_)
+            | OpCode::LoadStack(_)
+            | OpCode::LoadUpvalue(_)
+            | OpCode::TabCreate
+            | OpCode::MakeClosure(_) => {
                 self.try_push(None)?;
             }
             OpCode::LoadVariadic => {
                 self.make_variadic();
             }
-            OpCode::StoreStack(_) => {
+            OpCode::StoreStack(_) | OpCode::StoreUpvalue(_) => {
                 self.try_pop()?;
             }
             OpCode::AdjustStack(slot) => {

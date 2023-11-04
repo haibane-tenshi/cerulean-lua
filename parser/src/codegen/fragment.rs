@@ -184,11 +184,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     //     &mut self.stack
     // }
 
-    pub fn fun_mut(&mut self) -> &mut FunctionView<'origin> {
-        &mut self.fun
-    }
+    // pub fn fun_mut(&mut self) -> &mut FunctionView<'origin> {
+    //     &mut self.fun
+    // }
 
-    pub fn signature(&self) -> Signature {
+    pub fn signature(&self) -> &Signature {
         self.fun.signature()
     }
 

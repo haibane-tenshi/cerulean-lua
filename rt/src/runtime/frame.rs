@@ -155,9 +155,9 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub(crate) fn activate<'a, 'rt, C>(
+    pub(crate) fn activate<'a, C>(
         self,
-        rt: &'a mut RuntimeView<'rt, C>,
+        rt: &'a mut RuntimeView<C>,
     ) -> Result<ActiveFrame<'a>, RuntimeError>
     where
         C: ChunkCache,
@@ -244,6 +244,12 @@ impl<'rt> ActiveFrame<'rt> {
                 ControlFlow::Break(ChangeFrame::Invoke(closure, slot))
             }
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
+            MakeClosure(fn_id) => {
+                let closure = self.construct_closure(fn_id)?;
+                self.stack.push(closure.into());
+
+                ControlFlow::Continue(())
+            }
             LoadConstant(index) => {
                 let constant = self.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
@@ -271,6 +277,20 @@ impl<'rt> ActiveFrame<'rt> {
             }
             AdjustStack(height) => {
                 self.stack.adjust_height(height);
+
+                ControlFlow::Continue(())
+            }
+            LoadUpvalue(slot) => {
+                let value = self.upvalue_stack.get(slot)?.clone();
+                self.stack.push(value);
+
+                ControlFlow::Continue(())
+            }
+            StoreUpvalue(slot) => {
+                let value = self.stack.pop()?;
+                let location = self.upvalue_stack.get_mut(slot)?;
+
+                *location = value;
 
                 ControlFlow::Continue(())
             }

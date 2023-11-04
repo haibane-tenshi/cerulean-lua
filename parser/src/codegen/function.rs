@@ -73,8 +73,8 @@ impl<'fun> FunctionView<'fun> {
         self.prev_state.start
     }
 
-    pub fn signature(&self) -> Signature {
-        self.fun.signature
+    pub fn signature(&self) -> &Signature {
+        &self.fun.signature
     }
 
     pub fn len(&self) -> InstrId {

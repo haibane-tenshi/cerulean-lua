@@ -98,6 +98,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     let signature = Signature {
         height: 0,
         is_variadic: true,
+        upvalues: Default::default(),
     };
 
     let mut frame = Frame::script(

@@ -157,6 +157,7 @@ fn arg_list<'s, 'origin>() -> impl ParseOnce<
                 let signature = Signature {
                     height,
                     is_variadic,
+                    upvalues: todo!(),
                 };
 
                 span.put((idents, signature))
