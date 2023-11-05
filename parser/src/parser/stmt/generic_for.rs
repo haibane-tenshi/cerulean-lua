@@ -115,10 +115,9 @@ pub(crate) enum GenericForFailure {
     End(#[source] TokenMismatch),
 }
 
-fn name_list<'s>(
-    s: Lexer<'s>,
-) -> Result<ParsingState<Lexer<'s>, (), Spanned<Vec<&str>>, NameListSuccess, IdentMismatch>, LexError>
-{
+fn name_list(
+    s: Lexer,
+) -> Result<ParsingState<Lexer, (), Spanned<Vec<&str>>, NameListSuccess, IdentMismatch>, LexError> {
     let mut result = Vec::new();
     let token_comma = match_token(Token::Comma).map_failure(|_| NameListSuccess::Comma);
     let mut identifier = identifier.map_output(|output: Spanned<_>| {

@@ -165,11 +165,10 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
         }
 
         for instr_id in pending.drain(valid..) {
-            match fun.get_mut(instr_id) {
-                Some(OpCode::Jump { offset } | OpCode::JumpIf { offset, .. }) => {
-                    *offset = label.target - instr_id - 1;
-                }
-                _ => (),
+            if let Some(OpCode::Jump { offset } | OpCode::JumpIf { offset, .. }) =
+                fun.get_mut(instr_id)
+            {
+                *offset = label.target - instr_id - 1;
             }
         }
 

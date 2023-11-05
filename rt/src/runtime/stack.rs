@@ -60,9 +60,9 @@ pub struct Stack {
 }
 
 impl Stack {
-    pub fn new() -> Self {
-        Default::default()
-    }
+    // pub fn new() -> Self {
+    //     Default::default()
+    // }
 
     pub(crate) fn push(&mut self, value: Value) -> RawStackSlot {
         let slot = self.temporaries.len();
@@ -81,10 +81,6 @@ impl Stack {
         }
 
         r
-    }
-
-    pub(crate) fn adjust_height(&mut self, height: RawStackSlot) {
-        self.adjust_height_with_variadics(height);
     }
 
     pub(crate) fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<Value> {

@@ -13,11 +13,11 @@ impl ProtectedSize {
         self.0 + slot.0
     }
 
-    pub(crate) fn slot(self, index: usize) -> Option<UpvalueSlot> {
-        let offset = index.checked_sub(self.0)?;
-
-        Some(UpvalueSlot(offset))
-    }
+    // pub(crate) fn slot(self, index: usize) -> Option<UpvalueSlot> {
+    //     let offset = index.checked_sub(self.0)?;
+    //
+    //     Some(UpvalueSlot(offset))
+    // }
 }
 
 impl Add<usize> for ProtectedSize {
