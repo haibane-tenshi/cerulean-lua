@@ -1,9 +1,11 @@
 use repr::index::UpvalueSlot;
 use repr::tivec::TiVec;
 
+use super::Ident;
+
 #[derive(Debug, Default)]
 pub struct Upvalues<'s> {
-    store: TiVec<UpvalueSlot, &'s str>,
+    store: TiVec<UpvalueSlot, Ident<'s>>,
 }
 
 impl<'s> Upvalues<'s> {
@@ -15,7 +17,7 @@ impl<'s> Upvalues<'s> {
         UpvaluesView::new(self)
     }
 
-    fn get(&self, ident: &'s str) -> Option<UpvalueSlot> {
+    fn get(&self, ident: Ident<'s>) -> Option<UpvalueSlot> {
         // Perform linear search.
         // In general we expect the number of upvalues to be reasonably small:
         // somewhere in single digits.
@@ -28,7 +30,7 @@ impl<'s> Upvalues<'s> {
             .find_map(|(slot, &upvalue_name)| (upvalue_name == ident).then_some(slot))
     }
 
-    fn register(&mut self, ident: &'s str) -> UpvalueSlot {
+    fn register(&mut self, ident: Ident<'s>) -> UpvalueSlot {
         if let Some(slot) = self.get(ident) {
             return slot;
         }
@@ -48,7 +50,7 @@ impl<'s> Upvalues<'s> {
         self.store.truncate(store_len.into());
     }
 
-    pub fn resolve(self) -> TiVec<UpvalueSlot, &'s str> {
+    pub fn resolve(self) -> TiVec<UpvalueSlot, Ident<'s>> {
         self.store
     }
 }
@@ -78,7 +80,7 @@ impl<'s, 'origin> UpvaluesView<'s, 'origin> {
         self.upvalues
     }
 
-    pub fn register(&mut self, ident: &'s str) -> UpvalueSlot {
+    pub fn register(&mut self, ident: Ident<'s>) -> UpvalueSlot {
         self.upvalues.register(ident)
     }
 

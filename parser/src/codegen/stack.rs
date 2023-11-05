@@ -1,10 +1,12 @@
-use super::fragment::EmitError;
 use repr::index::StackSlot;
 use repr::opcode::OpCode;
 use repr::tivec::TiVec;
 use std::collections::HashMap;
 use std::ops::{Add, AddAssign, BitOr, Sub, SubAssign};
 use thiserror::Error;
+
+use super::fragment::EmitError;
+use super::Ident;
 
 pub(crate) use repr::index::StackOffset;
 
@@ -153,7 +155,7 @@ impl BitOr for StackState {
 
 #[derive(Debug, Default)]
 struct UnqualifiedStack<'s> {
-    temporaries: TiVec<GlobalStackSlot, Option<&'s str>>,
+    temporaries: TiVec<GlobalStackSlot, Option<Ident<'s>>>,
     backlinks: Backlinks<'s>,
     variadic: bool,
 }
@@ -163,7 +165,7 @@ impl<'s> UnqualifiedStack<'s> {
         self.temporaries.next_key()
     }
 
-    fn push(&mut self, name: Option<&'s str>) -> Result<GlobalStackSlot, PushError> {
+    fn push(&mut self, name: Option<Ident<'s>>) -> Result<GlobalStackSlot, PushError> {
         if self.variadic {
             return Err(VariadicStackError.into());
         }
@@ -196,7 +198,7 @@ impl<'s> UnqualifiedStack<'s> {
         self.variadic
     }
 
-    fn lookup(&self, name: &'s str) -> Option<GlobalStackSlot> {
+    fn lookup(&self, name: Ident<'s>) -> Option<GlobalStackSlot> {
         self.backlinks.get(name)
     }
 
@@ -254,7 +256,7 @@ impl<'s> StackFrame<'s> {
         self.global_to_frame(self.stack.len()).unwrap()
     }
 
-    fn push(&mut self, name: Option<&'s str>) -> Result<StackSlot, PushError> {
+    fn push(&mut self, name: Option<Ident<'s>>) -> Result<StackSlot, PushError> {
         self.stack
             .push(name)
             .map(|slot| self.global_to_frame(slot).unwrap())
@@ -276,7 +278,7 @@ impl<'s> StackFrame<'s> {
         self.stack.is_variadic()
     }
 
-    fn lookup(&self, name: &str) -> NameLookup {
+    fn lookup(&self, name: Ident<'s>) -> NameLookup {
         match self.stack.lookup(name) {
             Some(slot) => match self.global_to_frame(slot) {
                 Some(slot) => NameLookup::Local(slot),
@@ -333,7 +335,7 @@ impl<'s> Stack<'s> {
         self.frame_to_fragment(self.stack.len()).unwrap()
     }
 
-    fn push(&mut self, name: Option<&'s str>) -> Result<FragmentStackSlot, PushError> {
+    fn push(&mut self, name: Option<Ident<'s>>) -> Result<FragmentStackSlot, PushError> {
         self.stack
             .push(name)
             .map(|slot| self.frame_to_fragment(slot).unwrap())
@@ -355,7 +357,7 @@ impl<'s> Stack<'s> {
         self.stack.is_variadic()
     }
 
-    fn lookup(&self, name: &'s str) -> NameLookup {
+    fn lookup(&self, name: Ident<'s>) -> NameLookup {
         self.stack.lookup(name)
     }
 
@@ -367,7 +369,7 @@ impl<'s> Stack<'s> {
         self.stack.adjust_to(self.fragment_to_frame(slot))
     }
 
-    fn iter(&self) -> impl Iterator<Item = &Option<&'s str>> {
+    fn iter(&self) -> impl Iterator<Item = &Option<Ident<'s>>> {
         let start = self.stack.frame_to_global(self.boundary);
 
         self.stack
@@ -424,14 +426,14 @@ impl<'s> Stack<'s> {
 }
 
 #[derive(Debug, Default)]
-struct Backlinks<'s>(HashMap<&'s str, Vec<GlobalStackSlot>>);
+struct Backlinks<'s>(HashMap<Ident<'s>, Vec<GlobalStackSlot>>);
 
 impl<'s> Backlinks<'s> {
-    fn add(&mut self, slot: GlobalStackSlot, name: &'s str) {
+    fn add(&mut self, slot: GlobalStackSlot, name: Ident<'s>) {
         self.0.entry(name).or_default().push(slot);
     }
 
-    fn pop(&mut self, name: &'s str) {
+    fn pop(&mut self, name: Ident<'s>) {
         let Some(backlink) = self.0.get_mut(&name) else {
             return;
         };
@@ -443,8 +445,8 @@ impl<'s> Backlinks<'s> {
         }
     }
 
-    fn get(&self, name: &'s str) -> Option<GlobalStackSlot> {
-        self.0.get(name)?.last().copied()
+    fn get(&self, name: Ident<'s>) -> Option<GlobalStackSlot> {
+        self.0.get(&name)?.last().copied()
     }
 }
 
@@ -551,11 +553,11 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         self.stack.len()
     }
 
-    pub fn try_push(&mut self, name: Option<&'s str>) -> Result<FragmentStackSlot, PushError> {
+    pub fn try_push(&mut self, name: Option<Ident<'s>>) -> Result<FragmentStackSlot, PushError> {
         self.stack.push(name)
     }
 
-    pub fn push(&mut self, name: Option<&'s str>) -> FragmentStackSlot {
+    pub fn push(&mut self, name: Option<Ident<'s>>) -> FragmentStackSlot {
         self.try_push(name).unwrap()
     }
 
@@ -654,7 +656,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         self.stack.adjust_to(height)
     }
 
-    pub fn lookup(&self, name: &'s str) -> NameLookup {
+    pub fn lookup(&self, name: Ident<'s>) -> NameLookup {
         self.stack.lookup(name)
     }
 

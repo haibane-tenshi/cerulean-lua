@@ -1,6 +1,12 @@
 use std::ops::Add;
 use thiserror::Error;
 
+use repr::chunk::UpvalueSource;
+use repr::index::{InstrId, StackSlot};
+use repr::literal::Literal;
+use repr::opcode::OpCode;
+
+use super::Ident;
 use crate::codegen::const_table::{ConstTable, ConstTableView};
 use crate::codegen::func_table::{FuncTable, FuncTableView};
 use crate::codegen::function::{Function, FunctionView, Signature};
@@ -12,10 +18,6 @@ use crate::codegen::stack::{
     BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
 };
 use crate::codegen::upvalues::{Upvalues, UpvaluesView};
-use repr::chunk::UpvalueSource;
-use repr::index::{InstrId, StackSlot};
-use repr::literal::Literal;
-use repr::opcode::OpCode;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
 pub struct FragmentId(u32);
@@ -189,7 +191,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &self.stack
     }
 
-    pub fn capture_variable(&mut self, ident: &'s str) -> Option<UpvalueSource> {
+    pub fn capture_variable(&mut self, ident: Ident<'s>) -> Option<UpvalueSource> {
         use super::stack::NameLookup;
 
         match self.stack.lookup(ident) {
@@ -203,7 +205,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 
     pub fn capture_global_env(&mut self) -> Result<UpvalueSource, MissingGlobalEnvError> {
-        self.capture_variable("_ENV").ok_or(MissingGlobalEnvError)
+        self.capture_variable(Ident("_ENV"))
+            .ok_or(MissingGlobalEnvError)
     }
 
     pub fn signature(&self) -> &Signature {
@@ -226,7 +229,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(r)
     }
 
-    pub fn push_temporary(&mut self, name: Option<&'s str>) -> FragmentStackSlot {
+    pub fn push_temporary(&mut self, name: Option<Ident<'s>>) -> FragmentStackSlot {
         if name.is_some() {
             let marker = self.fun.len();
             self.labels.push_last_binding(marker);
@@ -318,7 +321,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.try_emit_load_literal(literal).unwrap()
     }
 
-    pub fn try_emit_label(&mut self, label: &'s str) -> Result<InstrId, PushLabelError> {
+    pub fn try_emit_label(&mut self, label: Ident<'s>) -> Result<InstrId, PushLabelError> {
         use super::labels::Label;
 
         // Since it is possible to reach label from unknown future point,
@@ -342,14 +345,14 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn try_emit_goto(&mut self, label: &'s str) -> Result<InstrId, EmitError> {
+    pub fn try_emit_goto(&mut self, label: Ident<'s>) -> Result<InstrId, EmitError> {
         let target = self.fun.len();
 
         let opcode = self.labels.goto(label, target);
         self.try_emit(opcode)
     }
 
-    pub fn emit_goto(&mut self, label: &'s str) -> InstrId {
+    pub fn emit_goto(&mut self, label: Ident<'s>) -> InstrId {
         self.try_emit_goto(label).unwrap()
     }
 

@@ -76,7 +76,7 @@ pub enum LocalAssignmentFailure {
 
 fn ident_list(
     s: Lexer,
-) -> Result<ParsingState<Lexer, (), Spanned<Vec<&str>>, IdentListSuccess, IdentMismatch>, LexError>
+) -> Result<ParsingState<Lexer, (), Spanned<Vec<Ident>>, IdentListSuccess, IdentMismatch>, LexError>
 {
     let mut result = Vec::new();
     let token_comma = match_token(Token::Comma).map_failure(|_| IdentListSuccess::Comma);

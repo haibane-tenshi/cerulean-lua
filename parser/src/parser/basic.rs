@@ -42,11 +42,11 @@ pub struct TokenMismatch {
 
 pub(crate) fn identifier(
     mut s: Lexer,
-) -> Result<ParsingState<Lexer, (), Spanned<&str>, Complete, IdentMismatch>, LexError> {
+) -> Result<ParsingState<Lexer, (), Spanned<Ident>, Complete, IdentMismatch>, LexError> {
     let r = match s.next_token()? {
         Ok(Token::Ident(ident)) => {
             let r = Spanned {
-                value: ident,
+                value: Ident(ident),
                 span: s.span(),
             };
             ParsingState::Success(s, r, Complete)

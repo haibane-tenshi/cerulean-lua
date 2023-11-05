@@ -111,7 +111,7 @@ impl From<ParListMismatch> for FuncBodyFailure {
 
 fn arg_list<'s, 'origin>() -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<(Vec<&'s str>, Signature)>,
+    Output = Spanned<(Vec<Ident<'s>>, Signature)>,
     Success = CompleteOr<ParListMismatch>,
     Failure = ParListMismatch,
     FailFast = FailFast,

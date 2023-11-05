@@ -380,7 +380,7 @@ fn variable<'s, 'origin>(
                 None => {
                     let env = frag.capture_global_env()?;
                     frag.emit(env.into_opcode());
-                    frag.emit_load_literal(Literal::String(ident.to_owned()));
+                    frag.emit_load_literal(Literal::String(ident.to_string()));
 
                     Place::TableField
                 }
@@ -507,7 +507,7 @@ fn tab_call<'s, 'origin>(
                 let table = frag.stack_slot(FragmentStackSlot(0));
 
                 frag.emit(OpCode::LoadStack(table));
-                frag.emit_load_literal(Literal::String(ident.into()));
+                frag.emit_load_literal(Literal::String(ident.to_string()));
                 frag.emit(OpCode::TabGet);
 
                 // Pass table itself as the first argument.

@@ -1,14 +1,15 @@
+use repr::index::InstrId;
+use repr::opcode::OpCode;
+use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::codegen::function::FunctionView;
 use crate::codegen::stack::CommitKind;
-use repr::index::InstrId;
-use repr::opcode::OpCode;
-use std::collections::HashMap;
+use crate::codegen::Ident;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Label<'s> {
-    pub name: &'s str,
+    pub name: Ident<'s>,
     pub target: InstrId,
 }
 
@@ -18,7 +19,7 @@ pub struct Labels<'s> {
     up_jumps: Vec<Label<'s>>,
 
     /// To-be-resolved labels.
-    down_jumps: HashMap<&'s str, Vec<InstrId>>,
+    down_jumps: HashMap<Ident<'s>, Vec<InstrId>>,
 
     /// First instruction marking the start of current lexical scope.
     ///
@@ -126,7 +127,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
         self.labels
     }
 
-    pub fn get(&mut self, name: &'s str) -> Option<InstrId> {
+    pub fn get(&mut self, name: Ident<'s>) -> Option<InstrId> {
         self.labels
             .up_jumps
             .iter()
@@ -153,7 +154,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
 
         self.labels.up_jumps.push(label);
 
-        let Some(pending) = self.labels.down_jumps.get_mut(label.name) else {
+        let Some(pending) = self.labels.down_jumps.get_mut(&label.name) else {
             return Ok(());
         };
 
@@ -173,7 +174,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
         }
 
         if pending.is_empty() {
-            self.labels.down_jumps.remove(label.name);
+            self.labels.down_jumps.remove(&label.name);
         }
 
         fun.commit();
@@ -181,7 +182,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
         Ok(())
     }
 
-    pub fn goto(&mut self, name: &'s str, instr_id: InstrId) -> OpCode {
+    pub fn goto(&mut self, name: Ident<'s>, instr_id: InstrId) -> OpCode {
         if let Some(target) = self.get(name) {
             let offset = instr_id - target + 1;
 
