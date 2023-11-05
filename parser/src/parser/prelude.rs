@@ -11,6 +11,6 @@ pub(crate) use crate::parser::traits::{
     ParsingState, Source, Spanned,
 };
 pub(crate) use crate::parser::{Eof, NextToken};
-pub(crate) use repr::index::{ConstId, InstrId, StackSlot};
+pub(crate) use repr::index::{ConstId, InstrId, StackSlot, UpvalueSlot};
 pub(crate) use repr::literal::Literal;
 pub(crate) use repr::opcode::{AriBinOp, BitBinOp, OpCode, RelBinOp, StrBinOp};

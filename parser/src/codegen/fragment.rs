@@ -189,21 +189,21 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &self.stack
     }
 
-    pub fn capture_variable(&mut self, ident: &'s str) -> UpvalueSource {
+    pub fn capture_variable(&mut self, ident: &'s str) -> Option<UpvalueSource> {
         use super::stack::NameLookup;
 
         match self.stack.lookup(ident) {
-            NameLookup::Local(slot) => UpvalueSource::Temporary(slot),
+            NameLookup::Local(slot) => Some(UpvalueSource::Temporary(slot)),
             NameLookup::Upvalue => {
                 let slot = self.upvalues.register(ident);
-                UpvalueSource::Upvalue(slot)
+                Some(UpvalueSource::Upvalue(slot))
             }
-            NameLookup::Global => {
-                // Might need fixing later if another option for UpvalueSource is introduced.
-                let slot = self.upvalues.register("_ENV");
-                UpvalueSource::Upvalue(slot)
-            }
+            NameLookup::Global => None,
         }
+    }
+
+    pub fn capture_global_env(&mut self) -> Result<UpvalueSource, MissingGlobalEnvError> {
+        self.capture_variable("_ENV").ok_or(MissingGlobalEnvError)
     }
 
     pub fn signature(&self) -> &Signature {
@@ -628,3 +628,7 @@ pub struct UnresolvedGotoError;
 #[derive(Debug, Error)]
 #[error("break statement is used outside a loop")]
 pub struct BreakOutsideLoopError;
+
+#[derive(Debug, Error)]
+#[error("could not lookup global environment")]
+pub struct MissingGlobalEnvError;

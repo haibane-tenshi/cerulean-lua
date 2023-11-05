@@ -52,7 +52,7 @@ use super::stmt::numerical_for::NumericalForFailure;
 use super::stmt::repeat_until::RepeatUntilFailure;
 use super::stmt::return_::ReturnFailure;
 use super::stmt::while_do::WhileDoFailure;
-use crate::codegen::fragment::{BreakOutsideLoopError, UnresolvedGotoError};
+use crate::codegen::fragment::{BreakOutsideLoopError, MissingGlobalEnvError, UnresolvedGotoError};
 use crate::codegen::labels::{DuplicateLabelError, IllFormedGotoError, PushLabelError};
 
 pub use std::convert::Infallible as Never;
@@ -114,6 +114,8 @@ pub enum CodegenError {
     IllFormedGoto(#[from] IllFormedGotoError),
 
     BreakOusideLoop(#[from] BreakOutsideLoopError),
+
+    MissingGlobalEnv(#[from] MissingGlobalEnvError),
 
     #[error("identifier is deduced to be an upvalue, but scripts cannot accept upvalues")]
     UnresolvedUpvalue,

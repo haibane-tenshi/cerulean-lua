@@ -41,6 +41,10 @@ pub(crate) fn assignment<'s, 'origin>(
                                         frag.emit(OpCode::LoadStack(expr_slot));
                                         frag.emit(OpCode::StoreStack(slot));
                                     }
+                                    Place::Upvalue(slot) => {
+                                        frag.emit(OpCode::LoadStack(expr_slot));
+                                        frag.emit(OpCode::StoreUpvalue(slot));
+                                    }
                                     Place::TableField => {
                                         let table = frag.stack_slot(places_start);
                                         let field = table + 1;

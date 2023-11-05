@@ -1,3 +1,4 @@
+use repr::chunk::UpvalueSource;
 use thiserror::Error;
 
 use crate::parser::prelude::*;
@@ -20,7 +21,7 @@ pub(crate) fn prefix_expr<'s, 'origin>(
                 // Eagerly evaluate place.
                 let (expr_type, span) = output.take();
                 if let PrefixExpr::Place(place) = expr_type {
-                    place.eval(&mut frag);
+                    frag.emit(place.into_opcode());
                 }
                 frag.commit();
 
@@ -70,20 +71,33 @@ pub(crate) fn place<'s, 'origin>(
     }
 }
 
+trait IntoOpcode {
+    fn into_opcode(self) -> OpCode;
+}
+
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum Place {
     Temporary(StackSlot),
+    Upvalue(UpvalueSlot),
     TableField,
 }
 
-impl Place {
-    pub fn eval(self, frag: &mut Fragment) -> InstrId {
-        let opcode = match self {
+impl IntoOpcode for Place {
+    fn into_opcode(self) -> OpCode {
+        match self {
             Place::Temporary(slot) => OpCode::LoadStack(slot),
+            Place::Upvalue(slot) => OpCode::LoadUpvalue(slot),
             Place::TableField => OpCode::TabGet,
-        };
+        }
+    }
+}
 
-        frag.emit(opcode)
+impl IntoOpcode for UpvalueSource {
+    fn into_opcode(self) -> OpCode {
+        match self {
+            UpvalueSource::Temporary(slot) => OpCode::LoadStack(slot),
+            UpvalueSource::Upvalue(slot) => OpCode::LoadUpvalue(slot),
+        }
     }
 }
 
@@ -160,7 +174,7 @@ fn prefix_expr_impl<'s, 'origin>(
 
                     // Evaluate place.
                     if let PrefixExpr::Place(place) = expr_type {
-                        place.eval(&mut frag);
+                        frag.emit(place.into_opcode());
                     }
 
                     // Adjust stack.
@@ -213,7 +227,7 @@ fn head<'s, 'origin>(
         let mut frag = core.expr();
 
         let state = Source(s)
-            .or(variable(&frag).map_failure(|_| Complete))?
+            .or(variable(frag.new_core()).map_failure(|_| Complete))?
             .or(par_expr(frag.new_core())
                 .map_output(|span: Spanned<_>| span.map(|_| PrefixExpr::Expr)))?
             .map_fsource(|_| ());
@@ -346,23 +360,33 @@ fn args_str<'s, 'origin>(
 
 use crate::parser::expr::table::table as args_table;
 
-fn variable<'s, 'a>(
-    frag: &'a Fragment<'s, '_>,
-) -> impl Parse<
+fn variable<'s, 'origin>(
+    core: Core<'s, 'origin>,
+) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<PrefixExpr>,
     Success = Complete,
     Failure = IdentMismatch,
     FailFast = FailFast,
-> + 'a {
+> + 'origin {
     move |s: Lexer<'s>| {
-        let state = identifier(s)?.try_map_output(|output| {
+        let mut frag = core.expr();
+
+        let state = identifier(s)?.try_map_output(|output| -> Result<_, CodegenError> {
             let (ident, span) = output.take();
-            match frag.stack().lookup(ident) {
-                NameLookup::Local(slot) => Ok(span.put(PrefixExpr::Place(Place::Temporary(slot)))),
-                NameLookup::Upvalue => Err(VariableFailure::UnsupportedUpvalue),
-                NameLookup::Global => Err(VariableFailure::UnsupportedGlobal),
-            }
+            let place = match frag.capture_variable(ident) {
+                Some(UpvalueSource::Temporary(slot)) => Place::Temporary(slot),
+                Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot),
+                None => {
+                    let env = frag.capture_global_env()?;
+                    frag.emit(env.into_opcode());
+                    frag.emit_load_literal(Literal::String(ident.to_owned()));
+
+                    Place::TableField
+                }
+            };
+
+            Ok(span.put(PrefixExpr::Place(place)))
         })?;
 
         Ok(state)
