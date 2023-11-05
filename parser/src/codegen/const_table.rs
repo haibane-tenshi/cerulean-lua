@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use repr::index::{ConstCapacityError, ConstId};
-use repr::index_vec::IndexVec;
+use repr::index::ConstId;
 use repr::literal::Literal;
+use repr::tivec::TiVec;
 
 #[derive(Debug, Default)]
 pub struct ConstTable {
-    constants: IndexVec<ConstId, Literal>,
+    constants: TiVec<ConstId, Literal>,
     backlinks: HashMap<Literal, ConstId>,
 }
 
@@ -19,30 +19,28 @@ impl ConstTable {
         ConstTableView::new(self)
     }
 
-    pub fn insert(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {
+    pub fn insert(&mut self, value: Literal) -> ConstId {
         use std::collections::hash_map::Entry;
 
-        let id = match self.backlinks.entry(value) {
+        match self.backlinks.entry(value) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
                 let value = entry.key().clone();
-                let id = self.constants.push(value)?;
+                let id = self.constants.push_and_get_key(value);
                 entry.insert(id);
 
                 id
             }
-        };
-
-        Ok(id)
+        }
     }
 
-    pub fn resolve(self) -> IndexVec<ConstId, Literal> {
+    pub fn resolve(self) -> TiVec<ConstId, Literal> {
         self.constants
     }
 
     fn inner_state(&self) -> InnerState {
         InnerState {
-            constants: self.constants.len(),
+            constants: self.constants.next_key(),
         }
     }
 
@@ -80,12 +78,8 @@ impl<'a> ConstTableView<'a> {
         self.constants
     }
 
-    pub fn try_insert(&mut self, value: Literal) -> Result<ConstId, ConstCapacityError> {
-        self.constants.insert(value)
-    }
-
     pub fn insert(&mut self, value: Literal) -> ConstId {
-        self.try_insert(value).unwrap()
+        self.constants.insert(value)
     }
 
     pub fn commit(self) {

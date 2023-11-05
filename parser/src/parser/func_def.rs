@@ -72,7 +72,7 @@ pub(crate) fn func_body<'s, 'origin>(
             .and(token_end, discard)?
             .map_output(|output| {
                 let (func, span) = output.take();
-                let function_id = envelope.func_table_mut().push(func).unwrap();
+                let function_id = envelope.func_table_mut().push(func);
                 envelope.commit();
 
                 span.put(function_id)
@@ -161,7 +161,7 @@ fn arg_list<'s, 'origin>() -> impl ParseOnce<
             .map_fsource(|_| ())
             .map_output(|output| {
                 let (is_variadic, span) = output.take();
-                let height = idents.len().try_into().unwrap();
+                let height = idents.len();
 
                 let signature = Signature {
                     height,

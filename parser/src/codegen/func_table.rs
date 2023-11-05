@@ -1,10 +1,10 @@
 use repr::chunk::Function;
-use repr::index::{FunctionCapacityError, FunctionId};
-use repr::index_vec::IndexVec;
+use repr::index::FunctionId;
+use repr::tivec::TiVec;
 
 #[derive(Debug, Default)]
 pub struct FuncTable {
-    functions: IndexVec<FunctionId, Function>,
+    functions: TiVec<FunctionId, Function>,
 }
 
 impl FuncTable {
@@ -14,7 +14,7 @@ impl FuncTable {
 
     pub fn with_script() -> Self {
         FuncTable {
-            functions: vec![Default::default()].try_into().unwrap(),
+            functions: vec![Default::default()].into(),
         }
     }
 
@@ -22,20 +22,20 @@ impl FuncTable {
         FuncTableView::new(self)
     }
 
-    pub fn resolve(self) -> IndexVec<FunctionId, Function> {
+    pub fn resolve(self) -> TiVec<FunctionId, Function> {
         self.functions
     }
 
     fn inner_state(&self) -> InnerState {
         InnerState {
-            functions: self.functions.len(),
+            functions: self.functions.next_key(),
         }
     }
 
     fn apply(&mut self, state: InnerState) {
         let InnerState { functions } = state;
 
-        self.functions.truncate(functions);
+        self.functions.truncate(functions.into());
     }
 }
 
@@ -64,8 +64,8 @@ impl<'a> FuncTableView<'a> {
         self.func_table
     }
 
-    pub fn push(&mut self, func: Function) -> Result<FunctionId, FunctionCapacityError> {
-        self.func_table.functions.push(func)
+    pub fn push(&mut self, func: Function) -> FunctionId {
+        self.func_table.functions.push_and_get_key(func)
     }
 
     pub fn commit(self) {

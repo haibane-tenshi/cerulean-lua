@@ -3,14 +3,14 @@ use std::fmt::Display;
 use rle_vec::RleVec;
 
 use crate::index::{ConstId, FunctionId, InstrId, StackSlot, UpvalueSlot};
-use crate::index_vec::IndexVec;
 use crate::literal::Literal;
 use crate::opcode::OpCode;
+use crate::tivec::TiVec;
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
-    pub functions: IndexVec<FunctionId, Function>,
-    pub constants: IndexVec<ConstId, Literal>,
+    pub functions: TiVec<FunctionId, Function>,
+    pub constants: TiVec<ConstId, Literal>,
 }
 
 impl Chunk {
@@ -46,7 +46,7 @@ impl Display for Chunk {
 
 #[derive(Debug, Clone, Default)]
 pub struct Function {
-    pub codes: IndexVec<InstrId, OpCode>,
+    pub codes: TiVec<InstrId, OpCode>,
     pub lines: RleVec<u32>,
     pub signature: Signature,
 }
@@ -88,9 +88,9 @@ impl Display for Function {
 
 #[derive(Debug, Clone, Default)]
 pub struct Signature {
-    pub height: u32,
+    pub height: usize,
     pub is_variadic: bool,
-    pub upvalues: IndexVec<UpvalueSlot, UpvalueSource>,
+    pub upvalues: TiVec<UpvalueSlot, UpvalueSource>,
 }
 
 #[derive(Debug, Copy, Clone)]

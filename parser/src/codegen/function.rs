@@ -1,17 +1,17 @@
 use repr::chunk::UpvalueSource;
-use repr::index::{InstrCountError, InstrId, UpvalueSlot};
-use repr::index_vec::IndexVec;
+use repr::index::{InstrId, UpvalueSlot};
 use repr::opcode::OpCode;
+use repr::tivec::TiVec;
 
 #[derive(Debug, Clone, Default)]
 pub struct Signature {
-    pub height: u32,
+    pub height: usize,
     pub is_variadic: bool,
 }
 
 #[derive(Debug)]
 pub struct Function {
-    opcodes: IndexVec<InstrId, OpCode>,
+    opcodes: TiVec<InstrId, OpCode>,
     signature: Signature,
 }
 
@@ -27,7 +27,7 @@ impl Function {
         FunctionView::new(self)
     }
 
-    pub fn resolve(self, upvalues: IndexVec<UpvalueSlot, UpvalueSource>) -> repr::chunk::Function {
+    pub fn resolve(self, upvalues: TiVec<UpvalueSlot, UpvalueSource>) -> repr::chunk::Function {
         let Function {
             opcodes: codes,
             signature:
@@ -52,14 +52,14 @@ impl Function {
 
     fn state(&self) -> InnerState {
         InnerState {
-            start: self.opcodes.len(),
+            start: self.opcodes.next_key(),
         }
     }
 
     fn apply(&mut self, state: InnerState) {
         let InnerState { start } = state;
 
-        self.opcodes.truncate(start);
+        self.opcodes.truncate(start.into());
     }
 }
 
@@ -94,11 +94,11 @@ impl<'fun> FunctionView<'fun> {
     }
 
     pub fn len(&self) -> InstrId {
-        self.fun.opcodes.len()
+        self.fun.opcodes.next_key()
     }
 
-    pub fn emit(&mut self, opcode: OpCode) -> Result<InstrId, InstrCountError> {
-        self.fun.opcodes.push(opcode)
+    pub fn emit(&mut self, opcode: OpCode) -> InstrId {
+        self.fun.opcodes.push_and_get_key(opcode)
     }
 
     pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {

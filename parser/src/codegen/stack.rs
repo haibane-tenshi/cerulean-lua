@@ -1,7 +1,7 @@
 use super::fragment::EmitError;
 use repr::index::StackSlot;
-use repr::index_vec::{Index, IndexVec};
 use repr::opcode::OpCode;
+use repr::tivec::TiVec;
 use std::collections::HashMap;
 use std::ops::{Add, AddAssign, BitOr, Sub, SubAssign};
 use thiserror::Error;
@@ -9,7 +9,7 @@ use thiserror::Error;
 pub(crate) use repr::index::StackOffset;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
-struct GlobalStackSlot(pub u32);
+struct GlobalStackSlot(usize);
 
 impl GlobalStackSlot {
     fn checked_sub(self, rhs: Self) -> Option<StackOffset> {
@@ -18,21 +18,15 @@ impl GlobalStackSlot {
     }
 }
 
-#[derive(Debug, Error)]
-#[error("number of temporaries on the stack exceeded the limit")]
-pub struct StackOverflowError;
-
-impl Index for GlobalStackSlot {
-    type Error = StackOverflowError;
-    const MAX: Self = GlobalStackSlot(u32::MAX);
-
-    fn try_from(val: usize) -> Result<Self, Self::Error> {
-        let inner = val.try_into().map_err(|_| StackOverflowError)?;
-        Ok(GlobalStackSlot(inner))
+impl From<usize> for GlobalStackSlot {
+    fn from(value: usize) -> Self {
+        GlobalStackSlot(value)
     }
+}
 
-    fn into(self) -> usize {
-        self.0.try_into().expect("u32 should fit into usize")
+impl From<GlobalStackSlot> for usize {
+    fn from(value: GlobalStackSlot) -> Self {
+        value.0
     }
 }
 
@@ -76,7 +70,7 @@ impl Sub for GlobalStackSlot {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
-pub struct FragmentStackSlot(pub(crate) u32);
+pub struct FragmentStackSlot(pub(crate) usize);
 
 // impl FragmentStackSlot {
 //     pub fn checked_sub(self, other: Self) -> Option<StackOffset> {
@@ -100,16 +94,16 @@ impl Add<StackOffset> for FragmentStackSlot {
     }
 }
 
-impl AddAssign<u32> for FragmentStackSlot {
-    fn add_assign(&mut self, rhs: u32) {
+impl AddAssign<usize> for FragmentStackSlot {
+    fn add_assign(&mut self, rhs: usize) {
         self.0 += rhs;
     }
 }
 
-impl Add<u32> for FragmentStackSlot {
+impl Add<usize> for FragmentStackSlot {
     type Output = Self;
 
-    fn add(mut self, rhs: u32) -> Self::Output {
+    fn add(mut self, rhs: usize) -> Self::Output {
         self += rhs;
         self
     }
@@ -159,14 +153,14 @@ impl BitOr for StackState {
 
 #[derive(Debug, Default)]
 struct UnqualifiedStack<'s> {
-    temporaries: IndexVec<GlobalStackSlot, Option<&'s str>>,
+    temporaries: TiVec<GlobalStackSlot, Option<&'s str>>,
     backlinks: Backlinks<'s>,
     variadic: bool,
 }
 
 impl<'s> UnqualifiedStack<'s> {
     fn len(&self) -> GlobalStackSlot {
-        self.temporaries.len()
+        self.temporaries.next_key()
     }
 
     fn push(&mut self, name: Option<&'s str>) -> Result<GlobalStackSlot, PushError> {
@@ -174,7 +168,7 @@ impl<'s> UnqualifiedStack<'s> {
             return Err(VariadicStackError.into());
         }
 
-        let slot = self.temporaries.push(name)?;
+        let slot = self.temporaries.push_and_get_key(name);
         if let Some(name) = name {
             self.backlinks.add(slot, name);
         }
@@ -216,9 +210,9 @@ impl<'s> UnqualifiedStack<'s> {
         let r = match Ord::cmp(&self.len(), &slot) {
             Ordering::Equal => false,
             Ordering::Less => {
-                let count = Index::into(slot) - Index::into(self.len());
-                let iter = std::iter::repeat(None).take(count);
-                self.temporaries.extend(iter).unwrap();
+                let count = slot - self.len();
+                self.temporaries
+                    .extend(std::iter::repeat(None).take(count.into()));
 
                 true
             }
@@ -246,12 +240,12 @@ struct StackFrame<'s> {
 
 impl<'s> StackFrame<'s> {
     fn frame_to_global(&self, slot: StackSlot) -> GlobalStackSlot {
-        self.frame_base + (slot - StackSlot::default())
+        self.frame_base + (slot - StackSlot(0))
     }
 
     fn global_to_frame(&self, slot: GlobalStackSlot) -> Option<StackSlot> {
         let offset = slot.checked_sub(self.frame_base)?;
-        let r = StackSlot::default() + offset;
+        let r = StackSlot(0) + offset;
 
         Some(r)
     }
@@ -376,13 +370,25 @@ impl<'s> Stack<'s> {
     fn iter(&self) -> impl Iterator<Item = &Option<&'s str>> {
         let start = self.stack.frame_to_global(self.boundary);
 
-        self.stack.stack.temporaries.range(start..).iter()
+        self.stack
+            .stack
+            .temporaries
+            .get(start..)
+            .unwrap_or_default()
+            .iter()
     }
 
     fn remove_idents(&mut self) {
         let start = self.stack.frame_to_global(self.boundary);
 
-        for slot in self.stack.stack.temporaries.range_mut(start..).iter_mut() {
+        for slot in self
+            .stack
+            .stack
+            .temporaries
+            .get_mut(start..)
+            .unwrap_or_default()
+            .iter_mut()
+        {
             if let Some(name) = slot.take() {
                 self.stack.stack.backlinks.pop(name)
             }
@@ -487,7 +493,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
 
     pub fn new_frame<'a>(stack: &'a mut Stack<'s>) -> StackView<'s, 'a> {
         let inner_state = stack.inner_state();
-        let frame_base = stack.stack.stack.temporaries.len();
+        let frame_base = stack.stack.stack.temporaries.next_key();
 
         stack.stack.stack.variadic = false;
         stack.stack.frame_base = frame_base;
@@ -715,9 +721,6 @@ pub struct BoundaryViolationError;
 pub enum PushError {
     #[error("attempt to push value onto variadic stack")]
     Variadic(#[from] VariadicStackError),
-
-    #[error("too many temporaries on the stack")]
-    Overflow(#[from] StackOverflowError),
 }
 
 #[derive(Debug, Error)]

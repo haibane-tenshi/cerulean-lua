@@ -4,9 +4,9 @@ use std::rc::Rc;
 
 use repr::chunk::Chunk;
 use repr::index::{ConstId, FunctionId, InstrId, StackSlot, UpvalueSlot};
-use repr::index_vec::{IndexSlice, IndexVec};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
+use repr::tivec::{TiSlice, TiVec};
 
 use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackView};
@@ -61,7 +61,7 @@ impl FunctionPtr {
 #[derive(Debug, Clone)]
 pub struct Closure {
     fn_ptr: FunctionPtr,
-    upvalues: IndexVec<UpvalueSlot, UpvalueId>,
+    upvalues: TiVec<UpvalueSlot, UpvalueId>,
 }
 
 #[derive(Debug, Clone)]
@@ -211,8 +211,8 @@ impl Frame {
 pub struct ActiveFrame<'rt> {
     closure: ClosureRef,
     chunk: &'rt Chunk,
-    constants: &'rt IndexSlice<ConstId, Literal>,
-    opcodes: &'rt IndexSlice<InstrId, OpCode>,
+    constants: &'rt TiSlice<ConstId, Literal>,
+    opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
     stack: StackView<'rt>,
     upvalue_stack: UpvalueView<'rt>,
@@ -554,21 +554,20 @@ impl<'rt> ActiveFrame<'rt> {
             .ok_or(RuntimeError)?
             .signature;
 
-        // To fix: remove this later when IndexVec is fixed.
-        let mut upvalues = IndexVec::new();
-        for value in signature.upvalues.iter().map(|&source| {
-            use repr::chunk::UpvalueSource;
+        let upvalues = signature
+            .upvalues
+            .iter()
+            .map(|&source| {
+                use repr::chunk::UpvalueSource;
 
-            match source {
-                UpvalueSource::Temporary(slot) => self.stack.mark_as_upvalue(slot),
-                UpvalueSource::Upvalue(slot) => {
-                    self.closure.upvalues.get(slot).copied().ok_or(RuntimeError)
+                match source {
+                    UpvalueSource::Temporary(slot) => self.stack.mark_as_upvalue(slot),
+                    UpvalueSource::Upvalue(slot) => {
+                        self.closure.upvalues.get(slot).copied().ok_or(RuntimeError)
+                    }
                 }
-            }
-        }) {
-            let value = value?;
-            let _ = upvalues.push(value);
-        }
+            })
+            .collect::<Result<_, _>>()?;
 
         let r = Closure { fn_ptr, upvalues };
 

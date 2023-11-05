@@ -10,18 +10,11 @@ pub(crate) struct ProtectedSize(pub(crate) usize);
 
 impl ProtectedSize {
     pub(crate) fn index(self, slot: UpvalueSlot) -> usize {
-        let offset: usize = slot
-            .0
-            .try_into()
-            .expect("upvalue index should fit into usize");
-        self.0 + offset
+        self.0 + slot.0
     }
 
     pub(crate) fn slot(self, index: usize) -> Option<UpvalueSlot> {
         let offset = index.checked_sub(self.0)?;
-        let offset = offset
-            .try_into()
-            .expect("upvalue offset should fit into u32");
 
         Some(UpvalueSlot(offset))
     }

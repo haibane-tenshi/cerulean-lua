@@ -44,7 +44,7 @@ pub(crate) fn local_assignment<'s, 'origin>(
             .map_output(|output| {
                 let (idents, span) = output.take();
 
-                let count: u32 = idents.len().try_into().unwrap();
+                let count = idents.len();
 
                 frag.emit_adjust_to(stack_start + count);
 

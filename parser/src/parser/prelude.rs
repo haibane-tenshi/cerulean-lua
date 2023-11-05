@@ -1,5 +1,5 @@
 pub(crate) use crate::codegen::fragment::{Core, Fragment};
-pub(crate) use crate::codegen::stack::{FragmentStackSlot, NameLookup};
+pub(crate) use crate::codegen::stack::FragmentStackSlot;
 pub(crate) use crate::lex::{Lexer, Number, Token};
 pub(crate) use crate::parser::basic::*;
 pub(crate) use crate::parser::error::{

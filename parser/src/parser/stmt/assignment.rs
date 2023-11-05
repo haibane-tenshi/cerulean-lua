@@ -29,7 +29,7 @@ pub(crate) fn assignment<'s, 'origin>(
                 |s| -> Result<_, FailFast> {
                     let (places, span) = places.take();
 
-                    let count = places.len().try_into().unwrap();
+                    let count = places.len();
                     let expr_start = frag.stack().len();
                     let status = expr_list_adjusted_to(count, frag.new_core())
                         .parse_once(s)?

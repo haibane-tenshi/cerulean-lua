@@ -11,17 +11,11 @@ pub(crate) struct RawStackSlot(pub(crate) usize);
 
 impl RawStackSlot {
     pub(crate) fn index(self, slot: StackSlot) -> RawStackSlot {
-        let offset: usize = slot
-            .0
-            .try_into()
-            .expect("stack index should fit into usize");
-
-        RawStackSlot(self.0 + offset)
+        RawStackSlot(self.0 + slot.0)
     }
 
     pub(crate) fn slot(self, index: RawStackSlot) -> Option<StackSlot> {
         let offset = index.0.checked_sub(self.0)?;
-        let offset = offset.try_into().expect("stack offset should fit into u32");
 
         Some(StackSlot(offset))
     }

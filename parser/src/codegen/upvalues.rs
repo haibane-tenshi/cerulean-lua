@@ -1,9 +1,9 @@
 use repr::index::UpvalueSlot;
-use repr::index_vec::IndexVec;
+use repr::tivec::TiVec;
 
 #[derive(Debug, Default)]
 pub struct Upvalues<'s> {
-    store: IndexVec<UpvalueSlot, &'s str>,
+    store: TiVec<UpvalueSlot, &'s str>,
 }
 
 impl<'s> Upvalues<'s> {
@@ -24,7 +24,7 @@ impl<'s> Upvalues<'s> {
         // In this situation not only linear search will perform just fine
         // but we also get rid of headache of properly handling backlinks.
         self.store
-            .indexed_iter()
+            .iter_enumerated()
             .find_map(|(slot, &upvalue_name)| (upvalue_name == ident).then_some(slot))
     }
 
@@ -33,22 +33,22 @@ impl<'s> Upvalues<'s> {
             return slot;
         }
 
-        self.store.push(ident).unwrap()
+        self.store.push_and_get_key(ident)
     }
 
     fn inner_state(&self) -> InnerState {
         InnerState {
-            store_len: self.store.len(),
+            store_len: self.store.next_key(),
         }
     }
 
     fn apply(&mut self, state: InnerState) {
         let InnerState { store_len } = state;
 
-        self.store.truncate(store_len);
+        self.store.truncate(store_len.into());
     }
 
-    pub fn resolve(self) -> IndexVec<UpvalueSlot, &'s str> {
+    pub fn resolve(self) -> TiVec<UpvalueSlot, &'s str> {
         self.store
     }
 }

@@ -13,7 +13,7 @@ use crate::codegen::stack::{
 };
 use crate::codegen::upvalues::{Upvalues, UpvaluesView};
 use repr::chunk::UpvalueSource;
-use repr::index::{ConstCapacityError, InstrCountError, InstrId, StackSlot};
+use repr::index::{InstrId, StackSlot};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
 
@@ -221,7 +221,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     pub fn try_emit(&mut self, instr: OpCode) -> Result<InstrId, EmitError> {
         self.stack.emit(&instr)?;
         self.reachability.emit(&instr);
-        let r = self.fun.emit(instr)?;
+        let r = self.fun.emit(instr);
 
         Ok(r)
     }
@@ -308,7 +308,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &mut self,
         literal: Literal,
     ) -> Result<InstrId, EmitLoadLiteralError> {
-        let const_id = self.const_table.try_insert(literal)?;
+        let const_id = self.const_table.insert(literal);
         let instr_id = self.try_emit(OpCode::LoadConstant(const_id))?;
 
         Ok(instr_id)
@@ -481,7 +481,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             && stack.need_adjustment_to(FragmentStackSlot(0))
         {
             let slot = stack.fragment_to_frame(FragmentStackSlot(0));
-            fun.emit(OpCode::AdjustStack(slot)).unwrap();
+            fun.emit(OpCode::AdjustStack(slot));
         }
 
         labels.commit(kind);
@@ -499,15 +499,12 @@ pub enum EmitError {
     AdjustStack(#[from] BoundaryViolationError),
     #[error("invoked pointing at stack slot above stack top")]
     InvokeOutsideStackBoundary,
-    InstrCount(#[from] InstrCountError),
 }
 
 #[derive(Debug, Error)]
 pub enum EmitLoadLiteralError {
     #[error(transparent)]
     Emit(#[from] EmitError),
-    #[error(transparent)]
-    Literal(#[from] ConstCapacityError),
 }
 
 #[derive(Debug)]

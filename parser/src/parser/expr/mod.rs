@@ -12,7 +12,7 @@ use crate::parser::prelude::*;
 pub(crate) use expr::expr;
 
 pub(crate) fn expr_adjusted_to<'s, 'origin>(
-    count: u32,
+    count: usize,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -133,7 +133,7 @@ pub(crate) enum ExprListError {
 }
 
 pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
-    count: u32,
+    count: usize,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,

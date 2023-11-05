@@ -54,7 +54,7 @@ pub(crate) fn generic_for<'s, 'origin>(
                     let mut loop_body = envelope.new_scope();
                     loop_body.mark_as_loop();
                     let mark = loop_body.stack().len();
-                    let count: u32 = names.len().try_into().unwrap();
+                    let count = names.len();
                     let iterator = loop_body.stack_slot(mark);
 
                     loop_body.emit(OpCode::LoadStack(iter));
