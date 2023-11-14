@@ -17,11 +17,16 @@ pub(crate) fn break_<'s, 'origin>(
 
         let mut frag = core.decl();
 
+        let source = s.source();
+        let _span = trace_span!("break").entered();
+
         let state = token_break
             .parse(s)?
             .try_map_output(|span| -> Result<_, CodegenError> {
                 frag.emit_break()?;
                 frag.commit();
+
+                trace!(span=?span.span(), str=&source[span.span()]);
 
                 Ok(span)
             })?;

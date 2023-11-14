@@ -48,6 +48,9 @@ pub(crate) fn numerical_for<'s, 'origin>(
         let mut envelope = core.scope();
         let envelope_id = envelope.id();
 
+        let source = s.source();
+        let _span = trace_span!("for_numeric").entered();
+
         let state = Source(s)
             .and(token_for)?
             .with_mode(FailureMode::Ambiguous)
@@ -197,7 +200,11 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 }
             })?
             .collapse()
-            .inspect(|_| envelope.commit());
+            .inspect(|output| {
+                envelope.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
+            });
 
         Ok(state)
     }

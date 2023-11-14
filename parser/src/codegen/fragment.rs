@@ -1,5 +1,6 @@
 use std::ops::Add;
 use thiserror::Error;
+use tracing::trace;
 
 use repr::chunk::UpvalueSource;
 use repr::index::{InstrId, StackSlot};
@@ -118,6 +119,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             labels.view_expr()
         };
 
+        // trace!(?fragment_id, "construct");
+
         Fragment {
             fragment_id,
             func_table,
@@ -160,6 +163,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             labels.view_expr()
         };
 
+        // trace!(?fragment_id, "construct");
+
         Fragment {
             fragment_id,
             func_table,
@@ -194,6 +199,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     pub fn capture_variable(&mut self, ident: Ident<'s>) -> Option<UpvalueSource> {
         use super::stack::NameLookup;
 
+        trace!(fragment_id=?self.id(), %ident, "capture variable");
+
         match self.stack.lookup(ident) {
             NameLookup::Local(slot) => Some(UpvalueSource::Temporary(slot)),
             NameLookup::Upvalue => {
@@ -218,13 +225,17 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 
     pub fn mark_as_loop(&mut self) {
+        trace!(fragment_id=?self.id(), "mark as loop body");
+
         self.loop_stack.push(self.id())
     }
 
-    pub fn try_emit(&mut self, instr: OpCode) -> Result<InstrId, EmitError> {
-        self.stack.emit(&instr)?;
-        self.reachability.emit(&instr);
-        let r = self.fun.emit(instr);
+    pub fn try_emit(&mut self, opcode: OpCode) -> Result<InstrId, EmitError> {
+        self.stack.emit(&opcode)?;
+        self.reachability.emit(&opcode);
+        let r = self.fun.emit(opcode);
+
+        trace!(fragment_id=?self.id(), ?opcode, "emit opcode");
 
         Ok(r)
     }
@@ -235,15 +246,25 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             self.labels.push_last_binding(marker);
         }
 
-        self.stack.push(name)
+        let r = self.stack.push(name);
+
+        trace!(fragment_id=?self.id(), ?name, "push temporary");
+
+        r
     }
 
     pub fn pop_temporary(&mut self) {
-        self.stack.pop()
+        self.stack.pop();
+
+        trace!(fragment_id=?self.id(), "pop temporary");
     }
 
     pub fn adjust_stack_to(&mut self, height: FragmentStackSlot) -> bool {
-        self.stack.adjust_to(height)
+        let r = self.stack.adjust_to(height);
+
+        trace!(fragment_id=?self.id(), ?height, "adjust stack");
+
+        r
     }
 
     pub fn emit(&mut self, instr: OpCode) -> InstrId {
@@ -261,6 +282,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         } else {
             None
         };
+
+        trace!(fragment_id=?self.id(), ?slot, "emitted optional AdjustStack");
 
         Ok(instr_id)
     }
@@ -288,6 +311,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.jumps
             .register_jump(target, instr_id, self.stack.state());
 
+        trace!(fragment_id=?self.id(), ?target, "emit jump to end of target fragment");
+
         Ok(instr_id)
     }
 
@@ -299,6 +324,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.try_emit_adjust_to(FragmentStackSlot(0))?;
         let offset = self.fun.len() - self.fun.start() + 1;
         self.try_emit(OpCode::Loop { offset })?;
+
+        trace!(fragment_id=?self.id(), "emit jump to start of current fragment");
 
         Ok(())
     }
@@ -342,6 +369,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         // This worsens codegen in some cases, but those should be rather rare.
         self.reachability.make_reachable();
 
+        trace!(fragment_id=?self.id(), ?label, "emit label");
+
         Ok(instr_id)
     }
 
@@ -349,7 +378,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let target = self.fun.len();
 
         let opcode = self.labels.goto(label, target);
-        self.try_emit(opcode)
+        let r = self.try_emit(opcode)?;
+
+        trace!(fragment_id=?self.id(), ?label, "emit jump to label");
+
+        Ok(r)
     }
 
     pub fn emit_goto(&mut self, label: Ident<'s>) -> InstrId {
@@ -362,6 +395,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             .innermost_loop()
             .ok_or(BreakOutsideLoopError)?;
         let instr_id = self.emit_jump_to(target, None);
+
+        trace!(fragment_id=?self.id(), "emit break statement");
 
         Ok(instr_id)
     }
@@ -448,7 +483,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
     pub fn commit(self) {
         let Fragment {
-            fragment_id: _,
+            fragment_id,
             func_table,
             const_table,
             mut fun,
@@ -491,6 +526,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         fun.commit();
         upvalues.commit();
         stack.commit(kind);
+
+        trace!(?fragment_id, "commit");
     }
 }
 

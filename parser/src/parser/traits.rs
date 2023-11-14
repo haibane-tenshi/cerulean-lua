@@ -844,6 +844,10 @@ pub struct Spanned<T> {
 }
 
 impl<T> Spanned<T> {
+    pub fn span(&self) -> Range<usize> {
+        self.span.clone()
+    }
+
     pub fn replace<U>(self, new_value: U) -> (T, Spanned<U>) {
         let Spanned { value, span } = self;
 

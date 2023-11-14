@@ -21,6 +21,9 @@ pub(crate) fn return_<'s, 'origin>(
         let mut frag = core.scope();
         let return_values = frag.stack_slot(frag.stack().len());
 
+        let source = s.source();
+        let _span = trace_span!("return").entered();
+
         let state = Source(s)
             .and(token_return)?
             .with_mode(FailureMode::Malformed)
@@ -31,9 +34,11 @@ pub(crate) fn return_<'s, 'origin>(
                     .map_success(ParseFailureOrComplete::Complete),
                 opt_discard,
             )?
-            .inspect(|_| {
+            .inspect(|output| {
                 frag.emit(OpCode::Return(return_values));
                 frag.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
             })
             .collapse();
 

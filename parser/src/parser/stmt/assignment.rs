@@ -20,6 +20,9 @@ pub(crate) fn assignment<'s, 'origin>(
         let mut frag = core.scope();
         let mut places_start = frag.stack().len();
 
+        let source = s.source();
+        let _span = trace_span!("assignment").entered();
+
         let state = places(frag.new_core())
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
@@ -63,7 +66,11 @@ pub(crate) fn assignment<'s, 'origin>(
                     Ok(status)
                 }
             })?
-            .inspect(|_| frag.commit())
+            .inspect(|output| {
+                frag.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
+            })
             .collapse();
 
         Ok(state)

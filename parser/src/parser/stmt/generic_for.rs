@@ -26,6 +26,9 @@ pub(crate) fn generic_for<'s, 'origin>(
 
         let mut envelope = core.scope();
 
+        let source = s.source();
+        let _span = trace_span!("for_generic").entered();
+
         let state = Source(s)
             .and(token_for)?
             .with_mode(FailureMode::Ambiguous)
@@ -95,7 +98,11 @@ pub(crate) fn generic_for<'s, 'origin>(
                 }
             })?
             .collapse()
-            .inspect(move |_| envelope.commit());
+            .inspect(move |output| {
+                envelope.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
+            });
 
         Ok(state)
     }

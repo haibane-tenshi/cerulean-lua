@@ -91,6 +91,8 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::stack::Stack;
     use crate::parser::block::block;
 
+    let _span = trace_span!("chunk").entered();
+
     // Reserve 0-th slot in table for the script itself.
     let mut func_table = FuncTable::with_script();
     let mut const_table = ConstTable::new();

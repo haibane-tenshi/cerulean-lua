@@ -14,3 +14,4 @@ logos = "0.13.0"
 repr = { version = "0.1.0", path = "../repr" }
 static_assertions = "1.1.0"
 thiserror = "1.0.40"
+tracing = "0.1.40"

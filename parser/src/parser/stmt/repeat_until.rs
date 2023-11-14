@@ -21,6 +21,10 @@ pub(crate) fn repeat_until<'s, 'origin>(
 
         let mut envelope = core.scope();
         let envelope_id = envelope.id();
+
+        let source = s.source();
+        let _span = trace_span!("repeat_until").entered();
+
         let mut loop_body = envelope.new_scope();
         loop_body.mark_as_loop();
 
@@ -35,7 +39,11 @@ pub(crate) fn repeat_until<'s, 'origin>(
                 loop_body.emit_loop_to();
                 loop_body.commit();
             })
-            .inspect(|_| envelope.commit())
+            .inspect(|output| {
+                envelope.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
+            })
             .collapse();
 
         Ok(state)

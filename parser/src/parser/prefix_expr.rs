@@ -15,6 +15,9 @@ pub(crate) fn prefix_expr<'s, 'origin>(
     move |s: Lexer<'s>| {
         let mut frag = core.expr();
 
+        let source = s.source();
+        let _span = trace_span!("prefix_expr").entered();
+
         let state = prefix_expr_impl(frag.new_core())
             .parse_once(s)?
             .map_output(|output| {
@@ -24,6 +27,8 @@ pub(crate) fn prefix_expr<'s, 'origin>(
                     frag.emit(place.into_opcode());
                 }
                 frag.commit();
+
+                trace!(span=?span.span(), str=&source[span.span()]);
 
                 span
             });
@@ -43,6 +48,9 @@ pub(crate) fn place<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         let mut frag = core.expr();
+
+        let source = s.source();
+        let _span = trace_span!("place").entered();
 
         let state = prefix_expr_impl(frag.new_core())
             .parse_once(s)?
@@ -65,6 +73,9 @@ pub(crate) fn place<'s, 'origin>(
 
                     Err(err)
                 }
+            })
+            .inspect(|output| {
+                trace!(span=?output.span(), str=&source[output.span()]);
             });
 
         Ok(state)
@@ -120,6 +131,9 @@ pub(crate) fn func_call<'s, 'origin>(
         // Function calls leave stack in variadic state, so we need to scope it when it is used as statement.
         let mut frag = core.scope();
 
+        let source = s.source();
+        let _span = trace_span!("fn_call").entered();
+
         let state = prefix_expr_impl(frag.new_core())
             .parse_once(s)?
             .transform(|output| {
@@ -132,9 +146,12 @@ pub(crate) fn func_call<'s, 'origin>(
 
                     Err(err.into())
                 }
-            });
+            })
+            .inspect(|output| {
+                frag.commit();
 
-        frag.commit();
+                trace!(span=?output.span(), str=&source[output.span()]);
+            });
 
         Ok(state)
     }

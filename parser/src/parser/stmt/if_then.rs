@@ -25,6 +25,9 @@ pub(crate) fn if_then<'s, 'origin>(
         let mut envelope = core.scope();
         let envelope_id = envelope.id();
 
+        let source = s.source();
+        let _span = trace_span!("if_then").entered();
+
         let state = Source(s)
             .and(token_if)?
             .with_mode(FailureMode::Malformed)
@@ -56,8 +59,10 @@ pub(crate) fn if_then<'s, 'origin>(
             )?
             .and(else_clause(envelope.new_core()).optional(), opt_discard)?
             .and(token_end, discard)?
-            .inspect(|_| {
+            .inspect(|output| {
                 envelope.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
             })
             .collapse();
 

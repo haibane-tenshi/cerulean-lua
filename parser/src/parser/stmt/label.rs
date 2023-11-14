@@ -18,6 +18,9 @@ pub(crate) fn label<'s, 'origin>(
 
         let mut frag = core.decl();
 
+        let source = s.source();
+        let _span = trace_span!("label").entered();
+
         let state = Source(s)
             .and(token_double_colon)?
             .with_mode(FailureMode::Malformed)
@@ -28,6 +31,8 @@ pub(crate) fn label<'s, 'origin>(
 
                 frag.try_emit_label(label)?;
                 frag.commit();
+
+                trace!(span=?span.span(), str=&source[span.span()]);
 
                 Ok(span)
             })?

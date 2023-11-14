@@ -38,6 +38,9 @@ pub(crate) fn statement<'s, 'origin>(
         use repeat_until::repeat_until;
         use while_do::while_do;
 
+        let source = s.source();
+        let _span = trace_span!("stmt").entered();
+
         let mut frag = core.decl();
 
         let state = Source(s)
@@ -63,7 +66,11 @@ pub(crate) fn statement<'s, 'origin>(
 
                 f.arrow(err)
             })
-            .inspect(|_| frag.commit());
+            .inspect(|output| {
+                frag.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
+            });
 
         Ok(state)
     }

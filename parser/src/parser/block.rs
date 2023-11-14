@@ -35,6 +35,9 @@ pub(crate) fn inner_block<'s, 'origin>(
 
         let mut frag = core.decl();
 
+        let source = s.source();
+        let _span = trace_span!("block").entered();
+
         let statement = |s: Lexer<'s>| statement(frag.new_core()).parse_once(s);
 
         let state = statement
@@ -66,8 +69,13 @@ pub(crate) fn inner_block<'s, 'origin>(
                     (Some(t), Some(u)) => Some(discard(t, u)),
                 },
             )?
-            .inspect(move |_| {
+            .inspect(move |output| {
                 frag.commit();
+
+                match output {
+                    Some(output) => trace!(span=?output.span(), str=&source[output.span()]),
+                    None => trace!(str = ""),
+                };
             });
 
         Ok(state)

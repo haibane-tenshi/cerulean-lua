@@ -15,6 +15,9 @@ pub(crate) fn do_end<'s, 'origin>(
 
         let mut frag = core.scope();
 
+        let source = s.source();
+        let _span = trace_span!("do_end").entered();
+
         let token_do =
             match_token(Token::Do).map_failure(|f| ParseFailure::from(DoEndFailure::Do(f)));
         let token_end =
@@ -25,8 +28,10 @@ pub(crate) fn do_end<'s, 'origin>(
             .with_mode(FailureMode::Malformed)
             .and(block(frag.new_core()), opt_discard)?
             .and(token_end, discard)?
-            .inspect(move |_| {
+            .inspect(move |output| {
                 frag.commit();
+
+                trace!(span=?output.span(), str=&source[output.span()]);
             })
             .collapse();
 

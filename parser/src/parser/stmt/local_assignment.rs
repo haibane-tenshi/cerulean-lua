@@ -23,6 +23,9 @@ pub(crate) fn local_assignment<'s, 'origin>(
         let mut frag = core.decl();
         let stack_start = frag.stack().len();
 
+        let source = s.source();
+        let _span = trace_span!("local_assignment").entered();
+
         let state = Source(s)
             .and(token_local)?
             .with_mode(FailureMode::Ambiguous)
@@ -55,6 +58,8 @@ pub(crate) fn local_assignment<'s, 'origin>(
                 }
 
                 frag.commit();
+
+                trace!(span=?span.span(), str=&source[span.span()]);
 
                 span
             })

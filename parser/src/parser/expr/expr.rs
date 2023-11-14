@@ -13,6 +13,9 @@ pub(crate) fn expr<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |mut s: Lexer<'s>| {
+        let source = s.source();
+        let _span = trace_span!("expr").entered();
+
         let r = expr_impl(0, frag)
             .parse_once(s.clone())?
             .map_failure(|failure| {
@@ -26,6 +29,9 @@ pub(crate) fn expr<'s, 'origin>(
                     unreachable!("there should be no ops with binding power below 0")
                 }
                 ExprSuccess::Parsing(success) => success,
+            })
+            .inspect(|output| {
+                trace!(span=?output.span(), str=&source[output.span()]);
             });
 
         Ok(r)

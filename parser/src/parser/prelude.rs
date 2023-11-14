@@ -15,3 +15,4 @@ pub(crate) use crate::parser::{Eof, NextToken};
 pub(crate) use repr::index::{ConstId, InstrId, StackSlot, UpvalueSlot};
 pub(crate) use repr::literal::Literal;
 pub(crate) use repr::opcode::{AriBinOp, BitBinOp, OpCode, RelBinOp, StrBinOp};
+pub(crate) use tracing::{trace, trace_span};

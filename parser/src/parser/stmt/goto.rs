@@ -18,6 +18,9 @@ pub(crate) fn goto<'s, 'origin>(
 
         let mut frag = core.decl();
 
+        let source = s.source();
+        let _span = trace_span!("goto").entered();
+
         let state = Source(s)
             .and(token_goto)?
             .with_mode(FailureMode::Malformed)
@@ -27,6 +30,8 @@ pub(crate) fn goto<'s, 'origin>(
 
                 frag.emit_goto(label);
                 frag.commit();
+
+                trace!(span=?span.span(), str=&source[span.span()]);
 
                 span
             })

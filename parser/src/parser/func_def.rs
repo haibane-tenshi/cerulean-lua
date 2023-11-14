@@ -22,6 +22,9 @@ pub(crate) fn func_body<'s, 'origin>(
 
         let mut envelope = core.scope();
 
+        let source = s.source();
+        let _span = trace_span!("fn_body").entered();
+
         let state = Source(s)
             .and(token_par_l)?
             .with_mode(FailureMode::Ambiguous)
@@ -74,6 +77,9 @@ pub(crate) fn func_body<'s, 'origin>(
                 let (func, span) = output.take();
                 let function_id = envelope.func_table_mut().push(func);
                 envelope.commit();
+
+                trace!(?function_id, "new function");
+                trace!(span=?span.span(), str=&source[span.span()]);
 
                 span.put(function_id)
             })

@@ -22,6 +22,9 @@ pub(crate) fn local_function<'s, 'origin>(
 
         let mut frag = core.decl();
 
+        let source = s.source();
+        let _span = trace_span!("local_function").entered();
+
         let state = Source(s)
             .and(token_local)?
             .with_mode(FailureMode::Ambiguous)
@@ -44,6 +47,8 @@ pub(crate) fn local_function<'s, 'origin>(
                 // Stack is already adjusted, remove unnecessary temporary.
                 frag.pop_temporary();
                 frag.commit();
+
+                trace!(span=?span.span(), str=&source[span.span()]);
 
                 span
             })
