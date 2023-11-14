@@ -27,17 +27,17 @@ impl Display for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "== chunk ==")?;
 
-        writeln!(f, "==constant table==")?;
+        writeln!(f, "== constant table ==")?;
         for (i, literal) in self.constants.iter().enumerate() {
             writeln!(f, "[{i:03}] {literal}")?;
         }
 
         writeln!(f)?;
 
-        writeln!(f, "==function table==")?;
+        writeln!(f, "== function table ==")?;
         for (i, fun) in self.functions.iter().enumerate() {
-            writeln!(f, "  function slot [{i:3}]")?;
-            write!(f, "{fun}")?;
+            writeln!(f, ":: function id {i:3} ::")?;
+            writeln!(f, "{fun}")?;
         }
 
         Ok(())
@@ -59,7 +59,24 @@ impl Display for Function {
             Repeat,
         }
 
-        writeln!(f, "initial stack: {}", self.signature.height)?;
+        writeln!(f, "# signature")?;
+        let arg_count = self.signature.height.checked_sub(1).unwrap_or_default();
+        writeln!(
+            f,
+            "  height:   {} ({arg_count} real args)",
+            self.signature.height
+        )?;
+        writeln!(f, "  variadic: {}", self.signature.is_variadic)?;
+
+        writeln!(f, "  upvalues: {}", self.signature.upvalues.len())?;
+        if !self.signature.upvalues.is_empty() {
+            for (i, upvalue) in self.signature.upvalues.iter().enumerate() {
+                writeln!(f, "    [{i:02}] {upvalue:?}")?;
+            }
+        }
+
+        writeln!(f)?;
+        writeln!(f, "# body")?;
 
         let iter = self.codes.iter().copied().enumerate().zip(
             self.lines
@@ -79,7 +96,7 @@ impl Display for Function {
                 None => "?".to_string(),
             };
 
-            writeln!(f, "{i:04} {line:>3} {code}")?;
+            writeln!(f, "  {i:04} {line:>3} {code}")?;
         }
 
         Ok(())
