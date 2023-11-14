@@ -273,7 +273,10 @@ fn tail_segment<'s, 'origin>(
             .or(field(frag.new_core()))?
             .or(index(frag.new_core()))?
             .or(tab_call(stack_start, frag.new_core()))?
-            .map_fsource(|_| ());
+            .map_fsource(|_| ())
+            .inspect(|_| {
+                frag.commit();
+            });
 
         Ok(state)
     }
