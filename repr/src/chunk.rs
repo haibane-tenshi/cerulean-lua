@@ -71,7 +71,7 @@ impl Display for Function {
         writeln!(f, "  upvalues: {}", self.signature.upvalues.len())?;
         if !self.signature.upvalues.is_empty() {
             for (i, upvalue) in self.signature.upvalues.iter().enumerate() {
-                writeln!(f, "    [{i:02}] {upvalue:?}")?;
+                writeln!(f, "    [{i:2}] {upvalue:?}")?;
             }
         }
 
