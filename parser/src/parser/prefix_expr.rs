@@ -247,7 +247,8 @@ fn head<'s, 'origin>(
             .or(variable(frag.new_core()).map_failure(|_| Complete))?
             .or(par_expr(frag.new_core())
                 .map_output(|span: Spanned<_>| span.map(|_| PrefixExpr::Expr)))?
-            .map_fsource(|_| ());
+            .map_fsource(|_| ())
+            .inspect(|_| frag.commit());
 
         Ok(state)
     }
@@ -392,22 +393,24 @@ fn variable<'s, 'origin>(
     move |s: Lexer<'s>| {
         let mut frag = core.expr();
 
-        let state = identifier(s)?.try_map_output(|output| -> Result<_, CodegenError> {
-            let (ident, span) = output.take();
-            let place = match frag.capture_variable(ident) {
-                Some(UpvalueSource::Temporary(slot)) => Place::Temporary(slot),
-                Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot),
-                None => {
-                    let env = frag.capture_global_env()?;
-                    frag.emit(env.into_opcode());
-                    frag.emit_load_literal(Literal::String(ident.to_string()));
+        let state = identifier(s)?
+            .try_map_output(|output| -> Result<_, CodegenError> {
+                let (ident, span) = output.take();
+                let place = match frag.capture_variable(ident) {
+                    Some(UpvalueSource::Temporary(slot)) => Place::Temporary(slot),
+                    Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot),
+                    None => {
+                        let env = frag.capture_global_env()?;
+                        frag.emit(env.into_opcode());
+                        frag.emit_load_literal(Literal::String(ident.to_string()));
 
-                    Place::TableField
-                }
-            };
+                        Place::TableField
+                    }
+                };
 
-            Ok(span.put(PrefixExpr::Place(place)))
-        })?;
+                Ok(span.put(PrefixExpr::Place(place)))
+            })?
+            .inspect(|_| frag.commit());
 
         Ok(state)
     }
