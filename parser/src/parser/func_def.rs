@@ -5,6 +5,7 @@ use thiserror::Error;
 
 pub(crate) fn func_body<'s, 'origin>(
     core: Core<'s, 'origin>,
+    self_arg: bool,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<FunctionId>,
@@ -40,10 +41,18 @@ pub(crate) fn func_body<'s, 'origin>(
                     // At the moment extra slot is occupied by the function pointer itself.
                     signature.height += 1;
 
+                    if self_arg {
+                        signature.height += 1;
+                    }
+
                     let mut frame = envelope.new_core().frame(signature);
                     let mut frag = frame.new_core().scope();
 
                     frag.push_temporary(None);
+
+                    if self_arg {
+                        frag.push_temporary(Some(Ident::self_()));
+                    }
 
                     for ident in idents {
                         frag.push_temporary(Some(ident));

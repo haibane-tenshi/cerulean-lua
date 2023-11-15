@@ -217,7 +217,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 
     pub fn capture_global_env(&mut self) -> Result<UpvalueSource, MissingGlobalEnvError> {
-        self.capture_variable(Ident("_ENV"))
+        self.capture_variable(Ident::env())
             .ok_or(MissingGlobalEnvError)
     }
 

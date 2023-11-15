@@ -41,13 +41,14 @@ use super::prefix_expr::{
 };
 use super::stmt::assignment::AssignmentFailure;
 use super::stmt::break_::BreakFailure;
+use super::stmt::decl_global_fn::DeclGlobalFnFailure;
+use super::stmt::decl_local_fn::DeclLocalFnFailure;
+use super::stmt::decl_local_var::DeclLocalVarFailure;
 use super::stmt::do_end::DoEndFailure;
 use super::stmt::generic_for::GenericForFailure;
 use super::stmt::goto::GotoFailure;
 use super::stmt::if_then::IfThenFailure;
 use super::stmt::label::LabelFailure;
-use super::stmt::local_assignment::LocalAssignmentFailure;
-use super::stmt::local_function::LocalFunctionFailure;
 use super::stmt::numerical_for::NumericalForFailure;
 use super::stmt::repeat_until::RepeatUntilFailure;
 use super::stmt::return_::ReturnFailure;
@@ -200,9 +201,11 @@ pub(crate) enum ParseCause {
     #[error("expected statement")]
     ExpectedStmt(Span),
     #[error("failed to parse local assignment")]
-    LocalAssignment(#[from] LocalAssignmentFailure),
+    DeclGlobalFn(#[from] DeclGlobalFnFailure),
+    #[error("failed to parse local assignment")]
+    DeclLocalVar(#[from] DeclLocalVarFailure),
     #[error("failed to parse local function declaration")]
-    LocalFunction(#[from] LocalFunctionFailure),
+    DeclLocalFn(#[from] DeclLocalFnFailure),
     #[error("failed to parse variable assignment")]
     Assignment(#[from] AssignmentFailure),
     #[error("failed to parse if-then statement")]
@@ -379,24 +382,34 @@ impl ParseCause {
                     .with_labels(labels)
                     .with_message("expected statement")
             }
-            ParseCause::LocalAssignment(err) => {
+            ParseCause::DeclGlobalFn(err) => {
                 let (msg, span) = match err {
-                    LocalAssignmentFailure::Local(err) => ("expected `local` keyword", err.span),
-                    LocalAssignmentFailure::Ident(err) => ("expceted identifier", err.span),
-                    LocalAssignmentFailure::EqualsSign(err) => ("expected equals sign", err.span),
+                    DeclGlobalFnFailure::Function(err) => ("expected `function` keyword", err.span),
+                    DeclGlobalFnFailure::Dot(err) => ("expected `.`", err.span),
+                    DeclGlobalFnFailure::Colon(err) => ("expected `:`", err.span),
+                    DeclGlobalFnFailure::Ident(err) => ("expected identifier", err.span),
                 };
 
                 let labels = vec![Label::primary((), span)];
 
                 Diagnostic::error().with_message(msg).with_labels(labels)
             }
-            ParseCause::LocalFunction(err) => {
+            ParseCause::DeclLocalVar(err) => {
                 let (msg, span) = match err {
-                    LocalFunctionFailure::Local(err) => ("expected `local` keyword", err.span),
-                    LocalFunctionFailure::Function(err) => {
-                        ("expected `function` keyword", err.span)
-                    }
-                    LocalFunctionFailure::Ident(err) => ("expected identifier", err.span),
+                    DeclLocalVarFailure::Local(err) => ("expected `local` keyword", err.span),
+                    DeclLocalVarFailure::Ident(err) => ("expceted identifier", err.span),
+                    DeclLocalVarFailure::EqualsSign(err) => ("expected equals sign", err.span),
+                };
+
+                let labels = vec![Label::primary((), span)];
+
+                Diagnostic::error().with_message(msg).with_labels(labels)
+            }
+            ParseCause::DeclLocalFn(err) => {
+                let (msg, span) = match err {
+                    DeclLocalFnFailure::Local(err) => ("expected `local` keyword", err.span),
+                    DeclLocalFnFailure::Function(err) => ("expected `function` keyword", err.span),
+                    DeclLocalFnFailure::Ident(err) => ("expected identifier", err.span),
                 };
 
                 let labels = vec![Label::primary((), span)];

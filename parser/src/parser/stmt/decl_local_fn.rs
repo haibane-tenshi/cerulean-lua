@@ -1,7 +1,7 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(crate) fn local_function<'s, 'origin>(
+pub(crate) fn decl_local_fn<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -14,16 +14,16 @@ pub(crate) fn local_function<'s, 'origin>(
         use crate::parser::func_def::func_body;
 
         let token_local = match_token(Token::Local)
-            .map_failure(|f| ParseFailure::from(LocalFunctionFailure::Local(f)));
+            .map_failure(|f| ParseFailure::from(DeclLocalFnFailure::Local(f)));
         let token_function = match_token(Token::Function)
-            .map_failure(|f| ParseFailure::from(LocalFunctionFailure::Function(f)));
+            .map_failure(|f| ParseFailure::from(DeclLocalFnFailure::Function(f)));
         let identifier =
-            identifier.map_failure(|f| ParseFailure::from(LocalFunctionFailure::Ident(f)));
+            identifier.map_failure(|f| ParseFailure::from(DeclLocalFnFailure::Ident(f)));
 
         let mut frag = core.decl();
 
         let source = s.source();
-        let _span = trace_span!("local_function").entered();
+        let _span = trace_span!("decl_local_fn").entered();
 
         let state = Source(s)
             .and(token_local)?
@@ -39,7 +39,7 @@ pub(crate) fn local_function<'s, 'origin>(
 
                 span
             })
-            .and(func_body(frag.new_core()), replace)?
+            .and(func_body(frag.new_core(), false), replace)?
             .map_output(|output| {
                 let (func_id, span) = output.take();
 
@@ -59,7 +59,7 @@ pub(crate) fn local_function<'s, 'origin>(
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum LocalFunctionFailure {
+pub(crate) enum DeclLocalFnFailure {
     #[error("missing `local` keyword")]
     Local(#[source] TokenMismatch),
     #[error("missing `function` keyword")]

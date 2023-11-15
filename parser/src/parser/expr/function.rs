@@ -22,7 +22,7 @@ pub(crate) fn function<'s, 'origin>(
         let r = Source(s)
             .and(token_function)?
             .with_mode(FailureMode::Malformed)
-            .and(func_body(frag.new_core()), replace)?
+            .and(func_body(frag.new_core(), false), replace)?
             .map_output(|output| {
                 let (func_id, span) = output.take();
 

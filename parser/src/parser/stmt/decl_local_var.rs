@@ -1,7 +1,7 @@
 use crate::parser::prelude::*;
 use thiserror::Error;
 
-pub(crate) fn local_assignment<'s, 'origin>(
+pub(crate) fn decl_local_var<'s, 'origin>(
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -14,17 +14,17 @@ pub(crate) fn local_assignment<'s, 'origin>(
         use crate::parser::expr::expr_list;
 
         let token_local = match_token(Token::Local)
-            .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Local(f)));
+            .map_failure(|f| ParseFailure::from(DeclLocalVarFailure::Local(f)));
         let token_equals_sign = match_token(Token::EqualsSign)
-            .map_failure(|f| ParseFailure::from(LocalAssignmentFailure::EqualsSign(f)));
+            .map_failure(|f| ParseFailure::from(DeclLocalVarFailure::EqualsSign(f)));
         let ident_list =
-            ident_list.map_failure(|f| ParseFailure::from(LocalAssignmentFailure::Ident(f)));
+            ident_list.map_failure(|f| ParseFailure::from(DeclLocalVarFailure::Ident(f)));
 
         let mut frag = core.decl();
         let stack_start = frag.stack().len();
 
         let source = s.source();
-        let _span = trace_span!("local_assignment").entered();
+        let _span = trace_span!("decl_local_var").entered();
 
         let state = Source(s)
             .and(token_local)?
@@ -70,7 +70,7 @@ pub(crate) fn local_assignment<'s, 'origin>(
 }
 
 #[derive(Debug, Error)]
-pub enum LocalAssignmentFailure {
+pub enum DeclLocalVarFailure {
     #[error("missing `local` keyword")]
     Local(#[source] TokenMismatch),
     #[error("assignment list should have at least one identifier")]
@@ -124,7 +124,7 @@ impl Arrow<ParseFailure> for IdentListSuccess {
         match self {
             IdentListSuccess::Comma => other,
             IdentListSuccess::Ident(f) => {
-                ParseFailure::from(LocalAssignmentFailure::Ident(f)).arrow(other)
+                ParseFailure::from(DeclLocalVarFailure::Ident(f)).arrow(other)
             }
         }
     }
