@@ -199,12 +199,17 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     pub fn capture_variable(&mut self, ident: Ident<'s>) -> Option<UpvalueSource> {
         use super::stack::NameLookup;
 
-        trace!(fragment_id=?self.id(), %ident, "capture variable");
-
         match self.stack.lookup(ident) {
-            NameLookup::Local(slot) => Some(UpvalueSource::Temporary(slot)),
+            NameLookup::Local(slot) => {
+                trace!(fragment_id=?self.id(), %ident, ?slot, "lookup variable");
+
+                Some(UpvalueSource::Temporary(slot))
+            }
             NameLookup::Upvalue => {
                 let slot = self.upvalues.register(ident);
+
+                trace!(fragment_id=?self.id(), %ident, ?slot, "capture variable");
+
                 Some(UpvalueSource::Upvalue(slot))
             }
             NameLookup::Global => None,
