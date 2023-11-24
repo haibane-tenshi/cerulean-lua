@@ -70,7 +70,7 @@ pub(crate) fn fn_name<'s, 'origin>(
             .and(identifier)?
             .with_mode(FailureMode::Malformed)
             .try_map_output(|output| -> Result<_, CodegenError> {
-                use repr::chunk::UpvalueSource;
+                use crate::codegen::fragment::UpvalueSource;
 
                 let (ident, span) = output.take();
 

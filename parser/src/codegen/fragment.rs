@@ -2,8 +2,7 @@ use std::ops::Add;
 use thiserror::Error;
 use tracing::trace;
 
-use repr::chunk::UpvalueSource;
-use repr::index::{InstrId, StackSlot};
+use repr::index::{InstrId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
 
@@ -29,6 +28,22 @@ impl Add<u32> for FragmentId {
     fn add(self, rhs: u32) -> Self::Output {
         let inner = self.0 + rhs;
         FragmentId(inner)
+    }
+}
+
+pub enum UpvalueSource {
+    Temporary(StackSlot),
+    Upvalue(UpvalueSlot),
+}
+
+impl From<UpvalueSource> for repr::chunk::UpvalueSource {
+    fn from(value: UpvalueSource) -> repr::chunk::UpvalueSource {
+        use repr::chunk::UpvalueSource::*;
+
+        match value {
+            UpvalueSource::Temporary(slot) => Temporary(slot),
+            UpvalueSource::Upvalue(slot) => Upvalue(slot),
+        }
     }
 }
 
@@ -597,12 +612,17 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         stack: StackView<'s, 'origin>,
         signature: Signature,
     ) -> Self {
+        let mut upvalues = Upvalues::new();
+        let mut upvalue_view = upvalues.view();
+        upvalue_view.register(Ident::env());
+        upvalue_view.commit();
+
         Frame {
             func_table,
             const_table,
             stack,
             fun: Function::new(signature),
-            upvalues: Upvalues::new(),
+            upvalues,
             jumps: Jumps::new(),
             labels: Labels::new(InstrId(0)),
         }

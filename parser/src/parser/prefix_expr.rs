@@ -1,4 +1,4 @@
-use repr::chunk::UpvalueSource;
+use crate::codegen::fragment::UpvalueSource;
 use thiserror::Error;
 
 use crate::parser::prelude::*;

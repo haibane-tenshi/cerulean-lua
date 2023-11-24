@@ -114,4 +114,5 @@ pub struct Signature {
 pub enum UpvalueSource {
     Temporary(StackSlot),
     Upvalue(UpvalueSlot),
+    GlobalEnv,
 }

@@ -70,7 +70,7 @@ pub(crate) fn func_body<'s, 'origin>(
                             let upvalues = upvalues
                                 .resolve()
                                 .into_iter()
-                                .map(|ident| envelope.capture_variable(ident).unwrap())
+                                .map(|ident| envelope.capture_variable(ident).unwrap().into())
                                 .collect::<Vec<_>>()
                                 .try_into()
                                 .unwrap();

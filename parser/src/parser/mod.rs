@@ -97,15 +97,22 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     let mut func_table = FuncTable::with_script();
     let mut const_table = ConstTable::new();
     let mut stack = Stack::new();
+    let mut stack_view = stack.view();
+    // Put env table on the stack *outside* of the script frame.
+    // This works nicely with name lookup mechanism.
+    // We are in charge of emitting correct `UpvalueSource`s anyways,
+    // so no harm is done.
+    stack_view.push(Some(Ident::env()));
+
     let signature = Signature {
-        height: 0,
+        height: 1,
         is_variadic: true,
     };
 
     let mut frame = Frame::script(
         func_table.view(),
         const_table.view(),
-        stack.view(),
+        stack_view.borrow().frame(),
         signature,
     );
     let state = block(frame.new_core()).parse_once(s)?;
@@ -131,11 +138,21 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
 
     let func_table = {
         let (script, upvalues) = frame.commit().map_err(CodegenError::from)?;
-        if !upvalues.resolve().is_empty() {
-            return Err(Error::Codegen(CodegenError::UnresolvedUpvalue));
-        }
 
-        let script = script.resolve(Default::default());
+        let upvalues = upvalues
+            .resolve()
+            .into_iter()
+            .map(|ident| {
+                if ident == Ident::env() {
+                    Ok(repr::chunk::UpvalueSource::GlobalEnv)
+                } else {
+                    Err(CodegenError::UnresolvedUpvalue)
+                }
+            })
+            .collect::<Result<_, _>>()?;
+
+        let mut script = script.resolve(Default::default());
+        script.signature.upvalues = upvalues;
         let mut func_table = func_table.resolve();
 
         // Put script where runtime expects it to find.
