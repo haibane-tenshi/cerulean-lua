@@ -1,5 +1,4 @@
-use repr::chunk::UpvalueSource;
-use repr::index::{InstrId, UpvalueSlot};
+use repr::index::InstrId;
 use repr::opcode::OpCode;
 use repr::tivec::TiVec;
 
@@ -27,7 +26,7 @@ impl Function {
         FunctionView::new(self)
     }
 
-    pub fn resolve(self, upvalues: TiVec<UpvalueSlot, UpvalueSource>) -> repr::chunk::Function {
+    pub fn resolve(self, upvalue_count: usize) -> repr::chunk::Function {
         let Function {
             opcodes: codes,
             signature:
@@ -40,7 +39,7 @@ impl Function {
         let signature = repr::chunk::Signature {
             height,
             is_variadic,
-            upvalues,
+            upvalue_count,
         };
 
         repr::chunk::Function {

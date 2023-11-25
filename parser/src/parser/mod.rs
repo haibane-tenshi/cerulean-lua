@@ -88,6 +88,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::fragment::Frame;
     use crate::codegen::func_table::FuncTable;
     use crate::codegen::function::Signature;
+    use crate::codegen::recipe_table::RecipeTable;
     use crate::codegen::stack::Stack;
     use crate::parser::block::block;
 
@@ -96,6 +97,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     // Reserve 0-th slot in table for the script itself.
     let mut func_table = FuncTable::with_script();
     let mut const_table = ConstTable::new();
+    let mut recipe_table = RecipeTable::new();
     let mut stack = Stack::new();
     let mut stack_view = stack.view();
     // Put env table on the stack *outside* of the script frame.
@@ -103,6 +105,11 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     // We are in charge of emitting correct `UpvalueSource`s anyways,
     // so no harm is done.
     stack_view.push(Some(Ident::env()));
+
+    let mut stack_view = stack_view.borrow().frame();
+    // Make scripts conform to our ABI.
+    // All functions recieve unused hidden argument which the closure itself.
+    stack_view.push(None);
 
     let signature = Signature {
         height: 1,
@@ -112,7 +119,8 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     let mut frame = Frame::script(
         func_table.view(),
         const_table.view(),
-        stack_view.borrow().frame(),
+        recipe_table.view(),
+        stack_view,
         signature,
     );
     let state = block(frame.new_core()).parse_once(s)?;
@@ -138,21 +146,14 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
 
     let func_table = {
         let (script, upvalues) = frame.commit().map_err(CodegenError::from)?;
+        let upvalues = upvalues.resolve();
 
-        let upvalues = upvalues
-            .resolve()
-            .into_iter()
-            .map(|ident| {
-                if ident == Ident::env() {
-                    Ok(repr::chunk::UpvalueSource::GlobalEnv)
-                } else {
-                    Err(CodegenError::UnresolvedUpvalue)
-                }
-            })
-            .collect::<Result<_, _>>()?;
+        if upvalues.iter().any(|&upvalue| upvalue != Ident::env()) {
+            return Err(CodegenError::UnresolvedUpvalue.into());
+        }
 
         let mut script = script.resolve(Default::default());
-        script.signature.upvalues = upvalues;
+        script.signature.upvalue_count = upvalues.len();
         let mut func_table = func_table.resolve();
 
         // Put script where runtime expects it to find.
@@ -161,10 +162,12 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
         func_table
     };
     let const_table = const_table.resolve();
+    let recipe_table = recipe_table.resolve();
 
     let chunk = Chunk {
         functions: func_table,
         constants: const_table,
+        closure_recipes: recipe_table,
     };
 
     Ok(chunk)

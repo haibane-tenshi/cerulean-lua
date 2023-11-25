@@ -14,6 +14,7 @@ use crate::codegen::jumps::{Jumps, JumpsView};
 use crate::codegen::labels::{Labels, LabelsView, PushLabelError};
 use crate::codegen::loop_stack::LoopStack;
 use crate::codegen::reachability::Reachability;
+use crate::codegen::recipe_table::{RecipeTable, RecipeTableView};
 use crate::codegen::stack::{
     BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
 };
@@ -52,6 +53,7 @@ pub struct Core<'s, 'origin> {
     fragment_id: FragmentId,
     func_table: &'origin mut FuncTable,
     const_table: &'origin mut ConstTable,
+    recipe_table: &'origin mut RecipeTable,
     fun: &'origin mut Function,
     upvalues: &'origin mut Upvalues<'s>,
     stack: &'origin mut Stack<'s>,
@@ -96,6 +98,7 @@ pub struct Fragment<'s, 'origin> {
     fragment_id: FragmentId,
     func_table: FuncTableView<'origin>,
     const_table: ConstTableView<'origin>,
+    recipe_table: RecipeTableView<'origin>,
     fun: FunctionView<'origin>,
     upvalues: UpvaluesView<'s, 'origin>,
     stack: StackView<'s, 'origin>,
@@ -112,6 +115,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             fun,
             upvalues,
             stack,
@@ -124,6 +128,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let fragment_id = fragment_id + 1;
         let func_table = func_table.view();
         let const_table = const_table.view();
+        let recipe_table = recipe_table.view();
         let fun = fun.view();
         let upvalues = upvalues.view();
         let stack = stack.view();
@@ -140,6 +145,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             fun,
             upvalues,
             stack,
@@ -156,6 +162,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             fun,
             upvalues,
             stack,
@@ -168,6 +175,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let fragment_id = fragment_id + 1;
         let func_table = func_table.view();
         let const_table = const_table.view();
+        let recipe_table = recipe_table.view();
         let fun = fun.view();
         let upvalues = upvalues.view();
         let stack = stack.view_at(slot);
@@ -184,6 +192,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             fun,
             upvalues,
             stack,
@@ -205,6 +214,10 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
     pub fn func_table_mut(&mut self) -> &mut FuncTableView<'origin> {
         &mut self.func_table
+    }
+
+    pub fn recipe_table_mut(&mut self) -> &mut RecipeTableView<'origin> {
+        &mut self.recipe_table
     }
 
     pub fn stack(&self) -> &StackView<'s, 'origin> {
@@ -434,6 +447,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             fun,
             upvalues,
             stack,
@@ -447,6 +461,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let fragment_id = *fragment_id;
         let func_table = func_table.borrow();
         let const_table = const_table.borrow();
+        let recipe_table = recipe_table.borrow();
         let fun = fun.borrow();
         let upvalues = upvalues.borrow();
         let stack = stack.borrow();
@@ -459,6 +474,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             fun,
             upvalues,
             stack,
@@ -506,6 +522,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             mut fun,
             upvalues,
             mut stack,
@@ -520,6 +537,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
         func_table.commit();
         const_table.commit();
+        recipe_table.commit();
 
         let sequence_state = is_reachable.then(|| stack.state());
         let jump_state = jumps.commit(&mut fun);
@@ -571,6 +589,7 @@ pub enum EmitLoadLiteralError {
 pub struct Frame<'s, 'origin> {
     func_table: FuncTableView<'origin>,
     const_table: ConstTableView<'origin>,
+    recipe_table: RecipeTableView<'origin>,
     stack: StackView<'s, 'origin>,
     fun: Function,
     upvalues: Upvalues<'s>,
@@ -583,12 +602,14 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let Core {
             func_table,
             const_table,
+            recipe_table,
             stack,
             ..
         } = core;
 
         let func_table = func_table.view();
         let const_table = const_table.view();
+        let recipe_table = recipe_table.view();
         let stack = stack.frame();
         let fun = Function::new(signature);
         let upvalues = Upvalues::new();
@@ -598,6 +619,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         Frame {
             func_table,
             const_table,
+            recipe_table,
             stack,
             fun,
             upvalues,
@@ -609,6 +631,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
     pub fn script(
         func_table: FuncTableView<'origin>,
         const_table: ConstTableView<'origin>,
+        recipe_table: RecipeTableView<'origin>,
         stack: StackView<'s, 'origin>,
         signature: Signature,
     ) -> Self {
@@ -620,6 +643,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         Frame {
             func_table,
             const_table,
+            recipe_table,
             stack,
             fun: Function::new(signature),
             upvalues,
@@ -632,6 +656,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let Frame {
             func_table,
             const_table,
+            recipe_table,
             stack,
             fun,
             upvalues,
@@ -642,6 +667,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let fragment_id = FragmentId::default();
         let func_table = func_table.borrow();
         let const_table = const_table.borrow();
+        let recipe_table = recipe_table.borrow();
         let stack = stack.borrow();
         let loop_stack = LoopStack::new();
         let reachability = Reachability::new();
@@ -650,6 +676,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             fragment_id,
             func_table,
             const_table,
+            recipe_table,
             fun,
             upvalues,
             stack,
@@ -664,6 +691,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let Frame {
             func_table,
             const_table,
+            recipe_table,
             stack,
             fun,
             upvalues,
@@ -673,6 +701,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
 
         func_table.commit();
         const_table.commit();
+        recipe_table.commit();
         stack.commit(CommitKind::Scope);
 
         if labels.is_resolved() {

@@ -1,6 +1,6 @@
 use crate::codegen::function::Signature;
 use crate::parser::prelude::*;
-use repr::index::FunctionId;
+use repr::index::RecipeId;
 use thiserror::Error;
 
 pub(crate) fn func_body<'s, 'origin>(
@@ -8,7 +8,7 @@ pub(crate) fn func_body<'s, 'origin>(
     self_arg: bool,
 ) -> impl ParseOnce<
     Lexer<'s>,
-    Output = Spanned<FunctionId>,
+    Output = Spanned<RecipeId>,
     Success = Complete,
     Failure = ParseFailure,
     FailFast = FailFast,
@@ -71,11 +71,9 @@ pub(crate) fn func_body<'s, 'origin>(
                                 .resolve()
                                 .into_iter()
                                 .map(|ident| envelope.capture_variable(ident).unwrap().into())
-                                .collect::<Vec<_>>()
-                                .try_into()
-                                .unwrap();
-                            let func = func.resolve(upvalues);
-                            span.put(func)
+                                .collect::<repr::tivec::TiVec<_, _>>();
+                            let func = func.resolve(upvalues.len());
+                            span.put((func, upvalues))
                         });
 
                     Ok(state)
@@ -83,14 +81,21 @@ pub(crate) fn func_body<'s, 'origin>(
             })?
             .and(token_end, discard)?
             .map_output(|output| {
-                let (func, span) = output.take();
+                use repr::chunk::ClosureRecipe;
+
+                let ((func, upvalues), span) = output.take();
                 let function_id = envelope.func_table_mut().push(func);
+                let closure = ClosureRecipe {
+                    function_id,
+                    upvalues,
+                };
+                let recipe_id = envelope.recipe_table_mut().push(closure);
                 envelope.commit();
 
-                trace!(?function_id, "new function");
+                trace!(?function_id, ?recipe_id, "new function");
                 trace!(span=?span.span(), str=&source[span.span()]);
 
-                span.put(function_id)
+                span.put(recipe_id)
             })
             .collapse();
 
