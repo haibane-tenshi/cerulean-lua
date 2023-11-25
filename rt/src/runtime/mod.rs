@@ -33,6 +33,7 @@ impl From<ClosureRef> for Value {
 
 pub struct Runtime<C> {
     chunk_cache: C,
+    global_env: Value,
     frames: Vec<Frame>,
     stack: Stack,
     upvalue_stack: Vec<Value>,
@@ -42,11 +43,12 @@ impl<C> Runtime<C>
 where
     C: Debug,
 {
-    pub fn new(chunk_cache: C) -> Self {
+    pub fn new(chunk_cache: C, global_env: Value) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         Runtime {
             chunk_cache,
+            global_env,
             frames: Default::default(),
             stack: Default::default(),
             upvalue_stack: Default::default(),
@@ -56,6 +58,7 @@ where
     pub fn view(&mut self) -> RuntimeView<C> {
         let Runtime {
             chunk_cache,
+            global_env,
             frames,
             stack,
             upvalue_stack,
@@ -67,6 +70,7 @@ where
 
         RuntimeView {
             chunk_cache,
+            global_env,
             frames,
             stack,
             upvalue_stack,
@@ -76,6 +80,7 @@ where
 
 pub struct RuntimeView<'rt, C> {
     pub chunk_cache: &'rt mut C,
+    pub global_env: &'rt Value,
     frames: FrameStackView<'rt>,
     pub stack: StackView<'rt>,
     upvalue_stack: UpvalueView<'rt>,
@@ -88,6 +93,7 @@ where
     fn view(&mut self) -> RuntimeView<C> {
         let RuntimeView {
             chunk_cache,
+            global_env,
             frames,
             stack,
             upvalue_stack,
@@ -99,6 +105,7 @@ where
 
         RuntimeView {
             chunk_cache,
+            global_env,
             frames,
             stack,
             upvalue_stack,
@@ -133,6 +140,31 @@ where
         }
 
         Ok(())
+    }
+
+    pub fn construct_closure(
+        &mut self,
+        fn_ptr: FunctionPtr,
+        upvalues: impl IntoIterator<Item = Value>,
+    ) -> Result<Closure, RuntimeError> {
+        let signature = &self
+            .chunk_cache
+            .chunk(fn_ptr.chunk_id)
+            .ok_or(RuntimeError)?
+            .get_function(fn_ptr.function_id)
+            .ok_or(RuntimeError)?
+            .signature;
+
+        let upvalues = upvalues
+            .into_iter()
+            .chain(std::iter::repeat(Value::Nil))
+            .take(signature.upvalue_count)
+            .map(|value| self.stack.fresh_upvalue(value))
+            .collect();
+
+        let closure = Closure { fn_ptr, upvalues };
+
+        Ok(closure)
     }
 
     pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError> {

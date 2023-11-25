@@ -2,8 +2,8 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use repr::chunk::Chunk;
-use repr::index::{ConstId, FunctionId, InstrId, StackSlot, UpvalueSlot};
+use repr::chunk::{Chunk, ClosureRecipe};
+use repr::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
 use repr::tivec::{TiSlice, TiVec};
@@ -29,39 +29,10 @@ pub struct FunctionPtr {
     pub function_id: FunctionId,
 }
 
-impl FunctionPtr {
-    pub(crate) fn construct_closure<C>(
-        self,
-        rt: &mut RuntimeView<C>,
-    ) -> Result<Closure, RuntimeError>
-    where
-        C: ChunkCache,
-    {
-        let signature = &rt
-            .chunk_cache
-            .chunk(self.chunk_id)
-            .ok_or(RuntimeError)?
-            .get_function(self.function_id)
-            .ok_or(RuntimeError)?
-            .signature;
-
-        if signature.upvalues.is_empty() {
-            let r = Closure {
-                fn_ptr: self,
-                upvalues: Default::default(),
-            };
-
-            Ok(r)
-        } else {
-            Err(RuntimeError)
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Closure {
-    fn_ptr: FunctionPtr,
-    upvalues: TiVec<UpvalueSlot, UpvalueId>,
+    pub(super) fn_ptr: FunctionPtr,
+    pub(super) upvalues: TiVec<UpvalueSlot, UpvalueId>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +61,12 @@ impl ClosureRef {
             .ok_or(RuntimeError)?;
 
         let Function { signature, .. } = function;
+
+        // Verify that closure provides exact same number of upvalues
+        // that is expected by the function.
+        if signature.upvalue_count != self.upvalues.len() {
+            return Err(RuntimeError);
+        }
 
         // Adjust stack, move varargs into register if needed.
         let stack_start = rt.stack.protected_size() + start;
@@ -542,20 +519,21 @@ impl<'rt> ActiveFrame<'rt> {
         Some(r)
     }
 
-    pub fn construct_closure(&mut self, fn_id: FunctionId) -> Result<Closure, RuntimeError> {
+    pub fn construct_closure(&mut self, recipe_id: RecipeId) -> Result<Closure, RuntimeError> {
+        let recipe = self.chunk.get_recipe(recipe_id).ok_or(RuntimeError)?;
+
+        let ClosureRecipe {
+            function_id,
+            upvalues,
+        } = recipe;
+        let function_id = *function_id;
+
         let fn_ptr = FunctionPtr {
             chunk_id: self.closure.fn_ptr.chunk_id,
-            function_id: fn_id,
+            function_id,
         };
 
-        let signature = &self
-            .chunk
-            .get_function(fn_id)
-            .ok_or(RuntimeError)?
-            .signature;
-
-        let upvalues = signature
-            .upvalues
+        let upvalues = upvalues
             .iter()
             .map(|&source| {
                 use repr::chunk::UpvalueSource;

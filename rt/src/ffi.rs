@@ -54,7 +54,7 @@ where
             function_id: FunctionId(0),
         };
         let offset = rt.stack.top();
-        let closure = ptr.construct_closure(&mut rt)?;
+        let closure = rt.construct_closure(ptr, [rt.global_env.clone()])?;
         let closure = ClosureRef::new(closure);
 
         rt.enter(closure, offset)

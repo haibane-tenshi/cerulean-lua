@@ -131,6 +131,19 @@ impl Stack {
         self.temporaries.last()
     }
 
+    pub fn fresh_upvalue(&mut self, value: Value) -> UpvalueId {
+        let raw_id = self.next_upvalue_id.increment();
+
+        self.evicted_upvalues.insert(raw_id, value);
+
+        // Provide a dummy stack slot.
+        // Ideally I would like to wrap it in Option and use None here,
+        // but creating niche on RawStackSlot is pain.
+        // Maybe some other day.
+        // We never remove upvalues so this works for now.
+        UpvalueId(raw_id, RawStackSlot(0))
+    }
+
     pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value> {
         self.evicted_upvalues
             .get(&upvalue.0)
@@ -225,6 +238,10 @@ impl<'a> StackView<'a> {
     pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value, RuntimeError> {
         let index = self.protected_size.index(slot);
         self.stack.get_mut(index).ok_or(RuntimeError)
+    }
+
+    pub fn fresh_upvalue(&mut self, value: Value) -> UpvalueId {
+        self.stack.fresh_upvalue(value)
     }
 
     pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value> {

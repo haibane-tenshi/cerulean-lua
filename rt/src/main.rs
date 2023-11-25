@@ -52,13 +52,14 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
+            use repr::value::table::TableRef;
             use rt::chunk_cache::single::{Main, SingleChunk};
-            use rt::runtime::Runtime;
+            use rt::runtime::{Runtime, Value};
 
             let chunk = load_from_file(&path)?;
             let chunk_cache = SingleChunk::new(chunk);
 
-            let mut runtime = Runtime::new(chunk_cache);
+            let mut runtime = Runtime::new(chunk_cache, Value::Table(TableRef::default()));
 
             runtime.view().invoke(rt::ffi::call_script(&Main))?;
         }
