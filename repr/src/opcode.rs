@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::index::{ConstId, FunctionId, InstrOffset, StackSlot, UpvalueSlot};
+use crate::index::{ConstId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
@@ -12,7 +12,7 @@ pub enum OpCode {
     LoadStack(StackSlot),
     StoreStack(StackSlot),
     AdjustStack(StackSlot),
-    MakeClosure(FunctionId),
+    MakeClosure(RecipeId),
     LoadUpvalue(UpvalueSlot),
     StoreUpvalue(UpvalueSlot),
     BinOp(BinOp),
@@ -75,7 +75,7 @@ impl Display for OpCode {
             LoadStack(StackSlot(index)) => format!("{:<11} [{index:>3}]", "LoadStack"),
             StoreStack(StackSlot(index)) => format!("{:<11} [{index:>3}]", "StoreStack"),
             AdjustStack(StackSlot(height)) => format!("{:<11} [{height:>3}]", "AdjustStack"),
-            MakeClosure(FunctionId(id)) => format!("{:<11} [{id:>3}]", "MakeClosure"),
+            MakeClosure(RecipeId(id)) => format!("{:<11} [{id:>3}]", "MakeClosure"),
             LoadUpvalue(UpvalueSlot(index)) => format!("{:<11} [{index:>3}]", "LoadUpvalue"),
             StoreUpvalue(UpvalueSlot(index)) => format!("{:<11} [{index:>3}]", "StoreUpvalue"),
             BinOp(op) => format!("{:<11} [{op}]", "BinaryOp"),

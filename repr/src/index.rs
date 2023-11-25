@@ -49,6 +49,27 @@ impl Display for FunctionId {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
+pub struct RecipeId(pub usize);
+
+impl From<usize> for RecipeId {
+    fn from(value: usize) -> Self {
+        RecipeId(value)
+    }
+}
+
+impl From<RecipeId> for usize {
+    fn from(value: RecipeId) -> Self {
+        value.0
+    }
+}
+
+impl Display for RecipeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
 pub struct InstrId(pub usize);
 

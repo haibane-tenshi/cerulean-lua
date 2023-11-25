@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use rle_vec::RleVec;
 
-use crate::index::{ConstId, FunctionId, InstrId, StackSlot, UpvalueSlot};
+use crate::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
 use crate::literal::Literal;
 use crate::opcode::OpCode;
 use crate::tivec::TiVec;
@@ -11,6 +11,7 @@ use crate::tivec::TiVec;
 pub struct Chunk {
     pub functions: TiVec<FunctionId, Function>,
     pub constants: TiVec<ConstId, Literal>,
+    pub closure_recipes: TiVec<RecipeId, ClosureRecipe>,
 }
 
 impl Chunk {
@@ -20,6 +21,10 @@ impl Chunk {
 
     pub fn get_function(&self, index: FunctionId) -> Option<&Function> {
         self.functions.get(index)
+    }
+
+    pub fn get_recipe(&self, index: RecipeId) -> Option<&ClosureRecipe> {
+        self.closure_recipes.get(index)
     }
 }
 
@@ -38,6 +43,12 @@ impl Display for Chunk {
         for (i, fun) in self.functions.iter().enumerate() {
             writeln!(f, ":: function id {i:3} ::")?;
             writeln!(f, "{fun}")?;
+        }
+
+        writeln!(f, "== recipe table ==")?;
+        for (i, recipe) in self.closure_recipes.iter().enumerate() {
+            writeln!(f, ":: recipe id {i:3} ::")?;
+            writeln!(f, "{recipe}")?;
         }
 
         Ok(())
@@ -67,13 +78,7 @@ impl Display for Function {
             self.signature.height
         )?;
         writeln!(f, "  variadic: {}", self.signature.is_variadic)?;
-
-        writeln!(f, "  upvalues: {}", self.signature.upvalues.len())?;
-        if !self.signature.upvalues.is_empty() {
-            for (i, upvalue) in self.signature.upvalues.iter().enumerate() {
-                writeln!(f, "    [{i:2}] {upvalue:?}")?;
-            }
-        }
+        writeln!(f, "  upvalues: {}", self.signature.upvalue_count)?;
 
         writeln!(f)?;
         writeln!(f, "# body")?;
@@ -105,14 +110,36 @@ impl Display for Function {
 
 #[derive(Debug, Clone, Default)]
 pub struct Signature {
+    pub upvalue_count: usize,
     pub height: usize,
     pub is_variadic: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ClosureRecipe {
+    pub function_id: FunctionId,
     pub upvalues: TiVec<UpvalueSlot, UpvalueSource>,
+}
+
+impl Display for ClosureRecipe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "function_id: {}", self.function_id)?;
+        if self.upvalues.is_empty() {
+            writeln!(f, "upvalues: []")?;
+        } else {
+            writeln!(f, "upvalues: [")?;
+            for upvalue in self.upvalues.iter() {
+                writeln!(f, "  {upvalue:?},")?
+            }
+            writeln!(f, "]")?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum UpvalueSource {
     Temporary(StackSlot),
     Upvalue(UpvalueSlot),
-    GlobalEnv,
 }
