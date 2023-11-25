@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
-use crate::literal::Literal;
+use repr::literal::Literal;
 use table::TableRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -19,9 +19,9 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub enum Value<Closure>
+pub enum Value<Callable>
 where
-    Closure: Eq + Hash,
+    Callable: Eq + Hash,
 {
     #[default]
     Nil,
@@ -29,13 +29,13 @@ where
     Int(i64),
     Float(f64),
     String(String),
-    Function(Closure),
-    Table(TableRef<Closure>),
+    Function(Callable),
+    Table(TableRef<Callable>),
 }
 
-impl<Closure> Value<Closure>
+impl<Callable> Value<Callable>
 where
-    Closure: Eq + Hash,
+    Callable: Eq + Hash,
 {
     pub fn as_boolish(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
@@ -54,9 +54,9 @@ where
     }
 }
 
-impl<Closure> PartialOrd for Value<Closure>
+impl<Callable> PartialOrd for Value<Callable>
 where
-    Closure: Eq + Hash,
+    Callable: Eq + Hash,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         use Value::*;
@@ -74,9 +74,9 @@ where
     }
 }
 
-impl<Closure> Display for Value<Closure>
+impl<Callable> Display for Value<Callable>
 where
-    Closure: Eq + Hash + Debug,
+    Callable: Eq + Hash + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
@@ -93,9 +93,9 @@ where
     }
 }
 
-impl<Closure> From<Literal> for Value<Closure>
+impl<Callable> From<Literal> for Value<Callable>
 where
-    Closure: Eq + Hash,
+    Callable: Eq + Hash,
 {
     fn from(value: Literal) -> Self {
         match value {

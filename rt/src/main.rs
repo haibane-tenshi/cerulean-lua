@@ -52,9 +52,9 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
-            use repr::value::table::TableRef;
             use rt::chunk_cache::single::{Main, SingleChunk};
             use rt::runtime::{Runtime, Value};
+            use rt::value::table::TableRef;
 
             let chunk = load_from_file(&path)?;
             let chunk_cache = SingleChunk::new(chunk);

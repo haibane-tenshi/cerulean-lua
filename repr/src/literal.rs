@@ -13,9 +13,14 @@ pub enum Literal {
 
 impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use crate::value::Value;
+        use Literal::*;
 
-        let t: Value<()> = Into::into(self.clone());
-        write!(f, "{t}")
+        match self {
+            Nil => write!(f, "nil"),
+            Bool(v) => write!(f, "{v}"),
+            Int(v) => write!(f, "{v}_i64"),
+            Float(v) => write!(f, "{v}_f64"),
+            String(v) => write!(f, "{v:?}"),
+        }
     }
 }

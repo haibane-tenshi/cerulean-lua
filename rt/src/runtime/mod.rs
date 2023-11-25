@@ -6,10 +6,10 @@ use std::fmt::Debug;
 use std::ops::ControlFlow;
 
 use repr::index::StackSlot;
-use repr::value::Value as ReprValue;
 
 use crate::chunk_cache::ChunkCache;
 use crate::ffi::LuaFfiOnce;
+use crate::value::Value as ReprValue;
 use crate::RuntimeError;
 use frame::{ChangeFrame, Frame};
 use stack::{Stack, StackView};

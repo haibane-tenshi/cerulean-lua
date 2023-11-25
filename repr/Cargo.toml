@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 decorum = { version = "0.3.1", default-features = false }
-ordered-float = "3.7.0"
 rle_vec = "0.4.1"
 thiserror = "1.0.40"
 typed-index-collections = "3.1.0"

@@ -1,6 +1,7 @@
 pub mod chunk_cache;
 pub mod ffi;
 pub mod runtime;
+pub mod value;
 
 use std::error::Error;
 use std::fmt::Display;

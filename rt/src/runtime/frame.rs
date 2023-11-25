@@ -202,9 +202,9 @@ impl<'rt> ActiveFrame<'rt> {
     }
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
+        use crate::value::table::TableRef;
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
-        use repr::value::table::TableRef;
 
         let Some(code) = self.next_code() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
