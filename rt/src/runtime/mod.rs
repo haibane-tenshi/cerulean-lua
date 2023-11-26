@@ -23,6 +23,7 @@ pub struct Runtime<C> {
     frames: Vec<Frame<C>>,
     stack: Stack<C>,
     upvalue_stack: Vec<Value<C>>,
+    register_callable: Value<C>,
 }
 
 impl<C> Runtime<C>
@@ -38,6 +39,7 @@ where
             frames: Default::default(),
             stack: Default::default(),
             upvalue_stack: Default::default(),
+            register_callable: Default::default(),
         }
     }
 
@@ -48,6 +50,7 @@ where
             frames,
             stack,
             upvalue_stack,
+            register_callable,
         } = self;
 
         let frames = FrameStackView::new(frames);
@@ -60,6 +63,7 @@ where
             frames,
             stack,
             upvalue_stack,
+            register_callable,
         }
     }
 }
@@ -70,6 +74,7 @@ pub struct RuntimeView<'rt, C> {
     frames: FrameStackView<'rt, C>,
     pub stack: StackView<'rt, C>,
     upvalue_stack: UpvalueView<'rt, C>,
+    register_callable: &'rt mut Value<C>,
 }
 
 impl<'rt, C> RuntimeView<'rt, C>
@@ -83,6 +88,7 @@ where
             frames,
             stack,
             upvalue_stack,
+            register_callable,
         } = self;
 
         let frames = frames.view();
@@ -96,6 +102,7 @@ where
             frames,
             stack,
             upvalue_stack,
+            register_callable,
         };
 
         Ok(r)
@@ -119,9 +126,13 @@ where
 
                     active_frame = frame.activate(self)?;
                 }
-                ControlFlow::Break(ChangeFrame::Invoke(callable, start)) => {
+                ControlFlow::Break(ChangeFrame::Invoke(start)) => {
                     let frame = active_frame.suspend();
                     self.frames.push(frame);
+
+                    let Value::Function(callable) = self.register_callable.take() else {
+                        return Err(RuntimeError);
+                    };
 
                     match callable {
                         Callable::LuaClosure(closure) => {

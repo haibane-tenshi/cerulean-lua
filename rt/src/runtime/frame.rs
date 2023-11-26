@@ -17,11 +17,11 @@ use crate::value::callable::Callable;
 use crate::value::Value;
 use crate::RuntimeError;
 
-pub type ControlFlow<C> = std::ops::ControlFlow<ChangeFrame<C>>;
+pub type ControlFlow = std::ops::ControlFlow<ChangeFrame>;
 
-pub enum ChangeFrame<C> {
+pub enum ChangeFrame {
     Return(StackSlot),
-    Invoke(Callable<C>, StackSlot),
+    Invoke(StackSlot),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -208,7 +208,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         self.constants.get(index)
     }
 
-    pub fn step(&mut self) -> Result<ControlFlow<C>, RuntimeError> {
+    pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::value::table::TableRef;
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
@@ -219,14 +219,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
         let r = match code {
             Panic => return Err(RuntimeError),
-            Invoke(slot) => {
-                let closure = match self.stack.get(slot) {
-                    Ok(Value::Function(closure)) => closure.clone(),
-                    _ => return Err(RuntimeError),
-                };
-
-                ControlFlow::Break(ChangeFrame::Invoke(closure, slot))
-            }
+            Invoke(slot) => ControlFlow::Break(ChangeFrame::Invoke(slot)),
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
                 let closure = self.construct_closure(fn_id)?;

@@ -46,6 +46,10 @@ impl<C> Value<C> {
             Value::Table(_) => Type::Table,
         }
     }
+
+    pub fn take(&mut self) -> Value<C> {
+        std::mem::take(self)
+    }
 }
 
 impl<C> Debug for Value<C> {
