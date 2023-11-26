@@ -83,17 +83,17 @@ where
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
         use crate::runtime::{ClosureRef, FunctionPtr};
-        use repr::index::FunctionId;
+        use repr::index::{FunctionId, StackSlot};
 
         let ptr = FunctionPtr {
             chunk_id,
             function_id: FunctionId(0),
         };
-        let offset = rt.stack.top();
+
         let closure = rt.construct_closure(ptr, [rt.global_env.clone()])?;
         let closure = ClosureRef::new(closure);
 
-        rt.enter(closure, offset)
+        rt.enter(closure, StackSlot(0))
     };
 
     let r: FnWrap<_> = f.into();
