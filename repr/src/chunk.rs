@@ -26,6 +26,70 @@ impl Chunk {
     pub fn get_recipe(&self, index: RecipeId) -> Option<&ClosureRecipe> {
         self.closure_recipes.get(index)
     }
+
+    pub fn extend<F, C, R>(&mut self, extension: ChunkExtension<F, C, R>)
+    where
+        F: IntoIterator<Item = Function>,
+        C: IntoIterator<Item = Literal>,
+        R: IntoIterator<Item = ClosureRecipe>,
+    {
+        let function_offset = self.functions.len();
+        let constant_offset = self.constants.len();
+        let recipe_offset = self.closure_recipes.len();
+
+        let ChunkExtension {
+            functions,
+            constants,
+            closure_recipes,
+        } = extension;
+
+        self.functions.extend(functions);
+        self.constants.extend(constants);
+        self.closure_recipes.extend(closure_recipes);
+
+        for opcode in self.functions[FunctionId(function_offset)..]
+            .iter_mut()
+            .flat_map(|fun| fun.codes.iter_mut())
+        {
+            match opcode {
+                OpCode::LoadConstant(ConstId(id)) => *id += constant_offset,
+                OpCode::MakeClosure(RecipeId(id)) => *id += recipe_offset,
+                _ => (),
+            }
+        }
+
+        for FunctionId(fn_id) in self.closure_recipes[RecipeId(recipe_offset)..]
+            .iter_mut()
+            .map(|recipe| &mut recipe.function_id)
+        {
+            *fn_id += function_offset;
+        }
+    }
+}
+
+impl<F, C, R> From<ChunkExtension<F, C, R>> for Chunk
+where
+    F: IntoIterator<Item = Function>,
+    C: IntoIterator<Item = Literal>,
+    R: IntoIterator<Item = ClosureRecipe>,
+{
+    fn from(value: ChunkExtension<F, C, R>) -> Self {
+        let ChunkExtension {
+            functions,
+            constants,
+            closure_recipes,
+        } = value;
+
+        let functions = functions.into_iter().collect();
+        let constants = constants.into_iter().collect();
+        let closure_recipes = closure_recipes.into_iter().collect();
+
+        Chunk {
+            functions,
+            constants,
+            closure_recipes,
+        }
+    }
 }
 
 impl Display for Chunk {
@@ -142,4 +206,33 @@ impl Display for ClosureRecipe {
 pub enum UpvalueSource {
     Temporary(StackSlot),
     Upvalue(UpvalueSlot),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ChunkExtension<F, C, R> {
+    pub functions: F,
+    pub constants: C,
+    pub closure_recipes: R,
+}
+
+impl From<Chunk>
+    for ChunkExtension<
+        TiVec<FunctionId, Function>,
+        TiVec<ConstId, Literal>,
+        TiVec<RecipeId, ClosureRecipe>,
+    >
+{
+    fn from(value: Chunk) -> Self {
+        let Chunk {
+            functions,
+            constants,
+            closure_recipes,
+        } = value;
+
+        ChunkExtension {
+            functions,
+            constants,
+            closure_recipes,
+        }
+    }
 }
