@@ -150,6 +150,7 @@ impl<C> Frame<C> {
             chunk_cache,
             stack,
             upvalue_stack,
+            register_callable,
             ..
         } = rt;
 
@@ -185,6 +186,7 @@ impl<C> Frame<C> {
             stack,
             upvalue_stack,
             register_variadic,
+            register_callable,
         };
 
         Ok(r)
@@ -201,6 +203,7 @@ pub struct ActiveFrame<'rt, C> {
     stack: StackView<'rt, C>,
     upvalue_stack: UpvalueView<'rt, C>,
     register_variadic: Vec<Value<C>>,
+    register_callable: &'rt mut Value<C>,
 }
 
 impl<'rt, C> ActiveFrame<'rt, C> {
@@ -231,6 +234,11 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             LoadConstant(index) => {
                 let constant = self.get_constant(index).ok_or(RuntimeError)?.clone();
                 self.stack.push(constant.into());
+
+                ControlFlow::Continue(())
+            }
+            StoreCallable => {
+                *self.register_callable = self.stack.pop()?;
 
                 ControlFlow::Continue(())
             }

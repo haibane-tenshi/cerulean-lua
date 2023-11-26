@@ -270,10 +270,10 @@ fn tail_segment<'s, 'origin>(
         let mut frag = core.fragment_at(CommitKind::Expr, stack_start);
 
         let state = Source(s)
-            .or(func_args(stack_start, frag.new_core()))?
+            .or(func_invocation(FragmentStackSlot(0), frag.new_core()))?
             .or(field(frag.new_core()))?
             .or(index(frag.new_core()))?
-            .or(tab_call(stack_start, frag.new_core()))?
+            .or(tab_call(FragmentStackSlot(0), frag.new_core()))?
             .map_fsource(|_| ())
             .inspect(|_| {
                 frag.commit();
@@ -283,8 +283,8 @@ fn tail_segment<'s, 'origin>(
     }
 }
 
-fn func_args<'s, 'origin>(
-    invoke_target: FragmentStackSlot,
+fn func_invocation<'s, 'origin>(
+    callable: FragmentStackSlot,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -296,7 +296,30 @@ fn func_args<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::codegen::stack::CommitKind;
 
-        let mut frag = Fragment::new_at(core, CommitKind::Expr, invoke_target);
+        let mut frag = Fragment::new_at(core, CommitKind::Expr, callable);
+        frag.emit(OpCode::StoreCallable);
+
+        let state = Source(s).and(func_args(frag.new_core()))?.inspect(|_| {
+            let args = frag.stack_slot(FragmentStackSlot(0));
+            frag.emit(OpCode::Invoke(args));
+            frag.commit();
+        });
+
+        Ok(state)
+    }
+}
+
+fn func_args<'s, 'origin>(
+    core: Core<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = Spanned<PrefixExpr>,
+    Success = Complete,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        let mut frag = core.expr();
 
         let state = Source(s)
             .or(args_par_expr(frag.new_core()))?
@@ -304,8 +327,6 @@ fn func_args<'s, 'origin>(
             .or(args_str(frag.new_core()))?
             .map_fsource(|_| ())
             .inspect(move |_| {
-                frag.emit(OpCode::Invoke(frag.stack_slot(FragmentStackSlot(0))));
-
                 frag.commit();
             })
             .map_output(|span| span.put(PrefixExpr::FnCall));
@@ -526,19 +547,21 @@ fn tab_call<'s, 'origin>(
             .and(ident, replace)?
             .then(|output| {
                 let (ident, span) = output.take();
-                let invoke_target = frag.stack().len();
                 let table = frag.stack_slot(FragmentStackSlot(0));
 
+                // Acquire function.
                 frag.emit(OpCode::LoadStack(table));
                 frag.emit_load_literal(Literal::String(ident.to_string()));
                 frag.emit(OpCode::TabGet);
 
-                // Pass table itself as the first argument.
-                frag.emit(OpCode::LoadStack(table));
+                frag.emit(OpCode::StoreCallable);
 
-                func_args(invoke_target, frag.new_core()).map_output(|output| discard(span, output))
+                func_args(frag.new_core()).map_output(|output| discard(span, output))
             })?
             .inspect(move |_| {
+                // Pass table itself as the first argument.
+                let args = frag.stack_slot(FragmentStackSlot(0));
+                frag.emit(OpCode::Invoke(args));
                 frag.commit();
             })
             .map_output(|span| span.put(PrefixExpr::FnCall));

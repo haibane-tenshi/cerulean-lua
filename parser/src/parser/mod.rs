@@ -106,13 +106,8 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     // so no harm is done.
     stack_view.push(Some(Ident::env()));
 
-    let mut stack_view = stack_view.borrow().frame();
-    // Make scripts conform to our ABI.
-    // All functions recieve unused hidden argument which the closure itself.
-    stack_view.push(None);
-
     let signature = Signature {
-        height: 1,
+        height: 0,
         is_variadic: true,
     };
 
@@ -120,7 +115,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
         func_table.view(),
         const_table.view(),
         recipe_table.view(),
-        stack_view,
+        stack_view.borrow().frame(),
         signature,
     );
     let state = block(frame.new_core()).parse_once(s)?;

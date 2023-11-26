@@ -38,17 +38,12 @@ pub(crate) fn func_body<'s, 'origin>(
                 move |s: Lexer<'s>| -> Result<_, FailFast> {
                     let (signature, span) = output.take();
                     let (idents, mut signature) = signature.unwrap_or_default();
-                    // At the moment extra slot is occupied by the function pointer itself.
-                    signature.height += 1;
-
                     if self_arg {
                         signature.height += 1;
                     }
 
                     let mut frame = envelope.new_core().frame(signature);
                     let mut frag = frame.new_core().scope();
-
-                    frag.push_temporary(None);
 
                     if self_arg {
                         frag.push_temporary(Some(Ident::self_()));
