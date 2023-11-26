@@ -9,7 +9,7 @@ use repr::index::StackSlot;
 
 use crate::chunk_cache::ChunkCache;
 use crate::ffi::LuaFfiOnce;
-use crate::value::Value as ReprValue;
+use crate::value::Value;
 use crate::RuntimeError;
 use frame::{ChangeFrame, Frame};
 use stack::{Stack, StackView};
@@ -17,33 +17,19 @@ use upvalue_stack::UpvalueView;
 
 pub use frame::{Closure, ClosureRef, FunctionPtr};
 
-pub type Value = ReprValue<ClosureRef>;
-
-impl From<Closure> for Value {
-    fn from(value: Closure) -> Self {
-        ClosureRef::new(value).into()
-    }
-}
-
-impl From<ClosureRef> for Value {
-    fn from(value: ClosureRef) -> Self {
-        Value::Function(value)
-    }
-}
-
 pub struct Runtime<C> {
     chunk_cache: C,
-    global_env: Value,
-    frames: Vec<Frame>,
-    stack: Stack,
-    upvalue_stack: Vec<Value>,
+    global_env: Value<C>,
+    frames: Vec<Frame<C>>,
+    stack: Stack<C>,
+    upvalue_stack: Vec<Value<C>>,
 }
 
 impl<C> Runtime<C>
 where
     C: Debug,
 {
-    pub fn new(chunk_cache: C, global_env: Value) -> Self {
+    pub fn new(chunk_cache: C, global_env: Value<C>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         Runtime {
@@ -80,17 +66,17 @@ where
 
 pub struct RuntimeView<'rt, C> {
     pub chunk_cache: &'rt mut C,
-    pub global_env: &'rt Value,
-    frames: FrameStackView<'rt>,
-    pub stack: StackView<'rt>,
-    upvalue_stack: UpvalueView<'rt>,
+    pub global_env: &'rt Value<C>,
+    frames: FrameStackView<'rt, C>,
+    pub stack: StackView<'rt, C>,
+    upvalue_stack: UpvalueView<'rt, C>,
 }
 
 impl<'rt, C> RuntimeView<'rt, C>
 where
     C: ChunkCache,
 {
-    fn view(&mut self) -> RuntimeView<C> {
+    fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError> {
         let RuntimeView {
             chunk_cache,
             global_env,
@@ -100,19 +86,24 @@ where
         } = self;
 
         let frames = frames.view();
-        let stack = stack.view_over();
+        let start = stack.protected_size() + start;
+        let stack = stack.view(start).ok_or(RuntimeError)?;
         let upvalue_stack = upvalue_stack.view_over();
 
-        RuntimeView {
-            chunk_cache,
+        let r = RuntimeView {
+            chunk_cache: *chunk_cache,
             global_env,
             frames,
             stack,
             upvalue_stack,
-        }
+        };
+
+        Ok(r)
     }
 
     pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError> {
+        use crate::value::callable::Callable;
+
         let frame = closure.construct_frame(self, start)?;
         let mut active_frame = frame.activate(self)?;
 
@@ -128,12 +119,22 @@ where
 
                     active_frame = frame.activate(self)?;
                 }
-                ControlFlow::Break(ChangeFrame::Invoke(closure, start)) => {
+                ControlFlow::Break(ChangeFrame::Invoke(callable, start)) => {
                     let frame = active_frame.suspend();
                     self.frames.push(frame);
 
-                    let frame = closure.construct_frame(self, start)?;
-                    active_frame = frame.activate(self)?;
+                    match callable {
+                        Callable::LuaClosure(closure) => {
+                            let frame = closure.construct_frame(self, start)?;
+                            active_frame = frame.activate(self)?;
+                        }
+                        Callable::RustClosure(closure) => {
+                            self.invoke_at(closure, start)?;
+
+                            let frame = self.frames.pop().unwrap();
+                            active_frame = frame.activate(self)?;
+                        }
+                    }
                 }
                 ControlFlow::Continue(()) => (),
             }
@@ -145,7 +146,7 @@ where
     pub fn construct_closure(
         &mut self,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = Value>,
+        upvalues: impl IntoIterator<Item = Value<C>>,
     ) -> Result<Closure, RuntimeError> {
         let signature = &self
             .chunk_cache
@@ -168,24 +169,32 @@ where
     }
 
     pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError> {
-        f.call_once(self.view())
+        f.call_once(self.view(StackSlot(0)).unwrap())
+    }
+
+    pub fn invoke_at(
+        &mut self,
+        f: impl LuaFfiOnce<C>,
+        start: StackSlot,
+    ) -> Result<(), RuntimeError> {
+        f.call_once(self.view(start)?)
     }
 }
 
-struct FrameStackView<'a> {
-    frames: &'a mut Vec<Frame>,
+struct FrameStackView<'a, C> {
+    frames: &'a mut Vec<Frame<C>>,
     protected_size: usize,
 }
 
-impl<'a> FrameStackView<'a> {
-    fn new(frames: &'a mut Vec<Frame>) -> Self {
+impl<'a, C> FrameStackView<'a, C> {
+    fn new(frames: &'a mut Vec<Frame<C>>) -> Self {
         FrameStackView {
             frames,
             protected_size: 0,
         }
     }
 
-    fn view(&mut self) -> FrameStackView {
+    fn view(&mut self) -> FrameStackView<C> {
         let protected_size = self.frames.len();
 
         FrameStackView {
@@ -194,7 +203,7 @@ impl<'a> FrameStackView<'a> {
         }
     }
 
-    fn pop(&mut self) -> Option<Frame> {
+    fn pop(&mut self) -> Option<Frame<C>> {
         if self.frames.len() <= self.protected_size {
             return None;
         }
@@ -202,7 +211,7 @@ impl<'a> FrameStackView<'a> {
         self.frames.pop()
     }
 
-    fn push(&mut self, frame: Frame) {
+    fn push(&mut self, frame: Frame<C>) {
         self.frames.push(frame)
     }
 }

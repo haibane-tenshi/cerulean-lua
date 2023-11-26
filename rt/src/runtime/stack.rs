@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::ops::{Add, Range};
 
 use repr::index::StackSlot;
@@ -51,27 +52,26 @@ impl RawUpvalueId {
 #[derive(Debug, Clone, Copy)]
 pub struct UpvalueId(RawUpvalueId, RawStackSlot);
 
-#[derive(Debug, Default)]
-pub struct Stack {
-    temporaries: Vec<Value>,
+pub struct Stack<C> {
+    temporaries: Vec<Value<C>>,
     on_stack_upvalues: HashMap<RawStackSlot, RawUpvalueId>,
-    evicted_upvalues: HashMap<RawUpvalueId, Value>,
+    evicted_upvalues: HashMap<RawUpvalueId, Value<C>>,
     next_upvalue_id: RawUpvalueId,
 }
 
-impl Stack {
+impl<C> Stack<C> {
     // pub fn new() -> Self {
     //     Default::default()
     // }
 
-    pub(crate) fn push(&mut self, value: Value) -> RawStackSlot {
+    pub(crate) fn push(&mut self, value: Value<C>) -> RawStackSlot {
         let slot = self.temporaries.len();
         self.temporaries.push(value);
 
         RawStackSlot(slot)
     }
 
-    pub(crate) fn pop(&mut self) -> Option<Value> {
+    pub(crate) fn pop(&mut self) -> Option<Value<C>> {
         let r = self.temporaries.pop();
         if let Some(value) = &r {
             let slot = RawStackSlot(self.temporaries.len());
@@ -83,7 +83,7 @@ impl Stack {
         r
     }
 
-    pub(crate) fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<Value> {
+    pub(crate) fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<Value<C>> {
         match height.0.checked_sub(self.temporaries.len()) {
             None => {
                 for slot in (height.0..self.len().0).map(RawStackSlot) {
@@ -119,19 +119,19 @@ impl Stack {
         Ok(())
     }
 
-    pub(crate) fn get(&self, slot: RawStackSlot) -> Option<&Value> {
+    pub(crate) fn get(&self, slot: RawStackSlot) -> Option<&Value<C>> {
         self.temporaries.get(slot.0)
     }
 
-    pub(crate) fn get_mut(&mut self, slot: RawStackSlot) -> Option<&mut Value> {
+    pub(crate) fn get_mut(&mut self, slot: RawStackSlot) -> Option<&mut Value<C>> {
         self.temporaries.get_mut(slot.0)
     }
 
-    pub fn last(&self) -> Option<&Value> {
+    pub fn last(&self) -> Option<&Value<C>> {
         self.temporaries.last()
     }
 
-    pub fn fresh_upvalue(&mut self, value: Value) -> UpvalueId {
+    pub fn fresh_upvalue(&mut self, value: Value<C>) -> UpvalueId {
         let raw_id = self.next_upvalue_id.increment();
 
         self.evicted_upvalues.insert(raw_id, value);
@@ -144,13 +144,13 @@ impl Stack {
         UpvalueId(raw_id, RawStackSlot(0))
     }
 
-    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value> {
+    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value<C>> {
         self.evicted_upvalues
             .get(&upvalue.0)
             .or_else(|| self.get(upvalue.1))
     }
 
-    pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut Value> {
+    pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut Value<C>> {
         self.evicted_upvalues
             .get_mut(&upvalue.0)
             .or_else(|| self.temporaries.get_mut(upvalue.1 .0))
@@ -174,21 +174,42 @@ impl Stack {
     }
 }
 
-#[derive(Debug)]
-pub struct StackView<'a> {
-    stack: &'a mut Stack,
+impl<C> Debug for Stack<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Stack")
+            .field("temporaries", &self.temporaries)
+            .field("on_stack_upvalues", &self.on_stack_upvalues)
+            .field("evicted_upvalues", &self.evicted_upvalues)
+            .field("next_upvalue_id", &self.next_upvalue_id)
+            .finish()
+    }
+}
+
+impl<C> Default for Stack<C> {
+    fn default() -> Self {
+        Self {
+            temporaries: Default::default(),
+            on_stack_upvalues: Default::default(),
+            evicted_upvalues: Default::default(),
+            next_upvalue_id: Default::default(),
+        }
+    }
+}
+
+pub struct StackView<'a, C> {
+    stack: &'a mut Stack<C>,
     protected_size: RawStackSlot,
 }
 
-impl<'a> StackView<'a> {
-    pub(crate) fn new(stack: &'a mut Stack) -> Self {
+impl<'a, C> StackView<'a, C> {
+    pub(crate) fn new(stack: &'a mut Stack<C>) -> Self {
         StackView {
             stack,
             protected_size: RawStackSlot(0),
         }
     }
 
-    pub(crate) fn view(&mut self, protected_size: RawStackSlot) -> Option<StackView> {
+    pub(crate) fn view(&mut self, protected_size: RawStackSlot) -> Option<StackView<'_, C>> {
         if self.stack.len().0 < protected_size.0 {
             return None;
         }
@@ -201,20 +222,11 @@ impl<'a> StackView<'a> {
         Some(r)
     }
 
-    pub(crate) fn view_over(&mut self) -> StackView {
-        let protected_size = self.stack.len();
-
-        StackView {
-            stack: self.stack,
-            protected_size,
-        }
-    }
-
-    pub fn push(&mut self, value: Value) {
+    pub fn push(&mut self, value: Value<C>) {
         self.stack.push(value);
     }
 
-    pub fn pop(&mut self) -> Result<Value, RuntimeError> {
+    pub fn pop(&mut self) -> Result<Value<C>, RuntimeError> {
         if self.stack.len().0 <= self.protected_size.0 {
             return Err(RuntimeError);
         }
@@ -222,7 +234,7 @@ impl<'a> StackView<'a> {
         self.stack.pop().ok_or(RuntimeError)
     }
 
-    pub fn last(&self) -> Result<&Value, RuntimeError> {
+    pub fn last(&self) -> Result<&Value<C>, RuntimeError> {
         self.stack.last().ok_or(RuntimeError)
     }
 
@@ -230,25 +242,25 @@ impl<'a> StackView<'a> {
         self.protected_size.slot(self.stack.len()).unwrap()
     }
 
-    pub fn get(&self, slot: StackSlot) -> Result<&Value, RuntimeError> {
+    pub fn get(&self, slot: StackSlot) -> Result<&Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
         self.stack.get(index).ok_or(RuntimeError)
     }
 
-    pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value, RuntimeError> {
+    pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
         self.stack.get_mut(index).ok_or(RuntimeError)
     }
 
-    pub fn fresh_upvalue(&mut self, value: Value) -> UpvalueId {
+    pub fn fresh_upvalue(&mut self, value: Value<C>) -> UpvalueId {
         self.stack.fresh_upvalue(value)
     }
 
-    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value> {
+    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value<C>> {
         self.stack.get_upvalue(upvalue)
     }
 
-    pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut Value> {
+    pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut Value<C>> {
         self.stack.get_upvalue_mut(upvalue)
     }
 
@@ -265,7 +277,7 @@ impl<'a> StackView<'a> {
         self.adjust_height_with_variadics(height);
     }
 
-    pub fn adjust_height_with_variadics(&mut self, height: StackSlot) -> Vec<Value> {
+    pub fn adjust_height_with_variadics(&mut self, height: StackSlot) -> Vec<Value<C>> {
         let requested_height = self.protected_size.index(height);
 
         self.stack.adjust_height_with_variadics(requested_height)
@@ -279,8 +291,17 @@ impl<'a> StackView<'a> {
     }
 }
 
-impl<'a> Extend<Value> for StackView<'a> {
-    fn extend<T: IntoIterator<Item = Value>>(&mut self, iter: T) {
+impl<'a, C> Extend<Value<C>> for StackView<'a, C> {
+    fn extend<T: IntoIterator<Item = Value<C>>>(&mut self, iter: T) {
         self.stack.temporaries.extend(iter)
+    }
+}
+
+impl<'a, C> Debug for StackView<'a, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StackView")
+            .field("stack", &self.stack)
+            .field("protected_size", &self.protected_size)
+            .finish()
     }
 }

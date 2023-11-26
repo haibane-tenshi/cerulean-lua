@@ -38,20 +38,20 @@ impl Add<UpvalueSlot> for ProtectedSize {
 }
 
 #[derive(Debug)]
-pub struct UpvalueView<'a> {
-    stack: &'a mut Vec<Value>,
+pub struct UpvalueView<'a, C> {
+    stack: &'a mut Vec<Value<C>>,
     protected_size: ProtectedSize,
 }
 
-impl<'a> UpvalueView<'a> {
-    pub(crate) fn new(stack: &'a mut Vec<Value>) -> Self {
+impl<'a, C> UpvalueView<'a, C> {
+    pub(crate) fn new(stack: &'a mut Vec<Value<C>>) -> Self {
         UpvalueView {
             stack,
             protected_size: ProtectedSize(0),
         }
     }
 
-    pub(crate) fn view(&mut self, protected_size: ProtectedSize) -> Option<UpvalueView> {
+    pub(crate) fn view(&mut self, protected_size: ProtectedSize) -> Option<UpvalueView<C>> {
         if self.stack.len() < protected_size.0 {
             return None;
         }
@@ -64,7 +64,7 @@ impl<'a> UpvalueView<'a> {
         Some(r)
     }
 
-    pub(crate) fn view_over(&mut self) -> UpvalueView {
+    pub(crate) fn view_over(&mut self) -> UpvalueView<C> {
         let protected_size = ProtectedSize(self.stack.len());
 
         UpvalueView {
@@ -73,21 +73,21 @@ impl<'a> UpvalueView<'a> {
         }
     }
 
-    pub fn get(&self, slot: UpvalueSlot) -> Result<&Value, RuntimeError> {
+    pub fn get(&self, slot: UpvalueSlot) -> Result<&Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
         self.stack.get(index).ok_or(RuntimeError)
     }
 
-    pub fn get_mut(&mut self, slot: UpvalueSlot) -> Result<&mut Value, RuntimeError> {
+    pub fn get_mut(&mut self, slot: UpvalueSlot) -> Result<&mut Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
         self.stack.get_mut(index).ok_or(RuntimeError)
     }
 
-    pub fn iter(&self) -> std::slice::Iter<Value> {
+    pub fn iter(&self) -> std::slice::Iter<Value<C>> {
         self.stack.get(self.protected_size.0..).unwrap().iter()
     }
 
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<Value> {
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<Value<C>> {
         self.stack
             .get_mut(self.protected_size.0..)
             .unwrap()
@@ -103,8 +103,8 @@ impl<'a> UpvalueView<'a> {
     }
 }
 
-impl<'a> Extend<Value> for UpvalueView<'a> {
-    fn extend<T: IntoIterator<Item = Value>>(&mut self, iter: T) {
+impl<'a, C> Extend<Value<C>> for UpvalueView<'a, C> {
+    fn extend<T: IntoIterator<Item = Value<C>>>(&mut self, iter: T) {
         self.stack.extend(iter)
     }
 }

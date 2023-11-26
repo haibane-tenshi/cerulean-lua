@@ -53,8 +53,9 @@ fn main() -> Result<()> {
     match command {
         Command::Run { path } => {
             use rt::chunk_cache::single::{Main, SingleChunk};
-            use rt::runtime::{Runtime, Value};
+            use rt::runtime::Runtime;
             use rt::value::table::TableRef;
+            use rt::value::Value;
 
             let chunk = load_from_file(&path)?;
             let chunk_cache = SingleChunk::new(chunk);

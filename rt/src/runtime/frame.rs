@@ -12,15 +12,16 @@ use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
-use super::Value;
 use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::value::callable::Callable;
+use crate::value::Value;
 use crate::RuntimeError;
 
-pub type ControlFlow = std::ops::ControlFlow<ChangeFrame>;
+pub type ControlFlow<C> = std::ops::ControlFlow<ChangeFrame<C>>;
 
-pub enum ChangeFrame {
+pub enum ChangeFrame<C> {
     Return(StackSlot),
-    Invoke(ClosureRef, StackSlot),
+    Invoke(Callable<C>, StackSlot),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -47,7 +48,7 @@ impl ClosureRef {
         self,
         rt: &mut RuntimeView<C>,
         start: StackSlot,
-    ) -> Result<Frame, RuntimeError>
+    ) -> Result<Frame<C>, RuntimeError>
     where
         C: ChunkCache,
     {
@@ -122,20 +123,26 @@ impl Deref for ClosureRef {
     }
 }
 
+impl From<Closure> for ClosureRef {
+    fn from(value: Closure) -> Self {
+        ClosureRef::new(value)
+    }
+}
+
 #[derive(Debug)]
-pub struct Frame {
+pub struct Frame<C> {
     closure: ClosureRef,
     ip: InstrId,
     stack_start: RawStackSlot,
     upvalue_start: RawUpvalueSlot,
-    register_variadic: Vec<Value>,
+    register_variadic: Vec<Value<C>>,
 }
 
-impl Frame {
-    pub(crate) fn activate<'a, C>(
+impl<C> Frame<C> {
+    pub(crate) fn activate<'a>(
         self,
         rt: &'a mut RuntimeView<C>,
-    ) -> Result<ActiveFrame<'a>, RuntimeError>
+    ) -> Result<ActiveFrame<'a, C>, RuntimeError>
     where
         C: ChunkCache,
     {
@@ -185,23 +192,23 @@ impl Frame {
 }
 
 #[derive(Debug)]
-pub struct ActiveFrame<'rt> {
+pub struct ActiveFrame<'rt, C> {
     closure: ClosureRef,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt>,
-    upvalue_stack: UpvalueView<'rt>,
-    register_variadic: Vec<Value>,
+    stack: StackView<'rt, C>,
+    upvalue_stack: UpvalueView<'rt, C>,
+    register_variadic: Vec<Value<C>>,
 }
 
-impl<'rt> ActiveFrame<'rt> {
+impl<'rt, C> ActiveFrame<'rt, C> {
     pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
         self.constants.get(index)
     }
 
-    pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
+    pub fn step(&mut self) -> Result<ControlFlow<C>, RuntimeError> {
         use crate::value::table::TableRef;
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
@@ -223,7 +230,8 @@ impl<'rt> ActiveFrame<'rt> {
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
                 let closure = self.construct_closure(fn_id)?;
-                self.stack.push(closure.into());
+                self.stack
+                    .push(Value::Function(Callable::LuaClosure(closure.into())));
 
                 ControlFlow::Continue(())
             }
@@ -552,7 +560,7 @@ impl<'rt> ActiveFrame<'rt> {
         Ok(r)
     }
 
-    pub fn suspend(self) -> Frame {
+    pub fn suspend(self) -> Frame<C> {
         let ActiveFrame {
             closure,
             ip,
