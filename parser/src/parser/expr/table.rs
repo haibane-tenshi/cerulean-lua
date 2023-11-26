@@ -23,10 +23,9 @@ pub(crate) fn table<'s, 'frag>(
             .and(curly_l)?
             .with_mode(FailureMode::Malformed)
             .then(|span| {
-                let table_slot = frag.stack().len();
                 frag.emit(OpCode::TabCreate);
 
-                field_list(table_slot, frag.new_core())
+                field_list(frag.new_core())
                     .optional()
                     .map_output(|output| opt_discard(span, output))
             })?
@@ -55,7 +54,6 @@ pub(crate) enum TableFailure {
 }
 
 fn field_list<'s, 'origin>(
-    table_slot: FragmentStackSlot,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -67,11 +65,11 @@ fn field_list<'s, 'origin>(
     move |s: Lexer<'s>| {
         let field_sep = field_sep.map_failure(|f| ParseFailure::from(TableFailure::Sep(f)));
 
-        let mut frag = core.scope();
+        let mut frag = core.scope_at(FragmentStackSlot(0));
         let mut next_index = 1;
 
         let state = Source(s)
-            .and(field(table_slot, next_index, frag.new_core()))?
+            .and(field(next_index, frag.new_core()))?
             .map_output(|output| {
                 let (field_type, span) = output.take();
                 if let FieldType::Index = field_type {
@@ -84,7 +82,7 @@ fn field_list<'s, 'origin>(
                 (|s| -> Result<_, FailFast> {
                     let state = Source(s)
                         .and(field_sep)?
-                        .and(field(table_slot, next_index, frag.new_core()), replace)?
+                        .and(field(next_index, frag.new_core()), replace)?
                         .inspect(|output| {
                             if let FieldType::Index = output.value {
                                 next_index += 1;
@@ -108,7 +106,6 @@ fn field_list<'s, 'origin>(
 }
 
 fn field<'s, 'origin>(
-    table_slot: FragmentStackSlot,
     next_index: i64,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -119,12 +116,12 @@ fn field<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut frag = core.scope();
+        let mut frag = core.scope_at(FragmentStackSlot(0));
 
         let state = Source(s)
-            .or(bracket(table_slot, frag.new_core()))?
-            .or(name(table_slot, frag.new_core()))?
-            .or(index(table_slot, next_index, frag.new_core()))?
+            .or(bracket(frag.new_core()))?
+            .or(name(frag.new_core()))?
+            .or(index(next_index, frag.new_core()))?
             .map_fsource(|_| ())
             .inspect(move |_| {
                 frag.commit();
@@ -162,7 +159,6 @@ fn field_sep(
 pub(crate) struct FieldSepMismatchError;
 
 fn bracket<'s, 'origin>(
-    table_slot: FragmentStackSlot,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -183,13 +179,13 @@ fn bracket<'s, 'origin>(
         let equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(BracketSetter(EqualsSign(f))));
 
-        let mut frag = core.scope();
+        let mut frag = core.scope_at(FragmentStackSlot(0));
 
         let state = Source(s)
             .and(bracket_l)?
             .with_mode(FailureMode::Malformed)
             .inspect(|_| {
-                frag.emit(OpCode::LoadStack(frag.stack_slot(table_slot)));
+                frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
             })
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .and(bracket_r, discard)?
@@ -218,7 +214,6 @@ pub(crate) enum BracketFailure {
 }
 
 fn name<'s, 'origin>(
-    table_slot: FragmentStackSlot,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -236,7 +231,7 @@ fn name<'s, 'origin>(
         let equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(NameSetter(EqualsSign(f))));
 
-        let mut frag = core.scope_at(table_slot);
+        let mut frag = core.scope_at(FragmentStackSlot(0));
 
         let state = Source(s)
             .and(ident)?
@@ -273,7 +268,6 @@ pub(crate) enum NameFailure {
 }
 
 fn index<'s, 'origin>(
-    table_slot: FragmentStackSlot,
     index: i64,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
@@ -286,13 +280,13 @@ fn index<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::parser::expr::expr_adjusted_to_1;
 
-        let mut frag = core.scope();
+        let mut frag = core.scope_at(FragmentStackSlot(0));
 
         let start = frag.stack().len();
         let r = expr_adjusted_to_1(frag.new_core())
             .parse_once(s)?
             .inspect(move |_| {
-                frag.emit(OpCode::LoadStack(frag.stack_slot(table_slot)));
+                frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
                 frag.emit_load_literal(Literal::Int(index));
                 frag.emit(OpCode::LoadStack(frag.stack_slot(start)));
                 frag.emit(OpCode::TabSet);
