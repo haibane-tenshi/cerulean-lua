@@ -355,7 +355,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
     pub fn try_emit_loop_to(&mut self) -> Result<(), EmitError> {
         self.try_emit_adjust_to(FragmentStackSlot(0))?;
-        let offset = self.fun.len() - self.fun.start() + 1;
+        let offset = self.fun.len() - self.fun.start();
         self.try_emit(OpCode::Loop { offset })?;
 
         trace!(fragment_id=?self.id(), "emit jump to start of current fragment");

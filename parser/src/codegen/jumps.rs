@@ -63,10 +63,10 @@ impl<'a> JumpsView<'a> {
             for (instr, state) in to_backpatch {
                 match fun.get_mut(instr) {
                     Some(OpCode::Jump { offset, .. } | OpCode::JumpIf { offset, .. }) => {
-                        *offset = end - instr - 1;
+                        *offset = end - instr;
                     }
                     Some(OpCode::Loop { offset, .. } | OpCode::LoopIf { offset, .. }) => {
-                        *offset = instr - start + 1;
+                        *offset = instr - start;
                     }
                     _ => (),
                 }

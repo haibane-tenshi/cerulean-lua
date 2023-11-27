@@ -169,7 +169,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
             if let Some(OpCode::Jump { offset } | OpCode::JumpIf { offset, .. }) =
                 fun.get_mut(instr_id)
             {
-                *offset = label.target - instr_id - 1;
+                *offset = label.target - instr_id;
             }
         }
 
@@ -184,7 +184,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
 
     pub fn goto(&mut self, name: Ident<'s>, instr_id: InstrId) -> OpCode {
         if let Some(target) = self.get(name) {
-            let offset = instr_id - target + 1;
+            let offset = instr_id - target;
 
             OpCode::Loop { offset }
         } else {

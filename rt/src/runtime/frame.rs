@@ -213,6 +213,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::value::table::TableRef;
+        use repr::index::InstrOffset;
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
 
@@ -446,6 +447,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             Jump { offset } => {
+                self.ip -= InstrOffset(1);
                 self.ip += offset;
 
                 ControlFlow::Continue(())
@@ -454,12 +456,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 let value = self.stack.last()?;
 
                 if value.as_boolish() == cond {
+                    self.ip -= InstrOffset(1);
                     self.ip += offset;
                 }
 
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
+                self.ip -= InstrOffset(1);
                 self.ip = self.ip.checked_sub_offset(offset).ok_or(RuntimeError)?;
 
                 ControlFlow::Continue(())
@@ -468,6 +472,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 let value = self.stack.last()?;
 
                 if value.as_boolish() == cond {
+                    self.ip -= InstrOffset(1);
                     self.ip = self.ip.checked_sub_offset(offset).ok_or(RuntimeError)?;
                 }
 
