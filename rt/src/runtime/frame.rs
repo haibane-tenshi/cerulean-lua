@@ -453,7 +453,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             JumpIf { cond, offset } => {
-                let value = self.stack.last()?;
+                let value = self.stack.pop()?;
 
                 if value.as_boolish() == cond {
                     self.ip -= InstrOffset(1);
@@ -469,7 +469,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             LoopIf { cond, offset } => {
-                let value = self.stack.last()?;
+                let value = self.stack.pop()?;
 
                 if value.as_boolish() == cond {
                     self.ip -= InstrOffset(1);

@@ -97,7 +97,7 @@ fn expr_impl<'s, 'origin>(
                     let (op, span) = op.take();
 
                     // Adjust left operand.
-                    frag.emit_adjust_to(stack_start + 1);
+                    frag.emit_adjust_to(FragmentStackSlot(1));
 
                     let maybe_opcode = match op {
                         Infix::BinOp(op) => Some(OpCode::BinOp(op)),
@@ -107,10 +107,11 @@ fn expr_impl<'s, 'origin>(
                                 Logical::And => false,
                             };
 
+                            frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
                             frag.emit_jump_to(frag.id(), Some(cond));
 
                             // Discard left operand when entering the other branch.
-                            frag.emit_adjust_to(stack_start);
+                            frag.emit_adjust_to(FragmentStackSlot(0));
 
                             None
                         }
