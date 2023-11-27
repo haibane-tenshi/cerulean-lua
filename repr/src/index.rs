@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Default, Hash)]
 pub struct ConstId(pub usize);
 
 impl From<usize> for ConstId {
@@ -22,7 +22,7 @@ impl Display for ConstId {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Default, Hash)]
 pub struct FunctionId(pub usize);
 
 impl FunctionId {
@@ -49,7 +49,7 @@ impl Display for FunctionId {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Default, Hash)]
 pub struct RecipeId(pub usize);
 
 impl From<usize> for RecipeId {

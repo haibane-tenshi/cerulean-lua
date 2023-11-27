@@ -7,7 +7,7 @@ use crate::literal::Literal;
 use crate::opcode::OpCode;
 use crate::tivec::TiVec;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Chunk {
     pub functions: TiVec<FunctionId, Function>,
     pub constants: TiVec<ConstId, Literal>,
@@ -213,6 +213,16 @@ pub struct ChunkExtension<F, C, R> {
     pub functions: F,
     pub constants: C,
     pub closure_recipes: R,
+}
+
+impl ChunkExtension<[Function; 0], [Literal; 0], [ClosureRecipe; 0]> {
+    pub fn empty() -> Self {
+        ChunkExtension {
+            functions: [],
+            constants: [],
+            closure_recipes: [],
+        }
+    }
 }
 
 impl From<Chunk>
