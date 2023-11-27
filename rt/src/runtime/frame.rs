@@ -50,7 +50,7 @@ impl ClosureRef {
         start: StackSlot,
     ) -> Result<Frame<C>, RuntimeError>
     where
-        C: ChunkCache,
+        C: ChunkCache<ChunkId>,
     {
         use repr::chunk::Function;
 
@@ -144,7 +144,7 @@ impl<C> Frame<C> {
         rt: &'a mut RuntimeView<C>,
     ) -> Result<ActiveFrame<'a, C>, RuntimeError>
     where
-        C: ChunkCache,
+        C: ChunkCache<ChunkId>,
     {
         let RuntimeView {
             chunk_cache,

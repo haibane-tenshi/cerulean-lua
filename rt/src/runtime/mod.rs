@@ -5,9 +5,11 @@ mod upvalue_stack;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
+use repr::chunk::Chunk;
 use repr::index::StackSlot;
 
-use crate::chunk_cache::ChunkCache;
+use crate::chunk_builder::ChunkBuilder;
+use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::ffi::LuaFfiOnce;
 use crate::value::Value;
 use crate::RuntimeError;
@@ -18,8 +20,8 @@ use upvalue_stack::UpvalueView;
 pub use frame::{Closure, ClosureRef, FunctionPtr};
 
 pub struct Runtime<C> {
-    chunk_cache: C,
-    global_env: Value<C>,
+    pub chunk_cache: C,
+    pub global_env: Value<C>,
     frames: Vec<Frame<C>>,
     stack: Stack<C>,
     upvalue_stack: Vec<Value<C>>,
@@ -41,6 +43,27 @@ where
             upvalue_stack: Default::default(),
             register_callable: Default::default(),
         }
+    }
+
+    pub fn with_env<F>(
+        env_builder: ChunkBuilder<F>,
+        cache_builder: impl FnOnce(Chunk) -> (ChunkId, C),
+    ) -> Result<Self, RuntimeError>
+    where
+        F: for<'rt> FnOnce(ChunkId, RuntimeView<'rt, C>) -> Result<(), RuntimeError>,
+    {
+        let ChunkBuilder { chunk, builder } = env_builder;
+        let (chunk_id, chunk_cache) = cache_builder(chunk);
+
+        let mut rt = Runtime::new(chunk_cache, Value::Nil);
+        builder(chunk_id, rt.view())?;
+
+        if let Ok(value) = rt.stack.view().pop() {
+            rt.global_env = value;
+        }
+        rt.stack.view().clear();
+
+        Ok(rt)
     }
 
     pub fn view(&mut self) -> RuntimeView<C> {
@@ -77,11 +100,8 @@ pub struct RuntimeView<'rt, C> {
     register_callable: &'rt mut Value<C>,
 }
 
-impl<'rt, C> RuntimeView<'rt, C>
-where
-    C: ChunkCache,
-{
-    fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError> {
+impl<'rt, C> RuntimeView<'rt, C> {
+    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError> {
         let RuntimeView {
             chunk_cache,
             global_env,
@@ -108,6 +128,23 @@ where
         Ok(r)
     }
 
+    pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError> {
+        f.call_once(self.view(StackSlot(0)).unwrap())
+    }
+
+    pub fn invoke_at(
+        &mut self,
+        f: impl LuaFfiOnce<C>,
+        start: StackSlot,
+    ) -> Result<(), RuntimeError> {
+        f.call_once(self.view(start)?)
+    }
+}
+
+impl<'rt, C> RuntimeView<'rt, C>
+where
+    C: ChunkCache<ChunkId>,
+{
     pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError> {
         use crate::value::callable::Callable;
 
@@ -177,18 +214,6 @@ where
         let closure = Closure { fn_ptr, upvalues };
 
         Ok(closure)
-    }
-
-    pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError> {
-        f.call_once(self.view(StackSlot(0)).unwrap())
-    }
-
-    pub fn invoke_at(
-        &mut self,
-        f: impl LuaFfiOnce<C>,
-        start: StackSlot,
-    ) -> Result<(), RuntimeError> {
-        f.call_once(self.view(start)?)
     }
 }
 

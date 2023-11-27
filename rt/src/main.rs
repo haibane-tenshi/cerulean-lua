@@ -52,15 +52,19 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
+            use rt::chunk_cache::main::MainCache;
             use rt::chunk_cache::single::{Main, SingleChunk};
+            use rt::chunk_cache::ChunkId;
             use rt::runtime::Runtime;
-            use rt::value::table::TableRef;
-            use rt::value::Value;
+            // use rt::value::table::TableRef;
+            // use rt::value::Value;
 
             let chunk = load_from_file(&path)?;
             let chunk_cache = SingleChunk::new(chunk);
 
-            let mut runtime = Runtime::new(chunk_cache, Value::Table(TableRef::default()));
+            let mut runtime = Runtime::with_env(rt::global_env::empty(), |chunk| {
+                (ChunkId(0), MainCache::new(chunk, chunk_cache))
+            })?;
 
             runtime.view().invoke(rt::ffi::call_script(&Main))?;
         }

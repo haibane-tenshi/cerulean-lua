@@ -41,6 +41,24 @@ where
     }
 }
 
+pub trait IntoLuaFfi<C> {
+    type Output;
+
+    fn into_lua_ffi(self) -> Self::Output;
+}
+
+impl<'rt, F, C> IntoLuaFfi<C> for F
+where
+    C: 'rt,
+    F: FnOnce(RuntimeView<'rt, C>) -> Result<(), RuntimeError>,
+{
+    type Output = FnWrap<F>;
+
+    fn into_lua_ffi(self) -> Self::Output {
+        FnWrap(self)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct FnWrap<F>(F);
 
@@ -71,15 +89,9 @@ where
     }
 }
 
-impl<F> From<F> for FnWrap<F> {
-    fn from(value: F) -> Self {
-        FnWrap(value)
-    }
-}
-
 pub fn call_chunk<C>(chunk_id: ChunkId) -> impl LuaFfi<C> + Copy + Send + Sync
 where
-    C: ChunkCache,
+    C: ChunkCache<ChunkId>,
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
         use crate::runtime::{ClosureRef, FunctionPtr};
@@ -96,13 +108,12 @@ where
         rt.enter(closure, StackSlot(0))
     };
 
-    let r: FnWrap<_> = f.into();
-    r
+    f.into_lua_ffi()
 }
 
 pub fn call_script<C, Q>(script: &Q) -> impl LuaFfi<C> + Copy + '_
 where
-    C: KeyedChunkCache<Q>,
+    C: KeyedChunkCache<ChunkId, Q>,
     Q: ?Sized,
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
@@ -110,6 +121,5 @@ where
         rt.invoke(call_chunk(chunk_id))
     };
 
-    let r: FnWrap<_> = f.into();
-    r
+    f.into_lua_ffi()
 }
