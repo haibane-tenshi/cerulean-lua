@@ -119,7 +119,7 @@ impl Display for Chunk {
 
 #[derive(Debug, Clone, Default)]
 pub struct Function {
-    pub codes: TiVec<InstrId, OpCode>,
+    pub opcodes: TiVec<InstrId, OpCode>,
     pub signature: Signature,
 }
 
@@ -147,7 +147,7 @@ impl Display for Function {
         writeln!(f, "# body")?;
 
         let iter = self
-            .codes
+            .opcodes
             .iter()
             .copied()
             .enumerate()

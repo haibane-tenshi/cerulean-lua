@@ -170,7 +170,7 @@ impl<C> Frame<C> {
         let function = chunk.get_function(fn_ptr.function_id).ok_or(RuntimeError)?;
 
         let constants = &chunk.constants;
-        let opcodes = &function.codes;
+        let opcodes = &function.opcodes;
         let stack = stack.view(stack_start).unwrap();
 
         // Restore upvalue stack and update its values.

@@ -28,7 +28,7 @@ impl Function {
 
     pub fn resolve(self, upvalue_count: usize) -> repr::chunk::Function {
         let Function {
-            opcodes: codes,
+            opcodes,
             signature:
                 Signature {
                     arg_count,
@@ -42,7 +42,7 @@ impl Function {
             upvalue_count,
         };
 
-        repr::chunk::Function { codes, signature }
+        repr::chunk::Function { opcodes, signature }
     }
 
     fn state(&self) -> InnerState {
