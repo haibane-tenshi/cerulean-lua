@@ -48,13 +48,13 @@ where
         let Value::Table(table) = value else {
             return Err(RuntimeError);
         };
-        
+
         let fn_assert = RustClosureRef::new(|rt: RuntimeView<_>| {
             let Ok(cond) = rt.stack.get(StackSlot(0)) else {
                 return Err(RuntimeError);
             };
-    
-            if cond.as_boolish() {
+
+            if cond.to_bool() {
                 Ok(())
             } else {
                 Err(RuntimeError)

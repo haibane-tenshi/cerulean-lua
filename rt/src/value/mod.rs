@@ -31,7 +31,7 @@ pub enum Value<C> {
 }
 
 impl<C> Value<C> {
-    pub fn as_boolish(&self) -> bool {
+    pub fn to_bool(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
     }
 

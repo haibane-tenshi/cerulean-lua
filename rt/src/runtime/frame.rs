@@ -303,7 +303,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                         }
                         _ => return Err(RuntimeError),
                     },
-                    UnaOp::LogNot => Value::Bool(!val.as_boolish()),
+                    UnaOp::LogNot => Value::Bool(!val.to_bool()),
                 };
 
                 self.stack.push(r);
@@ -455,7 +455,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             JumpIf { cond, offset } => {
                 let value = self.stack.pop()?;
 
-                if value.as_boolish() == cond {
+                if value.to_bool() == cond {
                     self.ip -= InstrOffset(1);
                     self.ip += offset;
                 }
@@ -471,7 +471,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             LoopIf { cond, offset } => {
                 let value = self.stack.pop()?;
 
-                if value.as_boolish() == cond {
+                if value.to_bool() == cond {
                     self.ip -= InstrOffset(1);
                     self.ip = self.ip.checked_sub_offset(offset).ok_or(RuntimeError)?;
                 }
