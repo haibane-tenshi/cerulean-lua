@@ -4,7 +4,7 @@ use repr::tivec::TiVec;
 
 #[derive(Debug, Clone, Default)]
 pub struct Signature {
-    pub height: usize,
+    pub arg_count: usize,
     pub is_variadic: bool,
 }
 
@@ -31,13 +31,13 @@ impl Function {
             opcodes: codes,
             signature:
                 Signature {
-                    height,
+                    arg_count,
                     is_variadic,
                 },
         } = self;
 
         let signature = repr::chunk::Signature {
-            height,
+            arg_count,
             is_variadic,
             upvalue_count,
         };

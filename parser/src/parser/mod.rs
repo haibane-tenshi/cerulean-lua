@@ -107,7 +107,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     stack_view.push(Some(Ident::env()));
 
     let signature = Signature {
-        height: 0,
+        arg_count: 0,
         is_variadic: true,
     };
 

@@ -39,7 +39,7 @@ pub(crate) fn func_body<'s, 'origin>(
                     let (signature, span) = output.take();
                     let (idents, mut signature) = signature.unwrap_or_default();
                     if self_arg {
-                        signature.height += 1;
+                        signature.arg_count += 1;
                     }
 
                     let mut frame = envelope.new_core().frame(signature);
@@ -179,7 +179,7 @@ fn arg_list<'s, 'origin>() -> impl ParseOnce<
                 let height = idents.len();
 
                 let signature = Signature {
-                    height,
+                    arg_count: height,
                     is_variadic,
                 };
 

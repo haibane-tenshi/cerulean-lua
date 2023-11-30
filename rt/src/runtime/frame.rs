@@ -71,7 +71,7 @@ impl ClosureRef {
 
         // Adjust stack, move varargs into register if needed.
         let stack_start = rt.stack.protected_size() + start;
-        let call_height = StackSlot(0) + signature.height;
+        let call_height = StackSlot(0) + signature.arg_count;
         let mut stack = rt.stack.view(stack_start).ok_or(RuntimeError)?;
 
         let register_variadic = if signature.is_variadic {

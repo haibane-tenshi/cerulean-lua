@@ -135,11 +135,11 @@ impl Display for Function {
         }
 
         writeln!(f, "# signature")?;
-        let arg_count = self.signature.height.checked_sub(1).unwrap_or_default();
+        let arg_count = self.signature.arg_count.checked_sub(1).unwrap_or_default();
         writeln!(
             f,
             "  height:   {} ({arg_count} real args)",
-            self.signature.height
+            self.signature.arg_count
         )?;
         writeln!(f, "  variadic: {}", self.signature.is_variadic)?;
         writeln!(f, "  upvalues: {}", self.signature.upvalue_count)?;
@@ -175,7 +175,7 @@ impl Display for Function {
 #[derive(Debug, Clone, Default)]
 pub struct Signature {
     pub upvalue_count: usize,
-    pub height: usize,
+    pub arg_count: usize,
     pub is_variadic: bool,
 }
 
