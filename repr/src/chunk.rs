@@ -47,7 +47,7 @@ impl Chunk {
 
         for opcode in self.functions[FunctionId(function_offset)..]
             .iter_mut()
-            .flat_map(|fun| fun.codes.iter_mut())
+            .flat_map(|fun| fun.opcodes.iter_mut())
         {
             match opcode {
                 OpCode::LoadConstant(ConstId(id)) => *id += constant_offset,
