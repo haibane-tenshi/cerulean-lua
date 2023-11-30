@@ -468,16 +468,6 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
                 ControlFlow::Continue(())
             }
-            LoopIf { cond, offset } => {
-                let value = self.stack.pop()?;
-
-                if value.to_bool() == cond {
-                    self.ip -= InstrOffset(1);
-                    self.ip = self.ip.checked_sub_offset(offset).ok_or(RuntimeError)?;
-                }
-
-                ControlFlow::Continue(())
-            }
             TabCreate => {
                 let value = TableRef::new();
 

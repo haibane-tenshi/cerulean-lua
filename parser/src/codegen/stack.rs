@@ -609,8 +609,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             OpCode::StoreStack(_)
             | OpCode::StoreUpvalue(_)
             | OpCode::StoreCallable
-            | OpCode::JumpIf { .. }
-            | OpCode::LoopIf { .. } => {
+            | OpCode::JumpIf { .. } => {
                 self.try_pop()?;
             }
             OpCode::AdjustStack(slot) => {

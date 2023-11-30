@@ -65,7 +65,7 @@ impl<'a> JumpsView<'a> {
                     Some(OpCode::Jump { offset, .. } | OpCode::JumpIf { offset, .. }) => {
                         *offset = end - instr;
                     }
-                    Some(OpCode::Loop { offset, .. } | OpCode::LoopIf { offset, .. }) => {
+                    Some(OpCode::Loop { offset, .. })=> {
                         *offset = instr - start;
                     }
                     _ => (),
