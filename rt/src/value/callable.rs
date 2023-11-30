@@ -3,12 +3,23 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::ffi::{LuaFfiMut, LuaFfiOnce};
+use crate::ffi::{IntoLuaFfi, LuaFfiMut, LuaFfiOnce};
 use crate::RuntimeError;
 
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
-pub struct RustClosureRef<C>(pub Rc<RefCell<dyn LuaFfiMut<C>>>);
+pub struct RustClosureRef<C>(pub Rc<RefCell<dyn LuaFfiMut<C> + 'static>>);
+
+impl<C> RustClosureRef<C> {
+    pub fn new<F>(value: F) -> Self
+    where
+        F: IntoLuaFfi<C>,
+        <F as IntoLuaFfi<C>>::Output: LuaFfiMut<C> + 'static,
+    {
+        let rc = Rc::new(RefCell::new(value.into_lua_ffi()));
+        RustClosureRef(rc)
+    }
+}
 
 impl<C> Debug for RustClosureRef<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

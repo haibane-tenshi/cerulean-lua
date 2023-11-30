@@ -30,3 +30,44 @@ pub fn empty<C>() -> ChunkBuilder<
 
     chunk_builder::builder().add(chunk_part)
 }
+
+pub fn assert<C>() -> ChunkPart<
+    [Function; 0],
+    [Literal; 0],
+    [ClosureRecipe; 0],
+    impl FnOnce(RuntimeView<C>, ChunkRange, &mut Value<C>) -> Result<(), RuntimeError>,
+>
+where
+    C: ChunkCache<ChunkId>,
+{
+    use crate::value::callable::RustClosureRef;
+
+    let chunk_ext = ChunkExtension::empty();
+
+    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, value: &mut Value<C>| {
+        let Value::Table(table) = value else {
+            return Err(RuntimeError);
+        };
+        
+        let fn_assert = RustClosureRef::new(|rt: RuntimeView<_>| {
+            let Ok(cond) = rt.stack.get(StackSlot(0)) else {
+                return Err(RuntimeError);
+            };
+    
+            if cond.as_boolish() {
+                Ok(())
+            } else {
+                Err(RuntimeError)
+            }
+        });
+
+        table.borrow_mut().map_err(|_| RuntimeError)?.set(
+            KeyValue::String("assert".into()),
+            Value::Function(Callable::RustClosure(fn_assert)),
+        );
+
+        Ok(())
+    };
+
+    ChunkPart { chunk_ext, builder }
+}
