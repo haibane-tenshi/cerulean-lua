@@ -4,8 +4,8 @@ use repr::literal::Literal;
 use std::ops::Range;
 
 use crate::chunk_cache::{ChunkCache, ChunkId};
-use crate::ffi::{IntoLuaFfi, LuaFfiOnce};
 use crate::runtime::{FunctionPtr, RuntimeView};
+use crate::value::Value;
 use crate::RuntimeError;
 
 #[derive(Debug, Clone)]
@@ -54,9 +54,10 @@ pub struct ChunkPart<Fun, Con, Rec, F> {
     pub builder: F,
 }
 
-pub fn builder<C>(
-) -> ChunkBuilder<impl for<'rt> FnOnce(ChunkId, RuntimeView<'rt, C>) -> Result<(), RuntimeError>> {
-    fn builder<C>(_: ChunkId, _: RuntimeView<C>) -> Result<(), RuntimeError> {
+pub fn builder<C>() -> ChunkBuilder<
+    impl for<'rt, 'a> FnOnce(RuntimeView<'rt, C>, ChunkId, &'a mut Value<C>) -> Result<(), RuntimeError>,
+> {
+    fn builder<C>(_: RuntimeView<C>, _: ChunkId, _: &mut Value<C>) -> Result<(), RuntimeError> {
         Ok(())
     }
 
@@ -85,17 +86,18 @@ impl<P> ChunkBuilder<P> {
     //     ChunkBuilder { chunk, builder }
     // }
 
-    pub fn add<Fun, Con, Rec, Cache, F, G>(
+    pub fn add<Fun, Con, Rec, Cache, F>(
         self,
         chunk_part: ChunkPart<Fun, Con, Rec, F>,
-    ) -> ChunkBuilder<impl FnOnce(ChunkId, RuntimeView<Cache>) -> Result<(), RuntimeError>>
+    ) -> ChunkBuilder<
+        impl FnOnce(RuntimeView<Cache>, ChunkId, &mut Value<Cache>) -> Result<(), RuntimeError>,
+    >
     where
-        P: FnOnce(ChunkId, RuntimeView<Cache>) -> Result<(), RuntimeError>,
+        P: FnOnce(RuntimeView<Cache>, ChunkId, &mut Value<Cache>) -> Result<(), RuntimeError>,
         Fun: IntoIterator<Item = Function>,
         Con: IntoIterator<Item = Literal>,
         Rec: IntoIterator<Item = ClosureRecipe>,
-        F: FnOnce(ChunkRange) -> G,
-        G: LuaFfiOnce<Cache>,
+        F: FnOnce(RuntimeView<Cache>, ChunkRange, &mut Value<Cache>) -> Result<(), RuntimeError>,
     {
         let ChunkPart {
             chunk_ext,
@@ -118,39 +120,46 @@ impl<P> ChunkBuilder<P> {
         let constant_ids = constant_start..constant_end;
         let recipe_ids = recipe_start..recipe_end;
 
-        let builder = move |chunk_id: ChunkId, mut rt: RuntimeView<Cache>| {
-            use repr::index::StackSlot;
+        let builder =
+            move |mut rt: RuntimeView<Cache>, chunk_id: ChunkId, value: &mut Value<Cache>| {
+                use repr::index::StackSlot;
 
-            builder(chunk_id, rt.view(StackSlot(0)).unwrap())?;
+                builder(rt.view(StackSlot(0)).unwrap(), chunk_id, value)?;
 
-            let chunk_part = ChunkRange {
-                chunk_id,
-                function_ids,
-                constant_ids,
-                recipe_ids,
+                let chunk_part = ChunkRange {
+                    chunk_id,
+                    function_ids,
+                    constant_ids,
+                    recipe_ids,
+                };
+
+                part_builder(rt, chunk_part, value)?;
+
+                Ok(())
             };
-
-            rt.invoke(part_builder(chunk_part))?;
-
-            Ok(())
-        };
 
         ChunkBuilder { chunk, builder }
     }
 
-    pub fn finish<C>(self) -> impl LuaFfiOnce<C>
+    pub fn finish<C>(
+        self,
+    ) -> (
+        Chunk,
+        impl FnOnce(RuntimeView<C>, ChunkId) -> Result<Value<C>, RuntimeError>,
+    )
     where
-        P: FnOnce(ChunkId, RuntimeView<C>) -> Result<(), RuntimeError>,
+        P: FnOnce(RuntimeView<C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError>,
         C: ChunkCache<ChunkId>,
     {
-        let f = |rt: RuntimeView<'_, C>| {
-            let ChunkBuilder { chunk, builder } = self;
+        let ChunkBuilder { chunk, builder } = self;
 
-            let chunk_id = rt.chunk_cache.insert(chunk).map_err(|_| RuntimeError)?;
+        let f = |rt: RuntimeView<'_, C>, chunk_id: ChunkId| {
+            let mut value = Value::Nil;
+            builder(rt, chunk_id, &mut value)?;
 
-            builder(chunk_id, rt)
+            Ok(value)
         };
 
-        f.into_lua_ffi()
+        (chunk, f)
     }
 }

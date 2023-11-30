@@ -5,10 +5,8 @@ mod upvalue_stack;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
-use repr::chunk::Chunk;
 use repr::index::StackSlot;
 
-use crate::chunk_builder::ChunkBuilder;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::ffi::LuaFfiOnce;
 use crate::value::Value;
@@ -43,27 +41,6 @@ where
             upvalue_stack: Default::default(),
             register_callable: Default::default(),
         }
-    }
-
-    pub fn with_env<F>(
-        env_builder: ChunkBuilder<F>,
-        cache_builder: impl FnOnce(Chunk) -> (ChunkId, C),
-    ) -> Result<Self, RuntimeError>
-    where
-        F: for<'rt> FnOnce(ChunkId, RuntimeView<'rt, C>) -> Result<(), RuntimeError>,
-    {
-        let ChunkBuilder { chunk, builder } = env_builder;
-        let (chunk_id, chunk_cache) = cache_builder(chunk);
-
-        let mut rt = Runtime::new(chunk_cache, Value::Nil);
-        builder(chunk_id, rt.view())?;
-
-        if let Ok(value) = rt.stack.view().pop() {
-            rt.global_env = value;
-        }
-        rt.stack.view().clear();
-
-        Ok(rt)
     }
 
     pub fn view(&mut self) -> RuntimeView<C> {

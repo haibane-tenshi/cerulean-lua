@@ -1,27 +1,30 @@
-use crate::chunk_builder::ChunkBuilder;
-use crate::chunk_cache::ChunkId;
+use repr::chunk::{ChunkExtension, ClosureRecipe, Function, Signature};
+use repr::index::{ConstId, FunctionId, InstrOffset, StackSlot};
+use repr::literal::Literal;
+use repr::opcode::OpCode;
+
+use crate::chunk_builder::{ChunkBuilder, ChunkPart, ChunkRange};
+use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::runtime::RuntimeView;
+use crate::value::callable::Callable;
+use crate::value::table::KeyValue;
+use crate::value::Value;
 
 use crate::RuntimeError;
 
-pub fn empty<C>(
-) -> ChunkBuilder<impl for<'rt> FnOnce(ChunkId, RuntimeView<'rt, C>) -> Result<(), RuntimeError>> {
-    use crate::chunk_builder::{self, ChunkPart};
-    use crate::ffi::IntoLuaFfi;
+pub fn empty<C>() -> ChunkBuilder<
+    impl for<'rt> FnOnce(RuntimeView<'rt, C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError>,
+> {
+    use crate::chunk_builder;
     use crate::value::table::TableRef;
-    use crate::value::Value;
-    use repr::chunk::ChunkExtension;
 
     let chunk_part = ChunkPart {
         chunk_ext: ChunkExtension::empty(),
-        builder: |_| {
-            (|mut rt: RuntimeView<C>| {
-                rt.stack.clear();
-                rt.stack.push(Value::Table(TableRef::new()));
+        builder: |mut rt: RuntimeView<C>, _, value: &mut Value<C>| {
+            *value = Value::Table(TableRef::new());
+            rt.stack.clear();
 
-                Ok(())
-            })
-            .into_lua_ffi()
+            Ok(())
         },
     };
 

@@ -57,14 +57,17 @@ fn main() -> Result<()> {
             use rt::chunk_cache::ChunkId;
             use rt::runtime::Runtime;
             // use rt::value::table::TableRef;
-            // use rt::value::Value;
+            use rt::value::Value;
+
+            let (env_chunk, builder) = rt::global_env::empty()
+                .add(rt::global_env::assert())
+                .finish();
 
             let chunk = load_from_file(&path)?;
-            let chunk_cache = SingleChunk::new(chunk);
-
-            let mut runtime = Runtime::with_env(rt::global_env::empty(), |chunk| {
-                (ChunkId(0), MainCache::new(chunk, chunk_cache))
-            })?;
+            let chunk_cache = MainCache::new(env_chunk, SingleChunk::new(chunk));
+            let mut runtime = Runtime::new(chunk_cache, Value::Nil);
+            let global_env = builder(runtime.view(), ChunkId(0))?;
+            runtime.global_env = global_env;
 
             runtime.view().invoke(rt::ffi::call_script(&Main))?;
         }
