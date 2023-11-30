@@ -10,6 +10,7 @@ pub struct Chunk {
     pub functions: TiVec<FunctionId, Function>,
     pub constants: TiVec<ConstId, Literal>,
     pub closure_recipes: TiVec<RecipeId, ClosureRecipe>,
+    pub debug_info: Option<DebugInfo>,
 }
 
 impl Chunk {
@@ -86,6 +87,7 @@ where
             functions,
             constants,
             closure_recipes,
+            debug_info: None,
         }
     }
 }
@@ -232,6 +234,7 @@ impl From<Chunk>
             functions,
             constants,
             closure_recipes,
+            debug_info: _,
         } = value;
 
         ChunkExtension {
@@ -240,4 +243,24 @@ impl From<Chunk>
             closure_recipes,
         }
     }
+}
+
+use std::ops::Range;
+
+#[derive(Debug, Clone)]
+pub struct DebugInfo {
+    pub functions: TiVec<FunctionId, FunctionDebugInfo>,
+    pub line_breaks: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionDebugInfo {
+    pub name: String,
+    pub span: Range<usize>,
+    pub opcodes: TiVec<InstrId, OpCodeDebugInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpCodeDebugInfo {
+    pub span: Range<usize>,
 }

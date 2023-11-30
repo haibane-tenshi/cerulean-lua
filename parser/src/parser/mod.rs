@@ -163,6 +163,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
         functions: func_table,
         constants: const_table,
         closure_recipes: recipe_table,
+        debug_info: None,
     };
 
     Ok(chunk)
