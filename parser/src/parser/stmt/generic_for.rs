@@ -79,7 +79,7 @@ pub(crate) fn generic_for<'s, 'origin>(
                     loop_body.emit(OpCode::LoadStack(new_control));
                     loop_body.emit_load_literal(Literal::Nil);
                     loop_body.emit(RelBinOp::Eq.into());
-                    loop_body.emit_jump_to(loop_body.id(), Some(true));
+                    loop_body.emit_jump_to_end(Some(true));
 
                     loop_body.emit(OpCode::LoadStack(new_control));
                     loop_body.emit(OpCode::StoreStack(control));

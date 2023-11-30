@@ -1,4 +1,4 @@
-use std::ops::Add;
+use std::ops::{Add, Deref, DerefMut};
 use thiserror::Error;
 use tracing::trace;
 
@@ -64,28 +64,180 @@ pub struct Core<'s, 'origin> {
 }
 
 impl<'s, 'origin> Core<'s, 'origin> {
-    pub fn fragment(self, kind: CommitKind) -> Fragment<'s, 'origin> {
-        Fragment::new(self, kind)
+    pub fn scope(self) -> Scope<'s, 'origin> {
+        let Core {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        } = self;
+
+        let fragment_id = fragment_id + 1;
+        let func_table = func_table.view();
+        let const_table = const_table.view();
+        let recipe_table = recipe_table.view();
+        let fun = fun.view();
+        let upvalues = upvalues.view();
+        let stack = stack.view();
+        let jumps = jumps.view(fragment_id, fun.len());
+        let labels = labels.view_scope(fun.len());
+
+        // trace!(?fragment_id, "construct");
+
+        let frag = Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        };
+
+        Scope(frag)
     }
 
-    pub fn scope(self) -> Fragment<'s, 'origin> {
-        self.fragment(CommitKind::Scope)
+    pub fn decl(self) -> Decl<'s, 'origin> {
+        let Core {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        } = self;
+
+        let fragment_id = fragment_id + 1;
+        let func_table = func_table.view();
+        let const_table = const_table.view();
+        let recipe_table = recipe_table.view();
+        let fun = fun.view();
+        let upvalues = upvalues.view();
+        let stack = stack.view();
+        let jumps = jumps.view(fragment_id, fun.len());
+        let labels = labels.view_expr();
+
+        // trace!(?fragment_id, "construct");
+
+        let frag = Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        };
+
+        Decl(frag)
     }
 
-    pub fn expr(self) -> Fragment<'s, 'origin> {
-        self.fragment(CommitKind::Expr)
+    pub fn expr(self) -> Expr<'s, 'origin> {
+        let Core {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        } = self;
+
+        let fragment_id = fragment_id + 1;
+        let func_table = func_table.view();
+        let const_table = const_table.view();
+        let recipe_table = recipe_table.view();
+        let fun = fun.view();
+        let upvalues = upvalues.view();
+        let stack = stack.view();
+        let jumps = jumps.view(fragment_id, fun.len());
+        let labels = labels.view_expr();
+
+        // trace!(?fragment_id, "construct");
+
+        let frag = Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        };
+
+        Expr(frag)
     }
 
-    pub fn decl(self) -> Fragment<'s, 'origin> {
-        self.fragment(CommitKind::Decl)
-    }
+    pub fn expr_at(self, slot: FragmentStackSlot) -> Expr<'s, 'origin> {
+        let Core {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        } = self;
 
-    pub fn fragment_at(self, kind: CommitKind, slot: FragmentStackSlot) -> Fragment<'s, 'origin> {
-        Fragment::new_at(self, kind, slot)
-    }
+        let fragment_id = fragment_id + 1;
+        let func_table = func_table.view();
+        let const_table = const_table.view();
+        let recipe_table = recipe_table.view();
+        let fun = fun.view();
+        let upvalues = upvalues.view();
+        let stack = stack.view_at(slot);
+        let jumps = jumps.view(fragment_id, fun.len());
+        let labels = labels.view_expr();
 
-    pub fn scope_at(self, slot: FragmentStackSlot) -> Fragment<'s, 'origin> {
-        self.fragment_at(CommitKind::Scope, slot)
+        // trace!(?fragment_id, "construct");
+
+        let frag = Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            fun,
+            upvalues,
+            stack,
+            jumps,
+            labels,
+            loop_stack,
+            reachability,
+        };
+
+        Expr(frag)
     }
 
     pub fn frame(self, signature: Signature) -> Frame<'s, 'origin> {
@@ -106,104 +258,9 @@ pub struct Fragment<'s, 'origin> {
     labels: LabelsView<'s, 'origin>,
     loop_stack: LoopStack,
     reachability: Reachability,
-    kind: CommitKind,
 }
 
 impl<'s, 'origin> Fragment<'s, 'origin> {
-    pub fn new(core: Core<'s, 'origin>, kind: CommitKind) -> Self {
-        let Core {
-            fragment_id,
-            func_table,
-            const_table,
-            recipe_table,
-            fun,
-            upvalues,
-            stack,
-            jumps,
-            labels,
-            loop_stack,
-            reachability,
-        } = core;
-
-        let fragment_id = fragment_id + 1;
-        let func_table = func_table.view();
-        let const_table = const_table.view();
-        let recipe_table = recipe_table.view();
-        let fun = fun.view();
-        let upvalues = upvalues.view();
-        let stack = stack.view();
-        let jumps = jumps.view(fragment_id, fun.len());
-        let labels = if kind == CommitKind::Scope {
-            labels.view_scope(fun.len())
-        } else {
-            labels.view_expr()
-        };
-
-        // trace!(?fragment_id, "construct");
-
-        Fragment {
-            fragment_id,
-            func_table,
-            const_table,
-            recipe_table,
-            fun,
-            upvalues,
-            stack,
-            jumps,
-            labels,
-            loop_stack,
-            reachability,
-            kind,
-        }
-    }
-
-    pub fn new_at(core: Core<'s, 'origin>, kind: CommitKind, slot: FragmentStackSlot) -> Self {
-        let Core {
-            fragment_id,
-            func_table,
-            const_table,
-            recipe_table,
-            fun,
-            upvalues,
-            stack,
-            jumps,
-            labels,
-            loop_stack,
-            reachability,
-        } = core;
-
-        let fragment_id = fragment_id + 1;
-        let func_table = func_table.view();
-        let const_table = const_table.view();
-        let recipe_table = recipe_table.view();
-        let fun = fun.view();
-        let upvalues = upvalues.view();
-        let stack = stack.view_at(slot);
-        let jumps = jumps.view(fragment_id, fun.len());
-        let labels = if kind == CommitKind::Scope {
-            labels.view_scope(fun.len())
-        } else {
-            labels.view_expr()
-        };
-
-        // trace!(?fragment_id, "construct");
-
-        Fragment {
-            fragment_id,
-            func_table,
-            const_table,
-            recipe_table,
-            fun,
-            upvalues,
-            stack,
-            jumps,
-            labels,
-            loop_stack,
-            reachability,
-            kind,
-        }
-    }
-
     pub fn id(&self) -> FragmentId {
         self.fragment_id
     }
@@ -353,6 +410,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.try_emit_jump_to(target, cond).unwrap()
     }
 
+    pub fn emit_jump_to_end(&mut self, cond: Option<bool>) -> InstrId {
+        let target = self.id();
+        self.emit_jump_to(target, cond)
+    }
+
     pub fn try_emit_loop_to(&mut self) -> Result<(), EmitError> {
         self.try_emit_adjust_to(FragmentStackSlot(0))?;
         let offset = self.fun.len() - self.fun.start();
@@ -365,6 +427,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
     pub fn emit_loop_to(&mut self) {
         self.try_emit_loop_to().unwrap()
+    }
+
+    pub fn emit_load_stack(&mut self, slot: FragmentStackSlot) -> InstrId {
+        let slot = self.stack_slot(slot);
+        self.emit(OpCode::LoadStack(slot))
     }
 
     pub fn try_emit_load_literal(
@@ -455,7 +522,6 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
-            kind: _,
         } = self;
 
         let fragment_id = *fragment_id;
@@ -489,34 +555,22 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     //     Frame::new(self.new_core(), signature)
     // }
 
-    pub fn new_fragment(&mut self, kind: CommitKind) -> Fragment<'s, '_> {
-        Fragment::new(self.new_core(), kind)
+    pub fn new_scope(&mut self) -> Scope<'s, '_> {
+        self.new_core().scope()
     }
 
-    pub fn new_scope(&mut self) -> Fragment<'s, '_> {
-        self.new_fragment(CommitKind::Scope)
+    pub fn new_expr(&mut self) -> Expr<'s, '_> {
+        self.new_core().expr()
     }
 
-    pub fn new_expr(&mut self) -> Fragment<'s, '_> {
-        self.new_fragment(CommitKind::Expr)
+    pub fn new_expr_at(&mut self, slot: FragmentStackSlot) -> Expr<'s, '_> {
+        self.new_core().expr_at(slot)
     }
+}
 
-    pub fn new_fragment_at(
-        &mut self,
-        kind: CommitKind,
-        slot: FragmentStackSlot,
-    ) -> Fragment<'s, '_> {
-        Fragment::new_at(self.new_core(), kind, slot)
-    }
+pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
 
-    pub fn new_expr_at(&mut self, slot: FragmentStackSlot) -> Fragment<'s, '_> {
-        self.new_fragment_at(CommitKind::Expr, slot)
-    }
-
-    pub fn new_fragment_at_boundary(&mut self, kind: CommitKind) -> Fragment<'s, '_> {
-        self.new_fragment_at(kind, FragmentStackSlot(0))
-    }
-
+impl<'s, 'origin> Scope<'s, 'origin> {
     pub fn commit(self) {
         let Fragment {
             fragment_id,
@@ -530,8 +584,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             labels,
             loop_stack: _,
             reachability,
-            kind,
-        } = self;
+        } = self.0;
 
         let is_reachable = reachability.commit();
 
@@ -552,20 +605,151 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             stack.apply(state);
         }
 
-        if matches!(kind, CommitKind::Scope)
-            && final_state.is_some()
-            && stack.need_adjustment_to(FragmentStackSlot(0))
-        {
+        if final_state.is_some() && stack.need_adjustment_to(FragmentStackSlot(0)) {
             let slot = stack.fragment_to_frame(FragmentStackSlot(0));
             fun.emit(OpCode::AdjustStack(slot));
         }
 
-        labels.commit(kind);
+        labels.commit(CommitKind::Scope);
         fun.commit();
         upvalues.commit();
-        stack.commit(kind);
+        stack.commit(CommitKind::Scope);
 
         trace!(?fragment_id, "commit");
+    }
+}
+
+impl<'s, 'origin> Deref for Scope<'s, 'origin> {
+    type Target = Fragment<'s, 'origin>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'s, 'origin> DerefMut for Scope<'s, 'origin> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub struct Decl<'s, 'origin>(Fragment<'s, 'origin>);
+
+impl<'s, 'origin> Decl<'s, 'origin> {
+    pub fn commit(self) {
+        let Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            mut fun,
+            upvalues,
+            mut stack,
+            jumps,
+            labels,
+            loop_stack: _,
+            reachability,
+        } = self.0;
+
+        let is_reachable = reachability.commit();
+
+        func_table.commit();
+        const_table.commit();
+        recipe_table.commit();
+
+        let sequence_state = is_reachable.then(|| stack.state());
+        let jump_state = jumps.commit(&mut fun);
+
+        let final_state = match (sequence_state, jump_state) {
+            (Some(a), Some(b)) => Some(a | b),
+            (Some(a), _) | (_, Some(a)) => Some(a),
+            (None, None) => None,
+        };
+
+        if let Some(state) = final_state {
+            stack.apply(state);
+        }
+
+        labels.commit(CommitKind::Decl);
+        fun.commit();
+        upvalues.commit();
+        stack.commit(CommitKind::Decl);
+
+        trace!(?fragment_id, "commit");
+    }
+}
+
+impl<'s, 'origin> Deref for Decl<'s, 'origin> {
+    type Target = Fragment<'s, 'origin>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'s, 'origin> DerefMut for Decl<'s, 'origin> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub struct Expr<'s, 'origin>(Fragment<'s, 'origin>);
+
+impl<'s, 'origin> Expr<'s, 'origin> {
+    pub fn commit(self) {
+        let Fragment {
+            fragment_id,
+            func_table,
+            const_table,
+            recipe_table,
+            mut fun,
+            upvalues,
+            mut stack,
+            jumps,
+            labels,
+            loop_stack: _,
+            reachability,
+        } = self.0;
+
+        let is_reachable = reachability.commit();
+
+        func_table.commit();
+        const_table.commit();
+        recipe_table.commit();
+
+        let sequence_state = is_reachable.then(|| stack.state());
+        let jump_state = jumps.commit(&mut fun);
+
+        let final_state = match (sequence_state, jump_state) {
+            (Some(a), Some(b)) => Some(a | b),
+            (Some(a), _) | (_, Some(a)) => Some(a),
+            (None, None) => None,
+        };
+
+        if let Some(state) = final_state {
+            stack.apply(state);
+        }
+
+        labels.commit(CommitKind::Expr);
+        fun.commit();
+        upvalues.commit();
+        stack.commit(CommitKind::Expr);
+
+        trace!(?fragment_id, "commit");
+    }
+}
+
+impl<'s, 'origin> Deref for Expr<'s, 'origin> {
+    type Target = Fragment<'s, 'origin>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'s, 'origin> DerefMut for Expr<'s, 'origin> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

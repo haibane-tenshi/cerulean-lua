@@ -65,7 +65,7 @@ fn field_list<'s, 'origin>(
     move |s: Lexer<'s>| {
         let field_sep = field_sep.map_failure(|f| ParseFailure::from(TableFailure::Sep(f)));
 
-        let mut frag = core.scope_at(FragmentStackSlot(0));
+        let mut frag = core.expr_at(FragmentStackSlot(0));
         let mut next_index = 1;
 
         let state = Source(s)
@@ -116,7 +116,7 @@ fn field<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut frag = core.scope_at(FragmentStackSlot(0));
+        let mut frag = core.expr_at(FragmentStackSlot(0));
 
         let state = Source(s)
             .or(bracket(frag.new_core()))?
@@ -179,13 +179,13 @@ fn bracket<'s, 'origin>(
         let equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(BracketSetter(EqualsSign(f))));
 
-        let mut frag = core.scope_at(FragmentStackSlot(0));
+        let mut frag = core.expr_at(FragmentStackSlot(0));
 
         let state = Source(s)
             .and(bracket_l)?
             .with_mode(FailureMode::Malformed)
             .inspect(|_| {
-                frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
+                frag.emit_load_stack(FragmentStackSlot(0));
             })
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .and(bracket_r, discard)?
@@ -231,7 +231,7 @@ fn name<'s, 'origin>(
         let equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(NameSetter(EqualsSign(f))));
 
-        let mut frag = core.scope_at(FragmentStackSlot(0));
+        let mut frag = core.expr_at(FragmentStackSlot(0));
 
         let state = Source(s)
             .and(ident)?
@@ -239,7 +239,7 @@ fn name<'s, 'origin>(
             .map_output(|r| {
                 let (ident, r) = r.take();
 
-                frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
+                frag.emit_load_stack(FragmentStackSlot(0));
                 frag.emit_load_literal(Literal::String(ident.to_string()));
 
                 r
@@ -280,15 +280,15 @@ fn index<'s, 'origin>(
     move |s: Lexer<'s>| {
         use crate::parser::expr::expr_adjusted_to_1;
 
-        let mut frag = core.scope_at(FragmentStackSlot(0));
+        let mut frag = core.expr_at(FragmentStackSlot(0));
 
         let start = frag.stack().len();
         let r = expr_adjusted_to_1(frag.new_core())
             .parse_once(s)?
             .inspect(move |_| {
-                frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
+                frag.emit_load_stack(FragmentStackSlot(0));
                 frag.emit_load_literal(Literal::Int(index));
-                frag.emit(OpCode::LoadStack(frag.stack_slot(start)));
+                frag.emit_load_stack(start);
                 frag.emit(OpCode::TabSet);
                 frag.emit_adjust_to(start);
 

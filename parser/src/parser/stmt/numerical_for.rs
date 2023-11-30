@@ -125,7 +125,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         zero_check.emit(OpCode::LoadStack(step));
                         zero_check.emit(OpCode::LoadConstant(zero));
                         zero_check.emit(RelBinOp::Eq.into());
-                        zero_check.emit_jump_to(zero_check.id(), Some(false));
+                        zero_check.emit_jump_to_end(Some(false));
 
                         zero_check.emit(OpCode::LoadConstant(error_msg));
                         zero_check.emit(OpCode::Panic);
@@ -143,7 +143,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         positive_step.emit(OpCode::LoadStack(step));
                         positive_step.emit(OpCode::LoadConstant(zero));
                         positive_step.emit(RelBinOp::Gt.into());
-                        positive_step.emit_jump_to(positive_step.id(), Some(false));
+                        positive_step.emit_jump_to_end(Some(false));
 
                         // Path: positive step.
                         positive_step.emit(OpCode::LoadStack(loop_var));

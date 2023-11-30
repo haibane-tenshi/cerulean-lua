@@ -86,8 +86,7 @@ pub(crate) fn fn_name<'s, 'origin>(
             })?
             .and(
                 (|s: Lexer<'s>| -> Result<_, FailFast> {
-                    use crate::codegen::stack::CommitKind;
-                    let mut frag = envelope.new_fragment_at_boundary(CommitKind::Expr);
+                    let mut frag = envelope.new_expr_at(FragmentStackSlot(0));
 
                     let state = Source(s)
                         .and(token_dot)?
@@ -112,8 +111,7 @@ pub(crate) fn fn_name<'s, 'origin>(
             )?
             .and(
                 (|s: Lexer<'s>| -> Result<_, FailFast> {
-                    use crate::codegen::stack::CommitKind;
-                    let mut frag = envelope.new_fragment_at_boundary(CommitKind::Expr);
+                    let mut frag = envelope.new_expr_at(FragmentStackSlot(0));
 
                     let state = Source(s)
                         .and(token_colon)?

@@ -107,8 +107,8 @@ fn expr_impl<'s, 'origin>(
                                 Logical::And => false,
                             };
 
-                            frag.emit(OpCode::LoadStack(frag.stack_slot(FragmentStackSlot(0))));
-                            frag.emit_jump_to(frag.id(), Some(cond));
+                            frag.emit_load_stack(FragmentStackSlot(0));
+                            frag.emit_jump_to_end(Some(cond));
 
                             // Discard left operand when entering the other branch.
                             frag.emit_adjust_to(FragmentStackSlot(0));

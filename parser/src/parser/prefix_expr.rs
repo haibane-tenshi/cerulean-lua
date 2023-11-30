@@ -186,8 +186,7 @@ fn prefix_expr_impl<'s, 'origin>(
             }))?
             .and(
                 (|s: Lexer<'s>| -> Result<_, FailFast> {
-                    use crate::codegen::stack::CommitKind;
-                    let mut frag = frag.new_fragment_at_boundary(CommitKind::Expr);
+                    let mut frag = frag.new_expr_at(FragmentStackSlot(0));
 
                     // Evaluate place.
                     if let PrefixExpr::Place(place) = expr_type {
@@ -265,9 +264,8 @@ fn tail_segment<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use crate::codegen::stack::CommitKind;
         // Need to include previous stack as it contains temporary with callable/table ref.
-        let mut frag = core.fragment_at(CommitKind::Expr, stack_start);
+        let mut frag = core.expr_at(stack_start);
 
         let state = Source(s)
             .or(func_invocation(FragmentStackSlot(0), frag.new_core()))?
@@ -294,9 +292,7 @@ fn func_invocation<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use crate::codegen::stack::CommitKind;
-
-        let mut frag = Fragment::new_at(core, CommitKind::Expr, callable);
+        let mut frag = core.expr_at(callable);
         frag.emit(OpCode::StoreCallable);
 
         let state = Source(s).and(func_args(frag.new_core()))?.inspect(|_| {
@@ -534,13 +530,11 @@ fn tab_call<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use crate::codegen::stack::CommitKind;
-
         let token_colon =
             match_token(Token::Colon).map_failure(|f| ParseFailure::from(TabCallFailure::Colon(f)));
         let ident = identifier.map_failure(|f| ParseFailure::from(TabCallFailure::Ident(f)));
 
-        let mut frag = Fragment::new_at(core, CommitKind::Expr, table);
+        let mut frag = core.expr_at(table);
 
         let state = Source(s)
             .and(token_colon)?

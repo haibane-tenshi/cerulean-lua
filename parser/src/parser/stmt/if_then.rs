@@ -39,7 +39,7 @@ pub(crate) fn if_then<'s, 'origin>(
                         .and(expr_adjusted_to_1(frag.new_core()))?
                         .and(token_then, discard)?
                         .inspect(|_| {
-                            frag.emit_jump_to(frag.id(), Some(false));
+                            frag.emit_jump_to_end(Some(false));
                         })
                         .and(block(frag.new_core()), opt_discard)?
                         .inspect(|_| {
@@ -116,7 +116,7 @@ fn else_if_clause<'s, 'origin>(
                         .and(expr_adjusted_to_1(frag.new_core()))?
                         .and(token_then, discard)?
                         .inspect(|_| {
-                            frag.emit_jump_to(frag.id(), Some(false));
+                            frag.emit_jump_to_end(Some(false));
                         })
                         .and(block(frag.new_core()), opt_discard)?
                         .inspect(|_| {
