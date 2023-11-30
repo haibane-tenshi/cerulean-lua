@@ -42,11 +42,7 @@ impl Function {
             upvalue_count,
         };
 
-        repr::chunk::Function {
-            codes,
-            lines: Default::default(),
-            signature,
-        }
+        repr::chunk::Function { codes, signature }
     }
 
     fn state(&self) -> InnerState {

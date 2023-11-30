@@ -1,7 +1,5 @@
 use std::fmt::Display;
 
-use rle_vec::RleVec;
-
 use crate::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
 use crate::literal::Literal;
 use crate::opcode::OpCode;
@@ -122,12 +120,13 @@ impl Display for Chunk {
 #[derive(Debug, Clone, Default)]
 pub struct Function {
     pub codes: TiVec<InstrId, OpCode>,
-    pub lines: RleVec<u32>,
     pub signature: Signature,
 }
 
 impl Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Silence warning for now, until debuginfo actually implemented.
+        #[allow(dead_code)]
         #[derive(Copy, Clone)]
         enum LineNumber {
             Explicit(u32),
@@ -147,16 +146,12 @@ impl Display for Function {
         writeln!(f)?;
         writeln!(f, "# body")?;
 
-        let iter = self.codes.iter().copied().enumerate().zip(
-            self.lines
-                .runs()
-                .flat_map(|run| {
-                    std::iter::once(LineNumber::Explicit(*run.value))
-                        .chain(std::iter::repeat(LineNumber::Repeat).take(run.len - 1))
-                })
-                .map(Some)
-                .chain(std::iter::repeat(None)),
-        );
+        let iter = self
+            .codes
+            .iter()
+            .copied()
+            .enumerate()
+            .zip(std::iter::repeat(None));
 
         for ((i, code), line) in iter {
             let line = match line {
