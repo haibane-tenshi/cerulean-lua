@@ -15,9 +15,7 @@ use crate::codegen::labels::{Labels, LabelsView, PushLabelError};
 use crate::codegen::loop_stack::LoopStack;
 use crate::codegen::reachability::Reachability;
 use crate::codegen::recipe_table::{RecipeTable, RecipeTableView};
-use crate::codegen::stack::{
-    BoundaryViolationError, CommitKind, FragmentStackSlot, PopError, PushError, Stack, StackView,
-};
+use crate::codegen::stack::{CommitKind, FragmentStackSlot, Stack, StackView};
 use crate::codegen::upvalues::{Upvalues, UpvaluesView};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
@@ -320,20 +318,6 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.loop_stack.push(self.id())
     }
 
-    pub fn try_emit(&mut self, opcode: OpCode, span: Range<usize>) -> Result<InstrId, EmitError> {
-        use repr::debug_info::OpCodeDebugInfo;
-
-        self.stack.emit(&opcode)?;
-        self.reachability.emit(&opcode);
-
-        let debug_info = OpCodeDebugInfo::Generic(span);
-        let r = self.fun.emit(opcode, debug_info);
-
-        trace!(fragment_id=?self.id(), ?opcode, "emit opcode");
-
-        Ok(r)
-    }
-
     pub fn push_temporary(&mut self, name: Option<Ident<'s>>) -> FragmentStackSlot {
         if name.is_some() {
             let marker = self.fun.next_id();
@@ -361,26 +345,18 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
-    pub fn emit(&mut self, instr: OpCode, span: Range<usize>) -> InstrId {
-        self.try_emit(instr, span).unwrap()
-    }
+    pub fn emit(&mut self, opcode: OpCode, span: Range<usize>) -> InstrId {
+        use repr::debug_info::OpCodeDebugInfo;
 
-    pub fn try_emit_adjust_to(
-        &mut self,
-        slot: FragmentStackSlot,
-        span: Range<usize>,
-    ) -> Result<Option<InstrId>, EmitError> {
-        let instr_id = if self.stack.need_adjustment_to(slot) {
-            let slot = self.stack.fragment_to_frame(slot);
-            let id = self.try_emit(OpCode::AdjustStack(slot), span)?;
-            Some(id)
-        } else {
-            None
-        };
+        self.stack.emit(&opcode);
+        self.reachability.emit(&opcode);
 
-        trace!(fragment_id=?self.id(), ?slot, "emitted optional AdjustStack");
+        let debug_info = OpCodeDebugInfo::Generic(span);
+        let r = self.fun.emit(opcode, debug_info);
 
-        Ok(instr_id)
+        trace!(fragment_id=?self.id(), ?opcode, "emit opcode");
+
+        r
     }
 
     pub fn emit_adjust_to(
@@ -388,15 +364,25 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         slot: FragmentStackSlot,
         span: Range<usize>,
     ) -> Option<InstrId> {
-        self.try_emit_adjust_to(slot, span).unwrap()
+        let instr_id = if self.stack.need_adjustment_to(slot) {
+            let slot = self.stack.fragment_to_frame(slot);
+            let id = self.emit(OpCode::AdjustStack(slot), span);
+            Some(id)
+        } else {
+            None
+        };
+
+        trace!(fragment_id=?self.id(), ?slot, "emitted optional AdjustStack");
+
+        instr_id
     }
 
-    pub fn try_emit_jump_to(
+    pub fn emit_jump_to(
         &mut self,
         target: FragmentId,
         cond: Option<bool>,
         span: Range<usize>,
-    ) -> Result<InstrId, EmitError> {
+    ) -> InstrId {
         let opcode = match cond {
             Some(cond) => OpCode::JumpIf {
                 cond,
@@ -407,22 +393,13 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             },
         };
 
-        let instr_id = self.try_emit(opcode, span)?;
+        let instr_id = self.emit(opcode, span);
         self.jumps
             .register_jump(target, instr_id, self.stack.state());
 
         trace!(fragment_id=?self.id(), ?target, "emit jump to end of target fragment");
 
-        Ok(instr_id)
-    }
-
-    pub fn emit_jump_to(
-        &mut self,
-        target: FragmentId,
-        cond: Option<bool>,
-        span: Range<usize>,
-    ) -> InstrId {
-        self.try_emit_jump_to(target, cond, span).unwrap()
+        instr_id
     }
 
     pub fn emit_jump_to_end(&mut self, cond: Option<bool>, span: Range<usize>) -> InstrId {
@@ -430,18 +407,12 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.emit_jump_to(target, cond, span)
     }
 
-    pub fn try_emit_loop_to(&mut self, span: Range<usize>) -> Result<(), EmitError> {
-        self.try_emit_adjust_to(FragmentStackSlot(0), span.clone())?;
+    pub fn emit_loop_to(&mut self, span: Range<usize>) {
+        self.emit_adjust_to(FragmentStackSlot(0), span.clone());
         let offset = self.fun.next_id() - self.fun.start();
-        self.try_emit(OpCode::Loop { offset }, span)?;
+        self.emit(OpCode::Loop { offset }, span);
 
         trace!(fragment_id=?self.id(), "emit jump to start of current fragment");
-
-        Ok(())
-    }
-
-    pub fn emit_loop_to(&mut self, span: Range<usize>) {
-        self.try_emit_loop_to(span).unwrap()
     }
 
     pub fn emit_load_stack(&mut self, slot: FragmentStackSlot, span: Range<usize>) -> InstrId {
@@ -449,19 +420,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.emit(OpCode::LoadStack(slot), span)
     }
 
-    pub fn try_emit_load_literal(
-        &mut self,
-        literal: Literal,
-        span: Range<usize>,
-    ) -> Result<InstrId, EmitLoadLiteralError> {
-        let const_id = self.const_table.insert(literal);
-        let instr_id = self.try_emit(OpCode::LoadConstant(const_id), span)?;
-
-        Ok(instr_id)
-    }
-
     pub fn emit_load_literal(&mut self, literal: Literal, span: Range<usize>) -> InstrId {
-        self.try_emit_load_literal(literal, span).unwrap()
+        let const_id = self.const_table.insert(literal);
+        self.emit(OpCode::LoadConstant(const_id), span)
     }
 
     pub fn try_emit_label(
@@ -494,23 +455,15 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn try_emit_goto(
-        &mut self,
-        label: Ident<'s>,
-        span: Range<usize>,
-    ) -> Result<InstrId, EmitError> {
+    pub fn emit_goto(&mut self, label: Ident<'s>, span: Range<usize>) -> InstrId {
         let target = self.fun.next_id();
 
         let opcode = self.labels.goto(label, target);
-        let r = self.try_emit(opcode, span)?;
+        let r = self.emit(opcode, span);
 
         trace!(fragment_id=?self.id(), ?label, "emit jump to label");
 
-        Ok(r)
-    }
-
-    pub fn emit_goto(&mut self, label: Ident<'s>, span: Range<usize>) -> InstrId {
-        self.try_emit_goto(label, span).unwrap()
+        r
     }
 
     pub fn emit_break(&mut self, span: Range<usize>) -> Result<InstrId, BreakOutsideLoopError> {
@@ -778,22 +731,6 @@ impl<'s, 'origin> DerefMut for Expr<'s, 'origin> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
-}
-
-#[derive(Debug, Error)]
-#[error("failed to emit instruction")]
-pub enum EmitError {
-    PopStack(#[from] PopError),
-    PushStack(#[from] PushError),
-    AdjustStack(#[from] BoundaryViolationError),
-    #[error("invoked pointing at stack slot above stack top")]
-    InvokeOutsideStackBoundary,
-}
-
-#[derive(Debug, Error)]
-pub enum EmitLoadLiteralError {
-    #[error(transparent)]
-    Emit(#[from] EmitError),
 }
 
 #[derive(Debug)]

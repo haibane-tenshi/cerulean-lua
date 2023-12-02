@@ -3,9 +3,7 @@ use repr::opcode::OpCode;
 use repr::tivec::TiVec;
 use std::collections::HashMap;
 use std::ops::{Add, AddAssign, BitOr, Sub, SubAssign};
-use thiserror::Error;
 
-use super::fragment::EmitError;
 use super::Ident;
 
 pub(crate) use repr::index::StackOffset;
@@ -165,29 +163,34 @@ impl<'s> UnqualifiedStack<'s> {
         self.temporaries.next_key()
     }
 
-    fn push(&mut self, name: Option<Ident<'s>>) -> Result<GlobalStackSlot, PushError> {
-        if self.variadic {
-            return Err(VariadicStackError.into());
-        }
+    fn push(&mut self, name: Option<Ident<'s>>) -> GlobalStackSlot {
+        assert!(
+            !self.variadic,
+            "cannot push values onto stack of variadic length"
+        );
 
         let slot = self.temporaries.push_and_get_key(name);
         if let Some(name) = name {
             self.backlinks.add(slot, name);
         }
 
-        Ok(slot)
+        slot
     }
 
-    fn pop(&mut self) -> Result<(), PopError> {
-        if self.variadic {
-            return Err(VariadicStackError.into());
-        }
+    fn pop(&mut self) {
+        assert!(
+            !self.variadic,
+            "cannot pop values from stack of variadic length"
+        );
 
-        if let Some(name) = self.temporaries.pop().ok_or(BoundaryViolationError)? {
-            self.backlinks.pop(name)
-        }
+        let maybe_name = self
+            .temporaries
+            .pop()
+            .expect("stack should contain at least one value");
 
-        Ok(())
+        if let Some(name) = maybe_name {
+            self.backlinks.pop(name);
+        }
     }
 
     fn make_variadic(&mut self) {
@@ -256,16 +259,16 @@ impl<'s> StackFrame<'s> {
         self.global_to_frame(self.stack.len()).unwrap()
     }
 
-    fn push(&mut self, name: Option<Ident<'s>>) -> Result<StackSlot, PushError> {
-        self.stack
-            .push(name)
-            .map(|slot| self.global_to_frame(slot).unwrap())
+    fn push(&mut self, name: Option<Ident<'s>>) -> StackSlot {
+        let slot = self.stack.push(name);
+        self.global_to_frame(slot).unwrap()
     }
 
-    fn pop(&mut self) -> Result<(), PopError> {
-        if self.stack.len() <= self.frame_base {
-            return Err(BoundaryViolationError.into());
-        }
+    fn pop(&mut self) {
+        assert!(
+            self.stack.len() > self.frame_base,
+            "current frame has no values on stack"
+        );
 
         self.stack.pop()
     }
@@ -335,16 +338,16 @@ impl<'s> Stack<'s> {
         self.frame_to_fragment(self.stack.len()).unwrap()
     }
 
-    fn push(&mut self, name: Option<Ident<'s>>) -> Result<FragmentStackSlot, PushError> {
-        self.stack
-            .push(name)
-            .map(|slot| self.frame_to_fragment(slot).unwrap())
+    fn push(&mut self, name: Option<Ident<'s>>) -> FragmentStackSlot {
+        let slot = self.stack.push(name);
+        self.frame_to_fragment(slot).unwrap()
     }
 
-    fn pop(&mut self) -> Result<(), PopError> {
-        if self.stack.len() <= self.boundary {
-            return Err(BoundaryViolationError.into());
-        }
+    fn pop(&mut self) {
+        assert!(
+            self.stack.len() > self.boundary,
+            "cannot pop values across fragment boundary"
+        );
 
         self.stack.pop()
     }
@@ -528,7 +531,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
         }
     }
 
-    pub fn try_apply(&mut self, state: StackState) -> Result<(), BoundaryViolationError> {
+    pub fn apply(&mut self, state: StackState) {
         match state {
             StackState::Variadic => {
                 self.make_variadic();
@@ -537,39 +540,25 @@ impl<'s, 'origin> StackView<'s, 'origin> {
                 let height = self
                     .stack
                     .frame_to_fragment(height)
-                    .ok_or(BoundaryViolationError)?;
+                    .expect("cannot set stack length to value below fragment boundary");
                 self.adjust_to(height);
             }
         }
-
-        Ok(())
-    }
-
-    pub fn apply(&mut self, state: StackState) {
-        self.try_apply(state).unwrap()
     }
 
     pub fn len(&self) -> FragmentStackSlot {
         self.stack.len()
     }
 
-    pub fn try_push(&mut self, name: Option<Ident<'s>>) -> Result<FragmentStackSlot, PushError> {
+    pub fn push(&mut self, name: Option<Ident<'s>>) -> FragmentStackSlot {
         self.stack.push(name)
     }
 
-    pub fn push(&mut self, name: Option<Ident<'s>>) -> FragmentStackSlot {
-        self.try_push(name).unwrap()
-    }
-
-    pub fn try_pop(&mut self) -> Result<(), PopError> {
+    pub fn pop(&mut self) {
         self.stack.pop()
     }
 
-    pub fn pop(&mut self) {
-        self.try_pop().unwrap();
-    }
-
-    pub fn emit(&mut self, opcode: &OpCode) -> Result<(), EmitError> {
+    pub fn emit(&mut self, opcode: &OpCode) {
         match opcode {
             // This opcode never returns, so stack manipulation is irrelevant.
             // Any opcodes after this one are either unreachable,
@@ -579,17 +568,15 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             OpCode::Return(_) => (),
             // This opcode never returns, however it grabs the top value as panic message.
             OpCode::Panic => {
-                self.try_pop()?;
+                self.pop();
             }
             OpCode::Invoke(slot) => {
                 let height = self
                     .stack
                     .frame_to_fragment(*slot)
-                    .ok_or(BoundaryViolationError)?;
+                    .expect("cannot pass values below fragment boundary as arguments to invoke");
 
-                if height > self.len() {
-                    return Err(EmitError::InvokeOutsideStackBoundary);
-                }
+                assert!(height <= self.len(), "cannot invoke past stack length");
 
                 // Stack space at `slot` and above is consumed during invocation.
                 // Function returns are always variadic.
@@ -601,7 +588,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             | OpCode::LoadUpvalue(_)
             | OpCode::TabCreate
             | OpCode::MakeClosure(_) => {
-                self.try_push(None)?;
+                self.push(None);
             }
             OpCode::LoadVariadic => {
                 self.make_variadic();
@@ -610,38 +597,36 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             | OpCode::StoreUpvalue(_)
             | OpCode::StoreCallable
             | OpCode::JumpIf { .. } => {
-                self.try_pop()?;
+                self.pop();
             }
             OpCode::AdjustStack(slot) => {
                 let height = self
                     .stack
                     .frame_to_fragment(*slot)
-                    .ok_or(BoundaryViolationError)?;
+                    .expect("cannot adjust stack length to value below fragment boundary");
                 self.adjust_to(height);
             }
             OpCode::UnaOp(_) => {
-                self.try_pop()?;
-                self.try_push(None)?;
+                self.pop();
+                self.push(None);
             }
             OpCode::BinOp(_) => {
-                self.try_pop()?;
-                self.try_pop()?;
-                self.try_push(None)?;
+                self.pop();
+                self.pop();
+                self.push(None);
             }
             OpCode::Jump { .. } | OpCode::Loop { .. } => (),
             OpCode::TabGet => {
-                self.try_pop()?;
-                self.try_pop()?;
-                self.try_push(None)?;
+                self.pop();
+                self.pop();
+                self.push(None);
             }
             OpCode::TabSet => {
-                self.try_pop()?;
-                self.try_pop()?;
-                self.try_pop()?;
+                self.pop();
+                self.pop();
+                self.pop();
             }
         }
-
-        Ok(())
     }
 
     pub fn make_variadic(&mut self) {
@@ -695,41 +680,4 @@ pub enum CommitKind {
     Scope,
     Expr,
     Decl,
-}
-
-/// There are named temporaries above boundary.
-#[derive(Debug, Error)]
-#[error("attempt to pass named temporaries into new frame")]
-pub struct PassingNamedTemporariesError;
-
-#[derive(Debug, Error)]
-#[error("failed to capture part of stack in new frame")]
-pub enum NewBlockAtError {
-    #[error("tried to capture temporaries below current frame's boundary")]
-    Boundary(#[from] BoundaryViolationError),
-    #[error("cannot capture named temporaries in the new frame")]
-    PassingNamed(#[from] PassingNamedTemporariesError),
-}
-
-#[derive(Debug, Error)]
-#[error("cannot manipulate stack when number of temporaries is statically unknown")]
-pub struct VariadicStackError;
-
-#[derive(Debug, Error)]
-#[error("attempt to modify stack beyond protected boundary")]
-pub struct BoundaryViolationError;
-
-#[derive(Debug, Error)]
-pub enum PushError {
-    #[error("attempt to push value onto variadic stack")]
-    Variadic(#[from] VariadicStackError),
-}
-
-#[derive(Debug, Error)]
-pub enum PopError {
-    #[error("attempt to pop value from variadic stack")]
-    Variadic(#[from] VariadicStackError),
-
-    #[error("locally accessible stack is empty")]
-    Boundary(#[from] BoundaryViolationError),
 }
