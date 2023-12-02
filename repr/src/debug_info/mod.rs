@@ -5,7 +5,7 @@ use std::ops::Range;
 use crate::index::{FunctionId, InstrId};
 use crate::tivec::TiVec;
 
-pub use opcode::OpCodeDebugInfo;
+pub use opcode::DebugInfo as OpCodeDebugInfo;
 
 #[derive(Debug, Clone)]
 pub struct DebugInfo {
