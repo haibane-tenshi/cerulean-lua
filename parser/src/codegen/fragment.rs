@@ -326,7 +326,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.stack.emit(&opcode)?;
         self.reachability.emit(&opcode);
 
-        let debug_info = OpCodeDebugInfo { span };
+        let debug_info = OpCodeDebugInfo::Generic(span);
         let r = self.fun.emit(opcode, debug_info);
 
         trace!(fragment_id=?self.id(), ?opcode, "emit opcode");
@@ -633,7 +633,7 @@ impl<'s, 'origin> Scope<'s, 'origin> {
 
         if final_state.is_some() && stack.need_adjustment_to(FragmentStackSlot(0)) {
             let slot = stack.fragment_to_frame(FragmentStackSlot(0));
-            let debug_info = OpCodeDebugInfo { span };
+            let debug_info = OpCodeDebugInfo::Generic(span);
             fun.emit(OpCode::AdjustStack(slot), debug_info);
         }
 

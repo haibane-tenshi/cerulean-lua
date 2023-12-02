@@ -29,9 +29,9 @@ impl Function {
         FunctionView::new(self)
     }
 
-    pub fn len(&self) -> usize {
-        self.opcodes.len()
-    }
+    // pub fn len(&self) -> usize {
+    //     self.opcodes.len()
+    // }
 
     pub fn next_id(&self) -> InstrId {
         self.opcodes.next_key()
