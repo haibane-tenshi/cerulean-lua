@@ -2,6 +2,7 @@ use std::ops::{Add, Deref, DerefMut, Range};
 use thiserror::Error;
 use tracing::trace;
 
+use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{InstrId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
@@ -345,18 +346,19 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
-    pub fn emit(&mut self, opcode: OpCode, span: Range<usize>) -> InstrId {
-        use repr::debug_info::OpCodeDebugInfo;
-
+    pub fn emit_with_debug(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
         self.stack.emit(&opcode);
         self.reachability.emit(&opcode);
-
-        let debug_info = OpCodeDebugInfo::Generic(span);
         let r = self.fun.emit(opcode, debug_info);
 
         trace!(fragment_id=?self.id(), ?opcode, "emit opcode");
 
         r
+    }
+
+    pub fn emit(&mut self, opcode: OpCode, span: Range<usize>) -> InstrId {
+        let debug_info = OpCodeDebugInfo::Generic(span);
+        self.emit_with_debug(opcode, debug_info)
     }
 
     pub fn emit_adjust_to(
@@ -549,8 +551,6 @@ pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
 
 impl<'s, 'origin> Scope<'s, 'origin> {
     pub fn commit(self, span: Range<usize>) {
-        use repr::debug_info::OpCodeDebugInfo;
-
         let Fragment {
             fragment_id,
             func_table,
