@@ -37,9 +37,12 @@ pub(crate) fn decl_local_fn<'s, 'origin>(
                 let ((fn_span, ident), span) = output.take();
                 frag.push_temporary(Some(ident));
 
-                span.put(fn_span)
+                (ident, span.put(fn_span))
             })
-            .and(func_body(frag.new_core(), false), keep)?
+            .then(|(ident, span)| {
+                func_body(frag.new_core(), false, ident.0, span.span().start)
+                    .map_output(|output| keep(span, output))
+            })?
             .map_output(|output| {
                 let ((fn_span, func_id), span) = output.take();
 

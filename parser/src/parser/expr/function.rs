@@ -23,7 +23,10 @@ pub(crate) fn function<'s, 'origin>(
             .and(token_function)?
             .with_mode(FailureMode::Malformed)
             .map_output(Spanned::put_range)
-            .and(func_body(frag.new_core(), false), keep)?
+            .then(|span| {
+                func_body(frag.new_core(), false, "<closure>", span.span().start)
+                    .map_output(|output| keep(span, output))
+            })?
             .map_output(|output| {
                 let ((fn_span, func_id), span) = output.take();
 

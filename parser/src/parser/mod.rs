@@ -91,7 +91,9 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::recipe_table::RecipeTable;
     use crate::codegen::stack::Stack;
     use crate::parser::block::block;
+    use repr::chunk::{DebugInfo, FunctionDebugInfo};
 
+    let source = s.source();
     let _span = trace_span!("chunk").entered();
 
     // Reserve 0-th slot in table for the script itself.
@@ -120,8 +122,8 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     );
     let state = block(frame.new_core()).parse_once(s)?;
 
-    match state {
-        ParsingState::Success(mut s, _, reason) => {
+    let span = match state {
+        ParsingState::Success(mut s, span, reason) => {
             if !matches!(s.next_token(), Ok(Err(Eof))) {
                 match reason {
                     CompleteOr::Other(failure) => return Err(Error::Parse(failure.into())),
@@ -134,12 +136,17 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
                         return Err(Error::Parse(err.into()));
                     }
                 }
+            } else {
+                match span {
+                    Some(spanned) => spanned.span,
+                    None => 0..0,
+                }
             }
         }
         ParsingState::Failure(_, failure) => match failure {},
-    }
+    };
 
-    let func_table = {
+    let (func_table, debug_info_table) = {
         let (script, upvalues) = frame.commit().map_err(CodegenError::from)?;
         let upvalues = upvalues.resolve();
 
@@ -147,23 +154,40 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
             return Err(CodegenError::UnresolvedUpvalue.into());
         }
 
-        let (mut script, _debug_info) = script.resolve(Default::default());
+        let (mut script, opcodes) = script.resolve(Default::default());
         script.signature.upvalue_count = upvalues.len();
-        let mut func_table = func_table.resolve();
+
+        let script_debug_info = FunctionDebugInfo {
+            name: "<script>".to_string(),
+            span,
+            opcodes,
+        };
+
+        let (mut func_table, mut debug_info_table) = func_table.resolve();
 
         // Put script where runtime expects it to find.
         let _ = std::mem::replace(func_table.first_mut().unwrap(), script);
+        let _ = std::mem::replace(debug_info_table.first_mut().unwrap(), script_debug_info);
 
-        func_table
+        (func_table, debug_info_table)
     };
     let const_table = const_table.resolve();
     let recipe_table = recipe_table.resolve();
+
+    let debug_info = {
+        let line_breaks = source.match_indices('\n').map(|(i, _)| i + 1).collect();
+
+        DebugInfo {
+            functions: debug_info_table,
+            line_breaks,
+        }
+    };
 
     let chunk = Chunk {
         functions: func_table,
         constants: const_table,
         closure_recipes: recipe_table,
-        debug_info: None,
+        debug_info: Some(debug_info),
     };
 
     Ok(chunk)

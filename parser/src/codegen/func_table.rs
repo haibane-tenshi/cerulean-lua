@@ -1,10 +1,11 @@
-use repr::chunk::Function;
+use repr::chunk::{Function, FunctionDebugInfo};
 use repr::index::FunctionId;
 use repr::tivec::TiVec;
 
 #[derive(Debug, Default)]
 pub struct FuncTable {
     functions: TiVec<FunctionId, Function>,
+    debug_info: TiVec<FunctionId, FunctionDebugInfo>,
 }
 
 impl FuncTable {
@@ -13,8 +14,15 @@ impl FuncTable {
     // }
 
     pub fn with_script() -> Self {
+        let dummy = FunctionDebugInfo {
+            name: "".to_string(),
+            span: 0..0,
+            opcodes: Default::default(),
+        };
+
         FuncTable {
             functions: vec![Default::default()].into(),
+            debug_info: vec![dummy].into(),
         }
     }
 
@@ -22,8 +30,13 @@ impl FuncTable {
         FuncTableView::new(self)
     }
 
-    pub fn resolve(self) -> TiVec<FunctionId, Function> {
-        self.functions
+    pub fn resolve(
+        self,
+    ) -> (
+        TiVec<FunctionId, Function>,
+        TiVec<FunctionId, FunctionDebugInfo>,
+    ) {
+        (self.functions, self.debug_info)
     }
 
     fn inner_state(&self) -> InnerState {
@@ -36,6 +49,7 @@ impl FuncTable {
         let InnerState { functions } = state;
 
         self.functions.truncate(functions.into());
+        self.debug_info.truncate(functions.into());
     }
 }
 
@@ -64,8 +78,13 @@ impl<'a> FuncTableView<'a> {
         self.func_table
     }
 
-    pub fn push(&mut self, func: Function) -> FunctionId {
-        self.func_table.functions.push_and_get_key(func)
+    pub fn push(&mut self, func: Function, debug_info: FunctionDebugInfo) -> FunctionId {
+        let func_id = self.func_table.functions.push_and_get_key(func);
+        let debug_info_id = self.func_table.debug_info.push_and_get_key(debug_info);
+
+        debug_assert_eq!(func_id, debug_info_id);
+
+        func_id
     }
 
     pub fn commit(self) {

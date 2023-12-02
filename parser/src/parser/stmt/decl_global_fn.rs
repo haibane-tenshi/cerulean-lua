@@ -28,9 +28,17 @@ pub(crate) fn decl_global_fn<'s, 'origin>(
             .and(fn_name(frag.new_core()), keep_with_range)?
             .then(|output| {
                 let ((fn_span, self_arg, ident_span), span) = output.take();
+                let core = frag.new_core();
 
-                func_body(frag.new_core(), self_arg)
-                    .map_output(|output| replace(span, output).map(|id| (id, fn_span, ident_span)))
+                move |s: Lexer<'s>| {
+                    let name = &s.source()[ident_span.clone()];
+
+                    func_body(core, self_arg, name, span.span().start)
+                        .map_output(|output| {
+                            replace(span, output).map(|id| (id, fn_span, ident_span))
+                        })
+                        .parse_once(s)
+                }
             })?
             .map_output(|output| {
                 let ((recipe_id, fn_span, ident_span), span) = output.take();

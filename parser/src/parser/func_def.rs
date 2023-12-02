@@ -6,6 +6,8 @@ use thiserror::Error;
 pub(crate) fn func_body<'s, 'origin>(
     core: Core<'s, 'origin>,
     self_arg: bool,
+    name: &'s str,
+    span_start: usize,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<RecipeId>,
@@ -71,16 +73,22 @@ pub(crate) fn func_body<'s, 'origin>(
                             Ok((func, upvalues, output))
                         })?
                         .map_output(|(func, upvalues, output)| {
-                            use repr::chunk::ClosureRecipe;
+                            use repr::chunk::{ClosureRecipe, FunctionDebugInfo};
 
                             let upvalues = upvalues
                                 .resolve()
                                 .into_iter()
                                 .map(|ident| envelope.capture_variable(ident).unwrap().into())
                                 .collect::<repr::tivec::TiVec<_, _>>();
-                            let (func, _debug_info) = func.resolve(upvalues.len());
+                            let (func, opcodes) = func.resolve(upvalues.len());
 
-                            let function_id = envelope.func_table_mut().push(func);
+                            let debug_info = FunctionDebugInfo {
+                                name: name.to_string(),
+                                span: span_start..output.span().end,
+                                opcodes,
+                            };
+
+                            let function_id = envelope.func_table_mut().push(func, debug_info);
                             let closure = ClosureRecipe {
                                 function_id,
                                 upvalues,
