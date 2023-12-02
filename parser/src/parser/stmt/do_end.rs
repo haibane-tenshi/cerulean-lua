@@ -27,11 +27,14 @@ pub(crate) fn do_end<'s, 'origin>(
             .and(token_do)?
             .with_mode(FailureMode::Malformed)
             .and(block(frag.new_core()), opt_discard)?
-            .and(token_end, discard)?
-            .inspect(move |output| {
-                frag.commit();
+            .and(token_end, replace_range)?
+            .map_output(move |output| {
+                let (end_span, span) = output.take();
+                frag.commit(end_span);
 
-                trace!(span=?output.span(), str=&source[output.span()]);
+                trace!(span=?span.span(), str=&source[span.span()]);
+
+                span
             })
             .collapse();
 

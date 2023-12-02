@@ -28,22 +28,22 @@ pub(crate) fn decl_local_fn<'s, 'origin>(
         let state = Source(s)
             .and(token_local)?
             .with_mode(FailureMode::Ambiguous)
-            .and(token_function, discard)?
+            .and(token_function, replace_range)?
             .with_mode(FailureMode::Malformed)
-            .and(identifier, replace)?
+            .and(identifier, keep)?
             .map_output(|output| {
                 // Lua disambiguates this case by introducing local variable first and assigning to it later.
                 // This is relevant for recursive functions.
-                let (ident, span) = output.take();
+                let ((fn_span, ident), span) = output.take();
                 frag.push_temporary(Some(ident));
 
-                span
+                span.put(fn_span)
             })
-            .and(func_body(frag.new_core(), false), replace)?
+            .and(func_body(frag.new_core(), false), keep)?
             .map_output(|output| {
-                let (func_id, span) = output.take();
+                let ((fn_span, func_id), span) = output.take();
 
-                frag.emit(OpCode::MakeClosure(func_id));
+                frag.emit(OpCode::MakeClosure(func_id), fn_span);
                 // Stack is already adjusted, remove unnecessary temporary.
                 frag.pop_temporary();
                 frag.commit();

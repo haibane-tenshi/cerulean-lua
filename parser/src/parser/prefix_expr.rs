@@ -1,6 +1,7 @@
-use crate::codegen::fragment::UpvalueSource;
+use std::ops::Range;
 use thiserror::Error;
 
+use crate::codegen::fragment::UpvalueSource;
 use crate::parser::prelude::*;
 
 pub(crate) fn prefix_expr<'s, 'origin>(
@@ -24,7 +25,7 @@ pub(crate) fn prefix_expr<'s, 'origin>(
                 // Eagerly evaluate place.
                 let (expr_type, span) = output.take();
                 if let PrefixExpr::Place(place) = expr_type {
-                    frag.emit(place.into_opcode());
+                    frag.emit(place.into_opcode(), span.span());
                 }
                 frag.commit();
 
@@ -148,7 +149,7 @@ pub(crate) fn func_call<'s, 'origin>(
                 }
             })
             .inspect(|output| {
-                frag.commit();
+                frag.commit(output.span());
 
                 trace!(span=?output.span(), str=&source[output.span()]);
             });
@@ -174,14 +175,15 @@ fn prefix_expr_impl<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         let mut frag = core.expr();
-        let stack_start = frag.stack().len();
-        // Need this as workaround for repeat unable to use output values to construct parsers.
+        // Need this as workaround because repeat is unable to use output values to construct parsers.
         let mut expr_type = PrefixExpr::Expr;
+        let mut all_expr_span = 0..0;
 
         let state = Source(s)
             .and(head(frag.new_core()).map_output(|output: Spanned<_>| {
                 let (expr, span) = output.take();
                 expr_type = expr;
+                all_expr_span = span.span();
                 span
             }))?
             .and(
@@ -190,22 +192,26 @@ fn prefix_expr_impl<'s, 'origin>(
 
                     // Evaluate place.
                     if let PrefixExpr::Place(place) = expr_type {
-                        frag.emit(place.into_opcode());
+                        frag.emit(place.into_opcode(), all_expr_span.clone());
                     }
 
                     // Adjust stack.
                     // Prefix expressions (except the very last one) always evaluate to 1 value.
                     // We are reusing the same stack slot to store it.
-                    frag.emit_adjust_to(stack_start + 1);
+                    // Required since previous part could have been a function invocation.
+                    frag.emit_adjust_to(FragmentStackSlot(1), all_expr_span.clone());
 
                     let state = Source(s)
-                        .and(tail_segment(stack_start, frag.new_core()).map_output(
-                            |output: Spanned<_>| {
-                                let (expr, span) = output.take();
-                                expr_type = expr;
-                                span
-                            },
-                        ))?
+                        .and(
+                            tail_segment(all_expr_span.clone(), frag.new_core()).map_output(
+                                |output: Spanned<_>| {
+                                    let (expr, span) = output.take();
+                                    expr_type = expr;
+                                    all_expr_span = all_expr_span.start..span.span().end;
+                                    span
+                                },
+                            ),
+                        )?
                         .inspect(|_| frag.commit());
 
                     Ok(state)
@@ -254,7 +260,7 @@ fn head<'s, 'origin>(
 }
 
 fn tail_segment<'s, 'origin>(
-    stack_start: FragmentStackSlot,
+    span: Range<usize>,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -264,14 +270,17 @@ fn tail_segment<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        // Need to include previous stack as it contains temporary with callable/table ref.
-        let mut frag = core.expr_at(stack_start);
+        // Grab previous part of expression.
+        let mut frag = core.expr_at(FragmentStackSlot(0));
+
+        // There should always be exactly one value
+        assert_eq!(frag.stack().len(), FragmentStackSlot(1));
 
         let state = Source(s)
-            .or(func_invocation(FragmentStackSlot(0), frag.new_core()))?
+            .or(func_invocation(span.clone(), frag.new_core()))?
             .or(field(frag.new_core()))?
             .or(index(frag.new_core()))?
-            .or(tab_call(FragmentStackSlot(0), frag.new_core()))?
+            .or(tab_call(span, frag.new_core()))?
             .map_fsource(|_| ())
             .inspect(|_| {
                 frag.commit();
@@ -282,7 +291,7 @@ fn tail_segment<'s, 'origin>(
 }
 
 fn func_invocation<'s, 'origin>(
-    callable: FragmentStackSlot,
+    span: Range<usize>,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -292,12 +301,12 @@ fn func_invocation<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        let mut frag = core.expr_at(callable);
-        frag.emit(OpCode::StoreCallable);
+        let mut frag = core.expr_at(FragmentStackSlot(0));
+        frag.emit(OpCode::StoreCallable, span.clone());
 
         let state = Source(s).and(func_args(frag.new_core()))?.inspect(|_| {
             let args = frag.stack_slot(FragmentStackSlot(0));
-            frag.emit(OpCode::Invoke(args));
+            frag.emit(OpCode::Invoke(args), span);
             frag.commit();
         });
 
@@ -386,7 +395,7 @@ fn args_str<'s, 'origin>(
             .map_failure(|f| ParseFailure::from(FnArgsFailure::String(f)))
             .map_output(move |output| {
                 let (value, span) = output.take();
-                frag.emit_load_literal(Literal::String(value.into_owned()));
+                frag.emit_load_literal(Literal::String(value.into_owned()), span.span());
 
                 frag.commit();
                 span
@@ -418,8 +427,8 @@ fn variable<'s, 'origin>(
                     Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot),
                     None => {
                         let env = frag.capture_global_env()?;
-                        frag.emit(env.into_opcode());
-                        frag.emit_load_literal(Literal::String(ident.to_string()));
+                        frag.emit(env.into_opcode(), span.span());
+                        frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
                         Place::TableField
                     }
@@ -460,10 +469,10 @@ fn field<'s, 'origin>(
 
         let state = Source(s)
             .and(token_dot)?
-            .and(identifier, replace)?
+            .and(identifier, replace_with_range)?
             .map_output(move |output| {
-                let (ident, span) = output.take();
-                frag.emit_load_literal(Literal::String(ident.to_string()));
+                let ((ident, ident_span), span) = output.take();
+                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
 
                 frag.commit();
                 span.put(PrefixExpr::Place(Place::TableField))
@@ -520,7 +529,7 @@ pub(crate) enum IndexFailure {
 }
 
 fn tab_call<'s, 'origin>(
-    table: FragmentStackSlot,
+    table_span: Range<usize>,
     core: Core<'s, 'origin>,
 ) -> impl ParseOnce<
     Lexer<'s>,
@@ -534,31 +543,35 @@ fn tab_call<'s, 'origin>(
             match_token(Token::Colon).map_failure(|f| ParseFailure::from(TabCallFailure::Colon(f)));
         let ident = identifier.map_failure(|f| ParseFailure::from(TabCallFailure::Ident(f)));
 
-        let mut frag = core.expr_at(table);
+        let mut frag = core.expr_at(FragmentStackSlot(0));
 
         let state = Source(s)
             .and(token_colon)?
-            .and(ident, replace)?
+            .map_output(Spanned::put_range)
+            .and(ident, keep_with_range)?
             .then(|output| {
-                let (ident, span) = output.take();
-                let table = frag.stack_slot(FragmentStackSlot(0));
+                let ((colon_span, ident, ident_span), span) = output.take();
 
                 // Acquire function.
-                frag.emit(OpCode::LoadStack(table));
-                frag.emit_load_literal(Literal::String(ident.to_string()));
-                frag.emit(OpCode::TabGet);
+                frag.emit_load_stack(FragmentStackSlot(0), table_span);
+                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
+                frag.emit(OpCode::TabGet, colon_span.clone());
 
-                frag.emit(OpCode::StoreCallable);
+                frag.emit(OpCode::StoreCallable, colon_span.clone());
 
-                func_args(frag.new_core()).map_output(|output| discard(span, output))
+                func_args(frag.new_core())
+                    .map_output(|output| discard(span, output).put(colon_span))
             })?
-            .inspect(move |_| {
+            .map_output(move |output| {
+                let (colon_span, span) = output.take();
+
                 // Pass table itself as the first argument.
                 let args = frag.stack_slot(FragmentStackSlot(0));
-                frag.emit(OpCode::Invoke(args));
+                frag.emit(OpCode::Invoke(args), colon_span);
                 frag.commit();
-            })
-            .map_output(|span| span.put(PrefixExpr::FnCall));
+
+                span.put(PrefixExpr::FnCall)
+            });
 
         Ok(state)
     }

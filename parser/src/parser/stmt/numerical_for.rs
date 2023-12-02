@@ -1,22 +1,13 @@
+use std::ops::Range;
+
 use thiserror::Error;
 
 use crate::parser::prelude::*;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 enum StackSlotOrConstId {
-    StackSlot(StackSlot),
+    StackSlot(StackSlot, Range<usize>),
     ConstId(ConstId),
-}
-
-impl StackSlotOrConstId {
-    fn load(self, frag: &mut Fragment) -> InstrId {
-        use StackSlotOrConstId::*;
-
-        match self {
-            StackSlot(slot) => frag.emit(OpCode::LoadStack(slot)),
-            ConstId(const_id) => frag.emit(OpCode::LoadConstant(const_id)),
-        }
-    }
 }
 
 pub(crate) fn numerical_for<'s, 'origin>(
@@ -54,45 +45,26 @@ pub(crate) fn numerical_for<'s, 'origin>(
         let state = Source(s)
             .and(token_for)?
             .with_mode(FailureMode::Ambiguous)
-            .and(identifier, replace)?
-            .and(token_equals_sign, discard)?
+            .map_output(Spanned::put_range)
+            .and(identifier, keep_with_range)?
+            .and(token_equals_sign, keep_range)?
             .with_mode(FailureMode::Malformed)
-            .then(|ident| {
-                |s| -> Result<_, FailFast> {
-                    let loop_var = envelope.stack_slot(envelope.stack().len());
-                    let status = expr_adjusted_to_1(envelope.new_core())
-                        .parse_once(s)?
-                        .map_output(|output| {
-                            // Assign name.
-                            let (ident, span) = ident.take();
-                            envelope.pop_temporary();
-                            envelope.push_temporary(Some(ident));
+            .and(expr_adjusted_to_1(envelope.new_core()), discard)?
+            .map_output(|output| {
+                // Assign name.
+                let (((for_span, ident, ident_span), eq_sign_span), span) = output.take();
+                envelope.pop_temporary();
+                envelope.push_temporary(Some(ident));
 
-                            replace(span, output).put(loop_var)
-                        });
-
-                    Ok(status)
-                }
-            })?
+                span.put((for_span, ident_span, eq_sign_span))
+            })
             .and(token_comma, discard)?
-            .and(
-                |s| -> Result<_, FailFast> {
-                    let limit = envelope.stack_slot(envelope.stack().len());
-                    let status = expr_adjusted_to_1(envelope.new_core())
-                        .parse_once(s)?
-                        .map_output(|span| span.put(limit));
-
-                    Ok(status)
-                },
-                keep,
-            )?
+            .and(expr_adjusted_to_1(envelope.new_core()), keep_range)?
             .and(
                 (|s| -> Result<_, FailFast> {
-                    let step = envelope.stack_slot(envelope.stack().len());
                     let status = Source(s)
                         .and(token_comma)?
-                        .and(expr_adjusted_to_1(envelope.new_core()), discard)?
-                        .map_output(|span| span.put(step));
+                        .and(expr_adjusted_to_1(envelope.new_core()), replace_range)?;
 
                     Ok(status)
                 })
@@ -100,10 +72,14 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 opt_keep,
             )?
             .then(|output| {
-                let (((loop_var, limit), step), span) = output.take();
+                let ((((for_span, loop_var_span, eq_sign_span), limit_span), step), span) =
+                    output.take();
+
+                let loop_var = envelope.stack_slot(FragmentStackSlot(0));
+                let limit = loop_var + 1;
 
                 let step = match step {
-                    Some(slot) => StackSlotOrConstId::StackSlot(slot),
+                    Some(step_span) => StackSlotOrConstId::StackSlot(loop_var + 2, step_span),
                     None => {
                         let const_id = envelope.const_table_mut().insert(Literal::Int(1));
                         StackSlotOrConstId::ConstId(const_id)
@@ -112,7 +88,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                 // Emit loop controls.
                 let mut loop_body = match step {
-                    StackSlotOrConstId::StackSlot(step) => {
+                    StackSlotOrConstId::StackSlot(step, ref step_span) => {
                         let zero = envelope.const_table_mut().insert(Literal::Int(0));
 
                         let error_msg = envelope
@@ -122,13 +98,13 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         // Panic if increment is 0.
                         let mut zero_check = envelope.new_expr();
 
-                        zero_check.emit(OpCode::LoadStack(step));
-                        zero_check.emit(OpCode::LoadConstant(zero));
-                        zero_check.emit(RelBinOp::Eq.into());
-                        zero_check.emit_jump_to_end(Some(false));
+                        zero_check.emit(OpCode::LoadStack(step), step_span.clone());
+                        zero_check.emit(OpCode::LoadConstant(zero), step_span.clone());
+                        zero_check.emit(RelBinOp::Eq.into(), step_span.clone());
+                        zero_check.emit_jump_to_end(Some(false), step_span.clone());
 
-                        zero_check.emit(OpCode::LoadConstant(error_msg));
-                        zero_check.emit(OpCode::Panic);
+                        zero_check.emit(OpCode::LoadConstant(error_msg), step_span.clone());
+                        zero_check.emit(OpCode::Panic, step_span.clone());
 
                         zero_check.commit();
 
@@ -140,26 +116,26 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         let mut positive_step = controls.new_expr();
 
-                        positive_step.emit(OpCode::LoadStack(step));
-                        positive_step.emit(OpCode::LoadConstant(zero));
-                        positive_step.emit(RelBinOp::Gt.into());
-                        positive_step.emit_jump_to_end(Some(false));
+                        positive_step.emit(OpCode::LoadStack(step), step_span.clone());
+                        positive_step.emit(OpCode::LoadConstant(zero), for_span.clone());
+                        positive_step.emit(RelBinOp::Gt.into(), for_span.clone());
+                        positive_step.emit_jump_to_end(Some(false), for_span.clone());
 
                         // Path: positive step.
-                        positive_step.emit(OpCode::LoadStack(loop_var));
-                        positive_step.emit(OpCode::LoadStack(limit));
-                        positive_step.emit(RelBinOp::Le.into());
-                        positive_step.emit_jump_to(envelope_id, Some(false));
-                        positive_step.emit_jump_to(controls_id, None);
+                        positive_step.emit(OpCode::LoadStack(loop_var), loop_var_span.clone());
+                        positive_step.emit(OpCode::LoadStack(limit), limit_span.clone());
+                        positive_step.emit(RelBinOp::Le.into(), for_span.clone());
+                        positive_step.emit_jump_to(envelope_id, Some(false), for_span.clone());
+                        positive_step.emit_jump_to(controls_id, None, for_span.clone());
 
                         positive_step.commit();
 
                         // Path: negative step.
                         // We assume total ordering for the variable.
-                        controls.emit(OpCode::LoadStack(loop_var));
-                        controls.emit(OpCode::LoadStack(limit));
-                        controls.emit(RelBinOp::Ge.into());
-                        controls.emit_jump_to(envelope_id, Some(false));
+                        controls.emit(OpCode::LoadStack(loop_var), loop_var_span.clone());
+                        controls.emit(OpCode::LoadStack(limit), limit_span.clone());
+                        controls.emit(RelBinOp::Ge.into(), for_span.clone());
+                        controls.emit_jump_to(envelope_id, Some(false), for_span.clone());
 
                         controls.commit();
 
@@ -169,10 +145,10 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         let mut loop_body = envelope.new_scope();
                         loop_body.mark_as_loop();
 
-                        loop_body.emit(OpCode::LoadStack(loop_var));
-                        loop_body.emit(OpCode::LoadStack(limit));
-                        loop_body.emit(RelBinOp::Le.into());
-                        loop_body.emit_jump_to(envelope_id, Some(false));
+                        loop_body.emit(OpCode::LoadStack(loop_var), loop_var_span.clone());
+                        loop_body.emit(OpCode::LoadStack(limit), limit_span.clone());
+                        loop_body.emit(RelBinOp::Le.into(), for_span.clone());
+                        loop_body.emit_jump_to(envelope_id, Some(false), for_span.clone());
 
                         loop_body
                     }
@@ -182,28 +158,41 @@ pub(crate) fn numerical_for<'s, 'origin>(
                     let state = Source(s)
                         .and(token_do)?
                         .and(block(loop_body.new_core()), opt_discard)?
-                        .and(token_end, discard)?
-                        .inspect(|_| {
+                        .and(token_end, replace_range)?
+                        .inspect(|output| {
+                            let end_span = output.value.clone();
+
                             // Increment control variable.
-                            loop_body.emit(OpCode::LoadStack(loop_var));
-                            step.load(&mut loop_body);
-                            loop_body.emit(AriBinOp::Add.into());
-                            loop_body.emit(OpCode::StoreStack(loop_var));
-                            loop_body.emit_loop_to();
+                            loop_body.emit(OpCode::LoadStack(loop_var), loop_var_span.clone());
+                            match step {
+                                StackSlotOrConstId::StackSlot(slot, step_span) => {
+                                    loop_body.emit(OpCode::LoadStack(slot), step_span)
+                                }
+                                StackSlotOrConstId::ConstId(const_id) => {
+                                    loop_body.emit(OpCode::LoadConstant(const_id), for_span)
+                                }
+                            };
+                            loop_body.emit(AriBinOp::Add.into(), eq_sign_span.clone());
+                            loop_body.emit(OpCode::StoreStack(loop_var), eq_sign_span);
+                            loop_body.emit_loop_to(end_span.clone());
 
                             // Clean up.
-                            loop_body.commit();
+                            loop_body.commit(end_span.clone());
                         })
-                        .map_output(|output| discard(span, output));
+                        .map_output(|output| replace(span, output));
 
                     Ok(state)
                 }
             })?
             .collapse()
-            .inspect(|output| {
-                envelope.commit();
+            .map_output(|output| {
+                let (end_span, span) = output.take();
 
-                trace!(span=?output.span(), str=&source[output.span()]);
+                envelope.commit(end_span);
+
+                trace!(span=?span.span(), str=&source[span.span()]);
+
+                span
             });
 
         Ok(state)

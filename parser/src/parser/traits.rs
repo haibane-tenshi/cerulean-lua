@@ -867,6 +867,15 @@ impl<T> Spanned<T> {
         self.replace(u).1
     }
 
+    pub fn place<U>(self, u: U) -> Spanned<(T, U)> {
+        self.map(|t| (t, u))
+    }
+
+    pub fn put_range(self) -> Spanned<Range<usize>> {
+        let span = self.span();
+        self.put(span)
+    }
+
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Spanned<U> {
         let Spanned { value, span } = self;
 
@@ -931,4 +940,28 @@ pub fn opt_replace<T, U>(t: Spanned<T>, u: Option<Spanned<U>>) -> Spanned<Option
         Some(u) => replace(t, u.map(Some)),
         None => t.map(|_| None),
     }
+}
+
+pub fn replace_range<T, U>(t: Spanned<T>, u: Spanned<U>) -> Spanned<Range<usize>> {
+    let span = u.span();
+
+    discard(t, u).put(span)
+}
+
+pub fn keep_range<T, U>(t: Spanned<T>, u: Spanned<U>) -> Spanned<(T, Range<usize>)> {
+    let span = u.span();
+
+    discard(t, u).place(span)
+}
+
+pub fn replace_with_range<T, U>(t: Spanned<T>, u: Spanned<U>) -> Spanned<(U, Range<usize>)> {
+    let span = u.span();
+
+    replace(t, u).place(span)
+}
+
+pub fn keep_with_range<T, U>(t: Spanned<T>, u: Spanned<U>) -> Spanned<(T, U, Range<usize>)> {
+    let span = u.span();
+
+    keep(t, u).map(|(t, u)| (t, u, span))
 }

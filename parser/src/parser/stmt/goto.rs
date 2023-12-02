@@ -24,11 +24,12 @@ pub(crate) fn goto<'s, 'origin>(
         let state = Source(s)
             .and(token_goto)?
             .with_mode(FailureMode::Malformed)
-            .and(identifier, replace)?
+            .map_output(Spanned::put_range)
+            .and(identifier, keep)?
             .map_output(|output| {
-                let (label, span) = output.take();
+                let ((goto_span, label), span) = output.take();
 
-                frag.emit_goto(label);
+                frag.emit_goto(label, goto_span);
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);

@@ -22,11 +22,12 @@ pub(crate) fn function<'s, 'origin>(
         let r = Source(s)
             .and(token_function)?
             .with_mode(FailureMode::Malformed)
-            .and(func_body(frag.new_core(), false), replace)?
+            .map_output(Spanned::put_range)
+            .and(func_body(frag.new_core(), false), keep)?
             .map_output(|output| {
-                let (func_id, span) = output.take();
+                let ((fn_span, func_id), span) = output.take();
 
-                frag.emit(OpCode::MakeClosure(func_id));
+                frag.emit(OpCode::MakeClosure(func_id), fn_span);
                 frag.commit();
 
                 span

@@ -33,21 +33,29 @@ pub(crate) fn while_do<'s, 'origin>(
         let state = Source(s)
             .and(token_while)?
             .with_mode(FailureMode::Malformed)
+            .map_output(Spanned::put_range)
             .and(expr_adjusted_to_1(loop_body.new_core()), discard)?
             .and(token_do, discard)?
-            .inspect(|_| {
-                loop_body.emit_jump_to(envelope_id, Some(false));
+            .map_output(|output| {
+                let (while_span, span) = output.take();
+                loop_body.emit_jump_to(envelope_id, Some(false), while_span);
+
+                span
             })
             .and(block(loop_body.new_core()), opt_discard)?
-            .and(token_end, discard)?
-            .inspect(|_| {
-                loop_body.emit_loop_to();
-                loop_body.commit();
-            })
+            .and(token_end, replace_range)?
             .inspect(|output| {
-                envelope.commit();
+                let end_span = output.value.clone();
+                loop_body.emit_loop_to(end_span.clone());
+                loop_body.commit(end_span);
+            })
+            .map_output(|output| {
+                let (end_span, span) = output.take();
+                envelope.commit(end_span);
 
-                trace!(span=?output.span(), str=&source[output.span()]);
+                trace!(span=?span.span(), str=&source[span.span()]);
+
+                span
             })
             .collapse();
 

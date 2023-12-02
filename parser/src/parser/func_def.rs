@@ -14,7 +14,7 @@ pub(crate) fn func_body<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use crate::parser::block::block;
+        use crate::parser::block::inner_block;
         use FuncBodyFailure::*;
 
         let token_par_l = match_token(Token::ParL).map_failure(|f| ParseFailure::from(ParL(f)));
@@ -53,41 +53,52 @@ pub(crate) fn func_body<'s, 'origin>(
                         frag.push_temporary(Some(ident));
                     }
 
-                    let state = block(frag.new_core())
-                        .parse_once(s)?
-                        .inspect(|_| frag.commit())
-                        .try_map_output(|output| -> Result<_, CodegenError> {
-                            let span = opt_discard(span, output);
-                            let (func, upvalues) = frame.commit()?;
-                            Ok((func, upvalues, span))
+                    let state = Source(s)
+                        .and(inner_block(frag.new_core()))?
+                        .map_failure::<ParseFailure>(|never| match never {})
+                        .and(token_end, |output, end_span| {
+                            let output = match output {
+                                Some(output) => replace_range(output, end_span),
+                                None => end_span.put_range(),
+                            };
+
+                            replace(span, output)
                         })?
-                        .map_output(|(func, upvalues, span)| {
+                        .inspect(|output| frag.commit(output.span()))
+                        .try_map_output(|output| -> Result<_, CodegenError> {
+                            let (func, upvalues) = frame.commit()?;
+
+                            Ok((func, upvalues, output))
+                        })?
+                        .map_output(|(func, upvalues, output)| {
+                            use repr::chunk::ClosureRecipe;
+
                             let upvalues = upvalues
                                 .resolve()
                                 .into_iter()
                                 .map(|ident| envelope.capture_variable(ident).unwrap().into())
                                 .collect::<repr::tivec::TiVec<_, _>>();
-                            let func = func.resolve(upvalues.len());
-                            span.put((func, upvalues))
+                            let (func, _debug_info) = func.resolve(upvalues.len());
+
+                            let function_id = envelope.func_table_mut().push(func);
+                            let closure = ClosureRecipe {
+                                function_id,
+                                upvalues,
+                            };
+                            let recipe_id = envelope.recipe_table_mut().push(closure);
+
+                            trace!(?function_id, ?recipe_id, "new function");
+
+                            (recipe_id, output)
                         });
 
                     Ok(state)
                 }
             })?
-            .and(token_end, discard)?
-            .map_output(|output| {
-                use repr::chunk::ClosureRecipe;
+            .map_output(|(recipe_id, output)| {
+                let (end_span, span) = output.take();
+                envelope.commit(end_span);
 
-                let ((func, upvalues), span) = output.take();
-                let function_id = envelope.func_table_mut().push(func);
-                let closure = ClosureRecipe {
-                    function_id,
-                    upvalues,
-                };
-                let recipe_id = envelope.recipe_table_mut().push(closure);
-                envelope.commit();
-
-                trace!(?function_id, ?recipe_id, "new function");
                 trace!(span=?span.span(), str=&source[span.span()]);
 
                 span.put(recipe_id)

@@ -23,7 +23,7 @@ pub(crate) fn table<'s, 'frag>(
             .and(curly_l)?
             .with_mode(FailureMode::Malformed)
             .then(|span| {
-                frag.emit(OpCode::TabCreate);
+                frag.emit(OpCode::TabCreate, span.span());
 
                 field_list(frag.new_core())
                     .optional()
@@ -184,20 +184,22 @@ fn bracket<'s, 'origin>(
         let state = Source(s)
             .and(bracket_l)?
             .with_mode(FailureMode::Malformed)
-            .inspect(|_| {
-                frag.emit_load_stack(FragmentStackSlot(0));
+            .inspect(|output| {
+                frag.emit_load_stack(FragmentStackSlot(0), output.span());
             })
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .and(bracket_r, discard)?
-            .and(equals_sign, discard)?
+            .and(equals_sign, replace_range)?
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
-            .inspect(move |_| {
-                frag.emit(OpCode::TabSet);
+            .map_output(move |output| {
+                let (eq_sign_span, span) = output.take();
 
+                frag.emit(OpCode::TabSet, eq_sign_span);
                 frag.commit();
+
+                span.put(FieldType::Bracket)
             })
-            .collapse()
-            .map_output(|span| span.put(FieldType::Bracket));
+            .collapse();
 
         Ok(state)
     }
@@ -237,23 +239,25 @@ fn name<'s, 'origin>(
             .and(ident)?
             .with_mode(FailureMode::Ambiguous)
             .map_output(|r| {
-                let (ident, r) = r.take();
+                let (ident, span) = r.take();
 
-                frag.emit_load_stack(FragmentStackSlot(0));
-                frag.emit_load_literal(Literal::String(ident.to_string()));
+                frag.emit_load_stack(FragmentStackSlot(0), span.span());
+                frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
-                r
+                span
             })
-            .and(equals_sign, discard)?
+            .and(equals_sign, replace_range)?
             .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
-            .inspect(move |_| {
-                frag.emit(OpCode::TabSet);
+            .map_output(move |output| {
+                let (eq_sign_span, span) = output.take();
 
+                frag.emit(OpCode::TabSet, eq_sign_span);
                 frag.commit();
+
+                span.put(FieldType::Name)
             })
-            .collapse()
-            .map_output(|span| span.put(FieldType::Name));
+            .collapse();
 
         Ok(state)
     }
@@ -282,15 +286,15 @@ fn index<'s, 'origin>(
 
         let mut frag = core.expr_at(FragmentStackSlot(0));
 
-        let start = frag.stack().len();
+        let value_slot = frag.stack().len();
         let r = expr_adjusted_to_1(frag.new_core())
             .parse_once(s)?
-            .inspect(move |_| {
-                frag.emit_load_stack(FragmentStackSlot(0));
-                frag.emit_load_literal(Literal::Int(index));
-                frag.emit_load_stack(start);
-                frag.emit(OpCode::TabSet);
-                frag.emit_adjust_to(start);
+            .inspect(move |output| {
+                frag.emit_load_stack(FragmentStackSlot(0), output.span());
+                frag.emit_load_literal(Literal::Int(index), output.span());
+                frag.emit_load_stack(value_slot, output.span());
+                frag.emit(OpCode::TabSet, output.span());
+                frag.emit_adjust_to(value_slot, output.span());
 
                 frag.commit();
             })

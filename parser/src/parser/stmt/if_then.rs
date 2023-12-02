@@ -31,25 +31,25 @@ pub(crate) fn if_then<'s, 'origin>(
         let state = Source(s)
             .and(token_if)?
             .with_mode(FailureMode::Malformed)
+            .map_output(Spanned::put_range)
+            .and(expr_adjusted_to_1(envelope.new_core()), discard)?
+            .and(token_then, discard)?
+            .map_output(|output| {
+                let (if_span, span) = output.take();
+                envelope.emit_jump_to_end(Some(false), if_span);
+                span
+            })
+            .and(block(envelope.new_core()), opt_discard)?
             .and(
-                |s| -> Result<_, FailFast> {
-                    let mut frag = envelope.new_scope();
+                |s: Lexer<'s>| -> Result<
+                    ParsingState<_, _, Option<Spanned<()>>, Complete, ParseFailure>,
+                    FailFast,
+                > {
+                    envelope.emit_jump_to(envelope_id, None, s.span());
 
-                    let state = Source(s)
-                        .and(expr_adjusted_to_1(frag.new_core()))?
-                        .and(token_then, discard)?
-                        .inspect(|_| {
-                            frag.emit_jump_to_end(Some(false));
-                        })
-                        .and(block(frag.new_core()), opt_discard)?
-                        .inspect(|_| {
-                            frag.emit_jump_to(envelope_id, None);
-                            frag.commit();
-                        });
-
-                    Ok(state)
+                    Ok(ParsingState::Success(s, None, Complete))
                 },
-                discard,
+                opt_discard,
             )?
             .and(
                 (|s| else_if_clause(envelope_id, envelope.new_core()).parse_once(s))
@@ -58,11 +58,14 @@ pub(crate) fn if_then<'s, 'origin>(
                 opt_discard,
             )?
             .and(else_clause(envelope.new_core()).optional(), opt_discard)?
-            .and(token_end, discard)?
-            .inspect(|output| {
-                envelope.commit();
+            .and(token_end, replace_range)?
+            .map_output(|output| {
+                let (end_span, span) = output.take();
+                envelope.commit(end_span);
 
-                trace!(span=?output.span(), str=&source[output.span()]);
+                trace!(span=?span.span(), str=&source[span.span()]);
+
+                span
             })
             .collapse();
 
@@ -108,28 +111,21 @@ fn else_if_clause<'s, 'origin>(
         let state = Source(s)
             .and(token_elseif)?
             .with_mode(FailureMode::Malformed)
-            .and(
-                |s| -> Result<_, FailFast> {
-                    let mut frag = frag.new_scope();
+            .map_output(Spanned::put_range)
+            .and(expr_adjusted_to_1(frag.new_core()), discard)?
+            .and(token_then, discard)?
+            .map_output(|output| {
+                let (elseif_span, span) = output.take();
+                frag.emit_jump_to_end(Some(false), elseif_span);
+                span
+            })
+            .and(block(frag.new_core()), opt_discard)?
+            .collapse();
 
-                    let state = Source(s)
-                        .and(expr_adjusted_to_1(frag.new_core()))?
-                        .and(token_then, discard)?
-                        .inspect(|_| {
-                            frag.emit_jump_to_end(Some(false));
-                        })
-                        .and(block(frag.new_core()), opt_discard)?
-                        .inspect(|_| {
-                            frag.emit_jump_to(envelope, None);
-                            frag.commit();
-                        });
-
-                    Ok(state)
-                },
-                discard,
-            )?
-            .collapse()
-            .inspect(|_| frag.commit());
+        if let ParsingState::Success(s, _, _) = &state {
+            frag.emit_jump_to(envelope, None, s.span());
+            frag.commit(s.span());
+        }
 
         Ok(state)
     }

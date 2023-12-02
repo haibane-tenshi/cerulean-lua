@@ -18,7 +18,7 @@ pub(crate) fn return_<'s, 'origin>(
             .map_failure(|f| ParseFailure::from(ReturnFailure::Return(f)));
         let token_semicolon = match_token(Token::Semicolon).map_failure(|_| Complete);
 
-        let mut frag = core.scope();
+        let mut frag = core.decl();
         let return_values = frag.stack_slot(frag.stack().len());
 
         let source = s.source();
@@ -27,6 +27,7 @@ pub(crate) fn return_<'s, 'origin>(
         let state = Source(s)
             .and(token_return)?
             .with_mode(FailureMode::Malformed)
+            .map_output(Spanned::put_range)
             .and(expr_list(frag.new_core()).optional(), opt_discard)?
             .and(
                 token_semicolon
@@ -34,11 +35,15 @@ pub(crate) fn return_<'s, 'origin>(
                     .map_success(ParseFailureOrComplete::Complete),
                 opt_discard,
             )?
-            .inspect(|output| {
-                frag.emit(OpCode::Return(return_values));
+            .map_output(|output| {
+                let (return_span, span) = output.take();
+
+                frag.emit(OpCode::Return(return_values), return_span);
                 frag.commit();
 
-                trace!(span=?output.span(), str=&source[output.span()]);
+                trace!(span=?span.span(), str=&source[span.span()]);
+
+                span
             })
             .collapse();
 

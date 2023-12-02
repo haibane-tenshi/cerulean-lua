@@ -25,8 +25,8 @@ pub(crate) fn expr_adjusted_to<'s, 'origin>(
         let mut frag = core.expr();
 
         let mark = frag.stack().len() + count;
-        let r = expr(frag.new_core()).parse_once(s)?.inspect(move |_| {
-            frag.emit_adjust_to(mark);
+        let r = expr(frag.new_core()).parse_once(s)?.inspect(move |output| {
+            frag.emit_adjust_to(mark, output.span());
 
             frag.commit();
         });
@@ -105,9 +105,9 @@ pub(crate) fn expr_list<'s, 'origin>(
                 (|s: Lexer<'s>| -> Result<_, FailFast> {
                     let state = Source(s)
                         .and(token_comma)?
-                        .inspect(|_| {
+                        .inspect(|output| {
                             // Expressions inside comma lists are adjusted to 1.
-                            frag.emit_adjust_to(mark);
+                            frag.emit_adjust_to(mark, output.span());
                         })
                         .and(expr(frag.new_core()), discard)?
                         .inspect(|_| {
@@ -146,11 +146,13 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
         let mut frag = core.expr();
 
         let mark = frag.stack().len() + count;
-        let r = Source(s).and(expr_list(frag.new_core()))?.inspect(|_| {
-            frag.emit_adjust_to(mark);
+        let r = Source(s)
+            .and(expr_list(frag.new_core()))?
+            .inspect(|output| {
+                frag.emit_adjust_to(mark, output.span());
 
-            frag.commit();
-        });
+                frag.commit();
+            });
 
         Ok(r)
     }

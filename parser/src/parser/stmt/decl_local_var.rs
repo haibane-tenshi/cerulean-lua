@@ -29,7 +29,11 @@ pub(crate) fn decl_local_var<'s, 'origin>(
         let state = Source(s)
             .and(token_local)?
             .with_mode(FailureMode::Ambiguous)
-            .and(ident_list, replace)?
+            .map_output(|output| {
+                let span = output.span();
+                output.put(span)
+            })
+            .and(ident_list, keep)?
             .with_mode(FailureMode::Malformed)
             .and(
                 (|s| -> Result<_, FailFast> {
@@ -45,11 +49,11 @@ pub(crate) fn decl_local_var<'s, 'origin>(
                 opt_discard,
             )?
             .map_output(|output| {
-                let (idents, span) = output.take();
+                let ((local_span, idents), span) = output.take();
 
                 let count = idents.len();
 
-                frag.emit_adjust_to(stack_start + count);
+                frag.emit_adjust_to(stack_start + count, local_span);
 
                 // Apply names.
                 frag.adjust_stack_to(stack_start);

@@ -147,7 +147,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
             return Err(CodegenError::UnresolvedUpvalue.into());
         }
 
-        let mut script = script.resolve(Default::default());
+        let (mut script, _debug_info) = script.resolve(Default::default());
         script.signature.upvalue_count = upvalues.len();
         let mut func_table = func_table.resolve();
 

@@ -1,4 +1,4 @@
-use std::ops::{Add, Deref, DerefMut};
+use std::ops::{Add, Deref, DerefMut, Range};
 use thiserror::Error;
 use tracing::trace;
 
@@ -86,8 +86,8 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let fun = fun.view();
         let upvalues = upvalues.view();
         let stack = stack.view();
-        let jumps = jumps.view(fragment_id, fun.len());
-        let labels = labels.view_scope(fun.len());
+        let jumps = jumps.view(fragment_id, fun.next_id());
+        let labels = labels.view_scope(fun.next_id());
 
         // trace!(?fragment_id, "construct");
 
@@ -130,7 +130,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let fun = fun.view();
         let upvalues = upvalues.view();
         let stack = stack.view();
-        let jumps = jumps.view(fragment_id, fun.len());
+        let jumps = jumps.view(fragment_id, fun.next_id());
         let labels = labels.view_expr();
 
         // trace!(?fragment_id, "construct");
@@ -174,7 +174,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let fun = fun.view();
         let upvalues = upvalues.view();
         let stack = stack.view();
-        let jumps = jumps.view(fragment_id, fun.len());
+        let jumps = jumps.view(fragment_id, fun.next_id());
         let labels = labels.view_expr();
 
         // trace!(?fragment_id, "construct");
@@ -218,7 +218,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let fun = fun.view();
         let upvalues = upvalues.view();
         let stack = stack.view_at(slot);
-        let jumps = jumps.view(fragment_id, fun.len());
+        let jumps = jumps.view(fragment_id, fun.next_id());
         let labels = labels.view_expr();
 
         // trace!(?fragment_id, "construct");
@@ -320,10 +320,14 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.loop_stack.push(self.id())
     }
 
-    pub fn try_emit(&mut self, opcode: OpCode) -> Result<InstrId, EmitError> {
+    pub fn try_emit(&mut self, opcode: OpCode, span: Range<usize>) -> Result<InstrId, EmitError> {
+        use repr::chunk::OpCodeDebugInfo;
+
         self.stack.emit(&opcode)?;
         self.reachability.emit(&opcode);
-        let r = self.fun.emit(opcode);
+
+        let debug_info = OpCodeDebugInfo { span };
+        let r = self.fun.emit(opcode, debug_info);
 
         trace!(fragment_id=?self.id(), ?opcode, "emit opcode");
 
@@ -332,7 +336,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 
     pub fn push_temporary(&mut self, name: Option<Ident<'s>>) -> FragmentStackSlot {
         if name.is_some() {
-            let marker = self.fun.len();
+            let marker = self.fun.next_id();
             self.labels.push_last_binding(marker);
         }
 
@@ -357,17 +361,18 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
-    pub fn emit(&mut self, instr: OpCode) -> InstrId {
-        self.try_emit(instr).unwrap()
+    pub fn emit(&mut self, instr: OpCode, span: Range<usize>) -> InstrId {
+        self.try_emit(instr, span).unwrap()
     }
 
     pub fn try_emit_adjust_to(
         &mut self,
         slot: FragmentStackSlot,
+        span: Range<usize>,
     ) -> Result<Option<InstrId>, EmitError> {
         let instr_id = if self.stack.need_adjustment_to(slot) {
             let slot = self.stack.fragment_to_frame(slot);
-            let id = self.try_emit(OpCode::AdjustStack(slot))?;
+            let id = self.try_emit(OpCode::AdjustStack(slot), span)?;
             Some(id)
         } else {
             None
@@ -378,14 +383,19 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn emit_adjust_to(&mut self, slot: FragmentStackSlot) -> Option<InstrId> {
-        self.try_emit_adjust_to(slot).unwrap()
+    pub fn emit_adjust_to(
+        &mut self,
+        slot: FragmentStackSlot,
+        span: Range<usize>,
+    ) -> Option<InstrId> {
+        self.try_emit_adjust_to(slot, span).unwrap()
     }
 
     pub fn try_emit_jump_to(
         &mut self,
         target: FragmentId,
         cond: Option<bool>,
+        span: Range<usize>,
     ) -> Result<InstrId, EmitError> {
         let opcode = match cond {
             Some(cond) => OpCode::JumpIf {
@@ -397,7 +407,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             },
         };
 
-        let instr_id = self.try_emit(opcode)?;
+        let instr_id = self.try_emit(opcode, span)?;
         self.jumps
             .register_jump(target, instr_id, self.stack.state());
 
@@ -406,49 +416,59 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn emit_jump_to(&mut self, target: FragmentId, cond: Option<bool>) -> InstrId {
-        self.try_emit_jump_to(target, cond).unwrap()
+    pub fn emit_jump_to(
+        &mut self,
+        target: FragmentId,
+        cond: Option<bool>,
+        span: Range<usize>,
+    ) -> InstrId {
+        self.try_emit_jump_to(target, cond, span).unwrap()
     }
 
-    pub fn emit_jump_to_end(&mut self, cond: Option<bool>) -> InstrId {
+    pub fn emit_jump_to_end(&mut self, cond: Option<bool>, span: Range<usize>) -> InstrId {
         let target = self.id();
-        self.emit_jump_to(target, cond)
+        self.emit_jump_to(target, cond, span)
     }
 
-    pub fn try_emit_loop_to(&mut self) -> Result<(), EmitError> {
-        self.try_emit_adjust_to(FragmentStackSlot(0))?;
-        let offset = self.fun.len() - self.fun.start();
-        self.try_emit(OpCode::Loop { offset })?;
+    pub fn try_emit_loop_to(&mut self, span: Range<usize>) -> Result<(), EmitError> {
+        self.try_emit_adjust_to(FragmentStackSlot(0), span.clone())?;
+        let offset = self.fun.next_id() - self.fun.start();
+        self.try_emit(OpCode::Loop { offset }, span)?;
 
         trace!(fragment_id=?self.id(), "emit jump to start of current fragment");
 
         Ok(())
     }
 
-    pub fn emit_loop_to(&mut self) {
-        self.try_emit_loop_to().unwrap()
+    pub fn emit_loop_to(&mut self, span: Range<usize>) {
+        self.try_emit_loop_to(span).unwrap()
     }
 
-    pub fn emit_load_stack(&mut self, slot: FragmentStackSlot) -> InstrId {
+    pub fn emit_load_stack(&mut self, slot: FragmentStackSlot, span: Range<usize>) -> InstrId {
         let slot = self.stack_slot(slot);
-        self.emit(OpCode::LoadStack(slot))
+        self.emit(OpCode::LoadStack(slot), span)
     }
 
     pub fn try_emit_load_literal(
         &mut self,
         literal: Literal,
+        span: Range<usize>,
     ) -> Result<InstrId, EmitLoadLiteralError> {
         let const_id = self.const_table.insert(literal);
-        let instr_id = self.try_emit(OpCode::LoadConstant(const_id))?;
+        let instr_id = self.try_emit(OpCode::LoadConstant(const_id), span)?;
 
         Ok(instr_id)
     }
 
-    pub fn emit_load_literal(&mut self, literal: Literal) -> InstrId {
-        self.try_emit_load_literal(literal).unwrap()
+    pub fn emit_load_literal(&mut self, literal: Literal, span: Range<usize>) -> InstrId {
+        self.try_emit_load_literal(literal, span).unwrap()
     }
 
-    pub fn try_emit_label(&mut self, label: Ident<'s>) -> Result<InstrId, PushLabelError> {
+    pub fn try_emit_label(
+        &mut self,
+        label: Ident<'s>,
+        span: Range<usize>,
+    ) -> Result<InstrId, PushLabelError> {
         use super::labels::Label;
 
         // Since it is possible to reach label from unknown future point,
@@ -456,7 +476,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         // We need to forecefully adjust it.
         let stack_top = self.stack().len();
         self.stack.make_variadic();
-        let instr_id = self.emit_adjust_to(stack_top).unwrap();
+        let instr_id = self.emit_adjust_to(stack_top, span).unwrap();
 
         let label = Label {
             name: label,
@@ -474,27 +494,31 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn try_emit_goto(&mut self, label: Ident<'s>) -> Result<InstrId, EmitError> {
-        let target = self.fun.len();
+    pub fn try_emit_goto(
+        &mut self,
+        label: Ident<'s>,
+        span: Range<usize>,
+    ) -> Result<InstrId, EmitError> {
+        let target = self.fun.next_id();
 
         let opcode = self.labels.goto(label, target);
-        let r = self.try_emit(opcode)?;
+        let r = self.try_emit(opcode, span)?;
 
         trace!(fragment_id=?self.id(), ?label, "emit jump to label");
 
         Ok(r)
     }
 
-    pub fn emit_goto(&mut self, label: Ident<'s>) -> InstrId {
-        self.try_emit_goto(label).unwrap()
+    pub fn emit_goto(&mut self, label: Ident<'s>, span: Range<usize>) -> InstrId {
+        self.try_emit_goto(label, span).unwrap()
     }
 
-    pub fn emit_break(&mut self) -> Result<InstrId, BreakOutsideLoopError> {
+    pub fn emit_break(&mut self, span: Range<usize>) -> Result<InstrId, BreakOutsideLoopError> {
         let target = self
             .loop_stack
             .innermost_loop()
             .ok_or(BreakOutsideLoopError)?;
-        let instr_id = self.emit_jump_to(target, None);
+        let instr_id = self.emit_jump_to(target, None, span);
 
         trace!(fragment_id=?self.id(), "emit break statement");
 
@@ -571,7 +595,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
 
 impl<'s, 'origin> Scope<'s, 'origin> {
-    pub fn commit(self) {
+    pub fn commit(self, span: Range<usize>) {
+        use repr::chunk::OpCodeDebugInfo;
+
         let Fragment {
             fragment_id,
             func_table,
@@ -607,7 +633,8 @@ impl<'s, 'origin> Scope<'s, 'origin> {
 
         if final_state.is_some() && stack.need_adjustment_to(FragmentStackSlot(0)) {
             let slot = stack.fragment_to_frame(FragmentStackSlot(0));
-            fun.emit(OpCode::AdjustStack(slot));
+            let debug_info = OpCodeDebugInfo { span };
+            fun.emit(OpCode::AdjustStack(slot), debug_info);
         }
 
         labels.commit(CommitKind::Scope);

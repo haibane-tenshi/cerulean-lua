@@ -97,7 +97,7 @@ fn expr_impl<'s, 'origin>(
                     let (op, span) = op.take();
 
                     // Adjust left operand.
-                    frag.emit_adjust_to(FragmentStackSlot(1));
+                    frag.emit_adjust_to(FragmentStackSlot(1), span.span());
 
                     let maybe_opcode = match op {
                         Infix::BinOp(op) => Some(OpCode::BinOp(op)),
@@ -107,11 +107,11 @@ fn expr_impl<'s, 'origin>(
                                 Logical::And => false,
                             };
 
-                            frag.emit_load_stack(FragmentStackSlot(0));
-                            frag.emit_jump_to_end(Some(cond));
+                            frag.emit_load_stack(FragmentStackSlot(0), span.span());
+                            frag.emit_jump_to_end(Some(cond), span.span());
 
                             // Discard left operand when entering the other branch.
-                            frag.emit_adjust_to(FragmentStackSlot(0));
+                            frag.emit_adjust_to(FragmentStackSlot(0), span.span());
 
                             None
                         }
@@ -119,7 +119,7 @@ fn expr_impl<'s, 'origin>(
 
                     let rhs_top = frag.stack().len() + 1;
 
-                    (maybe_opcode, rhs_top, op, span)
+                    (maybe_opcode, rhs_top, op, span.put_range())
                 })
                 .then(|(maybe_opcode, rhs_top, op, span)| {
                     let frag = &mut frag;
@@ -131,12 +131,14 @@ fn expr_impl<'s, 'origin>(
                         Ok(state)
                     }
                 })?
-                .map_output(move |(maybe_opcode, rhs_top, span)| {
+                .map_output(move |(maybe_opcode, rhs_top, output)| {
+                    let (op_span, span) = output.take();
+
                     // Adjust right operand.
-                    frag.emit_adjust_to(rhs_top);
+                    frag.emit_adjust_to(rhs_top, op_span.clone());
 
                     if let Some(opcode) = maybe_opcode {
-                        frag.emit(opcode);
+                        frag.emit(opcode, op_span);
                     }
 
                     frag.commit();
@@ -238,7 +240,7 @@ fn head_expr<'s, 'origin>(
         let state = prefix_op(s)?
             .map_failure(|f| ParseFailure::from(ExprFailure::Prefix(f)))
             .then(|op| {
-                let (op, r) = op.take();
+                let (op, span) = op.take();
 
                 let frag = &mut frag;
                 move |s: Lexer<'s>| -> Result<_, FailFast> {
@@ -250,10 +252,10 @@ fn head_expr<'s, 'origin>(
                         .map_output(|output| {
                             let opcode = OpCode::UnaOp(op.0);
 
-                            frag.emit_adjust_to(stack_start + 1);
-                            frag.emit(opcode);
+                            frag.emit_adjust_to(stack_start + 1, span.span());
+                            frag.emit(opcode, span.span());
 
-                            discard(r, output)
+                            discard(span, output)
                         });
 
                     Ok(r)

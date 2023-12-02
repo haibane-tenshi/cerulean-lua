@@ -24,17 +24,19 @@ pub(crate) fn decl_global_fn<'s, 'origin>(
         let state = Source(s)
             .and(token_function)?
             .with_mode(FailureMode::Malformed)
-            .and(fn_name(frag.new_core()), replace)?
+            .map_output(Spanned::put_range)
+            .and(fn_name(frag.new_core()), keep_with_range)?
             .then(|output| {
-                let (self_arg, span) = output.take();
+                let ((fn_span, self_arg, ident_span), span) = output.take();
 
-                func_body(frag.new_core(), self_arg).map_output(|output| replace(span, output))
+                func_body(frag.new_core(), self_arg)
+                    .map_output(|output| replace(span, output).map(|id| (id, fn_span, ident_span)))
             })?
             .map_output(|output| {
-                let (func_id, span) = output.take();
+                let ((recipe_id, fn_span, ident_span), span) = output.take();
 
-                frag.emit(OpCode::MakeClosure(func_id));
-                frag.emit(OpCode::TabSet);
+                frag.emit(OpCode::MakeClosure(recipe_id), fn_span);
+                frag.emit(OpCode::TabSet, ident_span);
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);
@@ -79,8 +81,8 @@ pub(crate) fn fn_name<'s, 'origin>(
                     UpvalueSource::Upvalue(slot) => OpCode::LoadUpvalue(slot),
                 };
 
-                envelope.emit(opcode);
-                envelope.emit_load_literal(Literal::String(ident.to_string()));
+                envelope.emit(opcode, span.span());
+                envelope.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
                 Ok(span)
             })?
@@ -91,12 +93,12 @@ pub(crate) fn fn_name<'s, 'origin>(
                     let state = Source(s)
                         .and(token_dot)?
                         .with_mode(FailureMode::Malformed)
-                        .and(identifier, replace)?
+                        .and(identifier, replace_with_range)?
                         .map_output(|output| {
-                            let (ident, span) = output.take();
+                            let ((ident, ident_span), span) = output.take();
 
-                            frag.emit(OpCode::TabGet);
-                            frag.emit_load_literal(Literal::String(ident.to_string()));
+                            frag.emit(OpCode::TabGet, span.span());
+                            frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
                             frag.commit();
 
                             span
@@ -116,12 +118,12 @@ pub(crate) fn fn_name<'s, 'origin>(
                     let state = Source(s)
                         .and(token_colon)?
                         .with_mode(FailureMode::Malformed)
-                        .and(identifier, replace)?
+                        .and(identifier, replace_with_range)?
                         .map_output(|output| {
-                            let (ident, span) = output.take();
+                            let ((ident, ident_span), span) = output.take();
 
-                            frag.emit(OpCode::TabGet);
-                            frag.emit_load_literal(Literal::String(ident.to_string()));
+                            frag.emit(OpCode::TabGet, span.span());
+                            frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
                             frag.commit();
 
                             span

@@ -32,76 +32,72 @@ pub(crate) fn generic_for<'s, 'origin>(
         let state = Source(s)
             .and(token_for)?
             .with_mode(FailureMode::Ambiguous)
-            .and(name_list, replace)?
-            .and(token_in, discard)?
+            .map_output(Spanned::put_range)
+            .and(name_list, keep)?
+            .and(token_in, keep_range)?
             .with_mode(FailureMode::Malformed)
-            .and(
-                |s| {
-                    let top = envelope.stack_slot(envelope.stack().len());
-                    expr_list_adjusted_to(4, envelope.new_core())
-                        .map_output(|span: Spanned<_>| span.put(top))
-                        .parse_once(s)
-                },
-                keep,
-            )?
+            .and(expr_list_adjusted_to(4, envelope.new_core()), discard)?
             .then(|output| {
                 |s| -> Result<_, FailFast> {
-                    let ((names, top), span) = output.take();
+                    let (((for_span, names), in_span), span) = output.take();
 
-                    let iter = top;
-                    let state = top + 1;
-                    let control = top + 2;
+                    let iter = envelope.stack_slot(FragmentStackSlot(0));
+                    let state = iter + 1;
+                    let control = iter + 2;
                     // Currently unimplemented.
-                    let _close = top + 3;
+                    let _close = iter + 3;
 
                     let mut loop_body = envelope.new_scope();
                     loop_body.mark_as_loop();
-                    let mark = loop_body.stack().len();
-                    let count = names.len();
-                    let iterator = loop_body.stack_slot(mark);
+                    let iter_args = loop_body.stack_slot(FragmentStackSlot(0));
 
-                    loop_body.emit(OpCode::LoadStack(iter));
-                    loop_body.emit(OpCode::LoadStack(state));
-                    loop_body.emit(OpCode::LoadStack(control));
-                    loop_body.emit(OpCode::Invoke(iterator));
+                    loop_body.emit(OpCode::LoadStack(iter), in_span.clone());
+                    loop_body.emit(OpCode::StoreCallable, in_span.clone());
+                    loop_body.emit(OpCode::LoadStack(state), in_span.clone());
+                    loop_body.emit(OpCode::LoadStack(control), in_span.clone());
+                    loop_body.emit(OpCode::Invoke(iter_args), in_span.clone());
 
-                    loop_body.emit_adjust_to(mark + count);
+                    loop_body.emit_adjust_to(FragmentStackSlot(names.len()), in_span.clone());
 
                     // Assign names.
-                    loop_body.adjust_stack_to(mark);
+                    loop_body.adjust_stack_to(FragmentStackSlot(0));
                     for name in names {
                         loop_body.push_temporary(Some(name));
                     }
 
                     // First output of iterator is the new value for control variable.
-                    let new_control = iterator;
+                    let new_control = iter_args;
 
-                    loop_body.emit(OpCode::LoadStack(new_control));
-                    loop_body.emit_load_literal(Literal::Nil);
-                    loop_body.emit(RelBinOp::Eq.into());
-                    loop_body.emit_jump_to_end(Some(true));
+                    loop_body.emit(OpCode::LoadStack(new_control), for_span.clone());
+                    loop_body.emit_load_literal(Literal::Nil, for_span.clone());
+                    loop_body.emit(RelBinOp::Eq.into(), for_span.clone());
+                    loop_body.emit_jump_to_end(Some(true), for_span.clone());
 
-                    loop_body.emit(OpCode::LoadStack(new_control));
-                    loop_body.emit(OpCode::StoreStack(control));
+                    loop_body.emit(OpCode::LoadStack(new_control), for_span.clone());
+                    loop_body.emit(OpCode::StoreStack(control), for_span.clone());
 
                     let state = Source(s)
                         .and(token_do)?
                         .and(block(loop_body.new_core()), opt_discard)?
-                        .and(token_end, discard)?
-                        .inspect(|_| {
-                            loop_body.emit_loop_to();
-                            loop_body.commit();
+                        .and(token_end, replace_range)?
+                        .inspect(|output| {
+                            let end_span = output.value.clone();
+                            loop_body.emit_loop_to(end_span.clone());
+                            loop_body.commit(end_span);
                         })
-                        .map_output(|output| discard(span, output));
+                        .map_output(|output| replace(span, output));
 
                     Ok(state)
                 }
             })?
             .collapse()
-            .inspect(move |output| {
-                envelope.commit();
+            .map_output(move |output| {
+                let (end_span, span) = output.take();
+                envelope.commit(end_span);
 
-                trace!(span=?output.span(), str=&source[output.span()]);
+                trace!(span=?span.span(), str=&source[span.span()]);
+
+                span
             });
 
         Ok(state)

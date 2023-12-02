@@ -17,7 +17,7 @@ pub(crate) fn assignment<'s, 'origin>(
         let token_equals_sign = match_token(Token::EqualsSign)
             .map_failure(|f| ParseFailure::from(AssignmentFailure::EqualsSign(f)));
 
-        let mut frag = core.scope();
+        let mut frag = core.decl();
         let mut places_start = frag.stack().len();
 
         let source = s.source();
@@ -26,11 +26,14 @@ pub(crate) fn assignment<'s, 'origin>(
         let state = places(frag.new_core())
             .parse_once(s)?
             .with_mode(FailureMode::Ambiguous)
-            .and(token_equals_sign, discard)?
+            .and(token_equals_sign, |prev, eq_sign| {
+                let eq_sign_span = eq_sign.span();
+                discard(prev, eq_sign).place(eq_sign_span)
+            })?
             .with_mode(FailureMode::Malformed)
             .then(|places| {
                 |s| -> Result<_, FailFast> {
-                    let (places, span) = places.take();
+                    let ((places, eq_sign_span), span) = places.take();
 
                     let count = places.len();
                     let expr_start = frag.stack().len();
@@ -41,22 +44,31 @@ pub(crate) fn assignment<'s, 'origin>(
                             for (expr_slot, place) in expr_slots.zip(places) {
                                 match place {
                                     Place::Temporary(slot) => {
-                                        frag.emit(OpCode::LoadStack(expr_slot));
-                                        frag.emit(OpCode::StoreStack(slot));
+                                        frag.emit(
+                                            OpCode::LoadStack(expr_slot),
+                                            eq_sign_span.clone(),
+                                        );
+                                        frag.emit(OpCode::StoreStack(slot), eq_sign_span.clone());
                                     }
                                     Place::Upvalue(slot) => {
-                                        frag.emit(OpCode::LoadStack(expr_slot));
-                                        frag.emit(OpCode::StoreUpvalue(slot));
+                                        frag.emit(
+                                            OpCode::LoadStack(expr_slot),
+                                            eq_sign_span.clone(),
+                                        );
+                                        frag.emit(OpCode::StoreUpvalue(slot), eq_sign_span.clone());
                                     }
                                     Place::TableField => {
                                         let table = frag.stack_slot(places_start);
                                         let field = table + 1;
                                         places_start += 2;
 
-                                        frag.emit(OpCode::LoadStack(table));
-                                        frag.emit(OpCode::LoadStack(field));
-                                        frag.emit(OpCode::LoadStack(expr_slot));
-                                        frag.emit(OpCode::TabSet);
+                                        frag.emit(OpCode::LoadStack(table), eq_sign_span.clone());
+                                        frag.emit(OpCode::LoadStack(field), eq_sign_span.clone());
+                                        frag.emit(
+                                            OpCode::LoadStack(expr_slot),
+                                            eq_sign_span.clone(),
+                                        );
+                                        frag.emit(OpCode::TabSet, eq_sign_span.clone());
                                     }
                                 }
                             }
@@ -102,7 +114,7 @@ fn places<'s, 'origin>(
         let token_comma = match_token(Token::Comma)
             .map_failure(|f| ParseFailure::from(AssignmentFailure::Comma(f)));
 
-        let mut frag = core.scope();
+        let mut frag = core.decl();
         let mut result = Vec::new();
 
         let mut put_place = |output: Spanned<_>| {

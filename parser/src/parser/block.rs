@@ -12,9 +12,12 @@ pub(crate) fn block<'s, 'origin>(
     move |s: Lexer<'s>| {
         let mut frag = core.scope();
 
-        let state = inner_block(frag.new_core()).parse_once(s)?.inspect(|_| {
-            frag.commit();
-        });
+        let state = inner_block(frag.new_core()).parse_once(s)?;
+
+        if let ParsingState::Success(s, _, _) = &state {
+            // Alright, there is no good span we can pick, just take the last one we parsed.
+            frag.commit(s.span());
+        }
 
         Ok(state)
     }

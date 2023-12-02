@@ -11,14 +11,14 @@ pub(crate) fn literal<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         let r = crate::parser::basic::literal(s)?.map_output(move |r| {
-            let (literal, r) = r.take();
+            let (literal, span) = r.take();
 
             let mut frag = core.expr();
 
-            frag.emit_load_literal(literal);
+            frag.emit_load_literal(literal, span.span());
             frag.commit();
 
-            r
+            span
         });
 
         Ok(r)

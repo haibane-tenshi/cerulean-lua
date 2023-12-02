@@ -25,8 +25,8 @@ pub(crate) fn variadic<'s, 'origin>(
                     Err(CodegenError::VariadicExpr(err))
                 }
             })?
-            .inspect(move |_| {
-                frag.emit(OpCode::LoadVariadic);
+            .inspect(move |output| {
+                frag.emit(OpCode::LoadVariadic, output.span());
                 frag.commit();
             });
 

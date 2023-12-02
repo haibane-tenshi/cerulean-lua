@@ -1,3 +1,4 @@
+use repr::chunk::OpCodeDebugInfo;
 use repr::index::InstrId;
 use repr::opcode::OpCode;
 use repr::tivec::TiVec;
@@ -11,6 +12,7 @@ pub struct Signature {
 #[derive(Debug)]
 pub struct Function {
     opcodes: TiVec<InstrId, OpCode>,
+    debug_info: TiVec<InstrId, OpCodeDebugInfo>,
     signature: Signature,
 }
 
@@ -18,6 +20,7 @@ impl Function {
     pub fn new(signature: Signature) -> Self {
         Function {
             opcodes: Default::default(),
+            debug_info: Default::default(),
             signature,
         }
     }
@@ -26,9 +29,30 @@ impl Function {
         FunctionView::new(self)
     }
 
-    pub fn resolve(self, upvalue_count: usize) -> repr::chunk::Function {
+    pub fn len(&self) -> usize {
+        self.opcodes.len()
+    }
+
+    pub fn next_id(&self) -> InstrId {
+        self.opcodes.next_key()
+    }
+
+    pub fn push(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
+        let debug_id = self.debug_info.push_and_get_key(debug_info);
+        let instr_id = self.opcodes.push_and_get_key(opcode);
+
+        debug_assert_eq!(instr_id, debug_id);
+
+        instr_id
+    }
+
+    pub fn resolve(
+        self,
+        upvalue_count: usize,
+    ) -> (repr::chunk::Function, TiVec<InstrId, OpCodeDebugInfo>) {
         let Function {
             opcodes,
+            debug_info,
             signature:
                 Signature {
                     arg_count,
@@ -42,7 +66,9 @@ impl Function {
             upvalue_count,
         };
 
-        repr::chunk::Function { opcodes, signature }
+        let func = repr::chunk::Function { opcodes, signature };
+
+        (func, debug_info)
     }
 
     fn state(&self) -> InnerState {
@@ -55,6 +81,7 @@ impl Function {
         let InnerState { start } = state;
 
         self.opcodes.truncate(start.into());
+        self.debug_info.truncate(start.into());
     }
 }
 
@@ -65,35 +92,39 @@ struct InnerState {
 
 #[derive(Debug)]
 pub struct FunctionView<'fun> {
-    fun: &'fun mut Function,
+    func: &'fun mut Function,
     prev_state: InnerState,
 }
 
 impl<'fun> FunctionView<'fun> {
-    pub fn new(fun: &'fun mut Function) -> Self {
-        let prev_state = fun.state();
+    pub fn new(func: &'fun mut Function) -> Self {
+        let prev_state = func.state();
 
-        FunctionView { fun, prev_state }
+        FunctionView { func, prev_state }
     }
 
     pub fn borrow(&mut self) -> &mut Function {
-        self.fun
+        self.func
     }
 
     pub fn start(&self) -> InstrId {
         self.prev_state.start
     }
 
+    pub fn end(&self) -> InstrId {
+        self.next_id()
+    }
+
+    pub fn next_id(&self) -> InstrId {
+        self.func.next_id()
+    }
+
     pub fn signature(&self) -> &Signature {
-        &self.fun.signature
+        &self.func.signature
     }
 
-    pub fn len(&self) -> InstrId {
-        self.fun.opcodes.next_key()
-    }
-
-    pub fn emit(&mut self, opcode: OpCode) -> InstrId {
-        self.fun.opcodes.push_and_get_key(opcode)
+    pub fn emit(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
+        self.func.push(opcode, debug_info)
     }
 
     pub fn get_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCode> {
@@ -101,17 +132,17 @@ impl<'fun> FunctionView<'fun> {
             return None;
         }
 
-        self.fun.opcodes.get_mut(instr_id)
+        self.func.opcodes.get_mut(instr_id)
     }
 
     pub fn commit(self) {
-        // Prevent drop impls from rolling back changes.
+        // Prevent drop impl from rolling back changes.
         std::mem::forget(self);
     }
 }
 
 impl<'fun> Drop for FunctionView<'fun> {
     fn drop(&mut self) {
-        self.fun.apply(self.prev_state);
+        self.func.apply(self.prev_state);
     }
 }

@@ -49,19 +49,19 @@ impl<'a> JumpsView<'a> {
             .push((instr_id, state));
     }
 
-    pub fn commit(self, fun: &mut FunctionView) -> Option<StackState> {
+    pub fn commit(self, func: &mut FunctionView) -> Option<StackState> {
         use repr::opcode::OpCode;
 
         let mut stack_state = None;
 
         if let Some(to_backpatch) = self.store.jumps.remove(&self.fragment_id) {
-            let start = fun.start();
-            let end = fun.len();
+            let start = func.start();
+            let end = func.end();
 
             // Note: instruction pointer is moved before instruction is executed,
             // so we need to take that into account.
             for (instr, state) in to_backpatch {
-                match fun.get_mut(instr) {
+                match func.get_mut(instr) {
                     Some(OpCode::Jump { offset, .. } | OpCode::JumpIf { offset, .. }) => {
                         *offset = end - instr;
                     }
