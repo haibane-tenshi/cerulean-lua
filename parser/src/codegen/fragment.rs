@@ -321,7 +321,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 
     pub fn try_emit(&mut self, opcode: OpCode, span: Range<usize>) -> Result<InstrId, EmitError> {
-        use repr::chunk::OpCodeDebugInfo;
+        use repr::debug_info::OpCodeDebugInfo;
 
         self.stack.emit(&opcode)?;
         self.reachability.emit(&opcode);
@@ -596,7 +596,7 @@ pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
 
 impl<'s, 'origin> Scope<'s, 'origin> {
     pub fn commit(self, span: Range<usize>) {
-        use repr::chunk::OpCodeDebugInfo;
+        use repr::debug_info::OpCodeDebugInfo;
 
         let Fragment {
             fragment_id,

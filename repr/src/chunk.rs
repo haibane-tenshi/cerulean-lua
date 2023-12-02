@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::debug_info::DebugInfo;
 use crate::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
 use crate::literal::Literal;
 use crate::opcode::OpCode;
@@ -243,24 +244,4 @@ impl From<Chunk>
             closure_recipes,
         }
     }
-}
-
-use std::ops::Range;
-
-#[derive(Debug, Clone)]
-pub struct DebugInfo {
-    pub functions: TiVec<FunctionId, FunctionDebugInfo>,
-    pub line_breaks: Vec<usize>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FunctionDebugInfo {
-    pub name: String,
-    pub span: Range<usize>,
-    pub opcodes: TiVec<InstrId, OpCodeDebugInfo>,
-}
-
-#[derive(Debug, Clone)]
-pub struct OpCodeDebugInfo {
-    pub span: Range<usize>,
 }

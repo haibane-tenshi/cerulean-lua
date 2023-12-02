@@ -1,4 +1,5 @@
 pub mod chunk;
+pub mod debug_info;
 pub mod index;
 pub mod literal;
 pub mod opcode;

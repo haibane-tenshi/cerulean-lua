@@ -91,7 +91,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     use crate::codegen::recipe_table::RecipeTable;
     use crate::codegen::stack::Stack;
     use crate::parser::block::block;
-    use repr::chunk::{DebugInfo, FunctionDebugInfo};
+    use repr::debug_info::{DebugInfo, FunctionDebugInfo};
 
     let source = s.source();
     let _span = trace_span!("chunk").entered();

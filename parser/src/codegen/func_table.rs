@@ -1,4 +1,5 @@
-use repr::chunk::{Function, FunctionDebugInfo};
+use repr::chunk::Function;
+use repr::debug_info::FunctionDebugInfo;
 use repr::index::FunctionId;
 use repr::tivec::TiVec;
 

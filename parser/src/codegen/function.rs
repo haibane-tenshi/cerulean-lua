@@ -1,4 +1,4 @@
-use repr::chunk::OpCodeDebugInfo;
+use repr::debug_info::OpCodeDebugInfo;
 use repr::index::InstrId;
 use repr::opcode::OpCode;
 use repr::tivec::TiVec;

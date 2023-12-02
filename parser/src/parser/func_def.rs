@@ -73,7 +73,8 @@ pub(crate) fn func_body<'s, 'origin>(
                             Ok((func, upvalues, output))
                         })?
                         .map_output(|(func, upvalues, output)| {
-                            use repr::chunk::{ClosureRecipe, FunctionDebugInfo};
+                            use repr::chunk::ClosureRecipe;
+                            use repr::debug_info::FunctionDebugInfo;
 
                             let upvalues = upvalues
                                 .resolve()
