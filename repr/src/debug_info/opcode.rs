@@ -16,6 +16,9 @@ pub struct TabSet {
 
     /// Span highlighting indexing portion of expression.
     ///
-    /// Should point at `[index]` in `table[index]` and `.index` in `table.index`.
+    /// Should point at
+    /// * `[index]` in `table[index]`
+    /// * `.index` in `table.index`
+    /// * `:index` in `table:index(...)`
     pub indexing: Range<usize>,
 }
