@@ -1,6 +1,6 @@
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
+use crate::error::RuntimeError;
 use crate::runtime::RuntimeView;
-use crate::RuntimeError;
 
 pub trait LuaFfiOnce<C> {
     fn call_once(self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError>;
@@ -117,7 +117,10 @@ where
     Q: ?Sized,
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
-        let chunk_id = rt.chunk_cache.lookup(script).ok_or(RuntimeError)?;
+        let chunk_id = rt
+            .chunk_cache
+            .lookup(script)
+            .ok_or(RuntimeError::CatchAll)?;
         rt.invoke(call_chunk(chunk_id))
     };
 

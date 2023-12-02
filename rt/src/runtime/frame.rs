@@ -13,9 +13,9 @@ use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
 use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::Value;
-use crate::RuntimeError;
 
 pub type ControlFlow = std::ops::ControlFlow<ChangeFrame>;
 
@@ -57,22 +57,22 @@ impl ClosureRef {
         let function = rt
             .chunk_cache
             .chunk(self.fn_ptr.chunk_id)
-            .ok_or(RuntimeError)?
+            .ok_or(RuntimeError::CatchAll)?
             .get_function(self.fn_ptr.function_id)
-            .ok_or(RuntimeError)?;
+            .ok_or(RuntimeError::CatchAll)?;
 
         let Function { signature, .. } = function;
 
         // Verify that closure provides exact same number of upvalues
         // that is expected by the function.
         if signature.upvalue_count != self.upvalues.len() {
-            return Err(RuntimeError);
+            return Err(RuntimeError::CatchAll);
         }
 
         // Adjust stack, move varargs into register if needed.
         let stack_start = rt.stack.protected_size() + start;
         let call_height = StackSlot(0) + signature.arg_count;
-        let mut stack = rt.stack.view(stack_start).ok_or(RuntimeError)?;
+        let mut stack = rt.stack.view(stack_start).ok_or(RuntimeError::CatchAll)?;
 
         let register_variadic = if signature.is_variadic {
             stack.adjust_height_with_variadics(call_height)
@@ -166,8 +166,12 @@ impl<C> Frame<C> {
 
         let fn_ptr = closure.fn_ptr;
 
-        let chunk = chunk_cache.chunk(fn_ptr.chunk_id).ok_or(RuntimeError)?;
-        let function = chunk.get_function(fn_ptr.function_id).ok_or(RuntimeError)?;
+        let chunk = chunk_cache
+            .chunk(fn_ptr.chunk_id)
+            .ok_or(RuntimeError::CatchAll)?;
+        let function = chunk
+            .get_function(fn_ptr.function_id)
+            .ok_or(RuntimeError::CatchAll)?;
 
         let constants = &chunk.constants;
         let opcodes = &function.opcodes;
@@ -228,7 +232,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         };
 
         let r = match code {
-            Panic => return Err(RuntimeError),
+            Panic => return Err(RuntimeError::CatchAll),
             Invoke(slot) => ControlFlow::Break(ChangeFrame::Invoke(slot)),
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
@@ -239,7 +243,10 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             LoadConstant(index) => {
-                let constant = self.get_constant(index).ok_or(RuntimeError)?.clone();
+                let constant = self
+                    .get_constant(index)
+                    .ok_or(RuntimeError::CatchAll)?
+                    .clone();
                 self.stack.push(constant.into());
 
                 ControlFlow::Continue(())
@@ -294,20 +301,20 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     UnaOp::AriNeg => match val {
                         Value::Int(val) => Value::Int(-val),
                         Value::Float(val) => Value::Float(-val),
-                        _ => return Err(RuntimeError),
+                        _ => return Err(RuntimeError::CatchAll),
                     },
                     UnaOp::BitNot => match val {
                         Value::Int(val) => Value::Int(!val),
-                        _ => return Err(RuntimeError),
+                        _ => return Err(RuntimeError::CatchAll),
                     },
                     UnaOp::StrLen => match val {
                         Value::String(val) => Value::Int(val.len().try_into().unwrap()),
                         Value::Table(val) => {
-                            let border = val.borrow().map_err(|_| RuntimeError)?.border();
+                            let border = val.borrow().map_err(|_| RuntimeError::CatchAll)?.border();
 
                             Value::Int(border)
                         }
-                        _ => return Err(RuntimeError),
+                        _ => return Err(RuntimeError::CatchAll),
                     },
                     UnaOp::LogNot => Value::Bool(!val.to_bool()),
                 };
@@ -348,7 +355,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                         AriBinOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
                         AriBinOp::Exp => Value::Float(lhs.powf(rhs)),
                     },
-                    _ => return Err(RuntimeError),
+                    _ => return Err(RuntimeError::CatchAll),
                 };
 
                 self.stack.push(r);
@@ -389,7 +396,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                             Value::Int(r)
                         }
                     },
-                    _ => return Err(RuntimeError),
+                    _ => return Err(RuntimeError::CatchAll),
                 };
 
                 self.stack.push(r);
@@ -407,28 +414,28 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                         if lhs.type_() == rhs.type_() {
                             lhs < rhs
                         } else {
-                            return Err(RuntimeError);
+                            return Err(RuntimeError::CatchAll);
                         }
                     }
                     RelBinOp::Le => {
                         if lhs.type_() == rhs.type_() {
                             lhs <= rhs
                         } else {
-                            return Err(RuntimeError);
+                            return Err(RuntimeError::CatchAll);
                         }
                     }
                     RelBinOp::Gt => {
                         if lhs.type_() == rhs.type_() {
                             lhs > rhs
                         } else {
-                            return Err(RuntimeError);
+                            return Err(RuntimeError::CatchAll);
                         }
                     }
                     RelBinOp::Ge => {
                         if lhs.type_() == rhs.type_() {
                             lhs >= rhs
                         } else {
-                            return Err(RuntimeError);
+                            return Err(RuntimeError::CatchAll);
                         }
                     }
                 };
@@ -445,7 +452,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     (Value::String(lhs), Value::String(rhs)) => match op {
                         StrBinOp::Concat => Value::String(lhs + &rhs),
                     },
-                    _ => return Err(RuntimeError),
+                    _ => return Err(RuntimeError::CatchAll),
                 };
 
                 self.stack.push(r);
@@ -470,7 +477,10 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
             Loop { offset } => {
                 self.ip -= InstrOffset(1);
-                self.ip = self.ip.checked_sub_offset(offset).ok_or(RuntimeError)?;
+                self.ip = self
+                    .ip
+                    .checked_sub_offset(offset)
+                    .ok_or(RuntimeError::CatchAll)?;
 
                 ControlFlow::Continue(())
             }
@@ -485,11 +495,11 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 let index = self.stack.pop()?;
                 let table = match self.stack.pop()? {
                     Value::Table(t) => t,
-                    _ => return Err(RuntimeError),
+                    _ => return Err(RuntimeError::CatchAll),
                 };
 
-                let key = index.try_into().map_err(|_| RuntimeError)?;
-                let value = table.borrow().map_err(|_| RuntimeError)?.get(key);
+                let key = index.try_into().map_err(|_| RuntimeError::CatchAll)?;
+                let value = table.borrow().map_err(|_| RuntimeError::CatchAll)?.get(key);
 
                 self.stack.push(value);
 
@@ -500,14 +510,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 let index = self.stack.pop()?;
                 let table = match self.stack.pop()? {
                     Value::Table(t) => t,
-                    _ => return Err(RuntimeError),
+                    _ => return Err(RuntimeError::CatchAll),
                 };
 
-                let key = index.try_into().map_err(|_| RuntimeError)?;
+                let key = index.try_into().map_err(|_| RuntimeError::CatchAll)?;
 
                 table
                     .borrow_mut()
-                    .map_err(|_| RuntimeError)?
+                    .map_err(|_| RuntimeError::CatchAll)?
                     .set(key, value);
 
                 ControlFlow::Continue(())
@@ -530,7 +540,10 @@ impl<'rt, C> ActiveFrame<'rt, C> {
     }
 
     pub fn construct_closure(&mut self, recipe_id: RecipeId) -> Result<Closure, RuntimeError> {
-        let recipe = self.chunk.get_recipe(recipe_id).ok_or(RuntimeError)?;
+        let recipe = self
+            .chunk
+            .get_recipe(recipe_id)
+            .ok_or(RuntimeError::CatchAll)?;
 
         let ClosureRecipe {
             function_id,
@@ -550,9 +563,12 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
                 match source {
                     UpvalueSource::Temporary(slot) => self.stack.mark_as_upvalue(slot),
-                    UpvalueSource::Upvalue(slot) => {
-                        self.closure.upvalues.get(slot).copied().ok_or(RuntimeError)
-                    }
+                    UpvalueSource::Upvalue(slot) => self
+                        .closure
+                        .upvalues
+                        .get(slot)
+                        .copied()
+                        .ok_or(RuntimeError::CatchAll),
                 }
             })
             .collect::<Result<_, _>>()?;

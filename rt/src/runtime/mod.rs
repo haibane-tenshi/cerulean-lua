@@ -8,9 +8,9 @@ use std::ops::ControlFlow;
 use repr::index::StackSlot;
 
 use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
 use crate::value::Value;
-use crate::RuntimeError;
 use frame::{ChangeFrame, Frame};
 use stack::{Stack, StackView};
 use upvalue_stack::UpvalueView;
@@ -84,7 +84,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
 
         let frames = frames.view();
         let start = stack.protected_size() + start;
-        let stack = stack.view(start).ok_or(RuntimeError)?;
+        let stack = stack.view(start).ok_or(RuntimeError::CatchAll)?;
         let upvalue_stack = upvalue_stack.view_over();
 
         let r = RuntimeView {
@@ -139,7 +139,7 @@ where
                     self.frames.push(frame);
 
                     let Value::Function(callable) = callable else {
-                        return Err(RuntimeError);
+                        return Err(RuntimeError::CatchAll);
                     };
 
                     match callable {
@@ -170,9 +170,9 @@ where
         let signature = &self
             .chunk_cache
             .chunk(fn_ptr.chunk_id)
-            .ok_or(RuntimeError)?
+            .ok_or(RuntimeError::CatchAll)?
             .get_function(fn_ptr.function_id)
-            .ok_or(RuntimeError)?
+            .ok_or(RuntimeError::CatchAll)?
             .signature;
 
         let upvalues = upvalues

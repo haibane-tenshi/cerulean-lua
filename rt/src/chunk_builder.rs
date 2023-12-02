@@ -4,9 +4,9 @@ use repr::literal::Literal;
 use std::ops::Range;
 
 use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::error::RuntimeError;
 use crate::runtime::{FunctionPtr, RuntimeView};
 use crate::value::Value;
-use crate::RuntimeError;
 
 #[derive(Debug, Clone)]
 pub struct ChunkRange {

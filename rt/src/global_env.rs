@@ -1,7 +1,6 @@
-use repr::chunk::{ChunkExtension, ClosureRecipe, Function, Signature};
-use repr::index::{ConstId, FunctionId, InstrOffset, StackSlot};
+use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
+use repr::index::StackSlot;
 use repr::literal::Literal;
-use repr::opcode::OpCode;
 
 use crate::chunk_builder::{ChunkBuilder, ChunkPart, ChunkRange};
 use crate::chunk_cache::{ChunkCache, ChunkId};
@@ -10,7 +9,7 @@ use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
 use crate::value::Value;
 
-use crate::RuntimeError;
+use crate::error::RuntimeError;
 
 pub fn empty<C>() -> ChunkBuilder<
     impl for<'rt> FnOnce(RuntimeView<'rt, C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError>,
@@ -46,22 +45,22 @@ where
 
     let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, value: &mut Value<C>| {
         let Value::Table(table) = value else {
-            return Err(RuntimeError);
+            return Err(RuntimeError::CatchAll);
         };
 
         let fn_assert = RustClosureRef::new(|rt: RuntimeView<_>| {
             let Ok(cond) = rt.stack.get(StackSlot(0)) else {
-                return Err(RuntimeError);
+                return Err(RuntimeError::CatchAll);
             };
 
             if cond.to_bool() {
                 Ok(())
             } else {
-                Err(RuntimeError)
+                Err(RuntimeError::CatchAll)
             }
         });
 
-        table.borrow_mut().map_err(|_| RuntimeError)?.set(
+        table.borrow_mut().map_err(|_| RuntimeError::CatchAll)?.set(
             KeyValue::String("assert".into()),
             Value::Function(Callable::RustClosure(fn_assert)),
         );

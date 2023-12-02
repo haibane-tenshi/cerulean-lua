@@ -3,8 +3,8 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::rc::Rc;
 
+use crate::error::RuntimeError;
 use crate::ffi::{IntoLuaFfi, LuaFfiMut, LuaFfiOnce};
-use crate::RuntimeError;
 
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
@@ -55,7 +55,10 @@ impl<C> LuaFfiOnce<C> for RustClosureRef<C> {
 
 impl<C> LuaFfiMut<C> for RustClosureRef<C> {
     fn call_mut(&mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError> {
-        let mut f = self.0.try_borrow_mut().map_err(|_| RuntimeError)?;
+        let mut f = self
+            .0
+            .try_borrow_mut()
+            .map_err(|_| RuntimeError::CatchAll)?;
         f.call_mut(rt)
     }
 }

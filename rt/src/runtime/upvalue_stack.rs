@@ -3,7 +3,7 @@ use std::ops::Add;
 use repr::index::UpvalueSlot;
 
 use super::Value;
-use crate::RuntimeError;
+use crate::error::RuntimeError;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProtectedSize(pub(crate) usize);
@@ -75,12 +75,12 @@ impl<'a, C> UpvalueView<'a, C> {
 
     pub fn get(&self, slot: UpvalueSlot) -> Result<&Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
-        self.stack.get(index).ok_or(RuntimeError)
+        self.stack.get(index).ok_or(RuntimeError::CatchAll)
     }
 
     pub fn get_mut(&mut self, slot: UpvalueSlot) -> Result<&mut Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
-        self.stack.get_mut(index).ok_or(RuntimeError)
+        self.stack.get_mut(index).ok_or(RuntimeError::CatchAll)
     }
 
     pub fn iter(&self) -> std::slice::Iter<Value<C>> {

@@ -6,7 +6,7 @@ use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
 use super::Value;
-use crate::RuntimeError;
+use crate::error::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct RawStackSlot(pub(crate) usize);
@@ -280,14 +280,14 @@ impl<'a, C> StackView<'a, C> {
 
     pub fn pop(&mut self) -> Result<Value<C>, RuntimeError> {
         if self.stack.len().0 <= self.protected_size.0 {
-            return Err(RuntimeError);
+            return Err(RuntimeError::CatchAll);
         }
 
-        self.stack.pop().ok_or(RuntimeError)
+        self.stack.pop().ok_or(RuntimeError::CatchAll)
     }
 
     pub fn last(&self) -> Result<&Value<C>, RuntimeError> {
-        self.stack.last().ok_or(RuntimeError)
+        self.stack.last().ok_or(RuntimeError::CatchAll)
     }
 
     pub fn top(&mut self) -> StackSlot {
@@ -296,12 +296,12 @@ impl<'a, C> StackView<'a, C> {
 
     pub fn get(&self, slot: StackSlot) -> Result<&Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
-        self.stack.get(index).ok_or(RuntimeError)
+        self.stack.get(index).ok_or(RuntimeError::CatchAll)
     }
 
     pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value<C>, RuntimeError> {
         let index = self.protected_size.index(slot);
-        self.stack.get_mut(index).ok_or(RuntimeError)
+        self.stack.get_mut(index).ok_or(RuntimeError::CatchAll)
     }
 
     pub fn fresh_upvalue(&mut self, value: Value<C>) -> UpvalueId {
@@ -318,7 +318,9 @@ impl<'a, C> StackView<'a, C> {
 
     pub fn mark_as_upvalue(&mut self, slot: StackSlot) -> Result<UpvalueId, RuntimeError> {
         let slot = self.protected_size.index(slot);
-        self.stack.mark_as_upvalue(slot).ok_or(RuntimeError)
+        self.stack
+            .mark_as_upvalue(slot)
+            .ok_or(RuntimeError::CatchAll)
     }
 
     pub(crate) fn protected_size(&self) -> RawStackSlot {
