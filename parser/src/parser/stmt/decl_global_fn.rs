@@ -44,7 +44,14 @@ pub(crate) fn decl_global_fn<'s, 'origin>(
                 let ((recipe_id, fn_span, ident_span), span) = output.take();
 
                 frag.emit(OpCode::MakeClosure(recipe_id), fn_span);
-                frag.emit(OpCode::TabSet, ident_span);
+                frag.emit_with_debug(
+                    OpCode::TabSet,
+                    debug_info::TabSet::GlobalEnv {
+                        ident: ident_span,
+                        eq_sign: None,
+                    }
+                    .into(),
+                );
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);

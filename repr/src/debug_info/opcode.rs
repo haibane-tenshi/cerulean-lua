@@ -4,16 +4,14 @@ use std::ops::Range;
 pub enum DebugInfo {
     Generic(Range<usize>),
     TabGet(TabGet),
+    TabSet(TabSet),
 }
 
-/// Debug info for [`OpCode::TabSet`](crate::opcode::OpCode::TabSet).
+/// Debug info for [`OpCode::TabGet`](crate::opcode::OpCode::TabGet).
 #[derive(Debug, Clone)]
 pub enum TabGet {
     Local {
-        /// Span highlighting table value.
         table: Range<usize>,
-
-        /// Span highlighting index value.
         index: Range<usize>,
 
         /// Span highlighting indexing portion of expression.
@@ -25,12 +23,92 @@ pub enum TabGet {
         indexing: Range<usize>,
     },
     GlobalEnv {
+        /// Span highlighting identifier causing global env lookup.
         ident: Range<usize>,
     },
+}
+
+/// Debug info for [`OpCode::TabSet`](crate::opcode::OpCode::TabSet).
+#[derive(Debug, Clone)]
+pub enum TabSet {
+    GlobalEnv {
+        ident: Range<usize>,
+        eq_sign: Option<Range<usize>>,
+    },
+    Local {
+        table: Range<usize>,
+        index: Range<usize>,
+
+        /// Span highlighting indexing portion of expression.
+        ///
+        /// Should point at
+        /// * `[index]` in `table[index]`
+        /// * `.index` in `table.index`
+        /// * `:index` in `table:index(...)`
+        indexing: Range<usize>,
+        eq_sign: Range<usize>,
+    },
+    Constructor {
+        /// Span covering entirety of table constructor.
+        table: Range<usize>,
+        flavor: TabConstructor,
+    },
+}
+
+/// Description of entries in table constructor.
+#[derive(Debug, Clone)]
+pub enum TabConstructor {
+    /// Corresponds to explicitly indexed entry.
+    ///
+    /// ```lua
+    /// {
+    ///     [index] = ...
+    /// }
+    /// ```
+    Index {
+        index: Range<usize>,
+
+        /// Span highlighting indexing portion of expression.
+        ///
+        /// Should point at `[index]` in
+        /// ```lua
+        /// {
+        ///     [index] = ...
+        /// }
+        /// ```
+        indexing: Range<usize>,
+        eq_sign: Range<usize>,
+    },
+    /// Corresponds to ident-based entry.
+    ///
+    /// ```lua
+    /// {
+    ///     ident = ...
+    /// }
+    /// ```
+    Field {
+        ident: Range<usize>,
+        eq_sign: Range<usize>,
+    },
+
+    /// Corresponds to value entry.
+    ///
+    /// ```lua
+    /// {
+    ///     value
+    /// }
+    /// ```
+    Value { value: Range<usize> },
 }
 
 impl From<TabGet> for DebugInfo {
     fn from(value: TabGet) -> Self {
         DebugInfo::TabGet(value)
+    }
+}
+
+impl From<TabSet> for DebugInfo {
+    fn from(value: TabSet) -> Self {
+        DebugInfo::TabSet(value)
     }
 }

@@ -57,7 +57,9 @@ pub(crate) fn assignment<'s, 'origin>(
                                         );
                                         frag.emit(OpCode::StoreUpvalue(slot), eq_sign_span.clone());
                                     }
-                                    Place::TableField(_) => {
+                                    Place::TableField(debug_info) => {
+                                        use debug_info::{TabGet, TabSet};
+
                                         let table = frag.stack_slot(places_start);
                                         let field = table + 1;
                                         places_start += 2;
@@ -68,7 +70,23 @@ pub(crate) fn assignment<'s, 'origin>(
                                             OpCode::LoadStack(expr_slot),
                                             eq_sign_span.clone(),
                                         );
-                                        frag.emit(OpCode::TabSet, eq_sign_span.clone());
+                                        let debug_info = match debug_info {
+                                            TabGet::GlobalEnv { ident } => TabSet::GlobalEnv {
+                                                ident,
+                                                eq_sign: Some(eq_sign_span.clone()),
+                                            },
+                                            TabGet::Local {
+                                                table,
+                                                index,
+                                                indexing,
+                                            } => TabSet::Local {
+                                                table,
+                                                index,
+                                                indexing,
+                                                eq_sign: eq_sign_span.clone(),
+                                            },
+                                        };
+                                        frag.emit_with_debug(OpCode::TabSet, debug_info.into());
                                     }
                                 }
                             }

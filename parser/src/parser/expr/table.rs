@@ -1,3 +1,4 @@
+use std::ops::Range;
 use thiserror::Error;
 
 use crate::parser::prelude::*;
@@ -25,7 +26,7 @@ pub(crate) fn table<'s, 'frag>(
             .then(|span| {
                 frag.emit(OpCode::TabCreate, span.span());
 
-                field_list(frag.new_core())
+                field_list(frag.new_core(), span.span())
                     .optional()
                     .map_output(|output| opt_discard(span, output))
             })?
@@ -55,6 +56,7 @@ pub(crate) enum TableFailure {
 
 fn field_list<'s, 'origin>(
     core: Core<'s, 'origin>,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<()>,
@@ -69,7 +71,7 @@ fn field_list<'s, 'origin>(
         let mut next_index = 1;
 
         let state = Source(s)
-            .and(field(next_index, frag.new_core()))?
+            .and(field(frag.new_core(), next_index, table_span.clone()))?
             .map_output(|output| {
                 let (field_type, span) = output.take();
                 if let FieldType::Index = field_type {
@@ -82,7 +84,10 @@ fn field_list<'s, 'origin>(
                 (|s| -> Result<_, FailFast> {
                     let state = Source(s)
                         .and(field_sep)?
-                        .and(field(next_index, frag.new_core()), replace)?
+                        .and(
+                            field(frag.new_core(), next_index, table_span.clone()),
+                            replace,
+                        )?
                         .inspect(|output| {
                             if let FieldType::Index = output.value {
                                 next_index += 1;
@@ -106,8 +111,9 @@ fn field_list<'s, 'origin>(
 }
 
 fn field<'s, 'origin>(
-    next_index: i64,
     core: Core<'s, 'origin>,
+    next_index: i64,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<FieldType>,
@@ -119,9 +125,9 @@ fn field<'s, 'origin>(
         let mut frag = core.expr_at(FragmentStackSlot(0));
 
         let state = Source(s)
-            .or(bracket(frag.new_core()))?
-            .or(name(frag.new_core()))?
-            .or(index(next_index, frag.new_core()))?
+            .or(bracket(frag.new_core(), table_span.clone()))?
+            .or(name(frag.new_core(), table_span.clone()))?
+            .or(index(frag.new_core(), next_index, table_span))?
             .map_fsource(|_| ())
             .inspect(move |_| {
                 frag.commit();
@@ -160,6 +166,7 @@ pub(crate) struct FieldSepMismatchError;
 
 fn bracket<'s, 'origin>(
     core: Core<'s, 'origin>,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<FieldType>,
@@ -187,14 +194,29 @@ fn bracket<'s, 'origin>(
             .inspect(|output| {
                 frag.emit_load_stack(FragmentStackSlot(0), output.span());
             })
-            .and(expr_adjusted_to_1(frag.new_core()), discard)?
+            .and(expr_adjusted_to_1(frag.new_core()), replace_range)?
             .and(bracket_r, discard)?
-            .and(equals_sign, replace_range)?
+            .map_output(|output| {
+                let span = output.span();
+                output.place(span)
+            })
+            .and(equals_sign, keep_range)?
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .map_output(move |output| {
-                let (eq_sign_span, span) = output.take();
+                let (((index_span, indexing_span), eq_sign_span), span) = output.take();
 
-                frag.emit(OpCode::TabSet, eq_sign_span);
+                frag.emit_with_debug(
+                    OpCode::TabSet,
+                    debug_info::TabSet::Constructor {
+                        table: table_span,
+                        flavor: debug_info::TabConstructor::Index {
+                            index: index_span,
+                            indexing: indexing_span,
+                            eq_sign: eq_sign_span,
+                        },
+                    }
+                    .into(),
+                );
                 frag.commit();
 
                 span.put(FieldType::Bracket)
@@ -217,6 +239,7 @@ pub(crate) enum BracketFailure {
 
 fn name<'s, 'origin>(
     core: Core<'s, 'origin>,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<FieldType>,
@@ -244,15 +267,25 @@ fn name<'s, 'origin>(
                 frag.emit_load_stack(FragmentStackSlot(0), span.span());
                 frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
-                span
+                span.put_range()
             })
-            .and(equals_sign, replace_range)?
+            .and(equals_sign, keep_range)?
             .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .map_output(move |output| {
-                let (eq_sign_span, span) = output.take();
+                let ((ident_span, eq_sign_span), span) = output.take();
 
-                frag.emit(OpCode::TabSet, eq_sign_span);
+                frag.emit_with_debug(
+                    OpCode::TabSet,
+                    debug_info::TabSet::Constructor {
+                        table: table_span,
+                        flavor: debug_info::TabConstructor::Field {
+                            ident: ident_span,
+                            eq_sign: eq_sign_span,
+                        },
+                    }
+                    .into(),
+                );
                 frag.commit();
 
                 span.put(FieldType::Name)
@@ -272,8 +305,9 @@ pub(crate) enum NameFailure {
 }
 
 fn index<'s, 'origin>(
-    index: i64,
     core: Core<'s, 'origin>,
+    index: i64,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<FieldType>,
@@ -293,7 +327,16 @@ fn index<'s, 'origin>(
                 frag.emit_load_stack(FragmentStackSlot(0), output.span());
                 frag.emit_load_literal(Literal::Int(index), output.span());
                 frag.emit_load_stack(value_slot, output.span());
-                frag.emit(OpCode::TabSet, output.span());
+                frag.emit_with_debug(
+                    OpCode::TabSet,
+                    debug_info::TabSet::Constructor {
+                        table: table_span,
+                        flavor: debug_info::TabConstructor::Value {
+                            value: output.span(),
+                        },
+                    }
+                    .into(),
+                );
                 frag.emit_adjust_to(value_slot, output.span());
 
                 frag.commit();
