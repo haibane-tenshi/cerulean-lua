@@ -92,7 +92,7 @@ trait IntoOpcode {
 pub(crate) enum Place {
     Temporary(StackSlot, Range<usize>),
     Upvalue(UpvalueSlot, Range<usize>),
-    TableField(debug_info::TabSet),
+    TableField(debug_info::TabGet),
 }
 
 impl Place {
@@ -438,7 +438,7 @@ fn variable<'s, 'origin>(
                         frag.emit(env.into_opcode(), span.span());
                         frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
-                        let debug_info = debug_info::TabSet {
+                        let debug_info = debug_info::TabGet {
                             table: debug_info::TableRange::GlobalEnv,
                             index: span.span(),
                             indexing: span.span(),
@@ -490,7 +490,7 @@ fn field<'s, 'origin>(
                 frag.emit_load_literal(Literal::String(ident.to_string()), ident_span.clone());
                 frag.commit();
 
-                let debug_info = debug_info::TabSet {
+                let debug_info = debug_info::TabGet {
                     table: debug_info::TableRange::Local(table_span),
                     index: ident_span,
                     indexing: span.span(),
@@ -540,7 +540,7 @@ fn index<'s, 'origin>(
             .map_output(|output| {
                 let (index, span) = output.take();
 
-                let debug_info = debug_info::TabSet {
+                let debug_info = debug_info::TabGet {
                     table: debug_info::TableRange::Local(table_span),
                     index,
                     indexing: span.span(),
@@ -589,7 +589,7 @@ fn tab_call<'s, 'origin>(
                 frag.emit_load_literal(Literal::String(ident.to_string()), ident_span.clone());
                 frag.emit_with_debug(
                     OpCode::TabGet,
-                    debug_info::TabSet {
+                    debug_info::TabGet {
                         table: debug_info::TableRange::Local(table_span),
                         index: ident_span.clone(),
                         indexing: colon_span.start..ident_span.end,

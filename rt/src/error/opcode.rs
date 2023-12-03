@@ -6,7 +6,7 @@ use crate::value::Type;
 #[derive(Debug)]
 pub enum Error {
     TabGet {
-        debug_info: Option<opcode::TabSet>,
+        debug_info: Option<opcode::TabGet>,
         cause: TabGetCause,
     },
 }

@@ -3,12 +3,12 @@ use std::ops::Range;
 #[derive(Debug, Clone)]
 pub enum DebugInfo {
     Generic(Range<usize>),
-    TabGet(TabSet),
+    TabGet(TabGet),
 }
 
 /// Debug info for [`OpCode::TabSet`](crate::opcode::OpCode::TabSet).
 #[derive(Debug, Clone)]
-pub struct TabSet {
+pub struct TabGet {
     /// Span highlighting table value.
     pub table: TableRange,
 
@@ -30,8 +30,8 @@ pub enum TableRange {
     Local(Range<usize>),
 }
 
-impl From<TabSet> for DebugInfo {
-    fn from(value: TabSet) -> Self {
+impl From<TabGet> for DebugInfo {
+    fn from(value: TabGet) -> Self {
         DebugInfo::TabGet(value)
     }
 }
