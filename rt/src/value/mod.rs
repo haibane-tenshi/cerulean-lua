@@ -20,6 +20,25 @@ pub enum Type {
     Table,
 }
 
+impl Type {
+    /// Produce a string with Lua name of the type.
+    ///
+    /// Note that this is a lossy conversion!
+    /// Technically Lua has only one numeric type - `number`,
+    /// but on the implementation side we distinguish between ints and floats.
+    pub fn to_lua_name(self) -> &'static str {
+        match self {
+            Type::Nil => "nil",
+            Type::Bool => "boolean",
+            Type::Int => "number",
+            Type::Float => "number",
+            Type::String => "string",
+            Type::Function => "function",
+            Type::Table => "table",
+        }
+    }
+}
+
 pub enum Value<C> {
     Nil,
     Bool(bool),
