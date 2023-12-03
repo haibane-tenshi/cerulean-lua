@@ -46,7 +46,7 @@ impl Error {
                             }
                             Some(GlobalEnv { ident }) => {
                                 let labels = vec![Label::secondary(file_id.clone(), ident)
-                                    .with_message("non-local identifier here")];
+                                    .with_message("identifier does not refer to local variable")];
 
                                 let notes = vec!["Lua implicitly accesses `_ENV` table to look up non-local variables".to_string()];
 
@@ -86,7 +86,7 @@ impl Error {
                             }
                             Some(GlobalEnv { ident }) => {
                                 let labels = vec![Label::secondary(file_id.clone(), ident)
-                                    .with_message("presumed non-local identifier here")];
+                                    .with_message("identifier does not refer to local variable")];
 
                                 let notes = vec!["Lua implicitly accesses `_ENV` table to look up non-local variables".to_string()];
 
@@ -105,7 +105,7 @@ impl Error {
                             .with_notes(notes)
                     }
                     TableTypeMismatch(ty) => {
-                        let msg = "value is not table";
+                        let msg = "expected table";
 
                         let (labels, notes) = match debug_info {
                             Some(Local {
@@ -125,8 +125,8 @@ impl Error {
                                 (labels, Vec::new())
                             }
                             Some(GlobalEnv { ident }) => {
-                                let labels = vec![Label::primary(file_id.clone(), ident)
-                                    .with_message("non-local identifier here")];
+                                let labels = vec![Label::secondary(file_id.clone(), ident)
+                                    .with_message("identifier does not refer to local variable")];
 
                                 let notes = vec![
                                     format!("expected `_ENV` to be table, but it has type {}", ty.to_lua_name()),
