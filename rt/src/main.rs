@@ -17,7 +17,7 @@ enum Command {
     Compile { path: PathBuf },
 }
 
-fn load_from_file(path: &Path) -> Result<Chunk> {
+fn load_from_file(path: &Path) -> Result<(Chunk, String)> {
     use logos::Logos;
     use parser::lex::Token;
 
@@ -39,7 +39,7 @@ fn load_from_file(path: &Path) -> Result<Chunk> {
         }
     };
 
-    Ok(chunk)
+    Ok((chunk, data))
 }
 
 fn main() -> Result<()> {
@@ -63,16 +63,29 @@ fn main() -> Result<()> {
                 .add(rt::global_env::assert())
                 .finish();
 
-            let chunk = load_from_file(&path)?;
+            let (chunk, source) = load_from_file(&path)?;
             let chunk_cache = MainCache::new(env_chunk, SingleChunk::new(chunk));
             let mut runtime = Runtime::new(chunk_cache, Value::Nil);
             let global_env = builder(runtime.view(), ChunkId(0))?;
             runtime.global_env = global_env;
 
-            runtime.view().invoke(rt::ffi::call_script(&Main))?;
+            if let Err(err) = runtime.view().invoke(rt::ffi::call_script(&Main)) {
+                use codespan_reporting::files::SimpleFile;
+                use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+                use codespan_reporting::term::{emit, Config};
+
+                let mut writer = StandardStream::stdout(ColorChoice::Always);
+                let config = Config::default();
+                let files = SimpleFile::new(path.to_string_lossy(), source);
+                let diagnostic = err.into_diagnostic(());
+
+                emit(&mut writer, &config, &files, &diagnostic)?;
+
+                return Err(anyhow::Error::msg("runtime error"));
+            }
         }
         Command::Compile { path } => {
-            let chunk = load_from_file(&path)?;
+            let (chunk, _) = load_from_file(&path)?;
 
             println!("{chunk}");
         }
