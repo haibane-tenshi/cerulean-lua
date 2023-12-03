@@ -1,5 +1,6 @@
 use repr::debug_info::opcode;
 
+use crate::value::table::InvalidTableKeyError;
 use crate::value::Type;
 
 #[derive(Debug)]
@@ -15,11 +16,5 @@ pub enum TabGetCause {
     NoTable,
     NoTableAndIndex,
     TableTypeMismatch(Type),
-    InvalidIndexValue(TabInvalidIndexValue),
-}
-
-#[derive(Debug)]
-pub enum TabInvalidIndexValue {
-    Nil,
-    Nan,
+    InvalidKey(InvalidTableKeyError),
 }

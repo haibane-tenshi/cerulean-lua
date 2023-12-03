@@ -130,6 +130,21 @@ impl Add<InstrOffset> for InstrId {
     }
 }
 
+impl SubAssign<usize> for InstrId {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.0 -= rhs;
+    }
+}
+
+impl Sub<usize> for InstrId {
+    type Output = Self;
+
+    fn sub(mut self, rhs: usize) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+
 impl SubAssign<InstrOffset> for InstrId {
     fn sub_assign(&mut self, rhs: InstrOffset) {
         self.0 -= rhs.0

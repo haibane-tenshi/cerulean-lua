@@ -131,8 +131,10 @@ impl<C> Hash for KeyValue<C> {
 }
 
 #[derive(Debug)]
-//#[error("value cannot be used to index tables")]
-pub struct InvalidTableKeyError;
+pub enum InvalidTableKeyError {
+    Nil,
+    Nan,
+}
 
 impl<C> TryFrom<Value<C>> for KeyValue<C> {
     type Error = InvalidTableKeyError;
@@ -142,13 +144,13 @@ impl<C> TryFrom<Value<C>> for KeyValue<C> {
             Value::Bool(t) => KeyValue::Bool(t),
             Value::Int(t) => KeyValue::Int(t),
             Value::Float(t) => {
-                let t = NotNan::new(t).map_err(|_| InvalidTableKeyError)?;
+                let t = NotNan::new(t).map_err(|_| InvalidTableKeyError::Nan)?;
                 KeyValue::Float(t)
             }
             Value::String(t) => KeyValue::String(t),
             Value::Function(t) => KeyValue::Function(t),
             Value::Table(t) => KeyValue::Table(t),
-            Value::Nil => return Err(InvalidTableKeyError),
+            Value::Nil => return Err(InvalidTableKeyError::Nil),
         };
 
         Ok(r)

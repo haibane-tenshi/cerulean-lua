@@ -3,7 +3,7 @@ use std::ops::Range;
 #[derive(Debug, Clone)]
 pub enum DebugInfo {
     Generic(Range<usize>),
-    TabSet(TabSet),
+    TabGet(TabSet),
 }
 
 /// Debug info for [`OpCode::TabSet`](crate::opcode::OpCode::TabSet).
@@ -32,6 +32,6 @@ pub enum TableRange {
 
 impl From<TabSet> for DebugInfo {
     fn from(value: TabSet) -> Self {
-        DebugInfo::TabSet(value)
+        DebugInfo::TabGet(value)
     }
 }

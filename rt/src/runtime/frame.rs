@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use repr::chunk::{Chunk, ClosureRecipe};
+use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
 use repr::opcode::OpCode;
@@ -13,6 +14,7 @@ use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
 use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::error::opcode;
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::Value;
@@ -492,16 +494,17 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             TabGet => {
-                let index = self.stack.pop()?;
-                let table = match self.stack.pop()? {
-                    Value::Table(t) => t,
-                    _ => return Err(RuntimeError::CatchAll),
-                };
+                self.exec_tab_get().map_err(|cause| {
+                    let debug_info = self.opcode_debug_info(self.ip - 1).and_then(|debug_info| {
+                        if let OpCodeDebugInfo::TabGet(info) = debug_info {
+                            Some(info)
+                        } else {
+                            None
+                        }
+                    });
 
-                let key = index.try_into().map_err(|_| RuntimeError::CatchAll)?;
-                let value = table.borrow().map_err(|_| RuntimeError::CatchAll)?.get(key);
-
-                self.stack.push(value);
+                    opcode::Error::TabGet { debug_info, cause }
+                })?;
 
                 ControlFlow::Continue(())
             }
@@ -527,6 +530,32 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         tracing::trace!(stack = ?self.stack, "executed opcode");
 
         Ok(r)
+    }
+
+    fn exec_tab_get(&mut self) -> Result<(), opcode::TabGetCause> {
+        use opcode::TabGetCause::*;
+
+        let index = self.stack.pop().map_err(|_| NoTableAndIndex)?;
+        let table = match self.stack.pop().map_err(|_| NoTable)? {
+            Value::Table(t) => t,
+            value => return Err(TableTypeMismatch(value.type_())),
+        };
+
+        let key = index.try_into().map_err(InvalidKey)?;
+        let value = table.borrow().unwrap().get(key);
+
+        self.stack.push(value);
+
+        Ok(())
+    }
+
+    fn opcode_debug_info(&self, ip: InstrId) -> Option<OpCodeDebugInfo> {
+        self.chunk
+            .debug_info
+            .as_ref()
+            .and_then(|debug_info| debug_info.functions.get(self.closure.fn_ptr.function_id))
+            .and_then(|fn_debug_info| fn_debug_info.opcodes.get(ip))
+            .cloned()
     }
 
     pub fn next_code(&mut self) -> Option<OpCode> {
