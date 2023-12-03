@@ -6,10 +6,11 @@ pub enum DebugInfo {
     TabSet(TabSet),
 }
 
+/// Debug info for [`OpCode::TabSet`](crate::opcode::OpCode::TabSet).
 #[derive(Debug, Clone)]
 pub struct TabSet {
     /// Span highlighting table value.
-    pub table: Range<usize>,
+    pub table: TableRange,
 
     /// Span highlighting index value.
     pub index: Range<usize>,
@@ -21,4 +22,16 @@ pub struct TabSet {
     /// * `.index` in `table.index`
     /// * `:index` in `table:index(...)`
     pub indexing: Range<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TableRange {
+    GlobalEnv,
+    Local(Range<usize>),
+}
+
+impl From<TabSet> for DebugInfo {
+    fn from(value: TabSet) -> Self {
+        DebugInfo::TabSet(value)
+    }
 }

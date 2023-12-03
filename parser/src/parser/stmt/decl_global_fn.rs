@@ -75,6 +75,7 @@ pub(crate) fn fn_name<'s, 'origin>(
             .map_failure(|f| ParseFailure::from(DeclGlobalFnFailure::Colon(f)));
 
         let mut envelope = core.expr();
+        let mut total_span = 0..0;
 
         let state = Source(s)
             .and(identifier)?
@@ -91,6 +92,7 @@ pub(crate) fn fn_name<'s, 'origin>(
 
                 envelope.emit(opcode, span.span());
                 envelope.emit_load_literal(Literal::String(ident.to_string()), span.span());
+                total_span = span.span();
 
                 Ok(span)
             })?
@@ -105,9 +107,19 @@ pub(crate) fn fn_name<'s, 'origin>(
                         .map_output(|output| {
                             let ((ident, ident_span), span) = output.take();
 
-                            frag.emit(OpCode::TabGet, span.span());
+                            frag.emit_with_debug(
+                                OpCode::TabGet,
+                                debug_info::TabSet {
+                                    table: debug_info::TableRange::Local(total_span.clone()),
+                                    index: ident_span.clone(),
+                                    indexing: span.span(),
+                                }
+                                .into(),
+                            );
                             frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
                             frag.commit();
+
+                            total_span = total_span.start..span.span.end;
 
                             span
                         })
@@ -130,7 +142,15 @@ pub(crate) fn fn_name<'s, 'origin>(
                         .map_output(|output| {
                             let ((ident, ident_span), span) = output.take();
 
-                            frag.emit(OpCode::TabGet, span.span());
+                            frag.emit_with_debug(
+                                OpCode::TabGet,
+                                debug_info::TabSet {
+                                    table: debug_info::TableRange::Local(total_span),
+                                    index: ident_span.clone(),
+                                    indexing: span.span(),
+                                }
+                                .into(),
+                            );
                             frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
                             frag.commit();
 

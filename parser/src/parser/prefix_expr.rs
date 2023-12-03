@@ -25,7 +25,8 @@ pub(crate) fn prefix_expr<'s, 'origin>(
                 // Eagerly evaluate place.
                 let (expr_type, span) = output.take();
                 if let PrefixExpr::Place(place) = expr_type {
-                    frag.emit(place.into_opcode(), span.span());
+                    let (opcode, debug_info) = place.into_opcode();
+                    frag.emit_with_debug(opcode, debug_info);
                 }
                 frag.commit();
 
@@ -87,19 +88,25 @@ trait IntoOpcode {
     fn into_opcode(self) -> OpCode;
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum Place {
-    Temporary(StackSlot),
-    Upvalue(UpvalueSlot),
-    TableField,
+    Temporary(StackSlot, Range<usize>),
+    Upvalue(UpvalueSlot, Range<usize>),
+    TableField(debug_info::TabSet),
 }
 
-impl IntoOpcode for Place {
-    fn into_opcode(self) -> OpCode {
+impl Place {
+    fn into_opcode(self) -> (OpCode, debug_info::DebugInfo) {
         match self {
-            Place::Temporary(slot) => OpCode::LoadStack(slot),
-            Place::Upvalue(slot) => OpCode::LoadUpvalue(slot),
-            Place::TableField => OpCode::TabGet,
+            Place::Temporary(slot, span) => (
+                OpCode::LoadStack(slot),
+                debug_info::DebugInfo::Generic(span),
+            ),
+            Place::Upvalue(slot, span) => (
+                OpCode::LoadUpvalue(slot),
+                debug_info::DebugInfo::Generic(span),
+            ),
+            Place::TableField(debug_info) => (OpCode::TabGet, debug_info.into()),
         }
     }
 }
@@ -177,13 +184,13 @@ fn prefix_expr_impl<'s, 'origin>(
         let mut frag = core.expr();
         // Need this as workaround because repeat is unable to use output values to construct parsers.
         let mut expr_type = PrefixExpr::Expr;
-        let mut all_expr_span = 0..0;
+        let mut total_span = 0..0;
 
         let state = Source(s)
             .and(head(frag.new_core()).map_output(|output: Spanned<_>| {
                 let (expr, span) = output.take();
                 expr_type = expr;
-                all_expr_span = span.span();
+                total_span = span.span();
                 span
             }))?
             .and(
@@ -191,23 +198,24 @@ fn prefix_expr_impl<'s, 'origin>(
                     let mut frag = frag.new_expr_at(FragmentStackSlot(0));
 
                     // Evaluate place.
-                    if let PrefixExpr::Place(place) = expr_type {
-                        frag.emit(place.into_opcode(), all_expr_span.clone());
+                    if let PrefixExpr::Place(place) = expr_type.clone() {
+                        let (opcode, debug_info) = place.into_opcode();
+                        frag.emit_with_debug(opcode, debug_info);
                     }
 
                     // Adjust stack.
                     // Prefix expressions (except the very last one) always evaluate to 1 value.
                     // We are reusing the same stack slot to store it.
                     // Required since previous part could have been a function invocation.
-                    frag.emit_adjust_to(FragmentStackSlot(1), all_expr_span.clone());
+                    frag.emit_adjust_to(FragmentStackSlot(1), total_span.clone());
 
                     let state = Source(s)
                         .and(
-                            tail_segment(all_expr_span.clone(), frag.new_core()).map_output(
+                            tail_segment(frag.new_core(), total_span.clone()).map_output(
                                 |output: Spanned<_>| {
                                     let (expr, span) = output.take();
                                     expr_type = expr;
-                                    all_expr_span = all_expr_span.start..span.span().end;
+                                    total_span = total_span.start..span.span().end;
                                     span
                                 },
                             ),
@@ -227,7 +235,7 @@ fn prefix_expr_impl<'s, 'origin>(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum PrefixExpr {
     Expr,
     Place(Place),
@@ -260,8 +268,8 @@ fn head<'s, 'origin>(
 }
 
 fn tail_segment<'s, 'origin>(
-    span: Range<usize>,
     core: Core<'s, 'origin>,
+    span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<PrefixExpr>,
@@ -277,10 +285,10 @@ fn tail_segment<'s, 'origin>(
         assert_eq!(frag.stack().len(), FragmentStackSlot(1));
 
         let state = Source(s)
-            .or(func_invocation(span.clone(), frag.new_core()))?
-            .or(field(frag.new_core()))?
-            .or(index(frag.new_core()))?
-            .or(tab_call(span, frag.new_core()))?
+            .or(func_invocation(frag.new_core(), span.clone()))?
+            .or(field(frag.new_core(), span.clone()))?
+            .or(index(frag.new_core(), span.clone()))?
+            .or(tab_call(frag.new_core(), span))?
             .map_fsource(|_| ())
             .inspect(|_| {
                 frag.commit();
@@ -291,8 +299,8 @@ fn tail_segment<'s, 'origin>(
 }
 
 fn func_invocation<'s, 'origin>(
-    span: Range<usize>,
     core: Core<'s, 'origin>,
+    span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<PrefixExpr>,
@@ -423,14 +431,20 @@ fn variable<'s, 'origin>(
             .try_map_output(|output| -> Result<_, CodegenError> {
                 let (ident, span) = output.take();
                 let place = match frag.capture_variable(ident) {
-                    Some(UpvalueSource::Temporary(slot)) => Place::Temporary(slot),
-                    Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot),
+                    Some(UpvalueSource::Temporary(slot)) => Place::Temporary(slot, span.span()),
+                    Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot, span.span()),
                     None => {
                         let env = frag.capture_global_env()?;
                         frag.emit(env.into_opcode(), span.span());
                         frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
-                        Place::TableField
+                        let debug_info = debug_info::TabSet {
+                            table: debug_info::TableRange::GlobalEnv,
+                            index: span.span(),
+                            indexing: span.span(),
+                        };
+
+                        Place::TableField(debug_info)
                     }
                 };
 
@@ -453,6 +467,7 @@ pub enum VariableFailure {
 
 fn field<'s, 'origin>(
     core: Core<'s, 'origin>,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<PrefixExpr>,
@@ -472,10 +487,16 @@ fn field<'s, 'origin>(
             .and(identifier, replace_with_range)?
             .map_output(move |output| {
                 let ((ident, ident_span), span) = output.take();
-                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
-
+                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span.clone());
                 frag.commit();
-                span.put(PrefixExpr::Place(Place::TableField))
+
+                let debug_info = debug_info::TabSet {
+                    table: debug_info::TableRange::Local(table_span),
+                    index: ident_span,
+                    indexing: span.span(),
+                };
+
+                span.put(PrefixExpr::Place(Place::TableField(debug_info)))
             });
 
         Ok(state)
@@ -491,6 +512,7 @@ pub(crate) enum FieldFailure {
 
 fn index<'s, 'origin>(
     core: Core<'s, 'origin>,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<PrefixExpr>,
@@ -510,12 +532,22 @@ fn index<'s, 'origin>(
 
         let state = Source(s)
             .and(token_bracket_l)?
-            .and(expr_adjusted_to_1(frag.new_core()), discard)?
+            .and(expr_adjusted_to_1(frag.new_core()), replace_range)?
             .and(token_bracket_r, discard)?
             .inspect(move |_| {
                 frag.commit();
             })
-            .map_output(|span| span.put(PrefixExpr::Place(Place::TableField)));
+            .map_output(|output| {
+                let (index, span) = output.take();
+
+                let debug_info = debug_info::TabSet {
+                    table: debug_info::TableRange::Local(table_span),
+                    index,
+                    indexing: span.span(),
+                };
+
+                span.put(PrefixExpr::Place(Place::TableField(debug_info)))
+            });
 
         Ok(state)
     }
@@ -529,8 +561,8 @@ pub(crate) enum IndexFailure {
 }
 
 fn tab_call<'s, 'origin>(
-    table_span: Range<usize>,
     core: Core<'s, 'origin>,
+    table_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<PrefixExpr>,
@@ -553,9 +585,17 @@ fn tab_call<'s, 'origin>(
                 let ((colon_span, ident, ident_span), span) = output.take();
 
                 // Acquire function.
-                frag.emit_load_stack(FragmentStackSlot(0), table_span);
-                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
-                frag.emit(OpCode::TabGet, colon_span.clone());
+                frag.emit_load_stack(FragmentStackSlot(0), table_span.clone());
+                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span.clone());
+                frag.emit_with_debug(
+                    OpCode::TabGet,
+                    debug_info::TabSet {
+                        table: debug_info::TableRange::Local(table_span),
+                        index: ident_span.clone(),
+                        indexing: colon_span.start..ident_span.end,
+                    }
+                    .into(),
+                );
 
                 frag.emit(OpCode::StoreCallable, colon_span.clone());
 
