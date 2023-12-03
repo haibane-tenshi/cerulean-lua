@@ -176,7 +176,7 @@ impl Error {
                                     Label::primary(file_id.clone(), index)
                                         .with_message(format!("index has value `{value}`")),
                                     Label::secondary(file_id.clone(), indexing)
-                                        .with_message("indexing happens here"),
+                                        .with_message("table indexing happens here"),
                                 ]
                             }
                             Some(GlobalEnv { ident }) => {
