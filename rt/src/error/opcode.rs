@@ -125,15 +125,15 @@ impl Error {
                                 (labels, Vec::new())
                             }
                             Some(GlobalEnv { ident }) => {
-                                let labels = vec![Label::secondary(file_id.clone(), ident)
+                                let labels = vec![Label::primary(file_id.clone(), ident)
                                     .with_message("non-local identifier here")];
 
                                 let notes = vec![
                                     format!("expected `_ENV` to be table, but it has type {}", ty.to_lua_name()),
                                     "Lua implicitly accesses `_ENV` table to look up non-local variables".to_string(),
                                     "maybe you forgot to initialize global env when creating runtime?".to_string(),
-                                    "maybe you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign or shadow it".to_string(),
-                                    "maybe script received misconfigured global env?\nby default scripts receive runtime's global env on creation, but it is possible to override this behavior\nsee documentation to Lua `load` function".to_string(),
+                                    "maybe you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign to or shadow it".to_string(),
+                                    "maybe script received misconfigured global env?\nby default scripts recieve runtime's global env on call, but it is possible to override this behavior\nsee documentation to Lua `load` function".to_string(),
                                 ];
 
                                 (labels, notes)
@@ -145,7 +145,7 @@ impl Error {
                             }
                         };
 
-                        Diagnostic::bug()
+                        Diagnostic::error()
                             .with_message(msg)
                             .with_labels(labels)
                             .with_notes(notes)
@@ -168,15 +168,13 @@ impl Error {
 
                         let labels = match debug_info {
                             Some(Local {
-                                table,
+                                table: _,
                                 index,
                                 indexing,
                             }) => {
                                 vec![
                                     Label::primary(file_id.clone(), index)
                                         .with_message(format!("index has value `{value}`")),
-                                    Label::secondary(file_id.clone(), table)
-                                        .with_message("table value"),
                                     Label::secondary(file_id.clone(), indexing)
                                         .with_message("indexing happens here"),
                                 ]
@@ -196,7 +194,7 @@ impl Error {
                             }
                         };
 
-                        Diagnostic::bug()
+                        Diagnostic::error()
                             .with_message(msg)
                             .with_labels(labels)
                             .with_notes(notes)
