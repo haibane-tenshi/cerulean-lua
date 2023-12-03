@@ -109,8 +109,8 @@ pub(crate) fn fn_name<'s, 'origin>(
 
                             frag.emit_with_debug(
                                 OpCode::TabGet,
-                                debug_info::TabGet {
-                                    table: debug_info::TableRange::Local(total_span.clone()),
+                                debug_info::TabGet::Local {
+                                    table: total_span.clone(),
                                     index: ident_span.clone(),
                                     indexing: span.span(),
                                 }
@@ -144,8 +144,8 @@ pub(crate) fn fn_name<'s, 'origin>(
 
                             frag.emit_with_debug(
                                 OpCode::TabGet,
-                                debug_info::TabGet {
-                                    table: debug_info::TableRange::Local(total_span),
+                                debug_info::TabGet::Local {
+                                    table: total_span,
                                     index: ident_span.clone(),
                                     indexing: span.span(),
                                 }
