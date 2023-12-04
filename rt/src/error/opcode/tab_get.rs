@@ -1,56 +1,69 @@
 use codespan_reporting::diagnostic::{Diagnostic, Label};
-use repr::debug_info::opcode;
+use repr::debug_info::opcode::TabGet;
 
+use super::{MissingArgsError, TotalSpan};
 use crate::value::table::InvalidTableKeyError;
 use crate::value::Type;
 
-#[derive(Debug)]
-pub enum Error {
-    TabGet {
-        debug_info: Option<opcode::TabGet>,
-        cause: TabGetCause,
-    },
-}
-
-impl Error {
-    pub fn into_diagnostic<FileId>(self, file_id: FileId) -> Diagnostic<FileId>
-    where
-        FileId: Clone,
-    {
-        use Error::*;
-
-        match self {
-            TabGet { debug_info, cause } => cause.into_diagnostic(debug_info, file_id),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
-pub enum TabGetCause {
-    NoTable,
-    NoTableAndIndex,
-    TableTypeMismatch(Type),
-    InvalidKey(InvalidTableKeyError),
+pub enum Cause {
+    Compile(MissingArgsError),
+    Runtime(RuntimeCause),
 }
 
-impl TabGetCause {
-    fn into_diagnostic<FileId>(
+impl Cause {
+    pub(super) fn into_diagnostic<FileId>(
         self,
-        debug_info: Option<opcode::TabGet>,
         file_id: FileId,
+        debug_info: Option<TabGet>,
     ) -> Diagnostic<FileId>
     where
         FileId: Clone,
     {
-        use opcode::TabGet::*;
-        use TabGetCause::*;
+        match self {
+            Cause::Compile(err) => {
+                let debug_info = debug_info.map(|info| (file_id, info.total_span()));
+                err.into_diagnostic("TabGet", 2, debug_info)
+            }
+            Cause::Runtime(err) => err.into_diagnostic(file_id, debug_info),
+        }
+    }
+}
+
+impl From<MissingArgsError> for Cause {
+    fn from(value: MissingArgsError) -> Self {
+        Cause::Compile(value)
+    }
+}
+
+impl From<RuntimeCause> for Cause {
+    fn from(value: RuntimeCause) -> Self {
+        Cause::Runtime(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RuntimeCause {
+    TableTypeMismatch(Type),
+    InvalidKey(InvalidTableKeyError),
+}
+
+impl RuntimeCause {
+    fn into_diagnostic<FileId>(
+        self,
+        file_id: FileId,
+        debug_info: Option<TabGet>,
+    ) -> Diagnostic<FileId>
+    where
+        FileId: Clone,
+    {
+        use RuntimeCause::*;
+        use TabGet::*;
 
         let mut labels = Vec::new();
         let mut notes = Vec::new();
 
         let msg = match self {
-            NoTable => "no table value on the stack",
-            NoTableAndIndex => "no table and index value on the stack",
             TableTypeMismatch(_) => "only tables can be indexed",
             InvalidKey(err) => {
                 match err {
@@ -71,21 +84,6 @@ impl TabGetCause {
                 index,
                 indexing,
             }) => match self {
-                NoTable => {
-                    labels.extend([
-                        Label::primary(file_id.clone(), table).with_message("presumed table value"),
-                        Label::secondary(file_id.clone(), indexing)
-                            .with_message("indexing happens here"),
-                    ]);
-                }
-                NoTableAndIndex => {
-                    labels.extend([
-                        Label::primary(file_id.clone(), table).with_message("presumed table value"),
-                        Label::primary(file_id.clone(), index).with_message("presumed index value"),
-                        Label::secondary(file_id.clone(), indexing)
-                            .with_message("indexing happens here"),
-                    ]);
-                }
                 TableTypeMismatch(ty) => {
                     labels.extend([
                         Label::primary(file_id.clone(), table).with_message(format!(
@@ -106,25 +104,16 @@ impl TabGetCause {
                 }
             },
             Some(GlobalEnv { ident }) => match self {
-                NoTable | NoTableAndIndex => {
-                    labels.extend([Label::secondary(file_id.clone(), ident)
-                        .with_message("identifier does not refer to local variable")]);
-
-                    notes.extend([
-                        "Lua implicitly accesses `_ENV` table to look up non-local variables"
-                            .to_string(),
-                    ]);
-                }
                 TableTypeMismatch(ty) => {
                     labels.extend([Label::secondary(file_id.clone(), ident)
                         .with_message("identifier does not refer to local variable")]);
 
                     notes.extend([
-                        format!("expected `_ENV` to be table, but it has type {}", ty.to_lua_name()),
+                        format!("expected `_ENV` to be table but it has type `{}`", ty.to_lua_name()),
                         "Lua implicitly accesses `_ENV` table to look up non-local variables".to_string(),
-                        "maybe you forgot to initialize global env when creating runtime?".to_string(),
-                        "maybe you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign to or shadow it".to_string(),
-                        "maybe script received misconfigured global env?\nby default scripts recieve runtime's global env on call, but it is possible to override this behavior\nsee documentation to Lua `load` function".to_string(),
+                        "perhaps you forgot to initialize global env when creating runtime?".to_string(),
+                        "perhaps you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign to or shadow it".to_string(),
+                        "perhaps script received misconfigured global env?\nby default scripts recieve runtime's global env on call, but it is possible to override this behavior\nsee documentation for Lua std `load` function".to_string(),
                     ]);
                 }
                 InvalidKey(_) => {
@@ -149,12 +138,3 @@ impl TabGetCause {
             .with_notes(notes)
     }
 }
-
-// #[derive(Debug)]
-// pub enum TabSetCause {
-//     NoTable,
-//     NoTableAndIndex,
-//     NoTableAndIndexAndValue,
-//     TableTypeMismatch(Type),
-//     InvalidKey(InvalidTableKeyError),
-// }

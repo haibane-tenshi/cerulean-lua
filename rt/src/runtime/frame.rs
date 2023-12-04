@@ -533,12 +533,17 @@ impl<'rt, C> ActiveFrame<'rt, C> {
     }
 
     fn exec_tab_get(&mut self) -> Result<(), opcode::TabGetCause> {
-        use opcode::TabGetCause::*;
+        use opcode::MissingArgsError;
+        use opcode::TabGetRuntimeCause::*;
 
-        let index = self.stack.pop().map_err(|_| NoTableAndIndex)?;
-        let table = match self.stack.pop().map_err(|_| NoTable)? {
+        let args_err = MissingArgsError {
+            stack_len: self.stack.len(),
+        };
+
+        let index = self.stack.pop().map_err(|_| args_err)?;
+        let table = match self.stack.pop().map_err(|_| args_err)? {
             Value::Table(t) => t,
-            value => return Err(TableTypeMismatch(value.type_())),
+            value => return Err(TableTypeMismatch(value.type_()).into()),
         };
 
         let key = index.try_into().map_err(InvalidKey)?;

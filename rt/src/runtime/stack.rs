@@ -103,7 +103,7 @@ impl<C> Stack<C> {
     fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<Value<C>> {
         match height.0.checked_sub(self.temporaries.len()) {
             None => {
-                for slot in (height.0..self.len().0).map(RawStackSlot) {
+                for slot in (height.0..self.len()).map(RawStackSlot) {
                     if let Some(upvalue_id) = self.on_stack_upvalues.remove(&slot) {
                         let value = self.get(slot).unwrap().clone();
                         self.evicted_upvalues.insert(upvalue_id, value);
@@ -171,7 +171,7 @@ impl<C> Stack<C> {
     }
 
     fn mark_as_upvalue(&mut self, slot: RawStackSlot) -> Option<UpvalueId> {
-        if slot.0 >= self.len().0 {
+        if slot.0 >= self.len() {
             return None;
         }
 
@@ -216,7 +216,11 @@ impl<C> Stack<C> {
         }
     }
 
-    fn len(&self) -> RawStackSlot {
+    fn len(&self) -> usize {
+        self.temporaries.len()
+    }
+
+    fn top(&self) -> RawStackSlot {
         RawStackSlot(self.temporaries.len())
     }
 
@@ -262,7 +266,7 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub(crate) fn view(&mut self, protected_size: RawStackSlot) -> Option<StackView<'_, C>> {
-        if self.stack.len().0 < protected_size.0 {
+        if self.stack.len() < protected_size.0 {
             return None;
         }
 
@@ -279,11 +283,15 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn pop(&mut self) -> Result<Value<C>, RuntimeError> {
-        if self.stack.len().0 <= self.protected_size.0 {
+        if self.stack.len() <= self.protected_size.0 {
             return Err(RuntimeError::CatchAll);
         }
 
         self.stack.pop().ok_or(RuntimeError::CatchAll)
+    }
+
+    pub fn len(&self) -> usize {
+        self.stack.len()
     }
 
     pub fn last(&self) -> Result<&Value<C>, RuntimeError> {
@@ -291,7 +299,7 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn top(&mut self) -> StackSlot {
-        self.protected_size.slot(self.stack.len()).unwrap()
+        self.protected_size.slot(self.stack.top()).unwrap()
     }
 
     pub fn get(&self, slot: StackSlot) -> Result<&Value<C>, RuntimeError> {
