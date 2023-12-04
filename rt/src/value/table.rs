@@ -130,10 +130,19 @@ impl<C> Hash for KeyValue<C> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum InvalidTableKeyError {
     Nil,
     Nan,
+}
+
+impl InvalidTableKeyError {
+    pub(crate) fn value_str(self) -> &'static str {
+        match self {
+            InvalidTableKeyError::Nan => "NaN",
+            InvalidTableKeyError::Nil => "nil",
+        }
+    }
 }
 
 impl<C> TryFrom<Value<C>> for KeyValue<C> {
