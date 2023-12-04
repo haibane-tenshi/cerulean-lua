@@ -1,7 +1,7 @@
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use repr::debug_info::opcode::TabGet;
 
-use super::{MissingArgsError, TotalSpan};
+use super::{ExtraDiagnostic, MissingArgsError, TotalSpan};
 use crate::value::table::InvalidTableKeyError;
 use crate::value::Type;
 
@@ -60,21 +60,20 @@ impl RuntimeCause {
         use RuntimeCause::*;
         use TabGet::*;
 
-        let mut labels = Vec::new();
-        let mut notes = Vec::new();
+        let mut diag = Diagnostic::error();
 
-        let msg = match self {
-            TableTypeMismatch(_) => "only tables can be indexed",
+        let mut diag = match self {
+            TableTypeMismatch(_) => diag.with_message("only tables can be indexed"),
             InvalidKey(err) => {
                 match err {
-                    InvalidTableKeyError::Nan => notes.extend([
-                        "Lua does not permit indexing tables using float NaN (not a number)".to_string(),
-                        "Lua follows floating point standard which mandates that no two NaN values are equal even if their bitwise representation is identical\ntherefore, values under NaN keys would be impossible to look up".to_string(),
+                    InvalidTableKeyError::Nan => diag.with_note([
+                        "Lua does not permit indexing tables using float NaN (not a number)",
+                        "Lua follows floating point standard which mandates that no two NaN values are equal even if their bitwise representation is identical\ntherefore, values under NaN keys would be impossible to look up",
                     ]),
-                    InvalidTableKeyError::Nil => notes.push("Lua does not permit indexing tables using `nil`".to_string()),
+                    InvalidTableKeyError::Nil => diag.with_note(["Lua does not permit indexing tables using `nil`"]),
                 };
 
-                "invalid table key"
+                diag.with_message("invalid table key")
             }
         };
 
@@ -85,7 +84,7 @@ impl RuntimeCause {
                 indexing,
             }) => match self {
                 TableTypeMismatch(ty) => {
-                    labels.extend([
+                    diag.with_label([
                         Label::primary(file_id.clone(), table).with_message(format!(
                             "expected table, but this has type `{}`",
                             ty.to_lua_name()
@@ -95,7 +94,7 @@ impl RuntimeCause {
                     ]);
                 }
                 InvalidKey(err) => {
-                    labels.extend([
+                    diag.with_label([
                         Label::primary(file_id.clone(), index)
                             .with_message(format!("index has value `{}`", err.value_str())),
                         Label::secondary(file_id.clone(), indexing)
@@ -105,36 +104,37 @@ impl RuntimeCause {
             },
             Some(GlobalEnv { ident }) => match self {
                 TableTypeMismatch(ty) => {
-                    labels.extend([Label::secondary(file_id.clone(), ident)
+                    diag.with_label([Label::secondary(file_id.clone(), ident)
                         .with_message("identifier does not refer to local variable")]);
 
-                    notes.extend([
-                        format!("expected `_ENV` to be table but it has type `{}`", ty.to_lua_name()),
-                        "Lua implicitly accesses `_ENV` table to look up non-local variables".to_string(),
-                        "perhaps you forgot to initialize global env when creating runtime?".to_string(),
-                        "perhaps you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign to or shadow it".to_string(),
-                        "perhaps script received misconfigured global env?\nby default scripts recieve runtime's global env on call, but it is possible to override this behavior\nsee documentation for Lua std `load` function".to_string(),
+                    diag.with_note([format!(
+                        "expected `_ENV` to be table but it has type `{}`",
+                        ty.to_lua_name()
+                    )]);
+                    diag.with_note([
+                        "Lua implicitly accesses `_ENV` table to look up non-local variables",
+                    ]);
+                    diag.with_help([
+                        "perhaps you forgot to initialize global env when creating runtime?",
+                        "perhaps you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign to or shadow it",
+                        "perhaps script received misconfigured global env?\nby default scripts recieve runtime's global env on call, but it is possible to override this behavior\nsee documentation for Lua std `load` function",
                     ]);
                 }
                 InvalidKey(_) => {
-                    labels.extend([
+                    diag.with_label([
                         Label::primary(file_id.clone(), ident).with_message("index value")
                     ]);
 
-                    notes.extend([
-                        "Lua implicitly accesses `_ENV` table to look up non-local variables"
-                            .to_string(),
+                    diag.with_note([
+                        "Lua implicitly accesses `_ENV` table to look up non-local variables",
                     ]);
                 }
             },
             None => {
-                notes.extend(["no debug info is available".to_string()]);
+                diag.with_note(["no debug info is available"]);
             }
         };
 
-        Diagnostic::error()
-            .with_message(msg)
-            .with_labels(labels)
-            .with_notes(notes)
+        diag
     }
 }
