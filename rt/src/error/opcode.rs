@@ -25,7 +25,7 @@ impl Error {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum TabGetCause {
     NoTable,
     NoTableAndIndex,
@@ -49,109 +49,10 @@ impl TabGetCause {
         let mut notes = Vec::new();
 
         let msg = match self {
-            NoTable => {
-                match debug_info {
-                    Some(Local {
-                        table,
-                        index: _,
-                        indexing,
-                    }) => {
-                        labels.extend([
-                            Label::primary(file_id.clone(), table)
-                                .with_message("presumed table value"),
-                            Label::secondary(file_id.clone(), indexing)
-                                .with_message("indexing happens here"),
-                        ]);
-                    }
-                    Some(GlobalEnv { ident }) => {
-                        labels.push(
-                            Label::secondary(file_id.clone(), ident)
-                                .with_message("identifier does not refer to local variable"),
-                        );
-
-                        notes.push(
-                            "Lua implicitly accesses `_ENV` table to look up non-local variables"
-                                .to_string(),
-                        );
-                    }
-                    None => {
-                        notes.push("no debug info is available".to_string());
-                    }
-                };
-
-                "no table value on the stack"
-            }
-            NoTableAndIndex => {
-                match debug_info {
-                    Some(Local {
-                        table,
-                        index,
-                        indexing,
-                    }) => {
-                        labels.extend([
-                            Label::primary(file_id.clone(), table)
-                                .with_message("presumed table value"),
-                            Label::primary(file_id.clone(), index)
-                                .with_message("presumed index value"),
-                            Label::secondary(file_id.clone(), indexing)
-                                .with_message("indexing happens here"),
-                        ]);
-                    }
-                    Some(GlobalEnv { ident }) => {
-                        labels.extend([Label::secondary(file_id.clone(), ident)
-                            .with_message("identifier does not refer to local variable")]);
-
-                        notes.push(
-                            "Lua implicitly accesses `_ENV` table to look up non-local variables"
-                                .to_string(),
-                        );
-                    }
-                    None => {
-                        notes.push("no debug info is available".to_string());
-                    }
-                };
-
-                "no table and index value on the stack"
-            }
-            TableTypeMismatch(ty) => {
-                match debug_info {
-                    Some(Local {
-                        table,
-                        index: _,
-                        indexing,
-                    }) => labels.extend([
-                        Label::primary(file_id.clone(), table)
-                            .with_message(format!("expected table, found {}", ty.to_lua_name())),
-                        Label::secondary(file_id.clone(), indexing)
-                            .with_message("indexing happens here"),
-                    ]),
-                    Some(GlobalEnv { ident }) => {
-                        labels.push(
-                            Label::secondary(file_id.clone(), ident)
-                                .with_message("identifier does not refer to local variable"),
-                        );
-
-                        notes.extend([
-                            format!("expected `_ENV` to be table, but it has type {}", ty.to_lua_name()),
-                            "Lua implicitly accesses `_ENV` table to look up non-local variables".to_string(),
-                            "maybe you forgot to initialize global env when creating runtime?".to_string(),
-                            "maybe you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign to or shadow it".to_string(),
-                            "maybe script received misconfigured global env?\nby default scripts recieve runtime's global env on call, but it is possible to override this behavior\nsee documentation to Lua `load` function".to_string(),
-                        ]);
-                    }
-                    None => {
-                        notes.push("no debug info is available".to_string());
-                    }
-                };
-
-                "expected table"
-            }
+            NoTable => "no table value on the stack",
+            NoTableAndIndex => "no table and index value on the stack",
+            TableTypeMismatch(_) => "only tables can be indexed",
             InvalidKey(err) => {
-                let value = match &err {
-                    InvalidTableKeyError::Nan => "NaN",
-                    InvalidTableKeyError::Nil => "nil",
-                };
-
                 match err {
                     InvalidTableKeyError::Nan => notes.extend([
                         "Lua does not permit indexing tables using float NaN (not a number)".to_string(),
@@ -160,35 +61,85 @@ impl TabGetCause {
                     InvalidTableKeyError::Nil => notes.push("Lua does not permit indexing tables using `nil`".to_string()),
                 };
 
-                match debug_info {
-                    Some(Local {
-                        table: _,
-                        index,
-                        indexing,
-                    }) => {
-                        labels.extend([
-                            Label::primary(file_id.clone(), index)
-                                .with_message(format!("index has value `{value}`")),
-                            Label::secondary(file_id.clone(), indexing)
-                                .with_message("table indexing happens here"),
-                        ]);
-                    }
-                    Some(GlobalEnv { ident }) => {
-                        labels.push(
-                            Label::primary(file_id.clone(), ident).with_message("index value"),
-                        );
-
-                        notes.push(
-                            "Lua implicitly accesses `_ENV` table to look up non-local variables"
-                                .to_string(),
-                        );
-                    }
-                    None => {
-                        notes.push("no debug info is available".to_string());
-                    }
-                };
-
                 "invalid table key"
+            }
+        };
+
+        match debug_info {
+            Some(Local {
+                table,
+                index,
+                indexing,
+            }) => match self {
+                NoTable => {
+                    labels.extend([
+                        Label::primary(file_id.clone(), table).with_message("presumed table value"),
+                        Label::secondary(file_id.clone(), indexing)
+                            .with_message("indexing happens here"),
+                    ]);
+                }
+                NoTableAndIndex => {
+                    labels.extend([
+                        Label::primary(file_id.clone(), table).with_message("presumed table value"),
+                        Label::primary(file_id.clone(), index).with_message("presumed index value"),
+                        Label::secondary(file_id.clone(), indexing)
+                            .with_message("indexing happens here"),
+                    ]);
+                }
+                TableTypeMismatch(ty) => {
+                    labels.extend([
+                        Label::primary(file_id.clone(), table).with_message(format!(
+                            "expected table, but this has type `{}`",
+                            ty.to_lua_name()
+                        )),
+                        Label::secondary(file_id.clone(), indexing)
+                            .with_message("indexing happens here"),
+                    ]);
+                }
+                InvalidKey(err) => {
+                    labels.extend([
+                        Label::primary(file_id.clone(), index)
+                            .with_message(format!("index has value `{}`", err.value_str())),
+                        Label::secondary(file_id.clone(), indexing)
+                            .with_message("table indexing happens here"),
+                    ]);
+                }
+            },
+            Some(GlobalEnv { ident }) => match self {
+                NoTable | NoTableAndIndex => {
+                    labels.extend([Label::secondary(file_id.clone(), ident)
+                        .with_message("identifier does not refer to local variable")]);
+
+                    notes.extend([
+                        "Lua implicitly accesses `_ENV` table to look up non-local variables"
+                            .to_string(),
+                    ]);
+                }
+                TableTypeMismatch(ty) => {
+                    labels.extend([Label::secondary(file_id.clone(), ident)
+                        .with_message("identifier does not refer to local variable")]);
+
+                    notes.extend([
+                        format!("expected `_ENV` to be table, but it has type {}", ty.to_lua_name()),
+                        "Lua implicitly accesses `_ENV` table to look up non-local variables".to_string(),
+                        "maybe you forgot to initialize global env when creating runtime?".to_string(),
+                        "maybe you assigned to `_ENV` somewhere?\nconsider that `_ENV` is a regular variable, so it is possible to assign to or shadow it".to_string(),
+                        "maybe script received misconfigured global env?\nby default scripts recieve runtime's global env on call, but it is possible to override this behavior\nsee documentation to Lua `load` function".to_string(),
+                    ]);
+                }
+                InvalidKey(_) => {
+                    labels.extend([
+                        Label::primary(file_id.clone(), ident).with_message("index value")
+                    ]);
+
+                    notes.extend([
+                        "Lua implicitly accesses `_ENV` table to look up non-local variables"
+                            .to_string(),
+                    ]);
+                }
+            },
+            None => {
+                notes.extend(["no debug info is available".to_string()]);
             }
         };
 
