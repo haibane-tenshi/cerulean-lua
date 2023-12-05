@@ -90,13 +90,38 @@ impl TotalSpan for opcode::TabGet {
 
 impl TotalSpan for opcode::TabSet {
     fn total_span(&self) -> Range<usize> {
-        todo!()
+        use opcode::TabSet::*;
+
+        match self {
+            Local {
+                table,
+                index: _,
+                indexing: _,
+                eq_sign,
+            } => table.start..eq_sign.end,
+            GlobalEnv { ident, eq_sign } => {
+                let end = eq_sign.as_ref().map(|span| span.end).unwrap_or(ident.end);
+
+                ident.start..end
+            }
+            Constructor { table: _, flavor } => flavor.total_span(),
+        }
     }
 }
 
 impl TotalSpan for opcode::TabConstructor {
     fn total_span(&self) -> Range<usize> {
-        todo!()
+        use opcode::TabConstructor::*;
+
+        match self {
+            Index {
+                index: _,
+                indexing,
+                eq_sign,
+            } => indexing.start..eq_sign.end,
+            Field { ident, eq_sign } => ident.start..eq_sign.end,
+            Value { value } => value.clone(),
+        }
     }
 }
 
