@@ -2,20 +2,24 @@ mod table;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use repr::debug_info::opcode;
+use repr::opcode::OpCode;
 use std::ops::Range;
 
-pub use table::{Cause as TabCause, RuntimeCause as TabRuntimeCause};
+pub use table::RuntimeCause as TabCause;
 
 #[derive(Debug)]
-pub enum Error {
-    TabGet {
-        debug_info: Option<opcode::TabGet>,
-        cause: TabCause,
-    },
-    TabSet {
-        debug_info: Option<opcode::TabSet>,
-        cause: TabCause,
-    },
+pub struct Error {
+    pub opcode: OpCode,
+    pub debug_info: Option<opcode::DebugInfo>,
+    pub cause: Cause,
+}
+
+#[derive(Debug)]
+pub enum Cause {
+    CatchAll,
+    MissingArgs(MissingArgsError),
+    TabGet(TabCause),
+    TabSet(TabCause),
 }
 
 impl Error {
@@ -23,32 +27,66 @@ impl Error {
     where
         FileId: Clone,
     {
-        use Error::*;
+        use Cause::*;
 
-        match self {
-            TabGet { debug_info, cause } => cause.into_diagnostic_tab_get(file_id, debug_info),
-            TabSet { debug_info, cause } => cause.into_diagnostic_tab_set(file_id, debug_info),
+        let Error {
+            opcode,
+            debug_info,
+            cause,
+        } = self;
+
+        match cause {
+            CatchAll => Diagnostic::error().with_message("diagnostic not implemented yet"),
+            MissingArgs(err) => {
+                let debug_info = debug_info.as_ref().map(TotalSpan::total_span);
+                err.into_diagnostic(file_id, opcode, debug_info)
+            }
+            TabGet(cause) => {
+                let debug_info = debug_info
+                    .and_then(Extract::<opcode::TabGet>::extract)
+                    .map(Into::into);
+                cause.into_diagnostic(file_id, debug_info)
+            }
+            TabSet(cause) => {
+                let debug_info = debug_info
+                    .and_then(Extract::<opcode::TabSet>::extract)
+                    .map(Into::into);
+                cause.into_diagnostic(file_id, debug_info)
+            }
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+impl From<MissingArgsError> for Cause {
+    fn from(value: MissingArgsError) -> Self {
+        Cause::MissingArgs(value)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MissingArgsError {
+    pub expected_args: usize,
     pub stack_len: usize,
 }
 
 impl MissingArgsError {
     fn into_diagnostic<FileId>(
         self,
-        opcode_name: &str,
-        expected_args: usize,
-        debug_info: Option<(FileId, Range<usize>)>,
+        file_id: FileId,
+        opcode: OpCode,
+        debug_info: Option<Range<usize>>,
     ) -> Diagnostic<FileId> {
+        let MissingArgsError {
+            expected_args,
+            stack_len,
+        } = self;
+
+        let name = opcode.name();
         let have_debug_info = debug_info.is_some();
         let mut diag = Diagnostic::bug()
-            .with_message(format!("bytecode instruction {opcode_name} expects {expected_args} argument(s) but only {} were provided", self.stack_len));
+            .with_message(format!("bytecode instruction {name} expects {expected_args} argument(s) but only {stack_len} were provided"));
 
-        if let Some((file_id, span)) = debug_info {
+        if let Some(span) = debug_info {
             diag.with_label([Label::secondary(file_id, span)
                 .with_message("error occurred here, but its cause in different place")]);
         }
@@ -71,6 +109,18 @@ impl MissingArgsError {
 
 trait TotalSpan {
     fn total_span(&self) -> Range<usize>;
+}
+
+impl TotalSpan for opcode::DebugInfo {
+    fn total_span(&self) -> Range<usize> {
+        use opcode::DebugInfo::*;
+
+        match self {
+            Generic(span) => span.clone(),
+            TabGet(t) => t.total_span(),
+            TabSet(t) => t.total_span(),
+        }
+    }
 }
 
 impl TotalSpan for opcode::TabGet {

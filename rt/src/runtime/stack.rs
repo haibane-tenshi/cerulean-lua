@@ -6,6 +6,7 @@ use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
 use super::Value;
+use crate::error::opcode::MissingArgsError;
 use crate::error::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -290,32 +291,41 @@ impl<'a, C> StackView<'a, C> {
         self.stack.pop().ok_or(RuntimeError::CatchAll)
     }
 
-    pub fn take1(&mut self) -> Option<[Value<C>; 1]> {
-        let v0 = self.pop().ok()?;
-        Some([v0])
+    pub(crate) fn take1(&mut self) -> Result<[Value<C>; 1], MissingArgsError> {
+        let v0 = self.pop().ok().ok_or_else(|| MissingArgsError {
+            stack_len: self.stack.len(),
+            expected_args: 1,
+        })?;
+        Ok([v0])
     }
 
-    pub fn take2(&mut self) -> Option<[Value<C>; 2]> {
+    pub(crate) fn take2(&mut self) -> Result<[Value<C>; 2], MissingArgsError> {
         if self.len() < 2 {
-            return None;
+            return Err(MissingArgsError {
+                expected_args: 2,
+                stack_len: self.len(),
+            });
         }
 
-        let v0 = self.pop().unwrap();
         let v1 = self.pop().unwrap();
+        let v0 = self.pop().unwrap();
 
-        Some([v0, v1])
+        Ok([v0, v1])
     }
 
-    pub fn take3(&mut self) -> Option<[Value<C>; 3]> {
+    pub(crate) fn take3(&mut self) -> Result<[Value<C>; 3], MissingArgsError> {
         if self.len() < 3 {
-            return None;
+            return Err(MissingArgsError {
+                expected_args: 3,
+                stack_len: self.len(),
+            });
         }
 
-        let v0 = self.pop().unwrap();
-        let v1 = self.pop().unwrap();
         let v2 = self.pop().unwrap();
+        let v1 = self.pop().unwrap();
+        let v0 = self.pop().unwrap();
 
-        Some([v0, v1, v2])
+        Ok([v0, v1, v2])
     }
 
     pub fn len(&self) -> usize {

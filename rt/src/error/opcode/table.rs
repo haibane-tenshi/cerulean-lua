@@ -2,63 +2,9 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use repr::debug_info::opcode::{TabConstructor, TabGet, TabSet};
 use std::ops::Range;
 
-use super::{compiler_bug, ExtraDiagnostic, MissingArgsError, TotalSpan};
+use super::{compiler_bug, ExtraDiagnostic, TotalSpan};
 use crate::value::table::InvalidTableKeyError;
 use crate::value::Type;
-
-#[derive(Debug, Clone, Copy)]
-pub enum Cause {
-    Compile(MissingArgsError),
-    Runtime(RuntimeCause),
-}
-
-impl Cause {
-    pub(super) fn into_diagnostic_tab_get<FileId>(
-        self,
-        file_id: FileId,
-        debug_info: Option<TabGet>,
-    ) -> Diagnostic<FileId>
-    where
-        FileId: Clone,
-    {
-        match self {
-            Cause::Compile(err) => {
-                let debug_info = debug_info.map(|info| (file_id, info.total_span()));
-                err.into_diagnostic("TabGet", 2, debug_info)
-            }
-            Cause::Runtime(err) => err.into_diagnostic_tab_get(file_id, debug_info),
-        }
-    }
-
-    pub(super) fn into_diagnostic_tab_set<FileId>(
-        self,
-        file_id: FileId,
-        debug_info: Option<TabSet>,
-    ) -> Diagnostic<FileId>
-    where
-        FileId: Clone,
-    {
-        match self {
-            Cause::Compile(err) => {
-                let debug_info = debug_info.map(|info| (file_id, info.total_span()));
-                err.into_diagnostic("TabSet", 3, debug_info)
-            }
-            Cause::Runtime(err) => err.into_diagnostic_tab_set(file_id, debug_info),
-        }
-    }
-}
-
-impl From<MissingArgsError> for Cause {
-    fn from(value: MissingArgsError) -> Self {
-        Cause::Compile(value)
-    }
-}
-
-impl From<RuntimeCause> for Cause {
-    fn from(value: RuntimeCause) -> Self {
-        Cause::Runtime(value)
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum RuntimeCause {
@@ -68,31 +14,7 @@ pub enum RuntimeCause {
 
 impl RuntimeCause {
     #[allow(clippy::single_match)]
-    fn into_diagnostic_tab_get<FileId>(
-        self,
-        file_id: FileId,
-        debug_info: Option<TabGet>,
-    ) -> Diagnostic<FileId>
-    where
-        FileId: Clone,
-    {
-        self.into_diagnostic(file_id, debug_info.map(Into::into))
-    }
-
-    #[allow(clippy::single_match)]
-    fn into_diagnostic_tab_set<FileId>(
-        self,
-        file_id: FileId,
-        debug_info: Option<TabSet>,
-    ) -> Diagnostic<FileId>
-    where
-        FileId: Clone,
-    {
-        self.into_diagnostic(file_id, debug_info.map(Into::into))
-    }
-
-    #[allow(clippy::single_match)]
-    fn into_diagnostic<FileId>(
+    pub(super) fn into_diagnostic<FileId>(
         self,
         file_id: FileId,
         debug_info: Option<TabDebugInfo>,
@@ -273,7 +195,7 @@ impl RuntimeCause {
 }
 
 #[derive(Debug, Clone)]
-enum TabDebugInfo {
+pub(super) enum TabDebugInfo {
     Local {
         table: Range<usize>,
         index: Range<usize>,

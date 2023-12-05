@@ -223,39 +223,45 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         self.register_callable.take()
     }
 
-    pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
+    pub fn step(&mut self) -> Result<ControlFlow, opcode::Error> {
+        let Some(opcode) = self.next_opcode() else {
+            return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
+        };
+
+        self.exec(opcode).map_err(|cause| opcode::Error {
+            opcode,
+            debug_info: self.opcode_debug_info(self.ip - 1),
+            cause,
+        })
+    }
+
+    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow, opcode::Cause> {
         use crate::value::table::TableRef;
-        use opcode::Extract;
+        use opcode::Cause;
         use repr::index::InstrOffset;
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
 
-        let Some(code) = self.next_code() else {
-            return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
-        };
-
-        let r = match code {
-            Panic => return Err(RuntimeError::CatchAll),
+        let r = match opcode {
+            Panic => return Err(Cause::CatchAll),
             Invoke(slot) => ControlFlow::Break(ChangeFrame::Invoke(slot)),
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
-                let closure = self.construct_closure(fn_id)?;
+                let closure = self.construct_closure(fn_id).map_err(|_| Cause::CatchAll)?;
                 self.stack
                     .push(Value::Function(Callable::LuaClosure(closure.into())));
 
                 ControlFlow::Continue(())
             }
             LoadConstant(index) => {
-                let constant = self
-                    .get_constant(index)
-                    .ok_or(RuntimeError::CatchAll)?
-                    .clone();
+                let constant = self.get_constant(index).ok_or(Cause::CatchAll)?.clone();
                 self.stack.push(constant.into());
 
                 ControlFlow::Continue(())
             }
             StoreCallable => {
-                self.register_callable = self.stack.pop()?;
+                let [callable] = self.stack.take1()?;
+                self.register_callable = callable;
 
                 ControlFlow::Continue(())
             }
@@ -265,14 +271,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             LoadStack(slot) => {
-                let value = self.stack.get(slot)?.clone();
+                let value = self.stack.get(slot).map_err(|_| Cause::CatchAll)?.clone();
                 self.stack.push(value);
 
                 ControlFlow::Continue(())
             }
             StoreStack(slot) => {
-                let value = self.stack.pop()?;
-                let slot = self.stack.get_mut(slot)?;
+                let [value] = self.stack.take1()?;
+                let slot = self.stack.get_mut(slot).map_err(|_| Cause::CatchAll)?;
 
                 *slot = value;
 
@@ -284,40 +290,47 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             LoadUpvalue(slot) => {
-                let value = self.upvalue_stack.get(slot)?.clone();
+                let value = self
+                    .upvalue_stack
+                    .get(slot)
+                    .map_err(|_| Cause::CatchAll)?
+                    .clone();
                 self.stack.push(value);
 
                 ControlFlow::Continue(())
             }
             StoreUpvalue(slot) => {
-                let value = self.stack.pop()?;
-                let location = self.upvalue_stack.get_mut(slot)?;
+                let [value] = self.stack.take1()?;
+                let location = self
+                    .upvalue_stack
+                    .get_mut(slot)
+                    .map_err(|_| Cause::CatchAll)?;
 
                 *location = value;
 
                 ControlFlow::Continue(())
             }
             UnaOp(op) => {
-                let val = self.stack.pop()?;
+                let [val] = self.stack.take1()?;
 
                 let r = match op {
                     UnaOp::AriNeg => match val {
                         Value::Int(val) => Value::Int(-val),
                         Value::Float(val) => Value::Float(-val),
-                        _ => return Err(RuntimeError::CatchAll),
+                        _ => return Err(Cause::CatchAll),
                     },
                     UnaOp::BitNot => match val {
                         Value::Int(val) => Value::Int(!val),
-                        _ => return Err(RuntimeError::CatchAll),
+                        _ => return Err(Cause::CatchAll),
                     },
                     UnaOp::StrLen => match val {
                         Value::String(val) => Value::Int(val.len().try_into().unwrap()),
                         Value::Table(val) => {
-                            let border = val.borrow().map_err(|_| RuntimeError::CatchAll)?.border();
+                            let border = val.borrow().map_err(|_| Cause::CatchAll)?.border();
 
                             Value::Int(border)
                         }
-                        _ => return Err(RuntimeError::CatchAll),
+                        _ => return Err(Cause::CatchAll),
                     },
                     UnaOp::LogNot => Value::Bool(!val.to_bool()),
                 };
@@ -327,8 +340,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             BinOp(BinOp::Ari(op)) => {
-                let rhs = self.stack.pop()?;
-                let lhs = self.stack.pop()?;
+                let [lhs, rhs] = self.stack.take2()?;
 
                 let r = match (lhs, rhs) {
                     (Value::Int(lhs), Value::Int(rhs)) => match op {
@@ -358,7 +370,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                         AriBinOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
                         AriBinOp::Exp => Value::Float(lhs.powf(rhs)),
                     },
-                    _ => return Err(RuntimeError::CatchAll),
+                    _ => return Err(Cause::CatchAll),
                 };
 
                 self.stack.push(r);
@@ -366,8 +378,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             BinOp(BinOp::Bit(op)) => {
-                let rhs = self.stack.pop()?;
-                let lhs = self.stack.pop()?;
+                let [lhs, rhs] = self.stack.take2()?;
 
                 let r = match (lhs, rhs) {
                     (Value::Int(lhs), Value::Int(rhs)) => match op {
@@ -399,7 +410,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                             Value::Int(r)
                         }
                     },
-                    _ => return Err(RuntimeError::CatchAll),
+                    _ => return Err(Cause::CatchAll),
                 };
 
                 self.stack.push(r);
@@ -407,8 +418,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             BinOp(BinOp::Rel(op)) => {
-                let rhs = self.stack.pop()?;
-                let lhs = self.stack.pop()?;
+                let [lhs, rhs] = self.stack.take2()?;
 
                 let r = match op {
                     RelBinOp::Eq => lhs == rhs,
@@ -417,28 +427,28 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                         if lhs.type_() == rhs.type_() {
                             lhs < rhs
                         } else {
-                            return Err(RuntimeError::CatchAll);
+                            return Err(Cause::CatchAll);
                         }
                     }
                     RelBinOp::Le => {
                         if lhs.type_() == rhs.type_() {
                             lhs <= rhs
                         } else {
-                            return Err(RuntimeError::CatchAll);
+                            return Err(Cause::CatchAll);
                         }
                     }
                     RelBinOp::Gt => {
                         if lhs.type_() == rhs.type_() {
                             lhs > rhs
                         } else {
-                            return Err(RuntimeError::CatchAll);
+                            return Err(Cause::CatchAll);
                         }
                     }
                     RelBinOp::Ge => {
                         if lhs.type_() == rhs.type_() {
                             lhs >= rhs
                         } else {
-                            return Err(RuntimeError::CatchAll);
+                            return Err(Cause::CatchAll);
                         }
                     }
                 };
@@ -448,14 +458,13 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             BinOp(BinOp::Str(op)) => {
-                let rhs = self.stack.pop()?;
-                let lhs = self.stack.pop()?;
+                let [lhs, rhs] = self.stack.take2()?;
 
                 let r = match (lhs, rhs) {
                     (Value::String(lhs), Value::String(rhs)) => match op {
                         StrBinOp::Concat => Value::String(lhs + &rhs),
                     },
-                    _ => return Err(RuntimeError::CatchAll),
+                    _ => return Err(Cause::CatchAll),
                 };
 
                 self.stack.push(r);
@@ -469,7 +478,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             JumpIf { cond, offset } => {
-                let value = self.stack.pop()?;
+                let [value] = self.stack.take1()?;
 
                 if value.to_bool() == cond {
                     self.ip -= InstrOffset(1);
@@ -480,10 +489,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
             Loop { offset } => {
                 self.ip -= InstrOffset(1);
-                self.ip = self
-                    .ip
-                    .checked_sub_offset(offset)
-                    .ok_or(RuntimeError::CatchAll)?;
+                self.ip = self.ip.checked_sub_offset(offset).ok_or(Cause::CatchAll)?;
 
                 ControlFlow::Continue(())
             }
@@ -495,22 +501,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             TabGet => {
-                self.exec_tab_get().map_err(|cause| {
-                    let debug_info = self
-                        .opcode_debug_info(self.ip - 1)
-                        .and_then(Extract::extract);
-                    opcode::Error::TabGet { debug_info, cause }
-                })?;
+                let args = self.stack.take2()?;
+                self.exec_tab_get(args).map_err(Cause::TabGet)?;
 
                 ControlFlow::Continue(())
             }
             TabSet => {
-                self.exec_tab_set().map_err(|cause| {
-                    let debug_info = self
-                        .opcode_debug_info(self.ip - 1)
-                        .and_then(Extract::extract);
-                    opcode::Error::TabSet { debug_info, cause }
-                })?;
+                let args = self.stack.take3()?;
+                self.exec_tab_set(args).map_err(Cause::TabSet)?;
 
                 ControlFlow::Continue(())
             }
@@ -521,19 +519,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(r)
     }
 
-    fn exec_tab_get(&mut self) -> Result<(), opcode::TabCause> {
-        use opcode::MissingArgsError;
-        use opcode::TabRuntimeCause::*;
+    fn exec_tab_get(&mut self, args: [Value<C>; 2]) -> Result<(), opcode::TabCause> {
+        use opcode::TabCause::*;
 
-        let args_err = MissingArgsError {
-            stack_len: self.stack.len(),
-        };
-
-        let [table, index] = self.stack.take2().ok_or(args_err)?;
+        let [table, index] = args;
 
         let table = match table {
             Value::Table(t) => t,
-            t => return Err(TableTypeMismatch(t.type_()).into()),
+            t => return Err(TableTypeMismatch(t.type_())),
         };
 
         let key = index.try_into().map_err(InvalidKey)?;
@@ -544,19 +537,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(())
     }
 
-    fn exec_tab_set(&mut self) -> Result<(), opcode::TabCause> {
-        use opcode::MissingArgsError;
-        use opcode::TabRuntimeCause::*;
+    fn exec_tab_set(&mut self, args: [Value<C>; 3]) -> Result<(), opcode::TabCause> {
+        use opcode::TabCause::*;
 
-        let args_err = MissingArgsError {
-            stack_len: self.stack.len(),
-        };
-
-        let [table, index, value] = self.stack.take3().ok_or(args_err)?;
+        let [table, index, value] = args;
 
         let table = match table {
             Value::Table(t) => t,
-            t => return Err(TableTypeMismatch(t.type_()).into()),
+            t => return Err(TableTypeMismatch(t.type_())),
         };
 
         let key = index.try_into().map_err(InvalidKey)?;
@@ -575,7 +563,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             .cloned()
     }
 
-    pub fn next_code(&mut self) -> Option<OpCode> {
+    pub fn next_opcode(&mut self) -> Option<OpCode> {
         let r = *self.opcodes.get(self.ip)?;
 
         tracing::trace!(ip = self.ip.0, opcode = %r, "next opcode");
