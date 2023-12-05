@@ -290,8 +290,36 @@ impl<'a, C> StackView<'a, C> {
         self.stack.pop().ok_or(RuntimeError::CatchAll)
     }
 
+    pub fn take1(&mut self) -> Option<[Value<C>; 1]> {
+        let v0 = self.pop().ok()?;
+        Some([v0])
+    }
+
+    pub fn take2(&mut self) -> Option<[Value<C>; 2]> {
+        if self.len() < 2 {
+            return None;
+        }
+
+        let v0 = self.pop().unwrap();
+        let v1 = self.pop().unwrap();
+
+        Some([v0, v1])
+    }
+
+    pub fn take3(&mut self) -> Option<[Value<C>; 3]> {
+        if self.len() < 3 {
+            return None;
+        }
+
+        let v0 = self.pop().unwrap();
+        let v1 = self.pop().unwrap();
+        let v2 = self.pop().unwrap();
+
+        Some([v0, v1, v2])
+    }
+
     pub fn len(&self) -> usize {
-        self.stack.len()
+        self.stack.len() - self.protected_size().0
     }
 
     pub fn last(&self) -> Result<&Value<C>, RuntimeError> {

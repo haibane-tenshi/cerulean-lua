@@ -529,8 +529,9 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             stack_len: self.stack.len(),
         };
 
-        let index = self.stack.pop().map_err(|_| args_err)?;
-        let table = match self.stack.pop().map_err(|_| args_err)? {
+        let [table, index] = self.stack.take2().ok_or(args_err)?;
+
+        let table = match table {
             Value::Table(t) => t,
             t => return Err(TableTypeMismatch(t.type_()).into()),
         };
@@ -551,9 +552,9 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             stack_len: self.stack.len(),
         };
 
-        let value = self.stack.pop().map_err(|_| args_err)?;
-        let index = self.stack.pop().map_err(|_| args_err)?;
-        let table = match self.stack.pop().map_err(|_| args_err)? {
+        let [table, index, value] = self.stack.take3().ok_or(args_err)?;
+
+        let table = match table {
             Value::Table(t) => t,
             t => return Err(TableTypeMismatch(t.type_()).into()),
         };
