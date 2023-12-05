@@ -532,9 +532,9 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(r)
     }
 
-    fn exec_tab_get(&mut self) -> Result<(), opcode::TabGetCause> {
+    fn exec_tab_get(&mut self) -> Result<(), opcode::TabCause> {
         use opcode::MissingArgsError;
-        use opcode::TabGetRuntimeCause::*;
+        use opcode::TabRuntimeCause::*;
 
         let args_err = MissingArgsError {
             stack_len: self.stack.len(),

@@ -1,16 +1,20 @@
-mod tab_get;
+mod table;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use repr::debug_info::opcode;
 use std::ops::Range;
 
-pub use tab_get::{Cause as TabGetCause, RuntimeCause as TabGetRuntimeCause};
+pub use table::{Cause as TabCause, RuntimeCause as TabRuntimeCause};
 
 #[derive(Debug)]
 pub enum Error {
     TabGet {
         debug_info: Option<opcode::TabGet>,
-        cause: TabGetCause,
+        cause: TabCause,
+    },
+    TabSet {
+        debug_info: Option<opcode::TabSet>,
+        cause: TabCause,
     },
 }
 
@@ -22,7 +26,8 @@ impl Error {
         use Error::*;
 
         match self {
-            TabGet { debug_info, cause } => cause.into_diagnostic(file_id, debug_info),
+            TabGet { debug_info, cause } => cause.into_diagnostic_tab_get(file_id, debug_info),
+            TabSet { debug_info, cause } => cause.into_diagnostic_tab_set(file_id, debug_info),
         }
     }
 }
@@ -48,12 +53,10 @@ impl MissingArgsError {
                 .with_message("error occurred here, but its cause in different place")]);
         }
 
-        diag.with_note([
-            "this is not bug in your Lua code, error is caused by malformed bytecode",
+        diag.with_note(compiler_bug([
             "the opcode gets its arguments from stack but it seems there is not enough values to take",
             "the error implies that too few values were put on stack however it could have happenned long before this point",
-            "this most likely resulted from bug in compiler and should be reported",
-        ]);
+        ]));
 
         if !have_debug_info {
             diag.with_note([
@@ -65,15 +68,6 @@ impl MissingArgsError {
         diag
     }
 }
-
-// #[derive(Debug)]
-// pub enum TabSetCause {
-//     NoTable,
-//     NoTableAndIndex,
-//     NoTableAndIndexAndValue,
-//     TableTypeMismatch(Type),
-//     InvalidKey(InvalidTableKeyError),
-// }
 
 trait TotalSpan {
     fn total_span(&self) -> Range<usize>;
@@ -91,6 +85,18 @@ impl TotalSpan for opcode::TabGet {
                 indexing,
             } => table.start..indexing.end,
         }
+    }
+}
+
+impl TotalSpan for opcode::TabSet {
+    fn total_span(&self) -> Range<usize> {
+        todo!()
+    }
+}
+
+impl TotalSpan for opcode::TabConstructor {
+    fn total_span(&self) -> Range<usize> {
+        todo!()
     }
 }
 
@@ -114,4 +120,12 @@ impl<FileId> ExtraDiagnostic<FileId> for Diagnostic<FileId> {
         self.notes
             .extend(iter.into_iter().map(|s| format!("help: {}", s.as_ref())));
     }
+}
+
+fn compiler_bug<'a>(iter: impl IntoIterator<Item = &'a str>) -> impl Iterator<Item = &'a str> {
+    std::iter::once("this is not bug in your Lua code, error is caused by malformed bytecode")
+        .chain(iter.into_iter().map(AsRef::as_ref))
+        .chain(std::iter::once(
+            "this most likely resulted from bug in compiler and should be reported",
+        ))
 }
