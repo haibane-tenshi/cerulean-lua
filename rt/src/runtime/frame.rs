@@ -225,6 +225,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
     pub fn step(&mut self) -> Result<ControlFlow, RuntimeError> {
         use crate::value::table::TableRef;
+        use opcode::Extract;
         use repr::index::InstrOffset;
         use repr::opcode::OpCode::*;
         use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
@@ -495,33 +496,21 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
             TabGet => {
                 self.exec_tab_get().map_err(|cause| {
-                    let debug_info = self.opcode_debug_info(self.ip - 1).and_then(|debug_info| {
-                        if let OpCodeDebugInfo::TabGet(info) = debug_info {
-                            Some(info)
-                        } else {
-                            None
-                        }
-                    });
-
+                    let debug_info = self
+                        .opcode_debug_info(self.ip - 1)
+                        .and_then(Extract::extract);
                     opcode::Error::TabGet { debug_info, cause }
                 })?;
 
                 ControlFlow::Continue(())
             }
             TabSet => {
-                let value = self.stack.pop()?;
-                let index = self.stack.pop()?;
-                let table = match self.stack.pop()? {
-                    Value::Table(t) => t,
-                    _ => return Err(RuntimeError::CatchAll),
-                };
-
-                let key = index.try_into().map_err(|_| RuntimeError::CatchAll)?;
-
-                table
-                    .borrow_mut()
-                    .map_err(|_| RuntimeError::CatchAll)?
-                    .set(key, value);
+                self.exec_tab_set().map_err(|cause| {
+                    let debug_info = self
+                        .opcode_debug_info(self.ip - 1)
+                        .and_then(Extract::extract);
+                    opcode::Error::TabSet { debug_info, cause }
+                })?;
 
                 ControlFlow::Continue(())
             }
@@ -543,13 +532,35 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         let index = self.stack.pop().map_err(|_| args_err)?;
         let table = match self.stack.pop().map_err(|_| args_err)? {
             Value::Table(t) => t,
-            value => return Err(TableTypeMismatch(value.type_()).into()),
+            t => return Err(TableTypeMismatch(t.type_()).into()),
         };
 
         let key = index.try_into().map_err(InvalidKey)?;
         let value = table.borrow().unwrap().get(key);
 
         self.stack.push(value);
+
+        Ok(())
+    }
+
+    fn exec_tab_set(&mut self) -> Result<(), opcode::TabCause> {
+        use opcode::MissingArgsError;
+        use opcode::TabRuntimeCause::*;
+
+        let args_err = MissingArgsError {
+            stack_len: self.stack.len(),
+        };
+
+        let value = self.stack.pop().map_err(|_| args_err)?;
+        let index = self.stack.pop().map_err(|_| args_err)?;
+        let table = match self.stack.pop().map_err(|_| args_err)? {
+            Value::Table(t) => t,
+            t => return Err(TableTypeMismatch(t.type_()).into()),
+        };
+
+        let key = index.try_into().map_err(InvalidKey)?;
+
+        table.borrow_mut().unwrap().set(key, value);
 
         Ok(())
     }

@@ -100,6 +100,28 @@ impl TotalSpan for opcode::TabConstructor {
     }
 }
 
+pub(crate) trait Extract<T> {
+    fn extract(self) -> Option<T>;
+}
+
+impl Extract<opcode::TabGet> for opcode::DebugInfo {
+    fn extract(self) -> Option<opcode::TabGet> {
+        match self {
+            opcode::DebugInfo::TabGet(t) => Some(t),
+            _ => None,
+        }
+    }
+}
+
+impl Extract<opcode::TabSet> for opcode::DebugInfo {
+    fn extract(self) -> Option<opcode::TabSet> {
+        match self {
+            opcode::DebugInfo::TabSet(t) => Some(t),
+            _ => None,
+        }
+    }
+}
+
 trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);
     fn with_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
