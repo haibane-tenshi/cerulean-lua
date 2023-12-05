@@ -251,6 +251,35 @@ pub enum OpCode {
     TabSet,
 }
 
+impl OpCode {
+    pub fn name(self) -> &'static str {
+        use OpCode::*;
+
+        match self {
+            Panic => "Panic",
+            Invoke(_) => "Invoke",
+            Return(_) => "Return",
+            LoadStack(_) => "LoadStack",
+            LoadUpvalue(_) => "LoadUpvalue",
+            LoadConstant(_) => "LoadConst",
+            LoadVariadic => "LoadVariadic",
+            StoreStack(_) => "StoreStack",
+            StoreUpvalue(_) => "StoreUpvalue",
+            StoreCallable => "StoreCallable",
+            MakeClosure(_) => "MakeClosure",
+            AdjustStack(_) => "AdjustStack",
+            BinOp(_) => "BinaryOp",
+            UnaOp(_) => "UnaryOp",
+            Jump { .. } => "Jump",
+            JumpIf { .. } => "JumpIf",
+            Loop { .. } => "Loop",
+            TabCreate => "TabCreate",
+            TabSet => "TabSet",
+            TabGet => "TabGet",
+        }
+    }
+}
+
 impl From<BinOp> for OpCode {
     fn from(value: BinOp) -> Self {
         OpCode::BinOp(value)
@@ -291,27 +320,29 @@ impl Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use OpCode::*;
 
+        let name = self.name();
+
         let s = match *self {
-            Panic => format!("{:<11}", "Panic"),
-            Invoke(StackSlot(index)) => format!("{:<11} [{index:>3}]", "Invoke"),
-            Return(StackSlot(index)) => format!("{:<11} [{index:>3}]", "Return"),
-            StoreCallable => format!("{:<11}", "StoreCallable"),
-            LoadVariadic => format!("{:<11}", "LoadVariadic"),
-            LoadConstant(ConstId(index)) => format!("{:<11} [{index:>3}]", "LoadConst"),
-            LoadStack(StackSlot(index)) => format!("{:<11} [{index:>3}]", "LoadStack"),
-            StoreStack(StackSlot(index)) => format!("{:<11} [{index:>3}]", "StoreStack"),
-            AdjustStack(StackSlot(height)) => format!("{:<11} [{height:>3}]", "AdjustStack"),
-            MakeClosure(RecipeId(id)) => format!("{:<11} [{id:>3}]", "MakeClosure"),
-            LoadUpvalue(UpvalueSlot(index)) => format!("{:<11} [{index:>3}]", "LoadUpvalue"),
-            StoreUpvalue(UpvalueSlot(index)) => format!("{:<11} [{index:>3}]", "StoreUpvalue"),
-            BinOp(op) => format!("{:<11} [{op}]", "BinaryOp"),
-            UnaOp(op) => format!("{:<11} [{op}]", "UnaryOp"),
-            Jump { offset } => format!("{:<11} [{:>3}]", "Jump", offset.0),
-            JumpIf { cond, offset } => format!("{:<11} [{cond:>5}] [{:>3}]", "JumpIf", offset.0),
-            Loop { offset } => format!("{:<11} [{:>3}]", "Loop", offset.0),
-            TabCreate => format!("{:<11}", "TabCreate"),
-            TabSet => format!("{:<11}", "TabSet"),
-            TabGet => format!("{:<11}", "TabGet"),
+            Panic => format!("{name:<11}"),
+            Invoke(StackSlot(index)) => format!("{name:<11} [{index:>3}]"),
+            Return(StackSlot(index)) => format!("{name:<11} [{index:>3}]"),
+            StoreCallable => format!("{name:<11}"),
+            LoadVariadic => format!("{name:<11}"),
+            LoadConstant(ConstId(index)) => format!("{name:<11} [{index:>3}]"),
+            LoadStack(StackSlot(index)) => format!("{name:<11} [{index:>3}]"),
+            StoreStack(StackSlot(index)) => format!("{name:<11} [{index:>3}]"),
+            AdjustStack(StackSlot(height)) => format!("{name:<11} [{height:>3}]"),
+            MakeClosure(RecipeId(id)) => format!("{name:<11} [{id:>3}]"),
+            LoadUpvalue(UpvalueSlot(index)) => format!("{name:<11} [{index:>3}]"),
+            StoreUpvalue(UpvalueSlot(index)) => format!("{name:<11} [{index:>3}]"),
+            BinOp(op) => format!("{name:<11} [{op}]"),
+            UnaOp(op) => format!("{name:<11} [{op}]"),
+            Jump { offset } => format!("{name:<11} [{:>3}]", offset.0),
+            JumpIf { cond, offset } => format!("{name:<11} [{cond:>5}] [{:>3}]", offset.0),
+            Loop { offset } => format!("{name:<11} [{:>3}]", offset.0),
+            TabCreate => format!("{name:<11}"),
+            TabSet => format!("{name:<11}"),
+            TabGet => format!("{name:<11}"),
         };
 
         write!(f, "{s}")
