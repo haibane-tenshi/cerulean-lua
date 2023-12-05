@@ -117,9 +117,16 @@ impl TotalSpan for opcode::DebugInfo {
 
         match self {
             Generic(span) => span.clone(),
+            BinOp(t) => t.total_span(),
             TabGet(t) => t.total_span(),
             TabSet(t) => t.total_span(),
         }
+    }
+}
+
+impl TotalSpan for opcode::BinOp {
+    fn total_span(&self) -> Range<usize> {
+        self.lhs.start..self.rhs.end
     }
 }
 
