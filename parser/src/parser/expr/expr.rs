@@ -64,10 +64,13 @@ fn expr_impl<'s, 'origin>(
         let mut frag = core.expr();
         let stack_start = frag.stack().len();
 
+        let mut total_span = 0..0;
+
         let state = Source(s)
             .or(head_expr(frag.new_core()).map_success(CompleteOr::Other))?
             .or(atom(frag.new_core()))?
-            .with_mode(FailureMode::Ambiguous);
+            .with_mode(FailureMode::Ambiguous)
+            .inspect(|output| total_span = output.span());
 
         // At this point there can be variadic number of values on stack.
         // This is OK: it can happen when there are no operators in current expression.
@@ -119,31 +122,47 @@ fn expr_impl<'s, 'origin>(
 
                     let rhs_top = frag.stack().len() + 1;
 
-                    (maybe_opcode, rhs_top, op, span.put_range())
+                    (maybe_opcode, rhs_top, op, span.span(), span)
                 })
-                .then(|(maybe_opcode, rhs_top, op, span)| {
+                .then(|(maybe_opcode, rhs_top, op, op_span, span)| {
                     let frag = &mut frag;
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
                         let state = expr_impl(op.binding_power().1, frag.new_core())
                             .parse_once(s)?
-                            .map_output(|output| (maybe_opcode, rhs_top, discard(span, output)));
+                            .map_output(|output| {
+                                (
+                                    maybe_opcode,
+                                    rhs_top,
+                                    op_span,
+                                    output.span(),
+                                    discard(span, output),
+                                )
+                            });
 
                         Ok(state)
                     }
                 })?
-                .map_output(move |(maybe_opcode, rhs_top, output)| {
-                    let (op_span, span) = output.take();
-
+                .map_output(|(maybe_opcode, rhs_top, op_span, rhs_span, output)| {
                     // Adjust right operand.
                     frag.emit_adjust_to(rhs_top, op_span.clone());
 
                     if let Some(opcode) = maybe_opcode {
-                        frag.emit(opcode, op_span);
+                        frag.emit_with_debug(
+                            opcode,
+                            debug_info::BinOp {
+                                op: op_span,
+                                lhs: total_span.clone(),
+                                rhs: rhs_span,
+                            }
+                            .into(),
+                        );
                     }
 
                     frag.commit();
 
-                    span
+                    total_span = total_span.start..output.span.end;
+
+                    output
                 })
                 .collapse();
 

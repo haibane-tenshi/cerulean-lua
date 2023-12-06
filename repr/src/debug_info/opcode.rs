@@ -121,3 +121,9 @@ impl From<TabSet> for DebugInfo {
         DebugInfo::TabSet(value)
     }
 }
+
+impl From<BinOp> for DebugInfo {
+    fn from(value: BinOp) -> Self {
+        DebugInfo::BinOp(value)
+    }
+}
