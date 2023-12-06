@@ -509,8 +509,8 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     Value::Float(r)
                 }
                 AriBinOp::FloorDiv => {
-                    let r = ((lhs as f64) / (rhs as f64)).floor();
-                    Value::Float(r)
+                    let r = ((lhs as f64) / (rhs as f64)).floor() as i64;
+                    Value::Int(r)
                 }
                 AriBinOp::Exp => {
                     let r = (lhs as f64).powf(rhs as f64);
