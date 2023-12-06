@@ -23,7 +23,7 @@ impl Cause {
         use super::ExtraDiagnostic;
         use codespan_reporting::diagnostic::Label;
         use repr::opcode::{
-            AriBinOp::Add,
+            AriBinOp::{Add, Exp},
             BitBinOp::{And, Or, Xor},
         };
         use Type::*;
@@ -48,6 +48,71 @@ impl Cause {
                     .with_message(format!("this has type `{lhs}`")),
                 Label::secondary(file_id, info.rhs).with_message(format!("this has type `{rhs}`")),
             ]);
+        }
+
+        // Well-formedness of ops when applied between values of the same type
+        //
+        //         | nil   | bool  | int   | float | string | fn    | table
+        // ari     |       |       | +     | +     |        |       | ?
+        // bit     |       |       | +     |       |        |       | ?
+        // rel eq  | +     | +     | +     | +     | +      | +     | +
+        // rel cmp |       |       | +     | +     | +      |       | ?
+        // str     |       |       |       |       | +      |       | ?
+        //
+        match (lhs, op, rhs) {
+            // Tables out first.
+            // It can always provide metamethods to override the op.
+            (Table, _, _) | (_, _, Table) => diag.with_help([
+                format!("by default `{op}` cannot be applied to tables,\nhowever it is possible to define it via <?> metamethod"),
+            ]),
+            // Special help in case someone tries to do logical ops on bools.
+            (Bool, BinOp::Bit(And | Or | Xor) | BinOp::Ari(Exp), Bool) => {
+                diag.with_help([
+                    "it appears you are trying to perform logical op on booleans\nLua does not define bitwise operations for this purpose"
+                ]);
+                match op {
+                    BinOp::Bit(And) => diag.with_help([
+                        "use `and` operator instead"
+                    ]),
+                    BinOp::Bit(Or) => diag.with_help([
+                        "use `or` operator instead"
+                    ]),
+                    BinOp::Bit(Xor) | BinOp::Ari(Exp) => diag.with_help([
+                        "there is no logical XOR, but you can write it as combination of `and`, `or` and `not` operators"
+                    ]),
+                    _ => (),
+                };
+                diag.with_help([
+                    "alternatively, you can convert arguments to integers first\nremember to convert the result back!\nLua treats all integer values (including 0) as `true`",
+                ]);
+                if let BinOp::Ari(Exp) = op{
+                    diag.with_note([
+                        "Lua defines `^` as exponentiation operator and `~` as bitwise XOR\nboth are well defined for integers, mixing the two will lead to silently wrong results",
+                    ]);
+                }
+            },
+            // Nil, bool and functions never have ops.
+            // No extra help required.
+            (Nil | Bool | Function, _, _) | (_, _, Nil | Bool | Function) => (),
+            // From this point only ints, floats and strings are left.
+            (String, BinOp::Ari(Add), String) => {
+                diag.with_help([
+                    "it appears you are trying to concatenate two strings\nLua does not use addition for string concatenation\nuse special concatenation operator `..` instead",
+                ]);
+                diag.with_note([
+                    "currently runtime doesn't perform automatic coercion from strings to numbers",
+                ]);
+            },
+            (String, BinOp::Ari(_), _) | (_, BinOp::Ari(_), String) => diag.with_note([
+                "currently runtime doesn't perform automatic coercion from strings to numbers in arithmetic ops",
+            ]),
+            (Int | Float, BinOp::Ari(_) | BinOp::Bit(_) | BinOp::Rel(_), Int | Float) => diag.with_note([
+                "currently runtime doesn't perform automatic coercion between numeric types",
+            ]),
+            (String, BinOp::Str(_), Int | Float) | (Int | Float, BinOp::Str(_), String) => diag.with_note([
+                "currently runtime doesn't perform automatic coercion from numbers to strings"
+            ]),
+            _ => (),
         }
 
         diag
