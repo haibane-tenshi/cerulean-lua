@@ -272,7 +272,14 @@ fn head_expr<'s, 'origin>(
                             let opcode = OpCode::UnaOp(op.0);
 
                             frag.emit_adjust_to(stack_start + 1, span.span());
-                            frag.emit(opcode, span.span());
+                            frag.emit_with_debug(
+                                opcode,
+                                debug_info::UnaOp {
+                                    op: span.span(),
+                                    arg: output.span(),
+                                }
+                                .into(),
+                            );
 
                             discard(span, output)
                         });
