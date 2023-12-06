@@ -1,3 +1,4 @@
+mod bin_op;
 mod table;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label};
@@ -5,6 +6,7 @@ use repr::debug_info::opcode;
 use repr::opcode::OpCode;
 use std::ops::Range;
 
+pub use bin_op::Cause as BinOpCause;
 pub use table::RuntimeCause as TabCause;
 
 #[derive(Debug)]
@@ -18,6 +20,7 @@ pub struct Error {
 pub enum Cause {
     CatchAll,
     MissingArgs(MissingArgsError),
+    BinOp(BinOpCause),
     TabGet(TabCause),
     TabSet(TabCause),
 }
@@ -41,6 +44,15 @@ impl Error {
                 let debug_info = debug_info.as_ref().map(TotalSpan::total_span);
                 err.into_diagnostic(file_id, opcode, debug_info)
             }
+            BinOp(cause) => {
+                if let OpCode::BinOp(op) = opcode {
+                    let debug_info = debug_info.and_then(Extract::extract);
+
+                    cause.into_diagnostic(file_id, debug_info, op)
+                } else {
+                    Diagnostic::error().with_message("malformed diagnostic")
+                }
+            }
             TabGet(cause) => {
                 let debug_info = debug_info
                     .and_then(Extract::<opcode::TabGet>::extract)
@@ -60,6 +72,12 @@ impl Error {
 impl From<MissingArgsError> for Cause {
     fn from(value: MissingArgsError) -> Self {
         Cause::MissingArgs(value)
+    }
+}
+
+impl From<BinOpCause> for Cause {
+    fn from(value: BinOpCause) -> Self {
+        Cause::BinOp(value)
     }
 }
 
@@ -184,6 +202,15 @@ impl TotalSpan for opcode::TabConstructor {
 
 pub(crate) trait Extract<T> {
     fn extract(self) -> Option<T>;
+}
+
+impl Extract<opcode::BinOp> for opcode::DebugInfo {
+    fn extract(self) -> Option<opcode::BinOp> {
+        match self {
+            opcode::DebugInfo::BinOp(t) => Some(t),
+            _ => None,
+        }
+    }
 }
 
 impl Extract<opcode::TabGet> for opcode::DebugInfo {

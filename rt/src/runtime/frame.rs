@@ -6,7 +6,7 @@ use repr::chunk::{Chunk, ClosureRecipe};
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
-use repr::opcode::OpCode;
+use repr::opcode::{AriBinOp, BinOp, BitBinOp, OpCode, RelBinOp, StrBinOp};
 use repr::tivec::{TiSlice, TiVec};
 
 use super::stack::UpvalueId;
@@ -14,7 +14,7 @@ use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
 use crate::chunk_cache::{ChunkCache, ChunkId};
-use crate::error::opcode;
+use crate::error::opcode as opcode_err;
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::Value;
@@ -223,24 +223,24 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         self.register_callable.take()
     }
 
-    pub fn step(&mut self) -> Result<ControlFlow, opcode::Error> {
+    pub fn step(&mut self) -> Result<ControlFlow, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
         };
 
-        self.exec(opcode).map_err(|cause| opcode::Error {
+        self.exec(opcode).map_err(|cause| opcode_err::Error {
             opcode,
             debug_info: self.opcode_debug_info(self.ip - 1),
             cause,
         })
     }
 
-    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow, opcode::Cause> {
+    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow, opcode_err::Cause> {
         use crate::value::table::TableRef;
-        use opcode::Cause;
+        use opcode_err::Cause;
         use repr::index::InstrOffset;
         use repr::opcode::OpCode::*;
-        use repr::opcode::{AriBinOp, BinOp, BitBinOp, RelBinOp, StrBinOp, UnaOp};
+        use repr::opcode::UnaOp;
 
         let r = match opcode {
             Panic => return Err(Cause::CatchAll),
@@ -339,135 +339,9 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
                 ControlFlow::Continue(())
             }
-            BinOp(BinOp::Ari(op)) => {
-                let [lhs, rhs] = self.stack.take2()?;
-
-                let r = match (lhs, rhs) {
-                    (Value::Int(lhs), Value::Int(rhs)) => match op {
-                        AriBinOp::Add => Value::Int(lhs.wrapping_add(rhs)),
-                        AriBinOp::Sub => Value::Int(lhs.wrapping_sub(rhs)),
-                        AriBinOp::Mul => Value::Int(lhs.wrapping_mul(rhs)),
-                        AriBinOp::Rem => Value::Int(lhs.rem_euclid(rhs)),
-                        AriBinOp::Div => {
-                            let r = (lhs as f64) / (rhs as f64);
-                            Value::Float(r)
-                        }
-                        AriBinOp::FloorDiv => {
-                            let r = ((lhs as f64) / (rhs as f64)).floor();
-                            Value::Float(r)
-                        }
-                        AriBinOp::Exp => {
-                            let r = (lhs as f64).powf(rhs as f64);
-                            Value::Float(r)
-                        }
-                    },
-                    (Value::Float(lhs), Value::Float(rhs)) => match op {
-                        AriBinOp::Add => Value::Float(lhs + rhs),
-                        AriBinOp::Sub => Value::Float(lhs - rhs),
-                        AriBinOp::Mul => Value::Float(lhs * rhs),
-                        AriBinOp::Div => Value::Float(lhs / rhs),
-                        AriBinOp::FloorDiv => Value::Float((lhs / rhs).floor()),
-                        AriBinOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
-                        AriBinOp::Exp => Value::Float(lhs.powf(rhs)),
-                    },
-                    _ => return Err(Cause::CatchAll),
-                };
-
-                self.stack.push(r);
-
-                ControlFlow::Continue(())
-            }
-            BinOp(BinOp::Bit(op)) => {
-                let [lhs, rhs] = self.stack.take2()?;
-
-                let r = match (lhs, rhs) {
-                    (Value::Int(lhs), Value::Int(rhs)) => match op {
-                        BitBinOp::And => Value::Int(lhs & rhs),
-                        BitBinOp::Or => Value::Int(lhs | rhs),
-                        BitBinOp::Xor => Value::Int(lhs ^ rhs),
-                        BitBinOp::ShL => {
-                            let r = if let Ok(rhs) = rhs.try_into() {
-                                lhs.checked_shl(rhs).unwrap_or_default()
-                            } else if let Ok(rhs) = (-rhs).try_into() {
-                                let lhs = lhs as u64;
-                                lhs.checked_shr(rhs).unwrap_or_default() as i64
-                            } else {
-                                0
-                            };
-
-                            Value::Int(r)
-                        }
-                        BitBinOp::ShR => {
-                            let r = if let Ok(rhs) = rhs.try_into() {
-                                let lhs = lhs as u64;
-                                lhs.checked_shr(rhs).unwrap_or_default() as i64
-                            } else if let Ok(rhs) = (-rhs).try_into() {
-                                lhs.checked_shl(rhs).unwrap_or_default()
-                            } else {
-                                0
-                            };
-
-                            Value::Int(r)
-                        }
-                    },
-                    _ => return Err(Cause::CatchAll),
-                };
-
-                self.stack.push(r);
-
-                ControlFlow::Continue(())
-            }
-            BinOp(BinOp::Rel(op)) => {
-                let [lhs, rhs] = self.stack.take2()?;
-
-                let r = match op {
-                    RelBinOp::Eq => lhs == rhs,
-                    RelBinOp::Neq => lhs != rhs,
-                    RelBinOp::Lt => {
-                        if lhs.type_() == rhs.type_() {
-                            lhs < rhs
-                        } else {
-                            return Err(Cause::CatchAll);
-                        }
-                    }
-                    RelBinOp::Le => {
-                        if lhs.type_() == rhs.type_() {
-                            lhs <= rhs
-                        } else {
-                            return Err(Cause::CatchAll);
-                        }
-                    }
-                    RelBinOp::Gt => {
-                        if lhs.type_() == rhs.type_() {
-                            lhs > rhs
-                        } else {
-                            return Err(Cause::CatchAll);
-                        }
-                    }
-                    RelBinOp::Ge => {
-                        if lhs.type_() == rhs.type_() {
-                            lhs >= rhs
-                        } else {
-                            return Err(Cause::CatchAll);
-                        }
-                    }
-                };
-
-                self.stack.push(Value::Bool(r));
-
-                ControlFlow::Continue(())
-            }
-            BinOp(BinOp::Str(op)) => {
-                let [lhs, rhs] = self.stack.take2()?;
-
-                let r = match (lhs, rhs) {
-                    (Value::String(lhs), Value::String(rhs)) => match op {
-                        StrBinOp::Concat => Value::String(lhs + &rhs),
-                    },
-                    _ => return Err(Cause::CatchAll),
-                };
-
-                self.stack.push(r);
+            BinOp(op) => {
+                let args = self.stack.take2()?;
+                self.exec_bin_op(args, op)?;
 
                 ControlFlow::Continue(())
             }
@@ -519,8 +393,154 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(r)
     }
 
-    fn exec_tab_get(&mut self, args: [Value<C>; 2]) -> Result<(), opcode::TabCause> {
-        use opcode::TabCause::*;
+    fn exec_bin_op(
+        &mut self,
+        args: [Value<C>; 2],
+        op: BinOp,
+    ) -> Result<(), opcode_err::BinOpCause> {
+        let err = opcode_err::BinOpCause {
+            lhs: args[0].type_(),
+            rhs: args[1].type_(),
+        };
+
+        let result = match op {
+            BinOp::Ari(op) => self.exec_bin_op_ari(args, op),
+            BinOp::Bit(op) => self.exec_bin_op_bit(args, op),
+            BinOp::Rel(op) => self.exec_bin_op_rel(args, op),
+            BinOp::Str(op) => self.exec_bin_op_str(args, op),
+        };
+
+        if let Some(value) = result {
+            self.stack.push(value);
+
+            Ok(())
+        } else {
+            Err(err)
+        }
+    }
+
+    fn exec_bin_op_str(&mut self, args: [Value<C>; 2], op: StrBinOp) -> Option<Value<C>> {
+        match args {
+            [Value::String(lhs), Value::String(rhs)] => match op {
+                StrBinOp::Concat => Some(Value::String(lhs + &rhs)),
+            },
+            _ => None,
+        }
+    }
+
+    fn exec_bin_op_rel(&mut self, args: [Value<C>; 2], op: RelBinOp) -> Option<Value<C>> {
+        let [lhs, rhs] = args;
+
+        let r = match op {
+            RelBinOp::Eq => lhs == rhs,
+            RelBinOp::Neq => lhs != rhs,
+            RelBinOp::Lt => {
+                if lhs.type_() == rhs.type_() {
+                    lhs < rhs
+                } else {
+                    return None;
+                }
+            }
+            RelBinOp::Le => {
+                if lhs.type_() == rhs.type_() {
+                    lhs <= rhs
+                } else {
+                    return None;
+                }
+            }
+            RelBinOp::Gt => {
+                if lhs.type_() == rhs.type_() {
+                    lhs > rhs
+                } else {
+                    return None;
+                }
+            }
+            RelBinOp::Ge => {
+                if lhs.type_() == rhs.type_() {
+                    lhs >= rhs
+                } else {
+                    return None;
+                }
+            }
+        };
+
+        Some(Value::Bool(r))
+    }
+
+    fn exec_bin_op_bit(&mut self, args: [Value<C>; 2], op: BitBinOp) -> Option<Value<C>> {
+        let r = match args {
+            [Value::Int(lhs), Value::Int(rhs)] => match op {
+                BitBinOp::And => Value::Int(lhs & rhs),
+                BitBinOp::Or => Value::Int(lhs | rhs),
+                BitBinOp::Xor => Value::Int(lhs ^ rhs),
+                BitBinOp::ShL => {
+                    let r = if let Ok(rhs) = rhs.try_into() {
+                        lhs.checked_shl(rhs).unwrap_or_default()
+                    } else if let Ok(rhs) = (-rhs).try_into() {
+                        let lhs = lhs as u64;
+                        lhs.checked_shr(rhs).unwrap_or_default() as i64
+                    } else {
+                        0
+                    };
+
+                    Value::Int(r)
+                }
+                BitBinOp::ShR => {
+                    let r = if let Ok(rhs) = rhs.try_into() {
+                        let lhs = lhs as u64;
+                        lhs.checked_shr(rhs).unwrap_or_default() as i64
+                    } else if let Ok(rhs) = (-rhs).try_into() {
+                        lhs.checked_shl(rhs).unwrap_or_default()
+                    } else {
+                        0
+                    };
+
+                    Value::Int(r)
+                }
+            },
+            _ => return None,
+        };
+
+        Some(r)
+    }
+
+    fn exec_bin_op_ari(&mut self, args: [Value<C>; 2], op: AriBinOp) -> Option<Value<C>> {
+        let r = match args {
+            [Value::Int(lhs), Value::Int(rhs)] => match op {
+                AriBinOp::Add => Value::Int(lhs.wrapping_add(rhs)),
+                AriBinOp::Sub => Value::Int(lhs.wrapping_sub(rhs)),
+                AriBinOp::Mul => Value::Int(lhs.wrapping_mul(rhs)),
+                AriBinOp::Rem => Value::Int(lhs.rem_euclid(rhs)),
+                AriBinOp::Div => {
+                    let r = (lhs as f64) / (rhs as f64);
+                    Value::Float(r)
+                }
+                AriBinOp::FloorDiv => {
+                    let r = ((lhs as f64) / (rhs as f64)).floor();
+                    Value::Float(r)
+                }
+                AriBinOp::Exp => {
+                    let r = (lhs as f64).powf(rhs as f64);
+                    Value::Float(r)
+                }
+            },
+            [Value::Float(lhs), Value::Float(rhs)] => match op {
+                AriBinOp::Add => Value::Float(lhs + rhs),
+                AriBinOp::Sub => Value::Float(lhs - rhs),
+                AriBinOp::Mul => Value::Float(lhs * rhs),
+                AriBinOp::Div => Value::Float(lhs / rhs),
+                AriBinOp::FloorDiv => Value::Float((lhs / rhs).floor()),
+                AriBinOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
+                AriBinOp::Exp => Value::Float(lhs.powf(rhs)),
+            },
+            _ => return None,
+        };
+
+        Some(r)
+    }
+
+    fn exec_tab_get(&mut self, args: [Value<C>; 2]) -> Result<(), opcode_err::TabCause> {
+        use opcode_err::TabCause::*;
 
         let [table, index] = args;
 
@@ -537,8 +557,8 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(())
     }
 
-    fn exec_tab_set(&mut self, args: [Value<C>; 3]) -> Result<(), opcode::TabCause> {
-        use opcode::TabCause::*;
+    fn exec_tab_set(&mut self, args: [Value<C>; 3]) -> Result<(), opcode_err::TabCause> {
+        use opcode_err::TabCause::*;
 
         let [table, index, value] = args;
 

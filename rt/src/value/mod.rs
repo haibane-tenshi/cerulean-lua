@@ -39,6 +39,22 @@ impl Type {
     }
 }
 
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Type::Nil => "nil",
+            Type::Bool => "bool",
+            Type::Int => "int",
+            Type::Float => "float",
+            Type::String => "string",
+            Type::Function => "function",
+            Type::Table => "table",
+        };
+
+        write!(f, "{s}")
+    }
+}
+
 pub enum Value<C> {
     Nil,
     Bool(bool),
