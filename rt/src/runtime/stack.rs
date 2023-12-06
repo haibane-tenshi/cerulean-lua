@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::{Add, Range, RangeBounds};
+use std::ops::{Add, Range, RangeBounds, Sub};
 
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
@@ -37,6 +37,14 @@ impl Add<StackSlot> for RawStackSlot {
 
     fn add(self, rhs: StackSlot) -> Self::Output {
         self.index(rhs)
+    }
+}
+
+impl Sub<usize> for RawStackSlot {
+    type Output = Self;
+
+    fn sub(self, rhs: usize) -> Self::Output {
+        RawStackSlot(self.0 - rhs)
     }
 }
 
@@ -99,6 +107,14 @@ impl<C> Stack<C> {
         }
 
         r
+    }
+
+    fn remove(&mut self, slot: RawStackSlot) -> Option<Value<C>> {
+        if slot.0 < self.temporaries.next_key().0 {
+            Some(self.temporaries.remove(slot))
+        } else {
+            None
+        }
     }
 
     fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<Value<C>> {
@@ -289,6 +305,11 @@ impl<'a, C> StackView<'a, C> {
         }
 
         self.stack.pop().ok_or(RuntimeError::CatchAll)
+    }
+
+    pub fn remove(&mut self, slot: StackSlot) -> Option<Value<C>> {
+        let slot = self.protected_size.index(slot);
+        self.stack.remove(slot)
     }
 
     pub(crate) fn take1(&mut self) -> Result<[Value<C>; 1], MissingArgsError> {

@@ -52,7 +52,6 @@ pub(crate) fn generic_for<'s, 'origin>(
                     let iter_args = loop_body.stack_slot(FragmentStackSlot(0));
 
                     loop_body.emit(OpCode::LoadStack(iter), in_span.clone());
-                    loop_body.emit(OpCode::StoreCallable, in_span.clone());
                     loop_body.emit(OpCode::LoadStack(state), in_span.clone());
                     loop_body.emit(OpCode::LoadStack(control), in_span.clone());
                     loop_body.emit(OpCode::Invoke(iter_args), in_span.clone());

@@ -310,7 +310,6 @@ fn func_invocation<'s, 'origin>(
 > + 'origin {
     move |s: Lexer<'s>| {
         let mut frag = core.expr_at(FragmentStackSlot(0));
-        frag.emit(OpCode::StoreCallable, span.clone());
 
         let state = Source(s).and(func_args(frag.new_core()))?.inspect(|_| {
             let args = frag.stack_slot(FragmentStackSlot(0));
@@ -586,14 +585,14 @@ fn tab_call<'s, 'origin>(
                 frag.emit_with_debug(
                     OpCode::TabGet,
                     debug_info::TabGet::Local {
-                        table: table_span,
+                        table: table_span.clone(),
                         index: ident_span.clone(),
                         indexing: colon_span.start..ident_span.end,
                     }
                     .into(),
                 );
 
-                frag.emit(OpCode::StoreCallable, colon_span.clone());
+                frag.emit_load_stack(FragmentStackSlot(0), table_span.clone());
 
                 func_args(frag.new_core())
                     .map_output(|output| discard(span, output).put(colon_span))
@@ -602,7 +601,7 @@ fn tab_call<'s, 'origin>(
                 let (colon_span, span) = output.take();
 
                 // Pass table itself as the first argument.
-                let args = frag.stack_slot(FragmentStackSlot(0));
+                let args = frag.stack_slot(FragmentStackSlot(1));
                 frag.emit(OpCode::Invoke(args), colon_span);
                 frag.commit();
 

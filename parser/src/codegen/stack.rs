@@ -593,10 +593,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             OpCode::LoadVariadic => {
                 self.make_variadic();
             }
-            OpCode::StoreStack(_)
-            | OpCode::StoreUpvalue(_)
-            | OpCode::StoreCallable
-            | OpCode::JumpIf { .. } => {
+            OpCode::StoreStack(_) | OpCode::StoreUpvalue(_) | OpCode::JumpIf { .. } => {
                 self.pop();
             }
             OpCode::AdjustStack(slot) => {

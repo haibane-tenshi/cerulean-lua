@@ -97,7 +97,6 @@ impl ClosureRef {
             stack_start,
             upvalue_start,
             register_variadic,
-            register_callable: Value::Nil,
         };
 
         Ok(r)
@@ -139,7 +138,6 @@ pub struct Frame<C> {
     stack_start: RawStackSlot,
     upvalue_start: RawUpvalueSlot,
     register_variadic: Vec<Value<C>>,
-    register_callable: Value<C>,
 }
 
 impl<C> Frame<C> {
@@ -163,7 +161,6 @@ impl<C> Frame<C> {
             stack_start,
             upvalue_start,
             register_variadic,
-            register_callable,
         } = self;
 
         let fn_ptr = closure.fn_ptr;
@@ -194,7 +191,6 @@ impl<C> Frame<C> {
             stack,
             upvalue_stack,
             register_variadic,
-            register_callable,
         };
 
         Ok(r)
@@ -211,16 +207,11 @@ pub struct ActiveFrame<'rt, C> {
     stack: StackView<'rt, C>,
     upvalue_stack: UpvalueView<'rt, C>,
     register_variadic: Vec<Value<C>>,
-    register_callable: Value<C>,
 }
 
 impl<'rt, C> ActiveFrame<'rt, C> {
     pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
         self.constants.get(index)
-    }
-
-    pub(crate) fn take_callable(&mut self) -> Value<C> {
-        self.register_callable.take()
     }
 
     pub fn step(&mut self) -> Result<ControlFlow, opcode_err::Error> {
@@ -255,12 +246,6 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             LoadConstant(index) => {
                 let constant = self.get_constant(index).ok_or(Cause::CatchAll)?.clone();
                 self.stack.push(constant.into());
-
-                ControlFlow::Continue(())
-            }
-            StoreCallable => {
-                let [callable] = self.stack.take1()?;
-                self.register_callable = callable;
 
                 ControlFlow::Continue(())
             }
@@ -644,7 +629,6 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             mut stack,
             upvalue_stack,
             register_variadic,
-            register_callable,
             ..
         } = self;
 
@@ -661,7 +645,6 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             stack_start,
             upvalue_start,
             register_variadic,
-            register_callable,
         }
     }
 

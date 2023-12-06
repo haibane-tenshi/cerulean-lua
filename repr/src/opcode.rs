@@ -84,57 +84,6 @@
 //! Which is a problem considering basically everything that happens inside the function
 //! will be placed there.
 //! We solve the issue by providing its own space for extra arguments.
-//!
-//! ## Callable register
-//!
-//! Callable register provides assistance in calling other functions.
-//! In order to invoke a function you need to:
-//!
-//! 1. Execute `StoreCallable` with the value you want to invoke.
-//!    This will move the value into callable register.
-//! 2. Execute `Invoke` pointing at the first argument target is going to receive.
-//!
-//! The register is write-only, while `Invoke` can observe its contents
-//! there is no way to return value back on stack.
-//! Value inside is single use, invoking will move callable out leaving `nil` in its place.
-//!
-//! ### Why it exists
-//!
-//! The reason why callable register exists is more convoluted.
-//! The most obvious way to handle callables is to put them on stack alongside arguments.
-//! The question is, where?
-//! There are two main possibilities: before arguments (`fn, args`) or  after (`args, fn`).
-//!
-//! The first case seems to work best with our single-pass compiler.
-//! But then there is another question: where should callee stack start?
-//! At args or at fn?
-//! Starting it at args seems most intuitive, but it leaves fn on caller stack.
-//! Which is confusing, since didn't we call invoke pointing at fn?
-//! Starting it at fn effectively adds extra unused argument to every single function.
-//! Which you need to remember to leave place for and address real args correctly.
-//! Whichever case you choose, this convention will need to be upholded by not only
-//! by Lua functions but also by Rust functions,
-//! both which are invoked through FFI and which are trying to invoke Lua functions.
-//!
-//! Either way there will be someone out there who is incredibly confused why code is not working
-//! because they forgot to correctly handle this extra stack space.
-//! And I'm definitely not speaking from experience here.
-//! It is also possible to silently handle it on runtime side, but it runs into more issues with Rust FFI.
-//!
-//! The advantage of the second case in that we can just pop callable off the stack.
-//! Value is gone, no headache handling extra space left after it.
-//! The issue, it just doesn't work with current compiler.
-//! Technically, Lua does not define the order of execution within single statement,
-//! so compiler is in its right to reorder how args and callable are emitted,
-//! but that is hard to do for single-pass compiler.
-//! Alternatively, we can keep the order and simply load function on top before invoking.
-//! This however brings us back to square one: we still have extra value left on stack.
-//!
-//! To sum it up, no stack-based solution seems to provide satisfying behaviour,
-//! so I took the next most obvious action:
-//! if it a problem to keep callable on the stack, let's give a dedicated place.
-//! It comes with downside, function calls are now two instructions (`StoreCallable` + `Invoke`)
-//! instead of one, but this a price I'm willing to pay to preserve the leftovers of my sanity.
 
 use std::fmt::Display;
 
@@ -209,7 +158,6 @@ use crate::index::{ConstId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 ///
 /// * [`StoreStack`](OpCode::StoreStack)
 /// * [`StoreUpvalue`](OpCode::StoreUpvalue)
-/// * [`StoreCallable`](OpCode::StoreCallable) - see [callable register](crate::opcode#callable-register).
 ///
 /// ## Binary/unary ops
 ///
@@ -239,7 +187,6 @@ pub enum OpCode {
     MakeClosure(RecipeId),
     StoreStack(StackSlot),
     StoreUpvalue(UpvalueSlot),
-    StoreCallable,
     AdjustStack(StackSlot),
     BinOp(BinOp),
     UnaOp(UnaOp),
@@ -265,7 +212,6 @@ impl OpCode {
             LoadVariadic => "LoadVariadic",
             StoreStack(_) => "StoreStack",
             StoreUpvalue(_) => "StoreUpvalue",
-            StoreCallable => "StoreCallable",
             MakeClosure(_) => "MakeClosure",
             AdjustStack(_) => "AdjustStack",
             BinOp(_) => "BinaryOp",
@@ -326,7 +272,6 @@ impl Display for OpCode {
             Panic => format!("{name:<11}"),
             Invoke(StackSlot(index)) => format!("{name:<11} [{index:>3}]"),
             Return(StackSlot(index)) => format!("{name:<11} [{index:>3}]"),
-            StoreCallable => format!("{name:<11}"),
             LoadVariadic => format!("{name:<11}"),
             LoadConstant(ConstId(index)) => format!("{name:<11} [{index:>3}]"),
             LoadStack(StackSlot(index)) => format!("{name:<11} [{index:>3}]"),

@@ -134,11 +134,18 @@ where
                     active_frame = frame.activate(self)?;
                 }
                 ControlFlow::Break(ChangeFrame::Invoke(start)) => {
-                    let callable = active_frame.take_callable();
                     let frame = active_frame.suspend();
                     self.frames.push(frame);
 
-                    let Value::Function(callable) = callable else {
+                    // It is extremely annoying to keep callable on the stack (either caller or callee),
+                    // however this causes stack adjustments on every single fn call.
+                    // I would like to implement it differently,
+                    // but somewhat frustratingly this seems to be the simplest workable option.
+                    // The only other approach I can think of is constructing dedicated callable *stack*
+                    // (single-value register doesn't work due to nested calls)
+                    // and make fn invocation into two instructions: StoreCallable + Invoke.
+                    // Not sure if it will work better.
+                    let Some(Value::Function(callable)) = self.stack.remove(start) else {
                         return Err(RuntimeError::CatchAll);
                     };
 
