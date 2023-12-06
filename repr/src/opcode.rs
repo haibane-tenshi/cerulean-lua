@@ -405,9 +405,9 @@ impl Display for BitBinOp {
 pub enum RelBinOp {
     Eq,
     Neq,
-    Le,
+    LtEq,
     Lt,
-    Ge,
+    GtEq,
     Gt,
 }
 
@@ -416,10 +416,10 @@ impl Display for RelBinOp {
         let s = match *self {
             RelBinOp::Eq => "==",
             RelBinOp::Neq => "~=",
-            RelBinOp::Le => "<",
-            RelBinOp::Lt => "<=",
-            RelBinOp::Ge => ">",
-            RelBinOp::Gt => ">=",
+            RelBinOp::LtEq => "<=",
+            RelBinOp::Lt => "<",
+            RelBinOp::GtEq => ">=",
+            RelBinOp::Gt => ">",
         };
 
         write!(f, "{s}")

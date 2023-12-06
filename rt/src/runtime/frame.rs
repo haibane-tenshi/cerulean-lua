@@ -441,7 +441,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     return None;
                 }
             }
-            RelBinOp::Le => {
+            RelBinOp::LtEq => {
                 if lhs.type_() == rhs.type_() {
                     lhs <= rhs
                 } else {
@@ -455,7 +455,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     return None;
                 }
             }
-            RelBinOp::Ge => {
+            RelBinOp::GtEq => {
                 if lhs.type_() == rhs.type_() {
                     lhs >= rhs
                 } else {

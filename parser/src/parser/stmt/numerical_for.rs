@@ -124,7 +124,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         // Path: positive step.
                         positive_step.emit(OpCode::LoadStack(loop_var), loop_var_span.clone());
                         positive_step.emit(OpCode::LoadStack(limit), limit_span.clone());
-                        positive_step.emit(RelBinOp::Le.into(), for_span.clone());
+                        positive_step.emit(RelBinOp::LtEq.into(), for_span.clone());
                         positive_step.emit_jump_to(envelope_id, Some(false), for_span.clone());
                         positive_step.emit_jump_to(controls_id, None, for_span.clone());
 
@@ -134,7 +134,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         // We assume total ordering for the variable.
                         controls.emit(OpCode::LoadStack(loop_var), loop_var_span.clone());
                         controls.emit(OpCode::LoadStack(limit), limit_span.clone());
-                        controls.emit(RelBinOp::Ge.into(), for_span.clone());
+                        controls.emit(RelBinOp::GtEq.into(), for_span.clone());
                         controls.emit_jump_to(envelope_id, Some(false), for_span.clone());
 
                         controls.commit();
@@ -147,7 +147,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         loop_body.emit(OpCode::LoadStack(loop_var), loop_var_span.clone());
                         loop_body.emit(OpCode::LoadStack(limit), limit_span.clone());
-                        loop_body.emit(RelBinOp::Le.into(), for_span.clone());
+                        loop_body.emit(RelBinOp::LtEq.into(), for_span.clone());
                         loop_body.emit_jump_to(envelope_id, Some(false), for_span.clone());
 
                         loop_body
