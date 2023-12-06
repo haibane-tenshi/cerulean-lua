@@ -429,39 +429,32 @@ impl<'rt, C> ActiveFrame<'rt, C> {
     }
 
     fn exec_bin_op_rel(&mut self, args: [Value<C>; 2], op: RelBinOp) -> Option<Value<C>> {
+        use RelBinOp::*;
+        use Value::*;
+
         let [lhs, rhs] = args;
 
-        let r = match op {
-            RelBinOp::Eq => lhs == rhs,
-            RelBinOp::Neq => lhs != rhs,
-            RelBinOp::Lt => {
-                if lhs.type_() == rhs.type_() {
-                    lhs < rhs
-                } else {
-                    return None;
-                }
-            }
-            RelBinOp::LtEq => {
-                if lhs.type_() == rhs.type_() {
-                    lhs <= rhs
-                } else {
-                    return None;
-                }
-            }
-            RelBinOp::Gt => {
-                if lhs.type_() == rhs.type_() {
-                    lhs > rhs
-                } else {
-                    return None;
-                }
-            }
-            RelBinOp::GtEq => {
-                if lhs.type_() == rhs.type_() {
-                    lhs >= rhs
-                } else {
-                    return None;
-                }
-            }
+        let r = match (op, lhs, rhs) {
+            (Eq, lhs, rhs) => lhs == rhs,
+            (Neq, lhs, rhs) => lhs != rhs,
+
+            (Lt, Int(lhs), Int(rhs)) => lhs < rhs,
+            (Lt, Float(lhs), Float(rhs)) => lhs < rhs,
+            (Lt, String(lhs), String(rhs)) => lhs < rhs,
+
+            (LtEq, Int(lhs), Int(rhs)) => lhs <= rhs,
+            (LtEq, Float(lhs), Float(rhs)) => lhs <= rhs,
+            (LtEq, String(lhs), String(rhs)) => lhs <= rhs,
+
+            (Gt, Int(lhs), Int(rhs)) => lhs > rhs,
+            (Gt, Float(lhs), Float(rhs)) => lhs > rhs,
+            (Gt, String(lhs), String(rhs)) => lhs > rhs,
+
+            (GtEq, Int(lhs), Int(rhs)) => lhs >= rhs,
+            (GtEq, Float(lhs), Float(rhs)) => lhs >= rhs,
+            (GtEq, String(lhs), String(rhs)) => lhs >= rhs,
+
+            _ => return None,
         };
 
         Some(Value::Bool(r))

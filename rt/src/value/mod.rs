@@ -1,7 +1,6 @@
 pub mod callable;
 pub mod table;
 
-use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 
 use repr::literal::Literal;
@@ -127,23 +126,6 @@ impl<C> PartialEq for Value<C> {
             (Self::Function(l0), Self::Function(r0)) => l0 == r0,
             (Self::Table(l0), Self::Table(r0)) => l0 == r0,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-        }
-    }
-}
-
-impl<C> PartialOrd for Value<C> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        use Value::*;
-
-        match (self, other) {
-            (Nil, Nil) => Some(Ordering::Equal),
-            (Bool(lhs), Bool(rhs)) => Some(lhs.cmp(rhs)),
-            (Int(lhs), Int(rhs)) => Some(lhs.cmp(rhs)),
-            (Float(lhs), Float(rhs)) => lhs.partial_cmp(rhs),
-            (String(lhs), String(rhs)) => Some(lhs.cmp(rhs)),
-            (Function(_), Function(_)) => None,
-            (Table(_), Table(_)) => None,
-            _ => None,
         }
     }
 }
