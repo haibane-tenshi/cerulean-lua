@@ -3,9 +3,17 @@ use std::ops::Range;
 #[derive(Debug, Clone)]
 pub enum DebugInfo {
     Generic(Range<usize>),
+    UnaOp(UnaOp),
     BinOp(BinOp),
     TabGet(TabGet),
     TabSet(TabSet),
+}
+
+/// Debug info for [`OpCode::UnaOp`](crate::opcode::OpCode::UnaOp).
+#[derive(Debug, Clone)]
+pub struct UnaOp {
+    pub op: Range<usize>,
+    pub arg: Range<usize>,
 }
 
 /// Debug info for [`OpCode::BinOp`](crate::opcode::OpCode::BinOp).
@@ -119,6 +127,12 @@ impl From<TabGet> for DebugInfo {
 impl From<TabSet> for DebugInfo {
     fn from(value: TabSet) -> Self {
         DebugInfo::TabSet(value)
+    }
+}
+
+impl From<UnaOp> for DebugInfo {
+    fn from(value: UnaOp) -> Self {
+        DebugInfo::UnaOp(value)
     }
 }
 
