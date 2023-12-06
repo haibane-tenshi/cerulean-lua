@@ -6,7 +6,7 @@ use repr::chunk::{Chunk, ClosureRecipe};
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
-use repr::opcode::{AriBinOp, BinOp, BitBinOp, OpCode, RelBinOp, StrBinOp};
+use repr::opcode::{AriBinOp, BinOp, BitBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
 use repr::tivec::{TiSlice, TiVec};
 
 use super::stack::UpvalueId;
@@ -240,7 +240,6 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         use opcode_err::Cause;
         use repr::index::InstrOffset;
         use repr::opcode::OpCode::*;
-        use repr::opcode::UnaOp;
 
         let r = match opcode {
             Panic => return Err(Cause::CatchAll),
@@ -311,31 +310,8 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             UnaOp(op) => {
-                let [val] = self.stack.take1()?;
-
-                let r = match op {
-                    UnaOp::AriNeg => match val {
-                        Value::Int(val) => Value::Int(-val),
-                        Value::Float(val) => Value::Float(-val),
-                        _ => return Err(Cause::CatchAll),
-                    },
-                    UnaOp::BitNot => match val {
-                        Value::Int(val) => Value::Int(!val),
-                        _ => return Err(Cause::CatchAll),
-                    },
-                    UnaOp::StrLen => match val {
-                        Value::String(val) => Value::Int(val.len().try_into().unwrap()),
-                        Value::Table(val) => {
-                            let border = val.borrow().map_err(|_| Cause::CatchAll)?.border();
-
-                            Value::Int(border)
-                        }
-                        _ => return Err(Cause::CatchAll),
-                    },
-                    UnaOp::LogNot => Value::Bool(!val.to_bool()),
-                };
-
-                self.stack.push(r);
+                let args = self.stack.take1()?;
+                self.exec_una_op(args, op)?;
 
                 ControlFlow::Continue(())
             }
@@ -391,6 +367,42 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         tracing::trace!(stack = ?self.stack, "executed opcode");
 
         Ok(r)
+    }
+
+    fn exec_una_op(
+        &mut self,
+        args: [Value<C>; 1],
+        op: UnaOp,
+    ) -> Result<(), opcode_err::UnaOpCause> {
+        let [val] = args;
+
+        let err = opcode_err::UnaOpCause { arg: val.type_() };
+
+        let r = match op {
+            UnaOp::AriNeg => match val {
+                Value::Int(val) => Value::Int(-val),
+                Value::Float(val) => Value::Float(-val),
+                _ => return Err(err),
+            },
+            UnaOp::BitNot => match val {
+                Value::Int(val) => Value::Int(!val),
+                _ => return Err(err),
+            },
+            UnaOp::StrLen => match val {
+                Value::String(val) => Value::Int(val.len().try_into().unwrap()),
+                Value::Table(val) => {
+                    let border = val.borrow().unwrap().border();
+
+                    Value::Int(border)
+                }
+                _ => return Err(err),
+            },
+            UnaOp::LogNot => Value::Bool(!val.to_bool()),
+        };
+
+        self.stack.push(r);
+
+        Ok(())
     }
 
     fn exec_bin_op(

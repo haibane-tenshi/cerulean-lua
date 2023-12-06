@@ -1,5 +1,6 @@
 mod bin_op;
 mod table;
+mod una_op;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use repr::debug_info::opcode;
@@ -8,6 +9,7 @@ use std::ops::Range;
 
 pub use bin_op::Cause as BinOpCause;
 pub use table::RuntimeCause as TabCause;
+pub use una_op::Cause as UnaOpCause;
 
 #[derive(Debug)]
 pub struct Error {
@@ -20,6 +22,7 @@ pub struct Error {
 pub enum Cause {
     CatchAll,
     MissingArgs(MissingArgsError),
+    UnaOp(UnaOpCause),
     BinOp(BinOpCause),
     TabGet(TabCause),
     TabSet(TabCause),
@@ -38,11 +41,21 @@ impl Error {
             cause,
         } = self;
 
+        let malformed_diagnostic = || Diagnostic::error().with_message("malformed diagnostic");
+
         match cause {
             CatchAll => Diagnostic::error().with_message("diagnostic not implemented yet"),
             MissingArgs(err) => {
                 let debug_info = debug_info.as_ref().map(TotalSpan::total_span);
                 err.into_diagnostic(file_id, opcode, debug_info)
+            }
+            UnaOp(cause) => {
+                if let OpCode::UnaOp(op) = opcode {
+                    let debug_info = debug_info.and_then(Extract::extract);
+                    cause.into_diagnostic(file_id, debug_info, op)
+                } else {
+                    malformed_diagnostic()
+                }
             }
             BinOp(cause) => {
                 if let OpCode::BinOp(op) = opcode {
@@ -50,7 +63,7 @@ impl Error {
 
                     cause.into_diagnostic(file_id, debug_info, op)
                 } else {
-                    Diagnostic::error().with_message("malformed diagnostic")
+                    malformed_diagnostic()
                 }
             }
             TabGet(cause) => {
@@ -78,6 +91,12 @@ impl From<MissingArgsError> for Cause {
 impl From<BinOpCause> for Cause {
     fn from(value: BinOpCause) -> Self {
         Cause::BinOp(value)
+    }
+}
+
+impl From<UnaOpCause> for Cause {
+    fn from(value: UnaOpCause) -> Self {
+        Cause::UnaOp(value)
     }
 }
 
@@ -209,6 +228,15 @@ impl TotalSpan for opcode::TabConstructor {
 
 pub(crate) trait Extract<T> {
     fn extract(self) -> Option<T>;
+}
+
+impl Extract<opcode::UnaOp> for opcode::DebugInfo {
+    fn extract(self) -> Option<opcode::UnaOp> {
+        match self {
+            opcode::DebugInfo::UnaOp(t) => Some(t),
+            _ => None,
+        }
+    }
 }
 
 impl Extract<opcode::BinOp> for opcode::DebugInfo {
