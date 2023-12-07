@@ -1,5 +1,6 @@
 mod bin_op;
 mod missing_args;
+mod missing_const_id;
 mod table;
 mod una_op;
 
@@ -10,6 +11,7 @@ use std::ops::Range;
 
 pub use bin_op::Cause as BinOpCause;
 pub use missing_args::MissingArgsError;
+pub use missing_const_id::MissingConstId;
 pub use table::RuntimeCause as TabCause;
 pub use una_op::Cause as UnaOpCause;
 
@@ -24,6 +26,7 @@ pub struct Error {
 pub enum Cause {
     CatchAll,
     MissingArgs(MissingArgsError),
+    MissingConstId(MissingConstId),
     UnaOp(UnaOpCause),
     BinOp(BinOpCause),
     TabGet(TabCause),
@@ -51,6 +54,7 @@ impl Error {
                 let debug_info = debug_info.as_ref().map(TotalSpan::total_span);
                 err.into_diagnostic(file_id, opcode, debug_info)
             }
+            MissingConstId(err) => err.into_diagnostic(file_id, opcode, debug_info),
             UnaOp(cause) => {
                 if let OpCode::UnaOp(op) = opcode {
                     let debug_info = debug_info.and_then(Extract::extract);
@@ -80,6 +84,12 @@ impl Error {
                 cause.into_diagnostic(file_id, debug_info)
             }
         }
+    }
+}
+
+impl From<MissingConstId> for Cause {
+    fn from(value: MissingConstId) -> Self {
+        Cause::MissingConstId(value)
     }
 }
 
@@ -234,6 +244,9 @@ trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);
     fn with_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
     fn with_help(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
+    fn with_compiler_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
+    fn with_runtime_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
+    fn no_debug_info(&mut self);
 }
 
 impl<FileId> ExtraDiagnostic<FileId> for Diagnostic<FileId> {
@@ -250,12 +263,25 @@ impl<FileId> ExtraDiagnostic<FileId> for Diagnostic<FileId> {
         self.notes
             .extend(iter.into_iter().map(|s| format!("help: {}", s.as_ref())));
     }
-}
 
-fn compiler_bug<'a>(iter: impl IntoIterator<Item = &'a str>) -> impl Iterator<Item = &'a str> {
-    std::iter::once("this is not bug in your Lua code, error is caused by malformed bytecode")
-        .chain(iter.into_iter().map(AsRef::as_ref))
-        .chain(std::iter::once(
-            "this most likely resulted from bug in compiler and should be reported",
-        ))
+    fn with_compiler_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>) {
+        self.with_note(["this is not bug in your Lua code, error is caused by malformed bytecode"]);
+        self.with_note(iter);
+        self.with_note(["this most likely resulted from bug in compiler and should be reported"]);
+    }
+
+    fn with_runtime_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>) {
+        self.with_note([
+            "this is not bug in your Lua code, error is caused by imporperly executed bytecode",
+        ]);
+        self.with_note(iter);
+        self.with_note(["this most likely resulted from bug in runtime and should be reported"]);
+    }
+
+    fn no_debug_info(&mut self) {
+        self.with_note([
+                "no debug info is available, it is possible debug info was stripped",
+                "it is also possible that erroneous bytecode was handcrafted\nplease check with where you got it",
+            ]);
+    }
 }

@@ -2,7 +2,7 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use repr::debug_info::opcode::{TabConstructor, TabGet, TabSet};
 use std::ops::Range;
 
-use super::{compiler_bug, ExtraDiagnostic, TotalSpan};
+use super::{ExtraDiagnostic, TotalSpan};
 use crate::value::table::InvalidTableKeyError;
 use crate::value::Type;
 
@@ -169,20 +169,20 @@ impl RuntimeCause {
                 ]);
             }
             (TableTypeMismatch(_), Some(Constructor{..})) => {
-                diag.with_note(compiler_bug([
+                diag.with_compiler_bug_note([
                     "table constructors first make an empty table then fill it with key-value pairs as reqested",
                     "the error indicates that the table under construction was not provided here for some reason",
-                ]));
+                ]);
             }
             (InvalidKey(_), Some(Constructor { flavor: Field{..}, .. } | GlobalEnv {..})) => {
-                diag.with_note(compiler_bug([
+                diag.with_compiler_bug_note([
                     "table should be indexed using this identifier as string but that didn't happen for some reason"
-                ]))
+                ])
             }
             (InvalidKey(_), Some(Constructor{flavor: Value{..}, ..})) => {
-                diag.with_note(compiler_bug([
+                diag.with_compiler_bug_note([
                     "keyless value should be provided with integer index but that didn't happen for some reason"
-                ]))
+                ])
             }
             (_, None) => {
                 diag.with_note(["no debug info is available"]);

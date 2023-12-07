@@ -15,7 +15,7 @@ impl MissingArgsError {
         opcode: OpCode,
         debug_info: Option<Range<usize>>,
     ) -> Diagnostic<FileId> {
-        use super::{compiler_bug, ExtraDiagnostic};
+        use super::ExtraDiagnostic;
         use codespan_reporting::diagnostic::Label;
 
         let MissingArgsError {
@@ -33,16 +33,13 @@ impl MissingArgsError {
                 .with_message("error occurred here, but its cause in different place")]);
         }
 
-        diag.with_note(compiler_bug([
+        diag.with_compiler_bug_note([
             "the opcode gets its arguments from stack but it seems there is not enough values to take",
             "the error implies that too few values were put on stack however it could have happenned long before this point",
-        ]));
+        ]);
 
         if !have_debug_info {
-            diag.with_note([
-                "no debug info is available",
-                "it is possible debug info was stripped\nit is also possible that erroneous bytecode was handcrafted\nplease check with where you got it",
-            ]);
+            diag.no_debug_info()
         }
 
         diag

@@ -14,7 +14,7 @@ use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
 use crate::chunk_cache::{ChunkCache, ChunkId};
-use crate::error::opcode as opcode_err;
+use crate::error::opcode::{self as opcode_err, MissingConstId};
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::Value;
@@ -210,8 +210,8 @@ pub struct ActiveFrame<'rt, C> {
 }
 
 impl<'rt, C> ActiveFrame<'rt, C> {
-    pub fn get_constant(&self, index: ConstId) -> Option<&Literal> {
-        self.constants.get(index)
+    pub fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
+        self.constants.get(index).ok_or(MissingConstId(index))
     }
 
     pub fn step(&mut self) -> Result<ControlFlow, opcode_err::Error> {
@@ -244,7 +244,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             LoadConstant(index) => {
-                let constant = self.get_constant(index).ok_or(Cause::CatchAll)?.clone();
+                let constant = self.get_constant(index)?.clone();
                 self.stack.push(constant.into());
 
                 ControlFlow::Continue(())
