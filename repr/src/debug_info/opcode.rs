@@ -2,11 +2,26 @@ use std::ops::Range;
 
 #[derive(Debug, Clone)]
 pub enum DebugInfo {
+    /// Opcode doesn't have direct syntax associated with it
+    /// but is required for correct operation of a language construct.
+    ///
+    /// The primary use here is to link back to the related position in code
+    /// without implying any specific use for the spanned fragment.
+    ///
+    /// More specific information should be conveyed through other variants.
     Generic(Range<usize>),
+    LoadConst(LoadConst),
     UnaOp(UnaOp),
     BinOp(BinOp),
     TabGet(TabGet),
     TabSet(TabSet),
+}
+
+/// Debug info for [`OpCode::LoadConstant`](crate::opcode::OpCode::LoadConstant).
+#[derive(Debug, Clone)]
+pub struct LoadConst {
+    /// Constant was created out of a literal value.
+    pub literal: Range<usize>,
 }
 
 /// Debug info for [`OpCode::UnaOp`](crate::opcode::OpCode::UnaOp).
@@ -116,6 +131,12 @@ pub enum TabConstructor {
     /// }
     /// ```
     Value { value: Range<usize> },
+}
+
+impl From<LoadConst> for DebugInfo {
+    fn from(value: LoadConst) -> Self {
+        DebugInfo::LoadConst(value)
+    }
 }
 
 impl From<TabGet> for DebugInfo {

@@ -123,7 +123,10 @@ pub(crate) fn fn_name<'s, 'origin>(
                                 }
                                 .into(),
                             );
-                            frag.emit_load_literal(Literal::String(ident.to_string()), ident_span);
+                            frag.emit_load_literal(
+                                Literal::String(ident.to_string()),
+                                ident_span.clone(),
+                            );
                             frag.commit();
 
                             total_span = total_span.start..span.span.end;

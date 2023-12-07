@@ -324,14 +324,16 @@ fn index<'s, 'origin>(
         let r = expr_adjusted_to_1(frag.new_core())
             .parse_once(s)?
             .inspect(move |output| {
+                use debug_info::{TabConstructor, TabSet};
+
                 frag.emit_load_stack(FragmentStackSlot(0), output.span());
-                frag.emit_load_literal(Literal::Int(index), output.span());
+                frag.emit_load_constant(Literal::Int(index), output.span());
                 frag.emit_load_stack(value_slot, output.span());
                 frag.emit_with_debug(
                     OpCode::TabSet,
-                    debug_info::TabSet::Constructor {
+                    TabSet::Constructor {
                         table: table_span,
-                        flavor: debug_info::TabConstructor::Value {
+                        flavor: TabConstructor::Value {
                             value: output.span(),
                         },
                     }

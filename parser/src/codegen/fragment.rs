@@ -2,6 +2,7 @@ use std::ops::{Add, Deref, DerefMut, Range};
 use thiserror::Error;
 use tracing::trace;
 
+use repr::debug_info::opcode as debug_info;
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{InstrId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
@@ -422,9 +423,18 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.emit(OpCode::LoadStack(slot), span)
     }
 
-    pub fn emit_load_literal(&mut self, literal: Literal, span: Range<usize>) -> InstrId {
+    pub fn emit_load_literal(&mut self, literal: Literal, literal_span: Range<usize>) -> InstrId {
         let const_id = self.const_table.insert(literal);
-        self.emit(OpCode::LoadConstant(const_id), span)
+        let debug_info = debug_info::LoadConst {
+            literal: literal_span,
+        };
+        self.emit_with_debug(OpCode::LoadConstant(const_id), debug_info.into())
+    }
+
+    pub fn emit_load_constant(&mut self, literal: Literal, related: Range<usize>) -> InstrId {
+        let const_id = self.const_table.insert(literal);
+        let debug_info = OpCodeDebugInfo::Generic(related);
+        self.emit_with_debug(OpCode::LoadConstant(const_id), debug_info)
     }
 
     pub fn try_emit_label(

@@ -86,6 +86,8 @@ pub(crate) fn numerical_for<'s, 'origin>(
                     }
                 };
 
+                let di_const = debug_info::DebugInfo::Generic(for_span.clone());
+
                 // Emit loop controls.
                 let mut loop_body = match step {
                     StackSlotOrConstId::StackSlot(step, ref step_span) => {
@@ -99,11 +101,12 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         let mut zero_check = envelope.new_expr();
 
                         zero_check.emit(OpCode::LoadStack(step), step_span.clone());
-                        zero_check.emit(OpCode::LoadConstant(zero), step_span.clone());
+                        zero_check.emit_with_debug(OpCode::LoadConstant(zero), di_const.clone());
                         zero_check.emit(RelBinOp::Eq.into(), step_span.clone());
                         zero_check.emit_jump_to_end(Some(false), step_span.clone());
 
-                        zero_check.emit(OpCode::LoadConstant(error_msg), step_span.clone());
+                        zero_check
+                            .emit_with_debug(OpCode::LoadConstant(error_msg), di_const.clone());
                         zero_check.emit(OpCode::Panic, step_span.clone());
 
                         zero_check.commit();
@@ -117,7 +120,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         let mut positive_step = controls.new_expr();
 
                         positive_step.emit(OpCode::LoadStack(step), step_span.clone());
-                        positive_step.emit(OpCode::LoadConstant(zero), for_span.clone());
+                        positive_step.emit_with_debug(OpCode::LoadConstant(zero), di_const.clone());
                         positive_step.emit(RelBinOp::Gt.into(), for_span.clone());
                         positive_step.emit_jump_to_end(Some(false), for_span.clone());
 
@@ -168,9 +171,8 @@ pub(crate) fn numerical_for<'s, 'origin>(
                                 StackSlotOrConstId::StackSlot(slot, step_span) => {
                                     loop_body.emit(OpCode::LoadStack(slot), step_span)
                                 }
-                                StackSlotOrConstId::ConstId(const_id) => {
-                                    loop_body.emit(OpCode::LoadConstant(const_id), for_span)
-                                }
+                                StackSlotOrConstId::ConstId(const_id) => loop_body
+                                    .emit_with_debug(OpCode::LoadConstant(const_id), di_const),
                             };
                             loop_body.emit(AriBinOp::Add.into(), eq_sign_span.clone());
                             loop_body.emit(OpCode::StoreStack(loop_var), eq_sign_span);
