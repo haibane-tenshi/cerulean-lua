@@ -102,7 +102,7 @@ pub(crate) fn fn_name<'s, 'origin>(
                 let (opcode, info) = match envelope.capture_global_env()? {
                     UpvalueSource::Temporary(slot) => (
                         OpCode::LoadStack(slot),
-                        debug_info::DebugInfo::Generic(span.span()),
+                        debug_info::LoadStack::Global(span.span()).into(),
                     ),
                     UpvalueSource::Upvalue(slot) => (
                         OpCode::LoadUpvalue(slot),

@@ -100,7 +100,7 @@ impl Place {
         match self {
             Place::Temporary(slot, span) => (
                 OpCode::LoadStack(slot),
-                debug_info::DebugInfo::Generic(span),
+                debug_info::LoadStack::Local(span).into(),
             ),
             Place::Upvalue(slot, span) => (
                 OpCode::LoadUpvalue(slot),
@@ -434,7 +434,7 @@ fn variable<'s, 'origin>(
                         let (opcode, info) = match frag.capture_global_env()? {
                             UpvalueSource::Temporary(slot) => (
                                 OpCode::LoadStack(slot),
-                                debug_info::DebugInfo::Generic(span.span()),
+                                debug_info::LoadStack::Global(span.span()).into(),
                             ),
                             UpvalueSource::Upvalue(slot) => (
                                 OpCode::LoadUpvalue(slot),

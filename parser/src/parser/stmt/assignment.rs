@@ -39,14 +39,14 @@ pub(crate) fn assignment<'s, 'origin>(
                     let expr_start = frag.stack().len();
                     let status = expr_list_adjusted_to(count, frag.new_core())
                         .parse_once(s)?
-                        .inspect(|_| {
+                        .inspect(|output| {
                             let expr_slots = (expr_start.0..).map(StackSlot);
                             for (expr_slot, place) in expr_slots.zip(places) {
                                 match place {
                                     Place::Temporary(slot, ident) => {
-                                        frag.emit(
+                                        frag.emit_with_debug(
                                             OpCode::LoadStack(expr_slot),
-                                            eq_sign_span.clone(),
+                                            debug_info::LoadStack::Expr(output.span()).into(),
                                         );
                                         frag.emit_with_debug(
                                             OpCode::StoreStack(slot),
@@ -58,9 +58,9 @@ pub(crate) fn assignment<'s, 'origin>(
                                         );
                                     }
                                     Place::Upvalue(slot, ident) => {
-                                        frag.emit(
+                                        frag.emit_with_debug(
                                             OpCode::LoadStack(expr_slot),
-                                            eq_sign_span.clone(),
+                                            debug_info::LoadStack::Expr(output.span()).into(),
                                         );
                                         frag.emit_with_debug(
                                             OpCode::StoreUpvalue(slot),
@@ -78,11 +78,17 @@ pub(crate) fn assignment<'s, 'origin>(
                                         let field = table + 1;
                                         places_start += 2;
 
-                                        frag.emit(OpCode::LoadStack(table), eq_sign_span.clone());
-                                        frag.emit(OpCode::LoadStack(field), eq_sign_span.clone());
-                                        frag.emit(
+                                        frag.emit_with_debug(
+                                            OpCode::LoadStack(table),
+                                            debug_info::DebugInfo::Generic(eq_sign_span.clone()),
+                                        );
+                                        frag.emit_with_debug(
+                                            OpCode::LoadStack(field),
+                                            debug_info::DebugInfo::Generic(eq_sign_span.clone()),
+                                        );
+                                        frag.emit_with_debug(
                                             OpCode::LoadStack(expr_slot),
-                                            eq_sign_span.clone(),
+                                            debug_info::LoadStack::Expr(output.span()).into(),
                                         );
                                         let debug_info = match debug_info {
                                             TabGet::GlobalEnv { ident } => TabSet::GlobalEnv {

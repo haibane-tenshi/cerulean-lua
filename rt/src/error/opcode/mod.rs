@@ -143,6 +143,7 @@ impl TotalSpan for opcode::DebugInfo {
             Generic(span) => span.clone(),
             Invoke(t) => t.total_span(),
             Return(t) => t.total_span(),
+            LoadStack(t) => t.total_span(),
             LoadUpvalue(t) => t.total_span(),
             LoadConst(t) => t.total_span(),
             MakeClosure(t) => t.total_span(),
@@ -172,6 +173,18 @@ impl TotalSpan for opcode::Return {
         let opcode::Return { return_token } = self;
 
         return_token.clone()
+    }
+}
+
+impl TotalSpan for opcode::LoadStack {
+    fn total_span(&self) -> Range<usize> {
+        use opcode::LoadStack::*;
+
+        match self {
+            Local(span) => span.clone(),
+            Global(span) => span.clone(),
+            Expr(span) => span.clone(),
+        }
     }
 }
 

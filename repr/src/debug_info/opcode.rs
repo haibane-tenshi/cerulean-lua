@@ -12,6 +12,7 @@ pub enum DebugInfo {
     Generic(Range<usize>),
     Invoke(Invoke),
     Return(Return),
+    LoadStack(LoadStack),
     LoadUpvalue(LoadUpvalue),
     LoadConst(LoadConst),
     MakeClosure(MakeClosure),
@@ -44,6 +45,25 @@ pub enum Invoke {
 #[derive(Debug, Clone)]
 pub struct Return {
     pub return_token: Range<usize>,
+}
+
+/// Debug info for [`OpCode::LoadStack`](crate::opcode::OpCode::LoadStack).
+#[derive(Debug, Clone)]
+pub enum LoadStack {
+    /// Span pointing to identifier resolved to be a local variable.
+    Local(Range<usize>),
+
+    /// Instruction attempts to load `_ENV` variable from stack.
+    ///
+    /// Span should point to identifier resolved to be global variable
+    /// which triggered lookup of `_ENV` variable.
+    Global(Range<usize>),
+
+    /// Span pointing to expression that generated value in target stack slot.
+    ///
+    /// This can happen when e.g. function returns multiple values
+    /// which need to be moved to already existing places.
+    Expr(Range<usize>),
 }
 
 /// Debug info for [`OpCode::StoreUpvalue`](crate::opcode::OpCode::StoreUpvalue).
@@ -207,6 +227,12 @@ impl From<Invoke> for DebugInfo {
 impl From<Return> for DebugInfo {
     fn from(value: Return) -> Self {
         DebugInfo::Return(value)
+    }
+}
+
+impl From<LoadStack> for DebugInfo {
+    fn from(value: LoadStack) -> Self {
+        DebugInfo::LoadStack(value)
     }
 }
 
