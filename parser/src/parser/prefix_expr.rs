@@ -234,7 +234,10 @@ fn prefix_expr_impl<'s, 'origin>(
                     // Prefix expressions (except the very last one) always evaluate to 1 value.
                     // We are reusing the same stack slot to store it.
                     // Required since previous part could have been a function invocation.
-                    frag.emit_adjust_to(FragmentStackSlot(1), total_span.clone());
+                    frag.emit_adjust_to(
+                        FragmentStackSlot(1),
+                        DebugInfo::Generic(total_span.clone()),
+                    );
 
                     let state = Source(s)
                         .and(

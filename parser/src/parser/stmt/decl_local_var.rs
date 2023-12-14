@@ -53,7 +53,7 @@ pub(crate) fn decl_local_var<'s, 'origin>(
 
                 let count = idents.len();
 
-                frag.emit_adjust_to(stack_start + count, local_span);
+                frag.emit_adjust_to(stack_start + count, DebugInfo::Generic(local_span));
 
                 // Apply names.
                 frag.adjust_stack_to(stack_start);

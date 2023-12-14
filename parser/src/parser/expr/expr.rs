@@ -107,7 +107,9 @@ fn expr_impl<'s, 'origin>(
                     let (op, span) = op.take();
 
                     // Adjust left operand.
-                    frag.emit_adjust_to(FragmentStackSlot(1), span.span());
+                    // Debug info backpatched later.
+                    let lhs_adjust =
+                        frag.emit_adjust_to(FragmentStackSlot(1), DebugInfo::Generic(span.span()));
 
                     let maybe_opcode = match op {
                         Infix::BinOp(op) => MaybeOpcode::OpCode(op),
@@ -123,10 +125,10 @@ fn expr_impl<'s, 'origin>(
 
                             let instr_id =
                                 frag.emit_load_stack(FragmentStackSlot(0), debug_info.clone());
-                            frag.emit_jump_to_end(Some(cond), debug_info);
+                            frag.emit_jump_to_end(Some(cond), debug_info.clone());
 
                             // Discard left operand when entering the other branch.
-                            frag.emit_adjust_to(FragmentStackSlot(0), span.span());
+                            frag.emit_adjust_to(FragmentStackSlot(0), debug_info);
 
                             MaybeOpcode::ToBackpatch(instr_id)
                         }
@@ -134,9 +136,9 @@ fn expr_impl<'s, 'origin>(
 
                     let rhs_top = frag.stack().len() + 1;
 
-                    (maybe_opcode, rhs_top, op, span.span(), span)
+                    (maybe_opcode, lhs_adjust, rhs_top, op, span.span(), span)
                 })
-                .then(|(maybe_opcode, rhs_top, op, op_span, span)| {
+                .then(|(maybe_opcode, lhs_adjust, rhs_top, op, op_span, span)| {
                     let frag = &mut frag;
                     move |s: Lexer<'s>| -> Result<_, FailFast> {
                         let state = expr_impl(op.binding_power().1, frag.new_core())
@@ -144,6 +146,7 @@ fn expr_impl<'s, 'origin>(
                             .map_output(|output| {
                                 (
                                     maybe_opcode,
+                                    lhs_adjust,
                                     rhs_top,
                                     op_span,
                                     output.span(),
@@ -154,35 +157,43 @@ fn expr_impl<'s, 'origin>(
                         Ok(state)
                     }
                 })?
-                .map_output(|(maybe_opcode, rhs_top, op_span, rhs_span, output)| {
-                    // Adjust right operand.
-                    frag.emit_adjust_to(rhs_top, op_span.clone());
+                .map_output(
+                    |(maybe_opcode, lhs_adjust, rhs_top, op_span, rhs_span, output)| {
+                        let debug_info = DebugInfo::BinOp {
+                            op: op_span,
+                            lhs: total_span.clone(),
+                            rhs: rhs_span,
+                        };
 
-                    let debug_info = DebugInfo::BinOp {
-                        op: op_span,
-                        lhs: total_span.clone(),
-                        rhs: rhs_span,
-                    };
+                        // Adjust right operand.
+                        frag.emit_adjust_to(rhs_top, debug_info.clone());
 
-                    match maybe_opcode {
-                        MaybeOpcode::OpCode(op) => {
-                            frag.emit_with_debug(OpCode::BinOp(op), debug_info);
-                        }
-                        MaybeOpcode::ToBackpatch(instr_id) => {
-                            for id in [instr_id, instr_id + 1, instr_id + 2] {
-                                if let Some(info) = frag.get_debug_info_mut(id) {
-                                    *info = debug_info.clone();
+                        match maybe_opcode {
+                            MaybeOpcode::OpCode(op) => {
+                                frag.emit_with_debug(OpCode::BinOp(op), debug_info.clone());
+                            }
+                            MaybeOpcode::ToBackpatch(instr_id) => {
+                                for id in [instr_id, instr_id + 1, instr_id + 2] {
+                                    if let Some(info) = frag.get_debug_info_mut(id) {
+                                        *info = debug_info.clone();
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    frag.commit();
+                        if let Some(instr_id) = lhs_adjust {
+                            if let Some(info) = frag.get_debug_info_mut(instr_id) {
+                                *info = debug_info;
+                            }
+                        }
 
-                    total_span = total_span.start..output.span.end;
+                        frag.commit();
 
-                    output
-                })
+                        total_span = total_span.start..output.span.end;
+
+                        output
+                    },
+                )
                 .collapse();
 
             Ok(state)
@@ -290,14 +301,13 @@ fn head_expr<'s, 'origin>(
                         .map_output(|output| {
                             let opcode = OpCode::UnaOp(op.0);
 
-                            frag.emit_adjust_to(stack_start + 1, span.span());
-                            frag.emit_with_debug(
-                                opcode,
-                                DebugInfo::UnaOp {
-                                    op: span.span(),
-                                    arg: output.span(),
-                                },
-                            );
+                            let debug_info = DebugInfo::UnaOp {
+                                op: span.span(),
+                                arg: output.span(),
+                            };
+
+                            frag.emit_adjust_to(stack_start + 1, debug_info.clone());
+                            frag.emit_with_debug(opcode, debug_info);
 
                             discard(span, output)
                         });

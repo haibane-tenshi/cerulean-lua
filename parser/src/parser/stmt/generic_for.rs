@@ -39,7 +39,7 @@ pub(crate) fn generic_for<'s, 'origin>(
             .and(expr_list_adjusted_to(4, envelope.new_core()), keep_range)?
             .then(|output| {
                 |s| -> Result<_, FailFast> {
-                    let ((((for_span, names), in_span), expr_list_span), span) = output.take();
+                    let ((((for_span, names), _in_span), expr_list_span), span) = output.take();
 
                     let iter = envelope.stack_slot(FragmentStackSlot(0));
                     let state = iter + 1;
@@ -61,7 +61,7 @@ pub(crate) fn generic_for<'s, 'origin>(
                     loop_body.emit_with_debug(OpCode::LoadStack(control), debug_info.clone());
                     loop_body.emit_with_debug(OpCode::Invoke(iter_args), debug_info.clone());
 
-                    loop_body.emit_adjust_to(FragmentStackSlot(names.len()), in_span.clone());
+                    loop_body.emit_adjust_to(FragmentStackSlot(names.len()), debug_info.clone());
 
                     // Assign names.
                     loop_body.adjust_stack_to(FragmentStackSlot(0));

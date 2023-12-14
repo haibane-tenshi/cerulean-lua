@@ -26,7 +26,7 @@ pub(crate) fn expr_adjusted_to<'s, 'origin>(
 
         let mark = frag.stack().len() + count;
         let r = expr(frag.new_core()).parse_once(s)?.inspect(move |output| {
-            frag.emit_adjust_to(mark, output.span());
+            frag.emit_adjust_to(mark, DebugInfo::Generic(output.span()));
 
             frag.commit();
         });
@@ -107,7 +107,7 @@ pub(crate) fn expr_list<'s, 'origin>(
                         .and(token_comma)?
                         .inspect(|output| {
                             // Expressions inside comma lists are adjusted to 1.
-                            frag.emit_adjust_to(mark, output.span());
+                            frag.emit_adjust_to(mark, DebugInfo::Generic(output.span()));
                         })
                         .and(expr(frag.new_core()), discard)?
                         .inspect(|_| {
@@ -149,7 +149,7 @@ pub(crate) fn expr_list_adjusted_to<'s, 'origin>(
         let r = Source(s)
             .and(expr_list(frag.new_core()))?
             .inspect(|output| {
-                frag.emit_adjust_to(mark, output.span());
+                frag.emit_adjust_to(mark, DebugInfo::Generic(output.span()));
 
                 frag.commit();
             });

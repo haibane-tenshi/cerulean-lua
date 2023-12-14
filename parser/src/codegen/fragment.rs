@@ -370,11 +370,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     pub fn emit_adjust_to(
         &mut self,
         slot: FragmentStackSlot,
-        span: Range<usize>,
+        debug_info: DebugInfo,
     ) -> Option<InstrId> {
         let instr_id = if self.stack.need_adjustment_to(slot) {
             let slot = self.stack.fragment_to_frame(slot);
-            let id = self.emit(OpCode::AdjustStack(slot), span);
+            let id = self.emit_with_debug(OpCode::AdjustStack(slot), debug_info);
             Some(id)
         } else {
             None
@@ -416,7 +416,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 
     pub fn emit_loop_to(&mut self, debug_info: DebugInfo) {
-        self.emit_adjust_to(FragmentStackSlot(0), 0..0);
+        self.emit_adjust_to(FragmentStackSlot(0), debug_info.clone());
         let offset = self.fun.next_id() - self.fun.start();
         self.emit_with_debug(OpCode::Loop { offset }, debug_info);
 
@@ -436,7 +436,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     pub fn try_emit_label(
         &mut self,
         label: Ident<'s>,
-        span: Range<usize>,
+        debug_info: DebugInfo,
     ) -> Result<InstrId, PushLabelError> {
         use super::labels::Label;
 
@@ -445,7 +445,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         // We need to forecefully adjust it.
         let stack_top = self.stack().len();
         self.stack.make_variadic();
-        let instr_id = self.emit_adjust_to(stack_top, span).unwrap();
+        let instr_id = self.emit_adjust_to(stack_top, debug_info).unwrap();
 
         let label = Label {
             name: label,

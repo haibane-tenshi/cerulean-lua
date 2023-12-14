@@ -348,7 +348,7 @@ fn index<'s, 'origin>(
                 frag.emit_load_literal(Literal::Int(index), debug_info.clone());
                 frag.emit_load_stack(value_slot, debug_info.clone());
                 frag.emit_with_debug(OpCode::TabSet, debug_info.clone());
-                frag.emit_adjust_to(value_slot, output.span());
+                frag.emit_adjust_to(value_slot, debug_info.clone());
 
                 frag.commit();
             })

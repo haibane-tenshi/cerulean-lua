@@ -50,6 +50,7 @@ pub enum DebugInfo {
         repeat: Range<usize>,
         until: Range<usize>,
     },
+    Label(Range<usize>),
     Goto {
         goto: Range<usize>,
     },

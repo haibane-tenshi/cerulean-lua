@@ -29,7 +29,7 @@ pub(crate) fn label<'s, 'origin>(
             .try_map_output(|output| -> Result<_, CodegenError> {
                 let (label, span) = output.take();
 
-                frag.try_emit_label(label, span.span())?;
+                frag.try_emit_label(label, DebugInfo::Label(span.span()))?;
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);
