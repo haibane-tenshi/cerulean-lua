@@ -194,10 +194,12 @@ fn bracket<'s, 'origin>(
         let state = Source(s)
             .and(bracket_l)?
             .with_mode(FailureMode::Malformed)
-            .inspect(|output| {
-                frag.emit_load_stack(FragmentStackSlot(0), output.span());
+            .map_output(|output| {
+                let instr_id =
+                    frag.emit_load_stack(FragmentStackSlot(0), DebugInfo::Generic(output.span()));
+                output.put(instr_id)
             })
-            .and(expr_adjusted_to_1(frag.new_core()), replace_range)?
+            .and(expr_adjusted_to_1(frag.new_core()), keep_range)?
             .and(bracket_r, discard)?
             .map_output(|output| {
                 let span = output.span();
@@ -206,19 +208,23 @@ fn bracket<'s, 'origin>(
             .and(equals_sign, keep_range)?
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .map_output(move |output| {
-                let (((index_span, indexing_span), eq_sign_span), span) = output.take();
+                let ((((to_backpatch, index_span), indexing_span), eq_sign_span), span) =
+                    output.take();
 
-                frag.emit_with_debug(
-                    OpCode::TabSet,
-                    DebugInfo::ConstructTable {
-                        table: table_span,
-                        entry: DebugTabEntry::Index {
-                            index: index_span,
-                            indexing: indexing_span,
-                            eq_sign: eq_sign_span,
-                        },
+                let debug_info = DebugInfo::ConstructTable {
+                    table: table_span,
+                    entry: DebugTabEntry::Index {
+                        index: index_span,
+                        indexing: indexing_span,
+                        eq_sign: eq_sign_span,
                     },
-                );
+                };
+
+                if let Some(info) = frag.get_debug_info_mut(to_backpatch) {
+                    *info = debug_info.clone();
+                }
+
+                frag.emit_with_debug(OpCode::TabSet, debug_info);
                 frag.commit();
 
                 span.put(FieldType::Bracket)
@@ -263,33 +269,36 @@ fn name<'s, 'origin>(
         let state = Source(s)
             .and(ident)?
             .with_mode(FailureMode::Ambiguous)
-            .map_output(|r| {
-                let (ident, span) = r.take();
-
-                frag.emit_load_stack(FragmentStackSlot(0), span.span());
-                frag.emit_load_literal(
-                    Literal::String(ident.to_string()),
-                    DebugInfo::Literal(span.span()),
-                );
-
-                span.put_range()
+            .map_output(|output| {
+                let span = output.span();
+                output.place(span)
             })
             .and(equals_sign, keep_range)?
+            .map_output(|r| {
+                let (((ident, ident_span), eq_sign_span), span) = r.take();
+
+                let debug_info = DebugInfo::ConstructTable {
+                    table: table_span.clone(),
+                    entry: DebugTabEntry::Field {
+                        ident: ident_span.clone(),
+                        eq_sign: eq_sign_span,
+                    },
+                };
+
+                frag.emit_load_stack(FragmentStackSlot(0), debug_info.clone());
+                frag.emit_load_literal(
+                    Literal::String(ident.to_string()),
+                    DebugInfo::Literal(ident_span),
+                );
+
+                span.put(debug_info)
+            })
             .with_mode(FailureMode::Malformed)
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .map_output(move |output| {
-                let ((ident_span, eq_sign_span), span) = output.take();
+                let (debug_info, span) = output.take();
 
-                frag.emit_with_debug(
-                    OpCode::TabSet,
-                    DebugInfo::ConstructTable {
-                        table: table_span,
-                        entry: DebugTabEntry::Field {
-                            ident: ident_span,
-                            eq_sign: eq_sign_span,
-                        },
-                    },
-                );
+                frag.emit_with_debug(OpCode::TabSet, debug_info);
                 frag.commit();
 
                 span.put(FieldType::Name)
@@ -335,9 +344,9 @@ fn index<'s, 'origin>(
                     },
                 };
 
-                frag.emit_load_stack(FragmentStackSlot(0), output.span());
+                frag.emit_load_stack(FragmentStackSlot(0), debug_info.clone());
                 frag.emit_load_literal(Literal::Int(index), debug_info.clone());
-                frag.emit_load_stack(value_slot, output.span());
+                frag.emit_load_stack(value_slot, debug_info.clone());
                 frag.emit_with_debug(OpCode::TabSet, debug_info.clone());
                 frag.emit_adjust_to(value_slot, output.span());
 

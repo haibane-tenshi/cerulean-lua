@@ -61,6 +61,8 @@ fn expr_impl<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
+        use repr::index::InstrId;
+
         let mut frag = core.expr();
         let stack_start = frag.stack().len();
 
@@ -75,6 +77,11 @@ fn expr_impl<'s, 'origin>(
         // At this point there can be variadic number of values on stack.
         // This is OK: it can happen when there are no operators in current expression.
         // We cannot trim it yet, outside context might expect those values.
+
+        enum MaybeOpcode {
+            OpCode(BinOp),
+            ToBackpatch(InstrId),
+        }
 
         let next_part = |s: Lexer<'s>| -> Result<
             ParsingState<Lexer<'s>, (), Spanned<()>, ExprSuccess, ExprSuccess>,
@@ -103,20 +110,25 @@ fn expr_impl<'s, 'origin>(
                     frag.emit_adjust_to(FragmentStackSlot(1), span.span());
 
                     let maybe_opcode = match op {
-                        Infix::BinOp(op) => Some(OpCode::BinOp(op)),
+                        Infix::BinOp(op) => MaybeOpcode::OpCode(op),
                         Infix::Logical(op) => {
                             let cond = match op {
                                 Logical::Or => true,
                                 Logical::And => false,
                             };
 
-                            frag.emit_load_stack(FragmentStackSlot(0), span.span());
-                            frag.emit_jump_to_end(Some(cond), DebugInfo::Generic(span.span()));
+                            // Emit dummy debug info.
+                            // We backpatch it later.
+                            let debug_info = DebugInfo::Generic(span.span());
+
+                            let instr_id =
+                                frag.emit_load_stack(FragmentStackSlot(0), debug_info.clone());
+                            frag.emit_jump_to_end(Some(cond), debug_info);
 
                             // Discard left operand when entering the other branch.
                             frag.emit_adjust_to(FragmentStackSlot(0), span.span());
 
-                            None
+                            MaybeOpcode::ToBackpatch(instr_id)
                         }
                     };
 
@@ -146,15 +158,23 @@ fn expr_impl<'s, 'origin>(
                     // Adjust right operand.
                     frag.emit_adjust_to(rhs_top, op_span.clone());
 
-                    if let Some(opcode) = maybe_opcode {
-                        frag.emit_with_debug(
-                            opcode,
-                            DebugInfo::BinOp {
-                                op: op_span,
-                                lhs: total_span.clone(),
-                                rhs: rhs_span,
-                            },
-                        );
+                    let debug_info = DebugInfo::BinOp {
+                        op: op_span,
+                        lhs: total_span.clone(),
+                        rhs: rhs_span,
+                    };
+
+                    match maybe_opcode {
+                        MaybeOpcode::OpCode(op) => {
+                            frag.emit_with_debug(OpCode::BinOp(op), debug_info);
+                        }
+                        MaybeOpcode::ToBackpatch(instr_id) => {
+                            for id in [instr_id, instr_id + 1, instr_id + 2] {
+                                if let Some(info) = frag.get_debug_info_mut(id) {
+                                    *info = debug_info.clone();
+                                }
+                            }
+                        }
                     }
 
                     frag.commit();

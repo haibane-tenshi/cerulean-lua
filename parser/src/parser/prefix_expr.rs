@@ -633,37 +633,40 @@ fn tab_call<'s, 'origin>(
                 let ((colon_span, ident, ident_span), span) = output.take();
 
                 // Acquire function.
-                frag.emit_load_stack(FragmentStackSlot(0), table_span.clone());
+                let debug_info = DebugInfo::LoadTable {
+                    table: table_span.clone(),
+                    index: ident_span.clone(),
+                    indexing: colon_span.start..ident_span.end,
+                };
+
+                frag.emit_load_stack(FragmentStackSlot(0), debug_info.clone());
                 frag.emit_load_literal(
                     Literal::String(ident.to_string()),
                     DebugInfo::Literal(ident_span.clone()),
                 );
-                frag.emit_with_debug(
-                    OpCode::TabGet,
-                    DebugInfo::LoadTable {
-                        table: table_span.clone(),
-                        index: ident_span.clone(),
-                        indexing: colon_span.start..ident_span.end,
-                    },
-                );
+                frag.emit_with_debug(OpCode::TabGet, debug_info);
 
                 // Pass table itself as the first argument.
-                frag.emit_load_stack(FragmentStackSlot(0), table_span.clone());
+                let instr_id = frag
+                    .emit_load_stack(FragmentStackSlot(0), DebugInfo::Generic(table_span.clone()));
 
-                span.put_range()
+                span.put_range().place(instr_id)
             })
             .and(func_args(frag.new_core()), keep_range)?
             .map_output(move |output| {
-                let ((colon_ident_span, args_span), span) = output.take();
+                let (((colon_ident_span, to_backpatch), args_span), span) = output.take();
+
+                let debug_info = DebugInfo::FnCall {
+                    callable: table_span.start..colon_ident_span.end,
+                    args: args_span,
+                };
+
+                if let Some(info) = frag.get_debug_info_mut(to_backpatch) {
+                    *info = debug_info.clone();
+                }
 
                 let args = frag.stack_slot(FragmentStackSlot(1));
-                frag.emit_with_debug(
-                    OpCode::Invoke(args),
-                    DebugInfo::FnCall {
-                        callable: table_span.start..colon_ident_span.end,
-                        args: args_span,
-                    },
-                );
+                frag.emit_with_debug(OpCode::Invoke(args), debug_info);
                 frag.commit();
 
                 span.put(PrefixExpr::FnCall)

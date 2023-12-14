@@ -339,6 +339,10 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         trace!(fragment_id=?self.id(), "pop temporary");
     }
 
+    pub fn get_debug_info_mut(&mut self, instr_id: InstrId) -> Option<&mut DebugInfo> {
+        self.fun.get_debug_info_mut(instr_id)
+    }
+
     pub fn adjust_stack_to(&mut self, height: FragmentStackSlot) -> bool {
         let r = self.stack.adjust_to(height);
 
@@ -419,9 +423,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         trace!(fragment_id=?self.id(), "emit jump to start of current fragment");
     }
 
-    pub fn emit_load_stack(&mut self, slot: FragmentStackSlot, span: Range<usize>) -> InstrId {
+    pub fn emit_load_stack(&mut self, slot: FragmentStackSlot, debug_info: DebugInfo) -> InstrId {
         let slot = self.stack_slot(slot);
-        self.emit(OpCode::LoadStack(slot), span)
+        self.emit_with_debug(OpCode::LoadStack(slot), debug_info)
     }
 
     pub fn emit_load_literal(&mut self, literal: Literal, debug_info: DebugInfo) -> InstrId {

@@ -135,6 +135,14 @@ impl<'fun> FunctionView<'fun> {
         self.func.opcodes.get_mut(instr_id)
     }
 
+    pub fn get_debug_info_mut(&mut self, instr_id: InstrId) -> Option<&mut OpCodeDebugInfo> {
+        if instr_id < self.start() {
+            return None;
+        }
+
+        self.func.debug_info.get_mut(instr_id)
+    }
+
     pub fn commit(self) {
         // Prevent drop impl from rolling back changes.
         std::mem::forget(self);
