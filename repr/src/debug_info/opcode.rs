@@ -12,6 +12,7 @@ pub enum DebugInfo {
     Generic(Range<usize>),
     LoadUpvalue(LoadUpvalue),
     LoadConst(LoadConst),
+    MakeClosure(MakeClosure),
     StoreUpvalue(StoreUpvalue),
     UnaOp(UnaOp),
     BinOp(BinOp),
@@ -44,6 +45,15 @@ pub struct StoreUpvalue {
 pub struct LoadConst {
     /// Constant was created out of a literal value.
     pub literal: Range<usize>,
+}
+
+/// Debug info for [`OpCode::MakeClosure`](crate::opcode::OpCode::MakeClosure).
+#[derive(Debug, Clone)]
+pub struct MakeClosure {
+    /// `function` token which triggered function creation.
+    pub function_token: Range<usize>,
+
+    pub total_span: Range<usize>,
 }
 
 /// Debug info for [`OpCode::UnaOp`](crate::opcode::OpCode::UnaOp).
@@ -164,6 +174,12 @@ impl From<LoadUpvalue> for DebugInfo {
 impl From<LoadConst> for DebugInfo {
     fn from(value: LoadConst) -> Self {
         DebugInfo::LoadConst(value)
+    }
+}
+
+impl From<MakeClosure> for DebugInfo {
+    fn from(value: MakeClosure) -> Self {
+        DebugInfo::MakeClosure(value)
     }
 }
 

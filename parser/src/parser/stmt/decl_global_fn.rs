@@ -43,7 +43,14 @@ pub(crate) fn decl_global_fn<'s, 'origin>(
             .map_output(|output| {
                 let ((recipe_id, fn_span, ident_span), span) = output.take();
 
-                frag.emit(OpCode::MakeClosure(recipe_id), fn_span);
+                frag.emit_with_debug(
+                    OpCode::MakeClosure(recipe_id),
+                    debug_info::MakeClosure {
+                        function_token: fn_span,
+                        total_span: span.span(),
+                    }
+                    .into(),
+                );
                 frag.emit_with_debug(
                     OpCode::TabSet,
                     debug_info::TabSet::GlobalEnv {

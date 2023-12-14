@@ -46,7 +46,14 @@ pub(crate) fn decl_local_fn<'s, 'origin>(
             .map_output(|output| {
                 let ((fn_span, func_id), span) = output.take();
 
-                frag.emit(OpCode::MakeClosure(func_id), fn_span);
+                frag.emit_with_debug(
+                    OpCode::MakeClosure(func_id),
+                    debug_info::MakeClosure {
+                        function_token: fn_span,
+                        total_span: span.span(),
+                    }
+                    .into(),
+                );
                 // Stack is already adjusted, remove unnecessary temporary.
                 frag.pop_temporary();
                 frag.commit();

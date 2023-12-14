@@ -30,7 +30,14 @@ pub(crate) fn function<'s, 'origin>(
             .map_output(|output| {
                 let ((fn_span, func_id), span) = output.take();
 
-                frag.emit(OpCode::MakeClosure(func_id), fn_span);
+                frag.emit_with_debug(
+                    OpCode::MakeClosure(func_id),
+                    debug_info::MakeClosure {
+                        function_token: fn_span,
+                        total_span: span.span(),
+                    }
+                    .into(),
+                );
                 frag.commit();
 
                 span

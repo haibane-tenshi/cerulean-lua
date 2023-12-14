@@ -1,6 +1,7 @@
 mod bin_op;
 mod missing_args;
 mod missing_const_id;
+mod missing_recipe;
 mod missing_upvalue_slot;
 mod table;
 mod una_op;
@@ -13,6 +14,7 @@ use std::ops::Range;
 pub use bin_op::Cause as BinOpCause;
 pub use missing_args::MissingArgsError;
 pub use missing_const_id::MissingConstId;
+pub use missing_recipe::MissingRecipe;
 pub use missing_upvalue_slot::MissingUpvalue;
 pub use table::RuntimeCause as TabCause;
 pub use una_op::Cause as UnaOpCause;
@@ -29,6 +31,7 @@ pub enum Cause {
     CatchAll,
     MissingArgs(MissingArgsError),
     MissingConstId(MissingConstId),
+    MissingRecipe(MissingRecipe),
     MissingUpvalue(MissingUpvalue),
     UnaOp(UnaOpCause),
     BinOp(BinOpCause),
@@ -58,6 +61,7 @@ impl Error {
                 err.into_diagnostic(file_id, opcode, debug_info)
             }
             MissingConstId(err) => err.into_diagnostic(file_id, opcode, debug_info),
+            MissingRecipe(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingUpvalue(err) => err.into_diagnostic(file_id, opcode, debug_info),
             UnaOp(cause) => {
                 if let OpCode::UnaOp(op) = opcode {
@@ -103,6 +107,12 @@ impl From<MissingConstId> for Cause {
     }
 }
 
+impl From<MissingRecipe> for Cause {
+    fn from(value: MissingRecipe) -> Self {
+        Cause::MissingRecipe(value)
+    }
+}
+
 impl From<MissingArgsError> for Cause {
     fn from(value: MissingArgsError) -> Self {
         Cause::MissingArgs(value)
@@ -133,6 +143,7 @@ impl TotalSpan for opcode::DebugInfo {
             Generic(span) => span.clone(),
             LoadUpvalue(t) => t.total_span(),
             LoadConst(t) => t.total_span(),
+            MakeClosure(t) => t.total_span(),
             StoreUpvalue(t) => t.total_span(),
             UnaOp(t) => t.total_span(),
             BinOp(t) => t.total_span(),
@@ -156,6 +167,12 @@ impl TotalSpan for opcode::LoadUpvalue {
 impl TotalSpan for opcode::LoadConst {
     fn total_span(&self) -> Range<usize> {
         self.literal.clone()
+    }
+}
+
+impl TotalSpan for opcode::MakeClosure {
+    fn total_span(&self) -> Range<usize> {
+        self.total_span.clone()
     }
 }
 
