@@ -1,6 +1,7 @@
 mod bin_op;
 mod missing_args;
 mod missing_const_id;
+mod missing_upvalue_slot;
 mod table;
 mod una_op;
 
@@ -12,6 +13,7 @@ use std::ops::Range;
 pub use bin_op::Cause as BinOpCause;
 pub use missing_args::MissingArgsError;
 pub use missing_const_id::MissingConstId;
+pub use missing_upvalue_slot::MissingUpvalue;
 pub use table::RuntimeCause as TabCause;
 pub use una_op::Cause as UnaOpCause;
 
@@ -27,6 +29,7 @@ pub enum Cause {
     CatchAll,
     MissingArgs(MissingArgsError),
     MissingConstId(MissingConstId),
+    MissingUpvalue(MissingUpvalue),
     UnaOp(UnaOpCause),
     BinOp(BinOpCause),
     TabGet(TabCause),
@@ -55,6 +58,7 @@ impl Error {
                 err.into_diagnostic(file_id, opcode, debug_info)
             }
             MissingConstId(err) => err.into_diagnostic(file_id, opcode, debug_info),
+            MissingUpvalue(err) => err.into_diagnostic(file_id, opcode, debug_info),
             UnaOp(cause) => {
                 if let OpCode::UnaOp(op) = opcode {
                     let debug_info = debug_info.and_then(Extract::extract);
@@ -84,6 +88,12 @@ impl Error {
                 cause.into_diagnostic(file_id, debug_info)
             }
         }
+    }
+}
+
+impl From<MissingUpvalue> for Cause {
+    fn from(value: MissingUpvalue) -> Self {
+        Cause::MissingUpvalue(value)
     }
 }
 
@@ -121,7 +131,9 @@ impl TotalSpan for opcode::DebugInfo {
 
         match self {
             Generic(span) => span.clone(),
+            LoadUpvalue(t) => t.total_span(),
             LoadConst(t) => t.total_span(),
+            StoreUpvalue(t) => t.total_span(),
             UnaOp(t) => t.total_span(),
             BinOp(t) => t.total_span(),
             TabGet(t) => t.total_span(),
@@ -130,9 +142,26 @@ impl TotalSpan for opcode::DebugInfo {
     }
 }
 
+impl TotalSpan for opcode::LoadUpvalue {
+    fn total_span(&self) -> Range<usize> {
+        use opcode::LoadUpvalue::*;
+
+        match self {
+            Upvalue(span) => span.clone(),
+            Global(span) => span.clone(),
+        }
+    }
+}
+
 impl TotalSpan for opcode::LoadConst {
     fn total_span(&self) -> Range<usize> {
         self.literal.clone()
+    }
+}
+
+impl TotalSpan for opcode::StoreUpvalue {
+    fn total_span(&self) -> Range<usize> {
+        self.ident.clone()
     }
 }
 

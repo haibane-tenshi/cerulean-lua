@@ -10,11 +10,33 @@ pub enum DebugInfo {
     ///
     /// More specific information should be conveyed through other variants.
     Generic(Range<usize>),
+    LoadUpvalue(LoadUpvalue),
     LoadConst(LoadConst),
+    StoreUpvalue(StoreUpvalue),
     UnaOp(UnaOp),
     BinOp(BinOp),
     TabGet(TabGet),
     TabSet(TabSet),
+}
+
+/// Debug info for [`OpCode::StoreUpvalue`](crate::opcode::OpCode::StoreUpvalue).
+#[derive(Debug, Clone)]
+pub enum LoadUpvalue {
+    /// Span pointing to identifier resolved to be an upvalue.
+    Upvalue(Range<usize>),
+
+    /// Instruction attempts to load `_ENV` variable from an upvalue slot.
+    ///
+    /// Span should point to identifier resolved to be global variable
+    /// which triggered lookup of `_ENV` variable.
+    Global(Range<usize>),
+}
+
+/// Debug info for [`OpCode::StoreUpvalue`](crate::opcode::OpCode::StoreUpvalue).
+#[derive(Debug, Clone)]
+pub struct StoreUpvalue {
+    pub ident: Range<usize>,
+    pub eq_sign: Range<usize>,
 }
 
 /// Debug info for [`OpCode::LoadConstant`](crate::opcode::OpCode::LoadConstant).
@@ -133,9 +155,21 @@ pub enum TabConstructor {
     Value { value: Range<usize> },
 }
 
+impl From<LoadUpvalue> for DebugInfo {
+    fn from(value: LoadUpvalue) -> Self {
+        DebugInfo::LoadUpvalue(value)
+    }
+}
+
 impl From<LoadConst> for DebugInfo {
     fn from(value: LoadConst) -> Self {
         DebugInfo::LoadConst(value)
+    }
+}
+
+impl From<StoreUpvalue> for DebugInfo {
+    fn from(value: StoreUpvalue) -> Self {
+        DebugInfo::StoreUpvalue(value)
     }
 }
 

@@ -14,7 +14,7 @@ use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
 use crate::chunk_cache::{ChunkCache, ChunkId};
-use crate::error::opcode::{self as opcode_err, MissingConstId};
+use crate::error::opcode::{self as opcode_err, MissingConstId, MissingUpvalue};
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::Value;
@@ -214,6 +214,16 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
+    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&Value<C>, MissingUpvalue> {
+        self.upvalue_stack.get(index).ok_or(MissingUpvalue(index))
+    }
+
+    fn get_upvalue_mut(&mut self, index: UpvalueSlot) -> Result<&mut Value<C>, MissingUpvalue> {
+        self.upvalue_stack
+            .get_mut(index)
+            .ok_or(MissingUpvalue(index))
+    }
+
     pub fn step(&mut self) -> Result<ControlFlow, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
@@ -274,23 +284,16 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             LoadUpvalue(slot) => {
-                let value = self
-                    .upvalue_stack
-                    .get(slot)
-                    .map_err(|_| Cause::CatchAll)?
-                    .clone();
+                let value = self.get_upvalue(slot)?.clone();
                 self.stack.push(value);
 
                 ControlFlow::Continue(())
             }
             StoreUpvalue(slot) => {
                 let [value] = self.stack.take1()?;
-                let location = self
-                    .upvalue_stack
-                    .get_mut(slot)
-                    .map_err(|_| Cause::CatchAll)?;
+                let place = self.get_upvalue_mut(slot)?;
 
-                *location = value;
+                *place = value;
 
                 ControlFlow::Continue(())
             }

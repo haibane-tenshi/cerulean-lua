@@ -104,18 +104,9 @@ impl Place {
             ),
             Place::Upvalue(slot, span) => (
                 OpCode::LoadUpvalue(slot),
-                debug_info::DebugInfo::Generic(span),
+                debug_info::LoadUpvalue::Global(span).into(),
             ),
             Place::TableField(debug_info) => (OpCode::TabGet, debug_info.into()),
-        }
-    }
-}
-
-impl IntoOpcode for UpvalueSource {
-    fn into_opcode(self) -> OpCode {
-        match self {
-            UpvalueSource::Temporary(slot) => OpCode::LoadStack(slot),
-            UpvalueSource::Upvalue(slot) => OpCode::LoadUpvalue(slot),
         }
     }
 }
@@ -433,8 +424,17 @@ fn variable<'s, 'origin>(
                     Some(UpvalueSource::Temporary(slot)) => Place::Temporary(slot, span.span()),
                     Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot, span.span()),
                     None => {
-                        let env = frag.capture_global_env()?;
-                        frag.emit(env.into_opcode(), span.span());
+                        let (opcode, info) = match frag.capture_global_env()? {
+                            UpvalueSource::Temporary(slot) => (
+                                OpCode::LoadStack(slot),
+                                debug_info::DebugInfo::Generic(span.span()),
+                            ),
+                            UpvalueSource::Upvalue(slot) => (
+                                OpCode::LoadUpvalue(slot),
+                                debug_info::LoadUpvalue::Global(span.span()).into(),
+                            ),
+                        };
+                        frag.emit_with_debug(opcode, info);
                         frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
                         let debug_info = debug_info::TabGet::GlobalEnv { ident: span.span() };

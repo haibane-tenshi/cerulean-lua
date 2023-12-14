@@ -303,3 +303,9 @@ impl From<UpvalueSlot> for usize {
         value.0
     }
 }
+
+impl Display for UpvalueSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}

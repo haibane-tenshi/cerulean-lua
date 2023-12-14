@@ -92,12 +92,18 @@ pub(crate) fn fn_name<'s, 'origin>(
 
                 let (ident, span) = output.take();
 
-                let opcode = match envelope.capture_global_env()? {
-                    UpvalueSource::Temporary(slot) => OpCode::LoadStack(slot),
-                    UpvalueSource::Upvalue(slot) => OpCode::LoadUpvalue(slot),
+                let (opcode, info) = match envelope.capture_global_env()? {
+                    UpvalueSource::Temporary(slot) => (
+                        OpCode::LoadStack(slot),
+                        debug_info::DebugInfo::Generic(span.span()),
+                    ),
+                    UpvalueSource::Upvalue(slot) => (
+                        OpCode::LoadUpvalue(slot),
+                        debug_info::LoadUpvalue::Global(span.span()).into(),
+                    ),
                 };
 
-                envelope.emit(opcode, span.span());
+                envelope.emit_with_debug(opcode, info);
                 envelope.emit_load_literal(Literal::String(ident.to_string()), span.span());
                 total_span = span.span();
 

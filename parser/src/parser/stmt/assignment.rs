@@ -50,12 +50,19 @@ pub(crate) fn assignment<'s, 'origin>(
                                         );
                                         frag.emit(OpCode::StoreStack(slot), eq_sign_span.clone());
                                     }
-                                    Place::Upvalue(slot, _) => {
+                                    Place::Upvalue(slot, ident) => {
                                         frag.emit(
                                             OpCode::LoadStack(expr_slot),
                                             eq_sign_span.clone(),
                                         );
-                                        frag.emit(OpCode::StoreUpvalue(slot), eq_sign_span.clone());
+                                        frag.emit_with_debug(
+                                            OpCode::StoreUpvalue(slot),
+                                            debug_info::StoreUpvalue {
+                                                ident,
+                                                eq_sign: eq_sign_span.clone(),
+                                            }
+                                            .into(),
+                                        );
                                     }
                                     Place::TableField(debug_info) => {
                                         use debug_info::{TabGet, TabSet};
