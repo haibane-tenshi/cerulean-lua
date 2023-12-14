@@ -29,7 +29,7 @@ pub(crate) fn goto<'s, 'origin>(
             .map_output(|output| {
                 let ((goto_span, label), span) = output.take();
 
-                frag.emit_goto(label, goto_span);
+                frag.emit_goto(label, DebugInfo::Goto { goto: goto_span });
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);

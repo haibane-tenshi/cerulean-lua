@@ -50,6 +50,9 @@ pub enum DebugInfo {
         repeat: Range<usize>,
         until: Range<usize>,
     },
+    Goto {
+        goto: Range<usize>,
+    },
     LoadVarargs(Range<usize>),
     LoadPlace {
         place: Place,

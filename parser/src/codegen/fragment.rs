@@ -459,11 +459,11 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         Ok(instr_id)
     }
 
-    pub fn emit_goto(&mut self, label: Ident<'s>, span: Range<usize>) -> InstrId {
+    pub fn emit_goto(&mut self, label: Ident<'s>, debug_info: DebugInfo) -> InstrId {
         let target = self.fun.next_id();
 
         let opcode = self.labels.goto(label, target);
-        let r = self.emit(opcode, span);
+        let r = self.emit_with_debug(opcode, debug_info);
 
         trace!(fragment_id=?self.id(), ?label, "emit jump to label");
 
