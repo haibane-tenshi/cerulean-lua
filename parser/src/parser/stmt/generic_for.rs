@@ -80,7 +80,10 @@ pub(crate) fn generic_for<'s, 'origin>(
                     loop_body.emit_jump_to_end(Some(true), for_span.clone());
 
                     loop_body.emit(OpCode::LoadStack(new_control), for_span.clone());
-                    loop_body.emit(OpCode::StoreStack(control), for_span.clone());
+                    loop_body.emit_with_debug(
+                        OpCode::StoreStack(control),
+                        debug_info::DebugInfo::Generic(for_span.clone()),
+                    );
 
                     let state = Source(s)
                         .and(token_do)?

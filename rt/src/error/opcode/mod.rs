@@ -146,6 +146,7 @@ impl TotalSpan for opcode::DebugInfo {
             LoadUpvalue(t) => t.total_span(),
             LoadConst(t) => t.total_span(),
             MakeClosure(t) => t.total_span(),
+            StoreStack(t) => t.total_span(),
             StoreUpvalue(t) => t.total_span(),
             UnaOp(t) => t.total_span(),
             BinOp(t) => t.total_span(),
@@ -201,6 +202,14 @@ impl TotalSpan for opcode::MakeClosure {
         } = self;
 
         total_span.clone()
+    }
+}
+
+impl TotalSpan for opcode::StoreStack {
+    fn total_span(&self) -> Range<usize> {
+        let opcode::StoreStack { ident, eq_sign: _ } = self;
+
+        ident.clone()
     }
 }
 

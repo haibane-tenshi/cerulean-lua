@@ -15,6 +15,7 @@ pub enum DebugInfo {
     LoadUpvalue(LoadUpvalue),
     LoadConst(LoadConst),
     MakeClosure(MakeClosure),
+    StoreStack(StoreStack),
     StoreUpvalue(StoreUpvalue),
     UnaOp(UnaOp),
     BinOp(BinOp),
@@ -58,13 +59,6 @@ pub enum LoadUpvalue {
     Global(Range<usize>),
 }
 
-/// Debug info for [`OpCode::StoreUpvalue`](crate::opcode::OpCode::StoreUpvalue).
-#[derive(Debug, Clone)]
-pub struct StoreUpvalue {
-    pub ident: Range<usize>,
-    pub eq_sign: Range<usize>,
-}
-
 /// Debug info for [`OpCode::LoadConstant`](crate::opcode::OpCode::LoadConstant).
 #[derive(Debug, Clone)]
 pub struct LoadConst {
@@ -79,6 +73,20 @@ pub struct MakeClosure {
     pub function_token: Range<usize>,
 
     pub total_span: Range<usize>,
+}
+
+/// Debug info for [`OpCode::StoreStack`](crate::opcode::OpCode::StoreStack).
+#[derive(Debug, Clone)]
+pub struct StoreStack {
+    pub ident: Range<usize>,
+    pub eq_sign: Range<usize>,
+}
+
+/// Debug info for [`OpCode::StoreUpvalue`](crate::opcode::OpCode::StoreUpvalue).
+#[derive(Debug, Clone)]
+pub struct StoreUpvalue {
+    pub ident: Range<usize>,
+    pub eq_sign: Range<usize>,
 }
 
 /// Debug info for [`OpCode::UnaOp`](crate::opcode::OpCode::UnaOp).
@@ -217,6 +225,12 @@ impl From<LoadConst> for DebugInfo {
 impl From<MakeClosure> for DebugInfo {
     fn from(value: MakeClosure) -> Self {
         DebugInfo::MakeClosure(value)
+    }
+}
+
+impl From<StoreStack> for DebugInfo {
+    fn from(value: StoreStack) -> Self {
+        DebugInfo::StoreStack(value)
     }
 }
 

@@ -175,7 +175,10 @@ pub(crate) fn numerical_for<'s, 'origin>(
                                     .emit_with_debug(OpCode::LoadConstant(const_id), di_const),
                             };
                             loop_body.emit(AriBinOp::Add.into(), eq_sign_span.clone());
-                            loop_body.emit(OpCode::StoreStack(loop_var), eq_sign_span);
+                            loop_body.emit_with_debug(
+                                OpCode::StoreStack(loop_var),
+                                debug_info::DebugInfo::Generic(eq_sign_span),
+                            );
                             loop_body.emit_loop_to(end_span.clone());
 
                             // Clean up.

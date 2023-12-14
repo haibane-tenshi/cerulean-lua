@@ -43,12 +43,19 @@ pub(crate) fn assignment<'s, 'origin>(
                             let expr_slots = (expr_start.0..).map(StackSlot);
                             for (expr_slot, place) in expr_slots.zip(places) {
                                 match place {
-                                    Place::Temporary(slot, _) => {
+                                    Place::Temporary(slot, ident) => {
                                         frag.emit(
                                             OpCode::LoadStack(expr_slot),
                                             eq_sign_span.clone(),
                                         );
-                                        frag.emit(OpCode::StoreStack(slot), eq_sign_span.clone());
+                                        frag.emit_with_debug(
+                                            OpCode::StoreStack(slot),
+                                            debug_info::StoreStack {
+                                                ident,
+                                                eq_sign: eq_sign_span.clone(),
+                                            }
+                                            .into(),
+                                        );
                                     }
                                     Place::Upvalue(slot, ident) => {
                                         frag.emit(
