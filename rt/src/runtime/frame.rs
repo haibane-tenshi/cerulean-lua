@@ -84,7 +84,7 @@ impl ClosureRef {
         };
 
         // Load upvalues onto upvalue stack.
-        let upvalue_start = rt.upvalue_stack.protected_size();
+        let upvalue_start = rt.upvalue_stack.protected_size() + rt.upvalue_stack.len();
         rt.upvalue_stack.extend(
             self.upvalues
                 .iter()

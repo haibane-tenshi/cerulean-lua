@@ -97,6 +97,10 @@ impl<'a, C> UpvalueView<'a, C> {
         self.stack.truncate(self.protected_size.0)
     }
 
+    pub fn len(&self) -> usize {
+        self.stack.len() - self.protected_size.0
+    }
+
     pub(crate) fn protected_size(&self) -> ProtectedSize {
         self.protected_size
     }
