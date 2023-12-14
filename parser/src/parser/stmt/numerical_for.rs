@@ -94,7 +94,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                 // Emit loop controls.
                 let mut loop_body = match step {
-                    StackSlotOrConstId::StackSlot(step, ref step_span) => {
+                    StackSlotOrConstId::StackSlot(step, ref _step_span) => {
                         let zero = envelope.const_table_mut().insert(Literal::Int(0));
 
                         let error_msg = envelope
@@ -106,7 +106,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         zero_check.emit_with_debug(OpCode::LoadStack(step), debug_info.clone());
                         zero_check.emit_with_debug(OpCode::LoadConstant(zero), debug_info.clone());
-                        zero_check.emit(RelBinOp::Eq.into(), step_span.clone());
+                        zero_check.emit_with_debug(RelBinOp::Eq.into(), debug_info.clone());
                         zero_check.emit_jump_to_end(Some(false), debug_info.clone());
 
                         zero_check
@@ -133,7 +133,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         positive_step
                             .emit_with_debug(OpCode::LoadStack(loop_var), debug_info.clone());
                         positive_step.emit_with_debug(OpCode::LoadStack(limit), debug_info.clone());
-                        positive_step.emit(RelBinOp::LtEq.into(), for_span.clone());
+                        positive_step.emit_with_debug(RelBinOp::LtEq.into(), debug_info.clone());
                         positive_step.emit_jump_to(envelope_id, Some(false), debug_info.clone());
                         positive_step.emit_jump_to(controls_id, None, debug_info.clone());
 

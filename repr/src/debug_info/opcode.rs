@@ -50,6 +50,7 @@ pub enum DebugInfo {
         repeat: Range<usize>,
         until: Range<usize>,
     },
+    LoadVarargs(Range<usize>),
     LoadPlace {
         place: Place,
         ident: Range<usize>,
@@ -94,6 +95,9 @@ pub enum DebugInfo {
         indexing: Range<usize>,
         eq_sign: Range<usize>,
         expr: Range<usize>,
+    },
+    CreateTable {
+        table: Range<usize>,
     },
     ConstructTable {
         table: Range<usize>,

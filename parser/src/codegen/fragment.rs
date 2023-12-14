@@ -357,6 +357,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
+    #[deprecated]
     pub fn emit(&mut self, opcode: OpCode, span: Range<usize>) -> InstrId {
         let debug_info = OpCodeDebugInfo::Generic(span);
         self.emit_with_debug(opcode, debug_info)

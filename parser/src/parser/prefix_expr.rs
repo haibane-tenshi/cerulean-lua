@@ -345,8 +345,7 @@ fn func_invocation<'s, 'origin>(
                 DebugInfo::FnCall {
                     callable: callable_span,
                     args: span.span(),
-                }
-                .into(),
+                },
             );
             frag.commit();
         });
@@ -645,8 +644,7 @@ fn tab_call<'s, 'origin>(
                         table: table_span.clone(),
                         index: ident_span.clone(),
                         indexing: colon_span.start..ident_span.end,
-                    }
-                    .into(),
+                    },
                 );
 
                 // Pass table itself as the first argument.

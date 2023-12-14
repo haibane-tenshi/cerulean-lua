@@ -24,7 +24,10 @@ pub(crate) fn table<'s, 'frag>(
             .and(curly_l)?
             .with_mode(FailureMode::Malformed)
             .then(|span| {
-                frag.emit(OpCode::TabCreate, span.span());
+                frag.emit_with_debug(
+                    OpCode::TabCreate,
+                    DebugInfo::CreateTable { table: span.span() },
+                );
 
                 field_list(frag.new_core(), span.span())
                     .optional()
@@ -214,8 +217,7 @@ fn bracket<'s, 'origin>(
                             indexing: indexing_span,
                             eq_sign: eq_sign_span,
                         },
-                    }
-                    .into(),
+                    },
                 );
                 frag.commit();
 
@@ -286,8 +288,7 @@ fn name<'s, 'origin>(
                             ident: ident_span,
                             eq_sign: eq_sign_span,
                         },
-                    }
-                    .into(),
+                    },
                 );
                 frag.commit();
 

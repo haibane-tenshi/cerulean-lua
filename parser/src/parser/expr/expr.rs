@@ -153,8 +153,7 @@ fn expr_impl<'s, 'origin>(
                                 op: op_span,
                                 lhs: total_span.clone(),
                                 rhs: rhs_span,
-                            }
-                            .into(),
+                            },
                         );
                     }
 
@@ -277,8 +276,7 @@ fn head_expr<'s, 'origin>(
                                 DebugInfo::UnaOp {
                                     op: span.span(),
                                     arg: output.span(),
-                                }
-                                .into(),
+                                },
                             );
 
                             discard(span, output)
