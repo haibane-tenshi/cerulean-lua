@@ -44,6 +44,7 @@ impl Error {
     where
         FileId: Clone,
     {
+        use table::TabDebugInfo;
         use Cause::*;
 
         let Error {
@@ -65,7 +66,6 @@ impl Error {
             MissingUpvalue(err) => err.into_diagnostic(file_id, opcode, debug_info),
             UnaOp(cause) => {
                 if let OpCode::UnaOp(op) = opcode {
-                    let debug_info = debug_info.and_then(Extract::extract);
                     cause.into_diagnostic(file_id, debug_info, op)
                 } else {
                     malformed_diagnostic()
@@ -73,23 +73,16 @@ impl Error {
             }
             BinOp(cause) => {
                 if let OpCode::BinOp(op) = opcode {
-                    let debug_info = debug_info.and_then(Extract::extract);
                     cause.into_diagnostic(file_id, debug_info, op)
                 } else {
                     malformed_diagnostic()
                 }
             }
             TabGet(cause) => {
-                let debug_info = debug_info
-                    .and_then(Extract::<opcode::TabGet>::extract)
-                    .map(Into::into);
-                cause.into_diagnostic(file_id, debug_info)
+                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_tab_get))
             }
             TabSet(cause) => {
-                let debug_info = debug_info
-                    .and_then(Extract::<opcode::TabSet>::extract)
-                    .map(Into::into);
-                cause.into_diagnostic(file_id, debug_info)
+                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_tab_set))
             }
         }
     }
@@ -141,158 +134,30 @@ impl TotalSpan for opcode::DebugInfo {
 
         match self {
             Generic(span) => span.clone(),
-            Panic(t) => t.total_span(),
-            Invoke(t) => t.total_span(),
-            Return(t) => t.total_span(),
-            LoadStack(t) => t.total_span(),
-            LoadUpvalue(t) => t.total_span(),
-            LoadConst(t) => t.total_span(),
-            MakeClosure(t) => t.total_span(),
-            StoreStack(t) => t.total_span(),
-            StoreUpvalue(t) => t.total_span(),
-            UnaOp(t) => t.total_span(),
-            BinOp(t) => t.total_span(),
-            TabGet(t) => t.total_span(),
-            TabSet(t) => t.total_span(),
-        }
-    }
-}
-
-impl TotalSpan for opcode::Panic {
-    fn total_span(&self) -> Range<usize> {
-        use opcode::Panic::*;
-
-        match self {
-            ForLoopStepZero { for_token: _, step } => step.clone(),
-        }
-    }
-}
-
-impl TotalSpan for opcode::Invoke {
-    fn total_span(&self) -> Range<usize> {
-        use opcode::Invoke::*;
-
-        match self {
-            Call { callable, args } => callable.start..args.end,
-            ForLoop { for_token: _, iter } => iter.clone(),
-        }
-    }
-}
-
-impl TotalSpan for opcode::Return {
-    fn total_span(&self) -> Range<usize> {
-        let opcode::Return { return_token } = self;
-
-        return_token.clone()
-    }
-}
-
-impl TotalSpan for opcode::LoadStack {
-    fn total_span(&self) -> Range<usize> {
-        use opcode::LoadStack::*;
-
-        match self {
-            Local(span) => span.clone(),
-            Global(span) => span.clone(),
-            Expr(span) => span.clone(),
-        }
-    }
-}
-
-impl TotalSpan for opcode::LoadUpvalue {
-    fn total_span(&self) -> Range<usize> {
-        use opcode::LoadUpvalue::*;
-
-        match self {
-            Upvalue(span) => span.clone(),
-            Global(span) => span.clone(),
-        }
-    }
-}
-
-impl TotalSpan for opcode::LoadConst {
-    fn total_span(&self) -> Range<usize> {
-        let opcode::LoadConst { literal } = self;
-
-        literal.clone()
-    }
-}
-
-impl TotalSpan for opcode::MakeClosure {
-    fn total_span(&self) -> Range<usize> {
-        let opcode::MakeClosure {
-            function_token: _,
-            total_span,
-        } = self;
-
-        total_span.clone()
-    }
-}
-
-impl TotalSpan for opcode::StoreStack {
-    fn total_span(&self) -> Range<usize> {
-        let opcode::StoreStack { ident, eq_sign: _ } = self;
-
-        ident.clone()
-    }
-}
-
-impl TotalSpan for opcode::StoreUpvalue {
-    fn total_span(&self) -> Range<usize> {
-        let opcode::StoreUpvalue { ident, eq_sign: _ } = self;
-
-        ident.clone()
-    }
-}
-
-impl TotalSpan for opcode::UnaOp {
-    fn total_span(&self) -> Range<usize> {
-        let opcode::UnaOp { op, arg } = self;
-
-        op.start..arg.end
-    }
-}
-
-impl TotalSpan for opcode::BinOp {
-    fn total_span(&self) -> Range<usize> {
-        let opcode::BinOp { lhs, op: _, rhs } = self;
-
-        lhs.start..rhs.end
-    }
-}
-
-impl TotalSpan for opcode::TabGet {
-    fn total_span(&self) -> Range<usize> {
-        use opcode::TabGet::*;
-
-        match self {
-            GlobalEnv { ident } => ident.clone(),
-            Local {
-                table,
-                index: _,
-                indexing,
+            Literal(span) => span.clone(),
+            FnCall { callable, args } => callable.start..args.end,
+            FnExpr { total_span, .. } => total_span.clone(),
+            FnDecl { total_span, .. } => total_span.clone(),
+            Return { return_ } => return_.clone(),
+            Break { break_ } => break_.clone(),
+            IfElse { if_ } => if_.clone(),
+            NumericForLoop { for_, .. } => for_.clone(),
+            GenericForLoop { for_, .. } => for_.clone(),
+            WhileLoop { while_ } => while_.clone(),
+            RepeatLoop { repeat, .. } => repeat.clone(),
+            Label(span) => span.clone(),
+            Goto { goto } => goto.clone(),
+            LoadVarargs(span) => span.clone(),
+            LoadPlace { ident, .. } => ident.clone(),
+            StorePlace { ident, expr, .. } => ident.start..expr.end,
+            UnaOp { op, arg } => op.start..arg.end,
+            BinOp { lhs, rhs, .. } => lhs.start..rhs.end,
+            LoadTable {
+                table, indexing, ..
             } => table.start..indexing.end,
-        }
-    }
-}
-
-impl TotalSpan for opcode::TabSet {
-    fn total_span(&self) -> Range<usize> {
-        use opcode::TabSet::*;
-
-        match self {
-            Local {
-                table,
-                index: _,
-                indexing: _,
-                eq_sign,
-            } => table.start..eq_sign.end,
-            GlobalEnv { ident, eq_sign } => {
-                let end = eq_sign.as_ref().map(|span| span.end).unwrap_or(ident.end);
-
-                ident.start..end
-            }
-            Constructor { table: _, flavor } => flavor.total_span(),
+            StoreTable { table, expr, .. } => table.start..expr.end,
+            CreateTable { table } => table.clone(),
+            ConstructTable { entry, .. } => entry.total_span(),
         }
     }
 }
@@ -302,53 +167,9 @@ impl TotalSpan for opcode::TabConstructor {
         use opcode::TabConstructor::*;
 
         match self {
-            Index {
-                index: _,
-                indexing,
-                eq_sign,
-            } => indexing.start..eq_sign.end,
-            Field { ident, eq_sign } => ident.start..eq_sign.end,
+            Index { indexing, .. } => indexing.clone(),
+            Field { ident, .. } => ident.clone(),
             Value { value } => value.clone(),
-        }
-    }
-}
-
-pub(crate) trait Extract<T> {
-    fn extract(self) -> Option<T>;
-}
-
-impl Extract<opcode::UnaOp> for opcode::DebugInfo {
-    fn extract(self) -> Option<opcode::UnaOp> {
-        match self {
-            opcode::DebugInfo::UnaOp(t) => Some(t),
-            _ => None,
-        }
-    }
-}
-
-impl Extract<opcode::BinOp> for opcode::DebugInfo {
-    fn extract(self) -> Option<opcode::BinOp> {
-        match self {
-            opcode::DebugInfo::BinOp(t) => Some(t),
-            _ => None,
-        }
-    }
-}
-
-impl Extract<opcode::TabGet> for opcode::DebugInfo {
-    fn extract(self) -> Option<opcode::TabGet> {
-        match self {
-            opcode::DebugInfo::TabGet(t) => Some(t),
-            _ => None,
-        }
-    }
-}
-
-impl Extract<opcode::TabSet> for opcode::DebugInfo {
-    fn extract(self) -> Option<opcode::TabSet> {
-        match self {
-            opcode::DebugInfo::TabSet(t) => Some(t),
-            _ => None,
         }
     }
 }

@@ -1,5 +1,5 @@
 use codespan_reporting::diagnostic::{Diagnostic, Label};
-use repr::debug_info::opcode::{TabConstructor, TabGet, TabSet};
+use repr::debug_info::opcode::{DebugInfo, TabConstructor};
 use std::ops::Range;
 
 use super::{ExtraDiagnostic, TotalSpan};
@@ -185,7 +185,7 @@ impl RuntimeCause {
                 ])
             }
             (_, None) => {
-                diag.with_note(["no debug info is available"]);
+                diag.no_debug_info();
             }
             _ => (),
         }
@@ -212,30 +212,49 @@ pub(super) enum TabDebugInfo {
     },
 }
 
-impl From<TabSet> for TabDebugInfo {
-    fn from(value: TabSet) -> Self {
-        match value {
-            TabSet::Local {
+impl TabDebugInfo {
+    pub(super) fn with_tab_set(debug_info: DebugInfo) -> Option<Self> {
+        use repr::debug_info::opcode::Place::*;
+        use DebugInfo::*;
+
+        let r = match debug_info {
+            StoreTable {
                 table,
                 index,
                 indexing,
                 eq_sign,
+                expr: _,
             } => TabDebugInfo::Local {
                 table,
                 index,
                 indexing,
                 eq_sign: Some(eq_sign),
             },
-            TabSet::GlobalEnv { ident, eq_sign } => TabDebugInfo::GlobalEnv { ident, eq_sign },
-            TabSet::Constructor { table, flavor } => TabDebugInfo::Constructor { table, flavor },
-        }
-    }
-}
+            StorePlace {
+                place: Global,
+                ident,
+                eq_sign,
+                expr: _,
+            } => TabDebugInfo::GlobalEnv {
+                ident,
+                eq_sign: Some(eq_sign),
+            },
+            ConstructTable { table, entry } => TabDebugInfo::Constructor {
+                table,
+                flavor: entry,
+            },
+            _ => return None,
+        };
 
-impl From<TabGet> for TabDebugInfo {
-    fn from(value: TabGet) -> Self {
-        match value {
-            TabGet::Local {
+        Some(r)
+    }
+
+    pub(super) fn with_tab_get(debug_info: DebugInfo) -> Option<Self> {
+        use repr::debug_info::opcode::Place::*;
+        use DebugInfo::*;
+
+        let r = match debug_info {
+            LoadTable {
                 table,
                 index,
                 indexing,
@@ -245,10 +264,16 @@ impl From<TabGet> for TabDebugInfo {
                 indexing,
                 eq_sign: None,
             },
-            TabGet::GlobalEnv { ident } => TabDebugInfo::GlobalEnv {
+            LoadPlace {
+                place: Global,
+                ident,
+            } => TabDebugInfo::GlobalEnv {
                 ident,
                 eq_sign: None,
             },
-        }
+            _ => return None,
+        };
+
+        Some(r)
     }
 }

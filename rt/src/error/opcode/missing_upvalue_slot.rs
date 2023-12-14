@@ -1,5 +1,5 @@
 use codespan_reporting::diagnostic::Diagnostic;
-use repr::debug_info::OpCodeDebugInfo;
+use repr::debug_info::opcode::DebugInfo;
 use repr::index::UpvalueSlot;
 use repr::opcode::OpCode;
 
@@ -11,13 +11,15 @@ impl MissingUpvalue {
         self,
         file_id: FileId,
         opcode: OpCode,
-        debug_info: Option<OpCodeDebugInfo>,
+        debug_info: Option<DebugInfo>,
     ) -> Diagnostic<FileId>
     where
         FileId: Clone,
     {
-        use super::ExtraDiagnostic;
+        use super::{ExtraDiagnostic, TotalSpan};
         use codespan_reporting::diagnostic::Label;
+        use repr::debug_info::opcode::Place::*;
+        use DebugInfo::*;
 
         let MissingUpvalue(upvalue_slot) = self;
         let have_debug_info = debug_info.is_some();
@@ -28,32 +30,31 @@ impl MissingUpvalue {
         ));
 
         if let Some(debug_info) = debug_info {
-            use repr::debug_info::opcode::LoadUpvalue;
-
             match (opcode, debug_info) {
-                (OpCode::StoreUpvalue(_), OpCodeDebugInfo::StoreUpvalue(info)) => {
+                (
+                    OpCode::StoreUpvalue(_),
+                    StorePlace {
+                        place: Upvalue,
+                        ident,
+                        eq_sign,
+                        ..
+                    },
+                ) => {
                     diag.with_label([
-                        Label::primary(file_id.clone(), info.ident)
+                        Label::primary(file_id.clone(), ident)
                             .with_message("variable is not local to current function"),
-                        Label::secondary(file_id, info.eq_sign)
+                        Label::secondary(file_id, eq_sign)
                             .with_message("triggered by this assignment"),
                     ]);
                 }
-                (
-                    OpCode::LoadUpvalue(_),
-                    OpCodeDebugInfo::LoadUpvalue(LoadUpvalue::Upvalue(span)),
-                ) => {
-                    diag.with_label([Label::primary(file_id, span)
+                (OpCode::LoadUpvalue(_), LoadPlace { place: _, ident }) => {
+                    diag.with_label([Label::primary(file_id, ident)
                         .with_message("variable is not local to curent function")]);
                 }
-                (
-                    OpCode::LoadUpvalue(_),
-                    OpCodeDebugInfo::LoadUpvalue(LoadUpvalue::Global(span)),
-                ) => {
-                    diag.with_label([Label::secondary(file_id, span)
-                        .with_message("variable is not local to curent function")]);
+                (_, debug_info) => {
+                    diag.with_label([Label::secondary(file_id, debug_info.total_span())
+                        .with_message("triggered by this")])
                 }
-                _ => (),
             }
         }
 

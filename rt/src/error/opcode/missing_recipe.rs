@@ -1,5 +1,5 @@
 use codespan_reporting::diagnostic::Diagnostic;
-use repr::debug_info::OpCodeDebugInfo;
+use repr::debug_info::opcode::DebugInfo;
 use repr::index::RecipeId;
 use repr::opcode::OpCode;
 
@@ -11,13 +11,14 @@ impl MissingRecipe {
         self,
         file_id: FileId,
         opcode: OpCode,
-        debug_info: Option<OpCodeDebugInfo>,
+        debug_info: Option<DebugInfo>,
     ) -> Diagnostic<FileId>
     where
         FileId: Clone,
     {
-        use super::ExtraDiagnostic;
+        use super::{ExtraDiagnostic, TotalSpan};
         use codespan_reporting::diagnostic::Label;
+        use DebugInfo::*;
 
         let MissingRecipe(recipe_id) = self;
         let have_debug_info = debug_info.is_some();
@@ -29,12 +30,35 @@ impl MissingRecipe {
 
         if let Some(debug_info) = debug_info {
             match (opcode, debug_info) {
-                (OpCode::MakeClosure(_), OpCodeDebugInfo::MakeClosure(info)) => diag.with_label([
-                    Label::primary(file_id.clone(), info.function_token),
-                    Label::secondary(file_id, info.total_span)
-                        .with_message("function constructor here"),
+                (
+                    OpCode::MakeClosure(_),
+                    FnExpr {
+                        function,
+                        total_span,
+                    },
+                ) => diag.with_label([
+                    Label::primary(file_id.clone(), function),
+                    Label::secondary(file_id, total_span)
+                        .with_message("as part of this function constructor"),
                 ]),
-                _ => (),
+                (
+                    OpCode::MakeClosure(_),
+                    FnDecl {
+                        function,
+                        total_span,
+                        ..
+                    },
+                ) => {
+                    diag.with_label([
+                        Label::primary(file_id.clone(), function),
+                        Label::secondary(file_id, total_span)
+                            .with_message("as part of this function declaration"),
+                    ]);
+                }
+                (_, debug_info) => {
+                    diag.with_label([Label::primary(file_id, debug_info.total_span())
+                        .with_message("triggered by this")])
+                }
             }
         }
 

@@ -1,5 +1,5 @@
 use codespan_reporting::diagnostic::Diagnostic;
-use repr::debug_info::opcode as debug_info;
+use repr::debug_info::opcode::DebugInfo;
 use repr::opcode::BinOp;
 
 use crate::value::Type;
@@ -14,13 +14,13 @@ impl Cause {
     pub(super) fn into_diagnostic<FileId>(
         self,
         file_id: FileId,
-        info: Option<debug_info::BinOp>,
+        info: Option<DebugInfo>,
         op: BinOp,
     ) -> Diagnostic<FileId>
     where
         FileId: Clone,
     {
-        use super::ExtraDiagnostic;
+        use super::{ExtraDiagnostic, TotalSpan};
         use codespan_reporting::diagnostic::Label;
         use repr::opcode::{
             AriBinOp::{Add, Exp},
@@ -41,13 +41,22 @@ impl Cause {
             )),
         };
 
-        if let Some(info) = info {
-            diag.with_label([
-                Label::primary(file_id.clone(), info.op).with_message("op happens here"),
-                Label::secondary(file_id.clone(), info.lhs)
-                    .with_message(format!("this has type `{lhs}`")),
-                Label::secondary(file_id, info.rhs).with_message(format!("this has type `{rhs}`")),
-            ]);
+        if let Some(debug_info) = info {
+            match debug_info {
+                DebugInfo::BinOp {
+                    lhs: lhs_span,
+                    op: op_span,
+                    rhs: rhs_span,
+                } => diag.with_label([
+                    Label::primary(file_id.clone(), op_span).with_message("op happens here"),
+                    Label::secondary(file_id.clone(), lhs_span)
+                        .with_message(format!("this has type `{lhs}`")),
+                    Label::secondary(file_id, rhs_span)
+                        .with_message(format!("this has type `{rhs}`")),
+                ]),
+                debug_info => diag.with_label([Label::secondary(file_id, debug_info.total_span())
+                    .with_message("triggered by this")]),
+            }
         }
 
         // Well-formedness of ops when applied between values of the same type

@@ -13,7 +13,7 @@ impl MissingConstId {
         opcode: OpCode,
         debug_info: Option<OpCodeDebugInfo>,
     ) -> Diagnostic<FileId> {
-        use super::ExtraDiagnostic;
+        use super::{ExtraDiagnostic, TotalSpan};
         use codespan_reporting::diagnostic::Label;
 
         let MissingConstId(const_id) = self;
@@ -26,13 +26,13 @@ impl MissingConstId {
 
         if let Some(debug_info) = debug_info {
             match (opcode, debug_info) {
-                (OpCode::LoadConstant(_), OpCodeDebugInfo::LoadConst(info)) => diag
-                    .with_label([Label::primary(file_id, info.literal)
+                (OpCode::LoadConstant(_), OpCodeDebugInfo::Literal(span)) => diag
+                    .with_label([Label::primary(file_id, span)
                         .with_message("constructed out of this literal")]),
-                (OpCode::LoadConstant(_), OpCodeDebugInfo::Generic(span)) => diag.with_label([
-                    Label::secondary(file_id, span).with_message("triggered by this"),
-                ]),
-                _ => (),
+                (_, debug_info) => {
+                    diag.with_label([Label::secondary(file_id, debug_info.total_span())
+                        .with_message("triggered by this")])
+                }
             }
         }
 
