@@ -38,7 +38,7 @@ pub(crate) fn return_<'s, 'origin>(
             .map_output(|output| {
                 let (return_span, span) = output.take();
 
-                frag.emit_with_debug(
+                frag.emit(
                     OpCode::Return(return_values),
                     DebugInfo::Return {
                         return_: return_span,

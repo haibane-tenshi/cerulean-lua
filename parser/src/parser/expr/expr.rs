@@ -170,7 +170,7 @@ fn expr_impl<'s, 'origin>(
 
                         match maybe_opcode {
                             MaybeOpcode::OpCode(op) => {
-                                frag.emit_with_debug(OpCode::BinOp(op), debug_info.clone());
+                                frag.emit(OpCode::BinOp(op), debug_info.clone());
                             }
                             MaybeOpcode::ToBackpatch(instr_id) => {
                                 for id in [instr_id, instr_id + 1, instr_id + 2] {
@@ -307,7 +307,7 @@ fn head_expr<'s, 'origin>(
                             };
 
                             frag.emit_adjust_to(stack_start + 1, debug_info.clone());
-                            frag.emit_with_debug(opcode, debug_info);
+                            frag.emit(opcode, debug_info);
 
                             discard(span, output)
                         });

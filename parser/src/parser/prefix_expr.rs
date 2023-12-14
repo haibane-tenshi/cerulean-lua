@@ -26,7 +26,7 @@ pub(crate) fn prefix_expr<'s, 'origin>(
                 let (expr_type, span) = output.take();
                 if let PrefixExpr::Place(place) = expr_type {
                     let (opcode, debug_info) = place.into_opcode();
-                    frag.emit_with_debug(opcode, debug_info);
+                    frag.emit(opcode, debug_info);
                 }
                 frag.commit();
 
@@ -227,7 +227,7 @@ fn prefix_expr_impl<'s, 'origin>(
                     // Evaluate place.
                     if let PrefixExpr::Place(place) = expr_type.clone() {
                         let (opcode, debug_info) = place.into_opcode();
-                        frag.emit_with_debug(opcode, debug_info);
+                        frag.emit(opcode, debug_info);
                     }
 
                     // Adjust stack.
@@ -343,7 +343,7 @@ fn func_invocation<'s, 'origin>(
 
         let state = Source(s).and(func_args(frag.new_core()))?.inspect(|span| {
             let args = frag.stack_slot(FragmentStackSlot(0));
-            frag.emit_with_debug(
+            frag.emit(
                 OpCode::Invoke(args),
                 DebugInfo::FnCall {
                     callable: callable_span,
@@ -478,7 +478,7 @@ fn variable<'s, 'origin>(
                         };
 
                         // We don't know at this point if we read or write, so by default read.
-                        frag.emit_with_debug(
+                        frag.emit(
                             opcode,
                             DebugInfo::LoadPlace {
                                 place: DebugPlace::Global,
@@ -647,7 +647,7 @@ fn tab_call<'s, 'origin>(
                     Literal::String(ident.to_string()),
                     DebugInfo::Literal(ident_span.clone()),
                 );
-                frag.emit_with_debug(OpCode::TabGet, debug_info);
+                frag.emit(OpCode::TabGet, debug_info);
 
                 // Pass table itself as the first argument.
                 let instr_id = frag
@@ -669,7 +669,7 @@ fn tab_call<'s, 'origin>(
                 }
 
                 let args = frag.stack_slot(FragmentStackSlot(1));
-                frag.emit_with_debug(OpCode::Invoke(args), debug_info);
+                frag.emit(OpCode::Invoke(args), debug_info);
                 frag.commit();
 
                 span.put(PrefixExpr::FnCall)

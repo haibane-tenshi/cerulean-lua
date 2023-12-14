@@ -44,7 +44,7 @@ pub(crate) fn decl_local_fn<'s, 'origin>(
             .map_output(|(local_span, fn_span, ident_span, output)| {
                 let (recipe_id, output) = output.take();
 
-                frag.emit_with_debug(
+                frag.emit(
                     OpCode::MakeClosure(recipe_id),
                     DebugInfo::FnDecl {
                         local: Some(local_span),

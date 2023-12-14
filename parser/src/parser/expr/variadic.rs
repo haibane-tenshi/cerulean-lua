@@ -26,7 +26,7 @@ pub(crate) fn variadic<'s, 'origin>(
                 }
             })?
             .inspect(move |output| {
-                frag.emit_with_debug(OpCode::LoadVariadic, DebugInfo::LoadVarargs(output.span()));
+                frag.emit(OpCode::LoadVariadic, DebugInfo::LoadVarargs(output.span()));
                 frag.commit();
             });
 

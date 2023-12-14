@@ -30,7 +30,7 @@ pub(crate) fn function<'s, 'origin>(
             .map_output(|output| {
                 let ((fn_span, func_id), span) = output.take();
 
-                frag.emit_with_debug(
+                frag.emit(
                     OpCode::MakeClosure(func_id),
                     DebugInfo::FnExpr {
                         function: fn_span,

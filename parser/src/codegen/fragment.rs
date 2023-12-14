@@ -351,7 +351,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
-    pub fn emit_with_debug(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
+    pub fn emit(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
         self.stack.emit(&opcode);
         self.reachability.emit(&opcode);
         let r = self.fun.emit(opcode, debug_info);
@@ -361,12 +361,6 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
-    #[deprecated]
-    pub fn emit(&mut self, opcode: OpCode, span: Range<usize>) -> InstrId {
-        let debug_info = OpCodeDebugInfo::Generic(span);
-        self.emit_with_debug(opcode, debug_info)
-    }
-
     pub fn emit_adjust_to(
         &mut self,
         slot: FragmentStackSlot,
@@ -374,7 +368,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     ) -> Option<InstrId> {
         let instr_id = if self.stack.need_adjustment_to(slot) {
             let slot = self.stack.fragment_to_frame(slot);
-            let id = self.emit_with_debug(OpCode::AdjustStack(slot), debug_info);
+            let id = self.emit(OpCode::AdjustStack(slot), debug_info);
             Some(id)
         } else {
             None
@@ -401,7 +395,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             },
         };
 
-        let instr_id = self.emit_with_debug(opcode, debug_info);
+        let instr_id = self.emit(opcode, debug_info);
         self.jumps
             .register_jump(target, instr_id, self.stack.state());
 
@@ -418,19 +412,19 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     pub fn emit_loop_to(&mut self, debug_info: DebugInfo) {
         self.emit_adjust_to(FragmentStackSlot(0), debug_info.clone());
         let offset = self.fun.next_id() - self.fun.start();
-        self.emit_with_debug(OpCode::Loop { offset }, debug_info);
+        self.emit(OpCode::Loop { offset }, debug_info);
 
         trace!(fragment_id=?self.id(), "emit jump to start of current fragment");
     }
 
     pub fn emit_load_stack(&mut self, slot: FragmentStackSlot, debug_info: DebugInfo) -> InstrId {
         let slot = self.stack_slot(slot);
-        self.emit_with_debug(OpCode::LoadStack(slot), debug_info)
+        self.emit(OpCode::LoadStack(slot), debug_info)
     }
 
     pub fn emit_load_literal(&mut self, literal: Literal, debug_info: DebugInfo) -> InstrId {
         let const_id = self.const_table.insert(literal);
-        self.emit_with_debug(OpCode::LoadConstant(const_id), debug_info)
+        self.emit(OpCode::LoadConstant(const_id), debug_info)
     }
 
     pub fn try_emit_label(
@@ -467,7 +461,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let target = self.fun.next_id();
 
         let opcode = self.labels.goto(label, target);
-        let r = self.emit_with_debug(opcode, debug_info);
+        let r = self.emit(opcode, debug_info);
 
         trace!(fragment_id=?self.id(), ?label, "emit jump to label");
 

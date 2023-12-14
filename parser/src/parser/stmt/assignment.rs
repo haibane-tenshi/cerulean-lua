@@ -51,11 +51,8 @@ pub(crate) fn assignment<'s, 'origin>(
                                             expr: output.span(),
                                         };
 
-                                        frag.emit_with_debug(
-                                            OpCode::LoadStack(expr_slot),
-                                            debug_info.clone(),
-                                        );
-                                        frag.emit_with_debug(OpCode::StoreStack(slot), debug_info);
+                                        frag.emit(OpCode::LoadStack(expr_slot), debug_info.clone());
+                                        frag.emit(OpCode::StoreStack(slot), debug_info);
                                     }
                                     Place::Upvalue(slot, ident) => {
                                         let debug_info = DebugInfo::StorePlace {
@@ -65,14 +62,8 @@ pub(crate) fn assignment<'s, 'origin>(
                                             expr: output.span(),
                                         };
 
-                                        frag.emit_with_debug(
-                                            OpCode::LoadStack(expr_slot),
-                                            debug_info.clone(),
-                                        );
-                                        frag.emit_with_debug(
-                                            OpCode::StoreUpvalue(slot),
-                                            debug_info,
-                                        );
+                                        frag.emit(OpCode::LoadStack(expr_slot), debug_info.clone());
+                                        frag.emit(OpCode::StoreUpvalue(slot), debug_info);
                                     }
                                     Place::TableField(debug_info) => {
                                         use crate::parser::prefix_expr::TableFieldDebugInfo;
@@ -103,19 +94,10 @@ pub(crate) fn assignment<'s, 'origin>(
                                         let field = table + 1;
                                         places_start += 2;
 
-                                        frag.emit_with_debug(
-                                            OpCode::LoadStack(table),
-                                            debug_info.clone(),
-                                        );
-                                        frag.emit_with_debug(
-                                            OpCode::LoadStack(field),
-                                            debug_info.clone(),
-                                        );
-                                        frag.emit_with_debug(
-                                            OpCode::LoadStack(expr_slot),
-                                            debug_info.clone(),
-                                        );
-                                        frag.emit_with_debug(OpCode::TabSet, debug_info);
+                                        frag.emit(OpCode::LoadStack(table), debug_info.clone());
+                                        frag.emit(OpCode::LoadStack(field), debug_info.clone());
+                                        frag.emit(OpCode::LoadStack(expr_slot), debug_info.clone());
+                                        frag.emit(OpCode::TabSet, debug_info);
                                     }
                                 }
                             }

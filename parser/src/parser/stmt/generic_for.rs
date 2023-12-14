@@ -56,10 +56,10 @@ pub(crate) fn generic_for<'s, 'origin>(
                         iter: expr_list_span,
                     };
 
-                    loop_body.emit_with_debug(OpCode::LoadStack(iter), debug_info.clone());
-                    loop_body.emit_with_debug(OpCode::LoadStack(state), debug_info.clone());
-                    loop_body.emit_with_debug(OpCode::LoadStack(control), debug_info.clone());
-                    loop_body.emit_with_debug(OpCode::Invoke(iter_args), debug_info.clone());
+                    loop_body.emit(OpCode::LoadStack(iter), debug_info.clone());
+                    loop_body.emit(OpCode::LoadStack(state), debug_info.clone());
+                    loop_body.emit(OpCode::LoadStack(control), debug_info.clone());
+                    loop_body.emit(OpCode::Invoke(iter_args), debug_info.clone());
 
                     loop_body.emit_adjust_to(FragmentStackSlot(names.len()), debug_info.clone());
 
@@ -72,13 +72,13 @@ pub(crate) fn generic_for<'s, 'origin>(
                     // First output of iterator is the new value for control variable.
                     let new_control = iter_args;
 
-                    loop_body.emit_with_debug(OpCode::LoadStack(new_control), debug_info.clone());
+                    loop_body.emit(OpCode::LoadStack(new_control), debug_info.clone());
                     loop_body.emit_load_literal(Literal::Nil, debug_info.clone());
-                    loop_body.emit_with_debug(RelBinOp::Eq.into(), debug_info.clone());
+                    loop_body.emit(RelBinOp::Eq.into(), debug_info.clone());
                     loop_body.emit_jump_to_end(Some(true), debug_info.clone());
 
-                    loop_body.emit_with_debug(OpCode::LoadStack(new_control), debug_info.clone());
-                    loop_body.emit_with_debug(OpCode::StoreStack(control), debug_info.clone());
+                    loop_body.emit(OpCode::LoadStack(new_control), debug_info.clone());
+                    loop_body.emit(OpCode::StoreStack(control), debug_info.clone());
 
                     let state = Source(s)
                         .and(token_do)?
