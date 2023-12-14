@@ -141,6 +141,7 @@ impl TotalSpan for opcode::DebugInfo {
 
         match self {
             Generic(span) => span.clone(),
+            Invoke(t) => t.total_span(),
             LoadUpvalue(t) => t.total_span(),
             LoadConst(t) => t.total_span(),
             MakeClosure(t) => t.total_span(),
@@ -149,6 +150,17 @@ impl TotalSpan for opcode::DebugInfo {
             BinOp(t) => t.total_span(),
             TabGet(t) => t.total_span(),
             TabSet(t) => t.total_span(),
+        }
+    }
+}
+
+impl TotalSpan for opcode::Invoke {
+    fn total_span(&self) -> Range<usize> {
+        use opcode::Invoke::*;
+
+        match self {
+            Call { callable, args } => callable.start..args.end,
+            ForLoop { for_token: _, iter } => iter.clone(),
         }
     }
 }

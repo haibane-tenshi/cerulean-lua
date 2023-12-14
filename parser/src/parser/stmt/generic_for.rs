@@ -36,10 +36,10 @@ pub(crate) fn generic_for<'s, 'origin>(
             .and(name_list, keep)?
             .and(token_in, keep_range)?
             .with_mode(FailureMode::Malformed)
-            .and(expr_list_adjusted_to(4, envelope.new_core()), discard)?
+            .and(expr_list_adjusted_to(4, envelope.new_core()), keep_range)?
             .then(|output| {
                 |s| -> Result<_, FailFast> {
-                    let (((for_span, names), in_span), span) = output.take();
+                    let ((((for_span, names), in_span), expr_list_span), span) = output.take();
 
                     let iter = envelope.stack_slot(FragmentStackSlot(0));
                     let state = iter + 1;
@@ -54,7 +54,14 @@ pub(crate) fn generic_for<'s, 'origin>(
                     loop_body.emit(OpCode::LoadStack(iter), in_span.clone());
                     loop_body.emit(OpCode::LoadStack(state), in_span.clone());
                     loop_body.emit(OpCode::LoadStack(control), in_span.clone());
-                    loop_body.emit(OpCode::Invoke(iter_args), in_span.clone());
+                    loop_body.emit_with_debug(
+                        OpCode::Invoke(iter_args),
+                        debug_info::Invoke::ForLoop {
+                            for_token: for_span.clone(),
+                            iter: expr_list_span,
+                        }
+                        .into(),
+                    );
 
                     loop_body.emit_adjust_to(FragmentStackSlot(names.len()), in_span.clone());
 

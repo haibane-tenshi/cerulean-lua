@@ -10,6 +10,7 @@ pub enum DebugInfo {
     ///
     /// More specific information should be conveyed through other variants.
     Generic(Range<usize>),
+    Invoke(Invoke),
     LoadUpvalue(LoadUpvalue),
     LoadConst(LoadConst),
     MakeClosure(MakeClosure),
@@ -18,6 +19,23 @@ pub enum DebugInfo {
     BinOp(BinOp),
     TabGet(TabGet),
     TabSet(TabSet),
+}
+
+/// Debug info for [`OpCode::Invoke`](crate::opcode::OpCode::Invoke).
+#[derive(Debug, Clone)]
+pub enum Invoke {
+    Call {
+        callable: Range<usize>,
+        args: Range<usize>,
+    },
+
+    /// Emitted as part of generic `for` loop desugaring.
+    ForLoop {
+        for_token: Range<usize>,
+
+        /// Span pointing to expression that emitted iterator function.
+        iter: Range<usize>,
+    },
 }
 
 /// Debug info for [`OpCode::StoreUpvalue`](crate::opcode::OpCode::StoreUpvalue).
@@ -163,6 +181,12 @@ pub enum TabConstructor {
     /// }
     /// ```
     Value { value: Range<usize> },
+}
+
+impl From<Invoke> for DebugInfo {
+    fn from(value: Invoke) -> Self {
+        DebugInfo::Invoke(value)
+    }
 }
 
 impl From<LoadUpvalue> for DebugInfo {

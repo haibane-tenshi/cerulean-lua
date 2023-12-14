@@ -291,7 +291,7 @@ fn tail_segment<'s, 'origin>(
 
 fn func_invocation<'s, 'origin>(
     core: Core<'s, 'origin>,
-    span: Range<usize>,
+    callable_span: Range<usize>,
 ) -> impl ParseOnce<
     Lexer<'s>,
     Output = Spanned<PrefixExpr>,
@@ -302,9 +302,16 @@ fn func_invocation<'s, 'origin>(
     move |s: Lexer<'s>| {
         let mut frag = core.expr_at(FragmentStackSlot(0));
 
-        let state = Source(s).and(func_args(frag.new_core()))?.inspect(|_| {
+        let state = Source(s).and(func_args(frag.new_core()))?.inspect(|span| {
             let args = frag.stack_slot(FragmentStackSlot(0));
-            frag.emit(OpCode::Invoke(args), span);
+            frag.emit_with_debug(
+                OpCode::Invoke(args),
+                debug_info::Invoke::Call {
+                    callable: callable_span,
+                    args: span.span(),
+                }
+                .into(),
+            );
             frag.commit();
         });
 
@@ -576,7 +583,7 @@ fn tab_call<'s, 'origin>(
             .and(token_colon)?
             .map_output(Spanned::put_range)
             .and(ident, keep_with_range)?
-            .then(|output| {
+            .map_output(|output| {
                 let ((colon_span, ident, ident_span), span) = output.take();
 
                 // Acquire function.
@@ -592,17 +599,24 @@ fn tab_call<'s, 'origin>(
                     .into(),
                 );
 
+                // Pass table itself as the first argument.
                 frag.emit_load_stack(FragmentStackSlot(0), table_span.clone());
 
-                func_args(frag.new_core())
-                    .map_output(|output| discard(span, output).put(colon_span))
-            })?
+                span.put_range()
+            })
+            .and(func_args(frag.new_core()), keep_range)?
             .map_output(move |output| {
-                let (colon_span, span) = output.take();
+                let ((colon_ident_span, args_span), span) = output.take();
 
-                // Pass table itself as the first argument.
                 let args = frag.stack_slot(FragmentStackSlot(1));
-                frag.emit(OpCode::Invoke(args), colon_span);
+                frag.emit_with_debug(
+                    OpCode::Invoke(args),
+                    debug_info::Invoke::Call {
+                        callable: table_span.start..colon_ident_span.end,
+                        args: args_span,
+                    }
+                    .into(),
+                );
                 frag.commit();
 
                 span.put(PrefixExpr::FnCall)
