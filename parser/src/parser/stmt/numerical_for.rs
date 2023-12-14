@@ -113,7 +113,14 @@ pub(crate) fn numerical_for<'s, 'origin>(
                             OpCode::LoadConstant(error_msg),
                             generic_debug_info.clone(),
                         );
-                        zero_check.emit(OpCode::Panic, step_span.clone());
+                        zero_check.emit_with_debug(
+                            OpCode::Panic,
+                            debug_info::Panic::ForLoopStepZero {
+                                for_token: for_span.clone(),
+                                step: step_span.clone(),
+                            }
+                            .into(),
+                        );
 
                         zero_check.commit();
 

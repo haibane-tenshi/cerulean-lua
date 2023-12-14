@@ -141,6 +141,7 @@ impl TotalSpan for opcode::DebugInfo {
 
         match self {
             Generic(span) => span.clone(),
+            Panic(t) => t.total_span(),
             Invoke(t) => t.total_span(),
             Return(t) => t.total_span(),
             LoadStack(t) => t.total_span(),
@@ -153,6 +154,16 @@ impl TotalSpan for opcode::DebugInfo {
             BinOp(t) => t.total_span(),
             TabGet(t) => t.total_span(),
             TabSet(t) => t.total_span(),
+        }
+    }
+}
+
+impl TotalSpan for opcode::Panic {
+    fn total_span(&self) -> Range<usize> {
+        use opcode::Panic::*;
+
+        match self {
+            ForLoopStepZero { for_token: _, step } => step.clone(),
         }
     }
 }

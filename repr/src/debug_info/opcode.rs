@@ -10,6 +10,7 @@ pub enum DebugInfo {
     ///
     /// More specific information should be conveyed through other variants.
     Generic(Range<usize>),
+    Panic(Panic),
     Invoke(Invoke),
     Return(Return),
     LoadStack(LoadStack),
@@ -22,6 +23,15 @@ pub enum DebugInfo {
     BinOp(BinOp),
     TabGet(TabGet),
     TabSet(TabSet),
+}
+
+/// Debug info for [`OpCode::Panic`](crate::opcode::OpCode::Panic).
+#[derive(Debug, Clone)]
+pub enum Panic {
+    ForLoopStepZero {
+        for_token: Range<usize>,
+        step: Range<usize>,
+    },
 }
 
 /// Debug info for [`OpCode::Invoke`](crate::opcode::OpCode::Invoke).
@@ -216,6 +226,12 @@ pub enum TabConstructor {
     /// }
     /// ```
     Value { value: Range<usize> },
+}
+
+impl From<Panic> for DebugInfo {
+    fn from(value: Panic) -> Self {
+        DebugInfo::Panic(value)
+    }
 }
 
 impl From<Invoke> for DebugInfo {
