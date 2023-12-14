@@ -185,7 +185,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
                             loop_body.emit_with_debug(AriBinOp::Add.into(), debug_info.clone());
                             loop_body
                                 .emit_with_debug(OpCode::StoreStack(loop_var), debug_info.clone());
-                            loop_body.emit_loop_to(end_span.clone());
+                            loop_body.emit_loop_to(debug_info.clone());
 
                             // Clean up.
                             loop_body.commit(end_span.clone());

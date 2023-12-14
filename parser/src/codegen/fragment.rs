@@ -411,10 +411,10 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.emit_jump_to(target, cond, debug_info)
     }
 
-    pub fn emit_loop_to(&mut self, span: Range<usize>) {
-        self.emit_adjust_to(FragmentStackSlot(0), span.clone());
+    pub fn emit_loop_to(&mut self, debug_info: DebugInfo) {
+        self.emit_adjust_to(FragmentStackSlot(0), 0..0);
         let offset = self.fun.next_id() - self.fun.start();
-        self.emit(OpCode::Loop { offset }, span);
+        self.emit_with_debug(OpCode::Loop { offset }, debug_info);
 
         trace!(fragment_id=?self.id(), "emit jump to start of current fragment");
     }

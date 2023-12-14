@@ -38,15 +38,13 @@ pub(crate) fn repeat_until<'s, 'origin>(
             .map_output(|output| {
                 let ((repeat_span, until_span), output) = output.take();
 
-                loop_body.emit_jump_to(
-                    envelope_id,
-                    Some(true),
-                    DebugInfo::RepeatLoop {
-                        repeat: repeat_span.clone(),
-                        until: until_span.clone(),
-                    },
-                );
-                loop_body.emit_loop_to(until_span.clone());
+                let debug_info = DebugInfo::RepeatLoop {
+                    repeat: repeat_span.clone(),
+                    until: until_span.clone(),
+                };
+
+                loop_body.emit_jump_to(envelope_id, Some(true), debug_info.clone());
+                loop_body.emit_loop_to(debug_info.clone());
                 loop_body.commit(until_span.clone());
 
                 (until_span, output)

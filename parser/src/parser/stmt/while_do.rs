@@ -36,25 +36,23 @@ pub(crate) fn while_do<'s, 'origin>(
             .map_output(Spanned::put_range)
             .and(expr_adjusted_to_1(loop_body.new_core()), discard)?
             .and(token_do, discard)?
-            .map_output(|output| {
-                let (while_span, span) = output.take();
+            .inspect(|output| {
+                let while_span = output.value.clone();
                 loop_body.emit_jump_to(
                     envelope_id,
                     Some(false),
                     DebugInfo::WhileLoop { while_: while_span },
                 );
-
-                span
             })
             .and(block(loop_body.new_core()), opt_discard)?
-            .and(token_end, replace_range)?
+            .and(token_end, keep_range)?
             .inspect(|output| {
-                let end_span = output.value.clone();
-                loop_body.emit_loop_to(end_span.clone());
+                let (while_span, end_span) = output.value.clone();
+                loop_body.emit_loop_to(DebugInfo::WhileLoop { while_: while_span });
                 loop_body.commit(end_span);
             })
             .map_output(|output| {
-                let (end_span, span) = output.take();
+                let ((_, end_span), span) = output.take();
                 envelope.commit(end_span);
 
                 trace!(span=?span.span(), str=&source[span.span()]);

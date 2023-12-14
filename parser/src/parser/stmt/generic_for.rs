@@ -78,7 +78,7 @@ pub(crate) fn generic_for<'s, 'origin>(
                     loop_body.emit_jump_to_end(Some(true), debug_info.clone());
 
                     loop_body.emit_with_debug(OpCode::LoadStack(new_control), debug_info.clone());
-                    loop_body.emit_with_debug(OpCode::StoreStack(control), debug_info);
+                    loop_body.emit_with_debug(OpCode::StoreStack(control), debug_info.clone());
 
                     let state = Source(s)
                         .and(token_do)?
@@ -86,7 +86,7 @@ pub(crate) fn generic_for<'s, 'origin>(
                         .and(token_end, replace_range)?
                         .inspect(|output| {
                             let end_span = output.value.clone();
-                            loop_body.emit_loop_to(end_span.clone());
+                            loop_body.emit_loop_to(debug_info.clone());
                             loop_body.commit(end_span);
                         })
                         .map_output(|output| replace(span, output));
