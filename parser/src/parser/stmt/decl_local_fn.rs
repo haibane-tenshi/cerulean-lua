@@ -28,39 +28,38 @@ pub(crate) fn decl_local_fn<'s, 'origin>(
         let state = Source(s)
             .and(token_local)?
             .with_mode(FailureMode::Ambiguous)
-            .and(token_function, replace_range)?
+            .map_output(Spanned::put_range)
+            .and(token_function, keep_range)?
             .with_mode(FailureMode::Malformed)
-            .and(identifier, keep)?
-            .map_output(|output| {
+            .and(identifier, keep_with_range)?
+            .then(|output| {
                 // Lua disambiguates this case by introducing local variable first and assigning to it later.
                 // This is relevant for recursive functions.
-                let ((fn_span, ident), span) = output.take();
+                let (((local_span, fn_span), ident, ident_span), span) = output.take();
                 frag.push_temporary(Some(ident));
 
-                (ident, span.put(fn_span))
-            })
-            .then(|(ident, span)| {
                 func_body(frag.new_core(), false, ident.0, span.span().start)
-                    .map_output(|output| keep(span, output))
+                    .map_output(|output| (local_span, fn_span, ident_span, replace(span, output)))
             })?
-            .map_output(|output| {
-                let ((fn_span, func_id), span) = output.take();
+            .map_output(|(local_span, fn_span, ident_span, output)| {
+                let (recipe_id, output) = output.take();
 
                 frag.emit_with_debug(
-                    OpCode::MakeClosure(func_id),
-                    debug_info::MakeClosure {
-                        function_token: fn_span,
-                        total_span: span.span(),
-                    }
-                    .into(),
+                    OpCode::MakeClosure(recipe_id),
+                    DebugInfo::FnDecl {
+                        local: Some(local_span),
+                        function: fn_span,
+                        name: ident_span,
+                        total_span: output.span(),
+                    },
                 );
                 // Stack is already adjusted, remove unnecessary temporary.
                 frag.pop_temporary();
                 frag.commit();
 
-                trace!(span=?span.span(), str=&source[span.span()]);
+                trace!(span=?output.span(), str=&source[output.span()]);
 
-                span
+                output
             })
             .collapse();
 

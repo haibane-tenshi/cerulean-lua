@@ -23,7 +23,9 @@ pub(crate) fn break_<'s, 'origin>(
         let state = token_break
             .parse(s)?
             .try_map_output(|span| -> Result<_, CodegenError> {
-                frag.emit_break(span.span())?;
+                frag.emit_break(DebugInfo::Break {
+                    break_: span.span(),
+                })?;
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);

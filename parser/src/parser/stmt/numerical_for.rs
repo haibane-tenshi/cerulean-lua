@@ -72,8 +72,14 @@ pub(crate) fn numerical_for<'s, 'origin>(
                 opt_keep,
             )?
             .then(|output| {
-                let ((((for_span, _loop_var_span, eq_sign_span), _limit_span), step), span) =
+                let ((((for_span, loop_var_span, _eq_sign_span), _limit_span), step), span) =
                     output.take();
+
+                let debug_info = DebugInfo::NumericForLoop {
+                    for_: for_span.clone(),
+                    ident: loop_var_span,
+                    step: step.clone(),
+                };
 
                 let loop_var = envelope.stack_slot(FragmentStackSlot(0));
                 let limit = loop_var + 1;
@@ -85,8 +91,6 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         StackSlotOrConstId::ConstId(const_id)
                     }
                 };
-
-                let generic_debug_info = debug_info::DebugInfo::Generic(for_span.clone());
 
                 // Emit loop controls.
                 let mut loop_body = match step {
@@ -100,27 +104,14 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         // Panic if increment is 0.
                         let mut zero_check = envelope.new_expr();
 
-                        zero_check
-                            .emit_with_debug(OpCode::LoadStack(step), generic_debug_info.clone());
-                        zero_check.emit_with_debug(
-                            OpCode::LoadConstant(zero),
-                            generic_debug_info.clone(),
-                        );
+                        zero_check.emit_with_debug(OpCode::LoadStack(step), debug_info.clone());
+                        zero_check.emit_with_debug(OpCode::LoadConstant(zero), debug_info.clone());
                         zero_check.emit(RelBinOp::Eq.into(), step_span.clone());
-                        zero_check.emit_jump_to_end(Some(false), step_span.clone());
+                        zero_check.emit_jump_to_end(Some(false), debug_info.clone());
 
-                        zero_check.emit_with_debug(
-                            OpCode::LoadConstant(error_msg),
-                            generic_debug_info.clone(),
-                        );
-                        zero_check.emit_with_debug(
-                            OpCode::Panic,
-                            debug_info::Panic::ForLoopStepZero {
-                                for_token: for_span.clone(),
-                                step: step_span.clone(),
-                            }
-                            .into(),
-                        );
+                        zero_check
+                            .emit_with_debug(OpCode::LoadConstant(error_msg), debug_info.clone());
+                        zero_check.emit_with_debug(OpCode::Panic, debug_info.clone());
 
                         zero_check.commit();
 
@@ -132,38 +123,28 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         let mut positive_step = controls.new_expr();
 
+                        positive_step.emit_with_debug(OpCode::LoadStack(step), debug_info.clone());
                         positive_step
-                            .emit_with_debug(OpCode::LoadStack(step), generic_debug_info.clone());
-                        positive_step.emit_with_debug(
-                            OpCode::LoadConstant(zero),
-                            generic_debug_info.clone(),
-                        );
-                        positive_step.emit(RelBinOp::Gt.into(), for_span.clone());
-                        positive_step.emit_jump_to_end(Some(false), for_span.clone());
+                            .emit_with_debug(OpCode::LoadConstant(zero), debug_info.clone());
+                        positive_step.emit_with_debug(RelBinOp::Gt.into(), debug_info.clone());
+                        positive_step.emit_jump_to_end(Some(false), debug_info.clone());
 
                         // Path: positive step.
-                        positive_step.emit_with_debug(
-                            OpCode::LoadStack(loop_var),
-                            generic_debug_info.clone(),
-                        );
                         positive_step
-                            .emit_with_debug(OpCode::LoadStack(limit), generic_debug_info.clone());
+                            .emit_with_debug(OpCode::LoadStack(loop_var), debug_info.clone());
+                        positive_step.emit_with_debug(OpCode::LoadStack(limit), debug_info.clone());
                         positive_step.emit(RelBinOp::LtEq.into(), for_span.clone());
-                        positive_step.emit_jump_to(envelope_id, Some(false), for_span.clone());
-                        positive_step.emit_jump_to(controls_id, None, for_span.clone());
+                        positive_step.emit_jump_to(envelope_id, Some(false), debug_info.clone());
+                        positive_step.emit_jump_to(controls_id, None, debug_info.clone());
 
                         positive_step.commit();
 
                         // Path: negative step.
                         // We assume total ordering for the variable.
-                        controls.emit_with_debug(
-                            OpCode::LoadStack(loop_var),
-                            generic_debug_info.clone(),
-                        );
-                        controls
-                            .emit_with_debug(OpCode::LoadStack(limit), generic_debug_info.clone());
-                        controls.emit(RelBinOp::GtEq.into(), for_span.clone());
-                        controls.emit_jump_to(envelope_id, Some(false), for_span.clone());
+                        controls.emit_with_debug(OpCode::LoadStack(loop_var), debug_info.clone());
+                        controls.emit_with_debug(OpCode::LoadStack(limit), debug_info.clone());
+                        controls.emit_with_debug(RelBinOp::GtEq.into(), debug_info.clone());
+                        controls.emit_jump_to(envelope_id, Some(false), debug_info.clone());
 
                         controls.commit();
 
@@ -173,14 +154,10 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         let mut loop_body = envelope.new_scope();
                         loop_body.mark_as_loop();
 
-                        loop_body.emit_with_debug(
-                            OpCode::LoadStack(loop_var),
-                            generic_debug_info.clone(),
-                        );
-                        loop_body
-                            .emit_with_debug(OpCode::LoadStack(limit), generic_debug_info.clone());
-                        loop_body.emit(RelBinOp::LtEq.into(), for_span.clone());
-                        loop_body.emit_jump_to(envelope_id, Some(false), for_span.clone());
+                        loop_body.emit_with_debug(OpCode::LoadStack(loop_var), debug_info.clone());
+                        loop_body.emit_with_debug(OpCode::LoadStack(limit), debug_info.clone());
+                        loop_body.emit_with_debug(RelBinOp::LtEq.into(), debug_info.clone());
+                        loop_body.emit_jump_to(envelope_id, Some(false), debug_info.clone());
 
                         loop_body
                     }
@@ -195,26 +172,19 @@ pub(crate) fn numerical_for<'s, 'origin>(
                             let end_span = output.value.clone();
 
                             // Increment control variable.
-                            loop_body.emit_with_debug(
-                                OpCode::LoadStack(loop_var),
-                                generic_debug_info.clone(),
-                            );
+                            loop_body
+                                .emit_with_debug(OpCode::LoadStack(loop_var), debug_info.clone());
                             match step {
                                 StackSlotOrConstId::StackSlot(slot, _) => loop_body
-                                    .emit_with_debug(
-                                        OpCode::LoadStack(slot),
-                                        generic_debug_info.clone(),
-                                    ),
+                                    .emit_with_debug(OpCode::LoadStack(slot), debug_info.clone()),
                                 StackSlotOrConstId::ConstId(const_id) => loop_body.emit_with_debug(
                                     OpCode::LoadConstant(const_id),
-                                    generic_debug_info,
+                                    debug_info.clone(),
                                 ),
                             };
-                            loop_body.emit(AriBinOp::Add.into(), eq_sign_span.clone());
-                            loop_body.emit_with_debug(
-                                OpCode::StoreStack(loop_var),
-                                debug_info::DebugInfo::Generic(eq_sign_span),
-                            );
+                            loop_body.emit_with_debug(AriBinOp::Add.into(), debug_info.clone());
+                            loop_body
+                                .emit_with_debug(OpCode::StoreStack(loop_var), debug_info.clone());
                             loop_body.emit_loop_to(end_span.clone());
 
                             // Clean up.

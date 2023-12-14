@@ -34,23 +34,24 @@ pub(crate) fn if_then<'s, 'origin>(
             .map_output(Spanned::put_range)
             .and(expr_adjusted_to_1(envelope.new_core()), discard)?
             .and(token_then, discard)?
-            .map_output(|output| {
-                let (if_span, span) = output.take();
-                envelope.emit_jump_to_end(Some(false), if_span);
-                span
+            .inspect(|output| {
+                envelope.emit_jump_to_end(
+                    Some(false),
+                    DebugInfo::IfElse {
+                        if_: output.value.clone(),
+                    },
+                );
             })
             .and(block(envelope.new_core()), opt_discard)?
-            .and(
-                |s: Lexer<'s>| -> Result<
-                    ParsingState<_, _, Option<Spanned<()>>, Complete, ParseFailure>,
-                    FailFast,
-                > {
-                    envelope.emit_jump_to(envelope_id, None, s.span());
-
-                    Ok(ParsingState::Success(s, None, Complete))
-                },
-                opt_discard,
-            )?
+            .inspect(|output| {
+                envelope.emit_jump_to(
+                    envelope_id,
+                    None,
+                    DebugInfo::IfElse {
+                        if_: output.value.clone(),
+                    },
+                );
+            })
             .and(
                 (|s| else_if_clause(envelope_id, envelope.new_core()).parse_once(s))
                     .repeat_with(discard)
@@ -114,18 +115,30 @@ fn else_if_clause<'s, 'origin>(
             .map_output(Spanned::put_range)
             .and(expr_adjusted_to_1(frag.new_core()), discard)?
             .and(token_then, discard)?
-            .map_output(|output| {
-                let (elseif_span, span) = output.take();
-                frag.emit_jump_to_end(Some(false), elseif_span);
-                span
+            .inspect(|output| {
+                frag.emit_jump_to_end(
+                    Some(false),
+                    DebugInfo::IfElse {
+                        if_: output.value.clone(),
+                    },
+                );
             })
             .and(block(frag.new_core()), opt_discard)?
-            .collapse();
+            .map_output(|output| {
+                let (elseif_span, output) = output.take();
 
-        if let ParsingState::Success(s, _, _) = &state {
-            frag.emit_jump_to(envelope, None, s.span());
-            frag.commit(s.span());
-        }
+                frag.emit_jump_to(
+                    envelope,
+                    None,
+                    DebugInfo::IfElse {
+                        if_: elseif_span.clone(),
+                    },
+                );
+                frag.commit(elseif_span);
+
+                output
+            })
+            .collapse();
 
         Ok(state)
     }

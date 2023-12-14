@@ -31,22 +31,32 @@ pub(crate) fn repeat_until<'s, 'origin>(
         let state = Source(s)
             .and(token_repeat)?
             .with_mode(FailureMode::Malformed)
+            .map_output(Spanned::put_range)
             .and(inner_block(loop_body.new_core()), opt_discard)?
-            .and(token_until, replace_range)?
+            .and(token_until, keep_range)?
             .and(expr_adjusted_to_1(loop_body.new_core()), discard)?
-            .inspect(|output| {
-                let until_span = output.value.clone();
-                loop_body.emit_jump_to(envelope_id, Some(true), until_span.clone());
+            .map_output(|output| {
+                let ((repeat_span, until_span), output) = output.take();
+
+                loop_body.emit_jump_to(
+                    envelope_id,
+                    Some(true),
+                    DebugInfo::RepeatLoop {
+                        repeat: repeat_span.clone(),
+                        until: until_span.clone(),
+                    },
+                );
                 loop_body.emit_loop_to(until_span.clone());
                 loop_body.commit(until_span.clone());
+
+                (until_span, output)
             })
-            .map_output(|output| {
-                let (until_span, span) = output.take();
+            .map_output(|(until_span, output)| {
                 envelope.commit(until_span);
 
-                trace!(span=?span.span(), str=&source[span.span()]);
+                trace!(span=?output.span(), str=&source[output.span()]);
 
-                span
+                output
             })
             .collapse();
 

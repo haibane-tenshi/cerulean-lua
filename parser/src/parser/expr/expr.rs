@@ -111,7 +111,7 @@ fn expr_impl<'s, 'origin>(
                             };
 
                             frag.emit_load_stack(FragmentStackSlot(0), span.span());
-                            frag.emit_jump_to_end(Some(cond), span.span());
+                            frag.emit_jump_to_end(Some(cond), DebugInfo::Generic(span.span()));
 
                             // Discard left operand when entering the other branch.
                             frag.emit_adjust_to(FragmentStackSlot(0), span.span());
@@ -149,7 +149,7 @@ fn expr_impl<'s, 'origin>(
                     if let Some(opcode) = maybe_opcode {
                         frag.emit_with_debug(
                             opcode,
-                            debug_info::BinOp {
+                            DebugInfo::BinOp {
                                 op: op_span,
                                 lhs: total_span.clone(),
                                 rhs: rhs_span,
@@ -274,7 +274,7 @@ fn head_expr<'s, 'origin>(
                             frag.emit_adjust_to(stack_start + 1, span.span());
                             frag.emit_with_debug(
                                 opcode,
-                                debug_info::UnaOp {
+                                DebugInfo::UnaOp {
                                     op: span.span(),
                                     arg: output.span(),
                                 }

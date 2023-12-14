@@ -92,21 +92,57 @@ trait IntoOpcode {
 pub(crate) enum Place {
     Temporary(StackSlot, Range<usize>),
     Upvalue(UpvalueSlot, Range<usize>),
-    TableField(debug_info::TabGet),
+    TableField(TableFieldDebugInfo),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TableFieldDebugInfo {
+    Global(Range<usize>),
+    Local {
+        table: Range<usize>,
+        index: Range<usize>,
+        indexing: Range<usize>,
+    },
 }
 
 impl Place {
-    fn into_opcode(self) -> (OpCode, debug_info::DebugInfo) {
+    fn into_opcode(self) -> (OpCode, DebugInfo) {
         match self {
-            Place::Temporary(slot, span) => (
+            Place::Temporary(slot, ident) => (
                 OpCode::LoadStack(slot),
-                debug_info::LoadStack::Local(span).into(),
+                DebugInfo::LoadPlace {
+                    place: DebugPlace::Temporary,
+                    ident,
+                },
             ),
-            Place::Upvalue(slot, span) => (
+            Place::Upvalue(slot, ident) => (
                 OpCode::LoadUpvalue(slot),
-                debug_info::LoadUpvalue::Global(span).into(),
+                DebugInfo::LoadPlace {
+                    place: DebugPlace::Upvalue,
+                    ident,
+                },
             ),
-            Place::TableField(debug_info) => (OpCode::TabGet, debug_info.into()),
+            Place::TableField(debug_info) => {
+                use TableFieldDebugInfo::*;
+
+                let debug_info = match debug_info {
+                    Global(ident) => DebugInfo::LoadPlace {
+                        place: DebugPlace::Global,
+                        ident,
+                    },
+                    Local {
+                        table,
+                        index,
+                        indexing,
+                    } => DebugInfo::LoadTable {
+                        table,
+                        index,
+                        indexing,
+                    },
+                };
+
+                (OpCode::TabGet, debug_info)
+            }
         }
     }
 }
@@ -306,7 +342,7 @@ fn func_invocation<'s, 'origin>(
             let args = frag.stack_slot(FragmentStackSlot(0));
             frag.emit_with_debug(
                 OpCode::Invoke(args),
-                debug_info::Invoke::Call {
+                DebugInfo::FnCall {
                     callable: callable_span,
                     args: span.span(),
                 }
@@ -400,7 +436,10 @@ fn args_str<'s, 'origin>(
             .map_failure(|f| ParseFailure::from(FnArgsFailure::String(f)))
             .map_output(move |output| {
                 let (value, span) = output.take();
-                frag.emit_load_literal(Literal::String(value.into_owned()), span.span());
+                frag.emit_load_literal(
+                    Literal::String(value.into_owned()),
+                    DebugInfo::Literal(span.span()),
+                );
 
                 frag.commit();
                 span
@@ -431,20 +470,25 @@ fn variable<'s, 'origin>(
                     Some(UpvalueSource::Temporary(slot)) => Place::Temporary(slot, span.span()),
                     Some(UpvalueSource::Upvalue(slot)) => Place::Upvalue(slot, span.span()),
                     None => {
-                        let (opcode, info) = match frag.capture_global_env()? {
-                            UpvalueSource::Temporary(slot) => (
-                                OpCode::LoadStack(slot),
-                                debug_info::LoadStack::Global(span.span()).into(),
-                            ),
-                            UpvalueSource::Upvalue(slot) => (
-                                OpCode::LoadUpvalue(slot),
-                                debug_info::LoadUpvalue::Global(span.span()).into(),
-                            ),
+                        let opcode = match frag.capture_global_env()? {
+                            UpvalueSource::Temporary(slot) => OpCode::LoadStack(slot),
+                            UpvalueSource::Upvalue(slot) => OpCode::LoadUpvalue(slot),
                         };
-                        frag.emit_with_debug(opcode, info);
-                        frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
 
-                        let debug_info = debug_info::TabGet::GlobalEnv { ident: span.span() };
+                        // We don't know at this point if we read or write, so by default read.
+                        frag.emit_with_debug(
+                            opcode,
+                            DebugInfo::LoadPlace {
+                                place: DebugPlace::Global,
+                                ident: span.span(),
+                            },
+                        );
+                        frag.emit_load_literal(
+                            Literal::String(ident.to_string()),
+                            DebugInfo::Literal(span.span()),
+                        );
+
+                        let debug_info = TableFieldDebugInfo::Global(span.span());
 
                         Place::TableField(debug_info)
                     }
@@ -489,10 +533,13 @@ fn field<'s, 'origin>(
             .and(identifier, replace_with_range)?
             .map_output(move |output| {
                 let ((ident, ident_span), span) = output.take();
-                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span.clone());
+                frag.emit_load_literal(
+                    Literal::String(ident.to_string()),
+                    DebugInfo::Literal(ident_span.clone()),
+                );
                 frag.commit();
 
-                let debug_info = debug_info::TabGet::Local {
+                let debug_info = TableFieldDebugInfo::Local {
                     table: table_span,
                     index: ident_span,
                     indexing: span.span(),
@@ -542,7 +589,7 @@ fn index<'s, 'origin>(
             .map_output(|output| {
                 let (index, span) = output.take();
 
-                let debug_info = debug_info::TabGet::Local {
+                let debug_info = TableFieldDebugInfo::Local {
                     table: table_span,
                     index,
                     indexing: span.span(),
@@ -588,10 +635,13 @@ fn tab_call<'s, 'origin>(
 
                 // Acquire function.
                 frag.emit_load_stack(FragmentStackSlot(0), table_span.clone());
-                frag.emit_load_literal(Literal::String(ident.to_string()), ident_span.clone());
+                frag.emit_load_literal(
+                    Literal::String(ident.to_string()),
+                    DebugInfo::Literal(ident_span.clone()),
+                );
                 frag.emit_with_debug(
                     OpCode::TabGet,
-                    debug_info::TabGet::Local {
+                    DebugInfo::LoadTable {
                         table: table_span.clone(),
                         index: ident_span.clone(),
                         indexing: colon_span.start..ident_span.end,
@@ -611,11 +661,10 @@ fn tab_call<'s, 'origin>(
                 let args = frag.stack_slot(FragmentStackSlot(1));
                 frag.emit_with_debug(
                     OpCode::Invoke(args),
-                    debug_info::Invoke::Call {
+                    DebugInfo::FnCall {
                         callable: table_span.start..colon_ident_span.end,
                         args: args_span,
-                    }
-                    .into(),
+                    },
                 );
                 frag.commit();
 

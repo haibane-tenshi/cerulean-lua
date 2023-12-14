@@ -44,35 +44,60 @@ pub(crate) fn assignment<'s, 'origin>(
                             for (expr_slot, place) in expr_slots.zip(places) {
                                 match place {
                                     Place::Temporary(slot, ident) => {
+                                        let debug_info = DebugInfo::StorePlace {
+                                            place: DebugPlace::Temporary,
+                                            ident,
+                                            eq_sign: eq_sign_span.clone(),
+                                            expr: output.span(),
+                                        };
+
                                         frag.emit_with_debug(
                                             OpCode::LoadStack(expr_slot),
-                                            debug_info::LoadStack::Expr(output.span()).into(),
+                                            debug_info.clone(),
                                         );
-                                        frag.emit_with_debug(
-                                            OpCode::StoreStack(slot),
-                                            debug_info::StoreStack {
-                                                ident,
-                                                eq_sign: eq_sign_span.clone(),
-                                            }
-                                            .into(),
-                                        );
+                                        frag.emit_with_debug(OpCode::StoreStack(slot), debug_info);
                                     }
                                     Place::Upvalue(slot, ident) => {
+                                        let debug_info = DebugInfo::StorePlace {
+                                            place: DebugPlace::Upvalue,
+                                            ident,
+                                            eq_sign: eq_sign_span.clone(),
+                                            expr: output.span(),
+                                        };
+
                                         frag.emit_with_debug(
                                             OpCode::LoadStack(expr_slot),
-                                            debug_info::LoadStack::Expr(output.span()).into(),
+                                            debug_info.clone(),
                                         );
                                         frag.emit_with_debug(
                                             OpCode::StoreUpvalue(slot),
-                                            debug_info::StoreUpvalue {
-                                                ident,
-                                                eq_sign: eq_sign_span.clone(),
-                                            }
-                                            .into(),
+                                            debug_info,
                                         );
                                     }
                                     Place::TableField(debug_info) => {
-                                        use debug_info::{TabGet, TabSet};
+                                        use crate::parser::prefix_expr::TableFieldDebugInfo;
+
+                                        let debug_info = match debug_info {
+                                            TableFieldDebugInfo::Local {
+                                                table,
+                                                index,
+                                                indexing,
+                                            } => DebugInfo::StoreTable {
+                                                table,
+                                                index,
+                                                indexing,
+                                                eq_sign: eq_sign_span.clone(),
+                                                expr: output.span(),
+                                            },
+                                            TableFieldDebugInfo::Global(ident) => {
+                                                DebugInfo::StorePlace {
+                                                    place: DebugPlace::Global,
+                                                    ident,
+                                                    eq_sign: eq_sign_span.clone(),
+                                                    expr: output.span(),
+                                                }
+                                            }
+                                        };
 
                                         let table = frag.stack_slot(places_start);
                                         let field = table + 1;
@@ -80,33 +105,17 @@ pub(crate) fn assignment<'s, 'origin>(
 
                                         frag.emit_with_debug(
                                             OpCode::LoadStack(table),
-                                            debug_info::DebugInfo::Generic(eq_sign_span.clone()),
+                                            debug_info.clone(),
                                         );
                                         frag.emit_with_debug(
                                             OpCode::LoadStack(field),
-                                            debug_info::DebugInfo::Generic(eq_sign_span.clone()),
+                                            debug_info.clone(),
                                         );
                                         frag.emit_with_debug(
                                             OpCode::LoadStack(expr_slot),
-                                            debug_info::LoadStack::Expr(output.span()).into(),
+                                            debug_info.clone(),
                                         );
-                                        let debug_info = match debug_info {
-                                            TabGet::GlobalEnv { ident } => TabSet::GlobalEnv {
-                                                ident,
-                                                eq_sign: Some(eq_sign_span.clone()),
-                                            },
-                                            TabGet::Local {
-                                                table,
-                                                index,
-                                                indexing,
-                                            } => TabSet::Local {
-                                                table,
-                                                index,
-                                                indexing,
-                                                eq_sign: eq_sign_span.clone(),
-                                            },
-                                        };
-                                        frag.emit_with_debug(OpCode::TabSet, debug_info.into());
+                                        frag.emit_with_debug(OpCode::TabSet, debug_info);
                                     }
                                 }
                             }

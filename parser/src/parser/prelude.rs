@@ -12,7 +12,9 @@ pub(crate) use crate::parser::traits::{
     replace_range, replace_with_range, Parse, ParseMut, ParseOnce, ParsingState, Source, Spanned,
 };
 pub(crate) use crate::parser::{Eof, NextToken};
-pub(crate) use repr::debug_info::opcode as debug_info;
+pub(crate) use repr::debug_info::opcode::{
+    DebugInfo, Place as DebugPlace, TabConstructor as DebugTabEntry,
+};
 pub(crate) use repr::index::{ConstId, StackSlot, UpvalueSlot};
 pub(crate) use repr::literal::Literal;
 pub(crate) use repr::opcode::{AriBinOp, BitBinOp, OpCode, RelBinOp, StrBinOp};

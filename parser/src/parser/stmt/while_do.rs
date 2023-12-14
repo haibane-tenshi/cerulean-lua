@@ -38,7 +38,11 @@ pub(crate) fn while_do<'s, 'origin>(
             .and(token_do, discard)?
             .map_output(|output| {
                 let (while_span, span) = output.take();
-                loop_body.emit_jump_to(envelope_id, Some(false), while_span);
+                loop_body.emit_jump_to(
+                    envelope_id,
+                    Some(false),
+                    DebugInfo::WhileLoop { while_: while_span },
+                );
 
                 span
             })

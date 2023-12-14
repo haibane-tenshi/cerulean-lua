@@ -32,11 +32,10 @@ pub(crate) fn function<'s, 'origin>(
 
                 frag.emit_with_debug(
                     OpCode::MakeClosure(func_id),
-                    debug_info::MakeClosure {
-                        function_token: fn_span,
+                    DebugInfo::FnExpr {
+                        function: fn_span,
                         total_span: span.span(),
-                    }
-                    .into(),
+                    },
                 );
                 frag.commit();
 

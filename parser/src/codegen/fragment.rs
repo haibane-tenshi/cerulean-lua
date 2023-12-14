@@ -2,7 +2,7 @@ use std::ops::{Add, Deref, DerefMut, Range};
 use thiserror::Error;
 use tracing::trace;
 
-use repr::debug_info::opcode as debug_info;
+use repr::debug_info::opcode::DebugInfo;
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{InstrId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
@@ -384,7 +384,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         &mut self,
         target: FragmentId,
         cond: Option<bool>,
-        span: Range<usize>,
+        debug_info: DebugInfo,
     ) -> InstrId {
         let opcode = match cond {
             Some(cond) => OpCode::JumpIf {
@@ -396,7 +396,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             },
         };
 
-        let instr_id = self.emit(opcode, span);
+        let instr_id = self.emit_with_debug(opcode, debug_info);
         self.jumps
             .register_jump(target, instr_id, self.stack.state());
 
@@ -405,9 +405,9 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         instr_id
     }
 
-    pub fn emit_jump_to_end(&mut self, cond: Option<bool>, span: Range<usize>) -> InstrId {
+    pub fn emit_jump_to_end(&mut self, cond: Option<bool>, debug_info: DebugInfo) -> InstrId {
         let target = self.id();
-        self.emit_jump_to(target, cond, span)
+        self.emit_jump_to(target, cond, debug_info)
     }
 
     pub fn emit_loop_to(&mut self, span: Range<usize>) {
@@ -423,17 +423,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         self.emit(OpCode::LoadStack(slot), span)
     }
 
-    pub fn emit_load_literal(&mut self, literal: Literal, literal_span: Range<usize>) -> InstrId {
+    pub fn emit_load_literal(&mut self, literal: Literal, debug_info: DebugInfo) -> InstrId {
         let const_id = self.const_table.insert(literal);
-        let debug_info = debug_info::LoadConst {
-            literal: literal_span,
-        };
-        self.emit_with_debug(OpCode::LoadConstant(const_id), debug_info.into())
-    }
-
-    pub fn emit_load_constant(&mut self, literal: Literal, related: Range<usize>) -> InstrId {
-        let const_id = self.const_table.insert(literal);
-        let debug_info = OpCodeDebugInfo::Generic(related);
         self.emit_with_debug(OpCode::LoadConstant(const_id), debug_info)
     }
 
@@ -478,12 +469,12 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
-    pub fn emit_break(&mut self, span: Range<usize>) -> Result<InstrId, BreakOutsideLoopError> {
+    pub fn emit_break(&mut self, debug_info: DebugInfo) -> Result<InstrId, BreakOutsideLoopError> {
         let target = self
             .loop_stack
             .innermost_loop()
             .ok_or(BreakOutsideLoopError)?;
-        let instr_id = self.emit_jump_to(target, None, span);
+        let instr_id = self.emit_jump_to(target, None, debug_info);
 
         trace!(fragment_id=?self.id(), "emit break statement");
 

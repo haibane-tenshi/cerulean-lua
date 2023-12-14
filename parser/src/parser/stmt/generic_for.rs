@@ -51,20 +51,15 @@ pub(crate) fn generic_for<'s, 'origin>(
                     loop_body.mark_as_loop();
                     let iter_args = loop_body.stack_slot(FragmentStackSlot(0));
 
-                    let generic_debug_info = debug_info::DebugInfo::Generic(for_span.clone());
+                    let debug_info = DebugInfo::GenericForLoop {
+                        for_: for_span.clone(),
+                        iter: expr_list_span,
+                    };
 
-                    loop_body.emit_with_debug(OpCode::LoadStack(iter), generic_debug_info.clone());
-                    loop_body.emit_with_debug(OpCode::LoadStack(state), generic_debug_info.clone());
-                    loop_body
-                        .emit_with_debug(OpCode::LoadStack(control), generic_debug_info.clone());
-                    loop_body.emit_with_debug(
-                        OpCode::Invoke(iter_args),
-                        debug_info::Invoke::ForLoop {
-                            for_token: for_span.clone(),
-                            iter: expr_list_span,
-                        }
-                        .into(),
-                    );
+                    loop_body.emit_with_debug(OpCode::LoadStack(iter), debug_info.clone());
+                    loop_body.emit_with_debug(OpCode::LoadStack(state), debug_info.clone());
+                    loop_body.emit_with_debug(OpCode::LoadStack(control), debug_info.clone());
+                    loop_body.emit_with_debug(OpCode::Invoke(iter_args), debug_info.clone());
 
                     loop_body.emit_adjust_to(FragmentStackSlot(names.len()), in_span.clone());
 
@@ -77,19 +72,13 @@ pub(crate) fn generic_for<'s, 'origin>(
                     // First output of iterator is the new value for control variable.
                     let new_control = iter_args;
 
-                    loop_body.emit_with_debug(
-                        OpCode::LoadStack(new_control),
-                        generic_debug_info.clone(),
-                    );
-                    loop_body.emit_load_literal(Literal::Nil, for_span.clone());
-                    loop_body.emit(RelBinOp::Eq.into(), for_span.clone());
-                    loop_body.emit_jump_to_end(Some(true), for_span.clone());
+                    loop_body.emit_with_debug(OpCode::LoadStack(new_control), debug_info.clone());
+                    loop_body.emit_load_literal(Literal::Nil, debug_info.clone());
+                    loop_body.emit_with_debug(RelBinOp::Eq.into(), debug_info.clone());
+                    loop_body.emit_jump_to_end(Some(true), debug_info.clone());
 
-                    loop_body.emit_with_debug(OpCode::LoadStack(new_control), generic_debug_info);
-                    loop_body.emit_with_debug(
-                        OpCode::StoreStack(control),
-                        debug_info::DebugInfo::Generic(for_span.clone()),
-                    );
+                    loop_body.emit_with_debug(OpCode::LoadStack(new_control), debug_info.clone());
+                    loop_body.emit_with_debug(OpCode::StoreStack(control), debug_info);
 
                     let state = Source(s)
                         .and(token_do)?

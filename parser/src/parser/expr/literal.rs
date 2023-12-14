@@ -15,7 +15,7 @@ pub(crate) fn literal<'s, 'origin>(
 
             let mut frag = core.expr();
 
-            frag.emit_load_literal(literal, span.span());
+            frag.emit_load_literal(literal, DebugInfo::Literal(span.span()));
             frag.commit();
 
             span

@@ -207,9 +207,9 @@ fn bracket<'s, 'origin>(
 
                 frag.emit_with_debug(
                     OpCode::TabSet,
-                    debug_info::TabSet::Constructor {
+                    DebugInfo::ConstructTable {
                         table: table_span,
-                        flavor: debug_info::TabConstructor::Index {
+                        entry: DebugTabEntry::Index {
                             index: index_span,
                             indexing: indexing_span,
                             eq_sign: eq_sign_span,
@@ -265,7 +265,10 @@ fn name<'s, 'origin>(
                 let (ident, span) = r.take();
 
                 frag.emit_load_stack(FragmentStackSlot(0), span.span());
-                frag.emit_load_literal(Literal::String(ident.to_string()), span.span());
+                frag.emit_load_literal(
+                    Literal::String(ident.to_string()),
+                    DebugInfo::Literal(span.span()),
+                );
 
                 span.put_range()
             })
@@ -277,9 +280,9 @@ fn name<'s, 'origin>(
 
                 frag.emit_with_debug(
                     OpCode::TabSet,
-                    debug_info::TabSet::Constructor {
+                    DebugInfo::ConstructTable {
                         table: table_span,
-                        flavor: debug_info::TabConstructor::Field {
+                        entry: DebugTabEntry::Field {
                             ident: ident_span,
                             eq_sign: eq_sign_span,
                         },
@@ -324,21 +327,17 @@ fn index<'s, 'origin>(
         let r = expr_adjusted_to_1(frag.new_core())
             .parse_once(s)?
             .inspect(move |output| {
-                use debug_info::{TabConstructor, TabSet};
+                let debug_info = DebugInfo::ConstructTable {
+                    table: table_span,
+                    entry: DebugTabEntry::Value {
+                        value: output.span(),
+                    },
+                };
 
                 frag.emit_load_stack(FragmentStackSlot(0), output.span());
-                frag.emit_load_constant(Literal::Int(index), output.span());
+                frag.emit_load_literal(Literal::Int(index), debug_info.clone());
                 frag.emit_load_stack(value_slot, output.span());
-                frag.emit_with_debug(
-                    OpCode::TabSet,
-                    TabSet::Constructor {
-                        table: table_span,
-                        flavor: TabConstructor::Value {
-                            value: output.span(),
-                        },
-                    }
-                    .into(),
-                );
+                frag.emit_with_debug(OpCode::TabSet, debug_info.clone());
                 frag.emit_adjust_to(value_slot, output.span());
 
                 frag.commit();

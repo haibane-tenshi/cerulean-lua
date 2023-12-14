@@ -40,10 +40,9 @@ pub(crate) fn return_<'s, 'origin>(
 
                 frag.emit_with_debug(
                     OpCode::Return(return_values),
-                    debug_info::Return {
-                        return_token: return_span,
-                    }
-                    .into(),
+                    DebugInfo::Return {
+                        return_: return_span,
+                    },
                 );
                 frag.commit();
 
