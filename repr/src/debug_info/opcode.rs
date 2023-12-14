@@ -11,6 +11,7 @@ pub enum DebugInfo {
     /// More specific information should be conveyed through other variants.
     Generic(Range<usize>),
     Invoke(Invoke),
+    Return(Return),
     LoadUpvalue(LoadUpvalue),
     LoadConst(LoadConst),
     MakeClosure(MakeClosure),
@@ -36,6 +37,12 @@ pub enum Invoke {
         /// Span pointing to expression that emitted iterator function.
         iter: Range<usize>,
     },
+}
+
+/// Debug info for [`OpCode::Return`](crate::opcode::OpCode::Return).
+#[derive(Debug, Clone)]
+pub struct Return {
+    pub return_token: Range<usize>,
 }
 
 /// Debug info for [`OpCode::StoreUpvalue`](crate::opcode::OpCode::StoreUpvalue).
@@ -186,6 +193,12 @@ pub enum TabConstructor {
 impl From<Invoke> for DebugInfo {
     fn from(value: Invoke) -> Self {
         DebugInfo::Invoke(value)
+    }
+}
+
+impl From<Return> for DebugInfo {
+    fn from(value: Return) -> Self {
+        DebugInfo::Return(value)
     }
 }
 

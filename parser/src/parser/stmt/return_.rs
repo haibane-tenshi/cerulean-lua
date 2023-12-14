@@ -38,7 +38,13 @@ pub(crate) fn return_<'s, 'origin>(
             .map_output(|output| {
                 let (return_span, span) = output.take();
 
-                frag.emit(OpCode::Return(return_values), return_span);
+                frag.emit_with_debug(
+                    OpCode::Return(return_values),
+                    debug_info::Return {
+                        return_token: return_span,
+                    }
+                    .into(),
+                );
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);

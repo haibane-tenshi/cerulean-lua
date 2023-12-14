@@ -142,6 +142,7 @@ impl TotalSpan for opcode::DebugInfo {
         match self {
             Generic(span) => span.clone(),
             Invoke(t) => t.total_span(),
+            Return(t) => t.total_span(),
             LoadUpvalue(t) => t.total_span(),
             LoadConst(t) => t.total_span(),
             MakeClosure(t) => t.total_span(),
@@ -165,6 +166,14 @@ impl TotalSpan for opcode::Invoke {
     }
 }
 
+impl TotalSpan for opcode::Return {
+    fn total_span(&self) -> Range<usize> {
+        let opcode::Return { return_token } = self;
+
+        return_token.clone()
+    }
+}
+
 impl TotalSpan for opcode::LoadUpvalue {
     fn total_span(&self) -> Range<usize> {
         use opcode::LoadUpvalue::*;
@@ -178,31 +187,44 @@ impl TotalSpan for opcode::LoadUpvalue {
 
 impl TotalSpan for opcode::LoadConst {
     fn total_span(&self) -> Range<usize> {
-        self.literal.clone()
+        let opcode::LoadConst { literal } = self;
+
+        literal.clone()
     }
 }
 
 impl TotalSpan for opcode::MakeClosure {
     fn total_span(&self) -> Range<usize> {
-        self.total_span.clone()
+        let opcode::MakeClosure {
+            function_token: _,
+            total_span,
+        } = self;
+
+        total_span.clone()
     }
 }
 
 impl TotalSpan for opcode::StoreUpvalue {
     fn total_span(&self) -> Range<usize> {
-        self.ident.clone()
+        let opcode::StoreUpvalue { ident, eq_sign: _ } = self;
+
+        ident.clone()
     }
 }
 
 impl TotalSpan for opcode::UnaOp {
     fn total_span(&self) -> Range<usize> {
-        self.op.start..self.arg.end
+        let opcode::UnaOp { op, arg } = self;
+
+        op.start..arg.end
     }
 }
 
 impl TotalSpan for opcode::BinOp {
     fn total_span(&self) -> Range<usize> {
-        self.lhs.start..self.rhs.end
+        let opcode::BinOp { lhs, op: _, rhs } = self;
+
+        lhs.start..rhs.end
     }
 }
 
