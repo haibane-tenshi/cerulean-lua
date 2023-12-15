@@ -56,7 +56,7 @@ impl ClosureRef {
     where
         C: ChunkCache<ChunkId>,
     {
-        use crate::error::{MissingChunk, MissingFunction};
+        use crate::error::{MissingChunk, MissingFunction, OutOfBoundsStack, UpvalueCountMismatch};
         use repr::chunk::Function;
 
         let function = rt
@@ -71,13 +71,18 @@ impl ClosureRef {
         // Verify that closure provides exact same number of upvalues
         // that is expected by the function.
         if signature.upvalue_count != self.upvalues.len() {
-            return Err(RuntimeError::CatchAll);
+            let err = UpvalueCountMismatch {
+                expected: signature.upvalue_count,
+                closure: self.upvalues.len(),
+            };
+
+            return Err(err.into());
         }
 
         // Adjust stack, move varargs into register if needed.
         let stack_start = rt.stack.protected_size() + start;
         let call_height = StackSlot(0) + signature.arg_count;
-        let mut stack = rt.stack.view(stack_start).ok_or(RuntimeError::CatchAll)?;
+        let mut stack = rt.stack.view(stack_start).ok_or(OutOfBoundsStack)?;
 
         let register_variadic = if signature.is_variadic {
             stack.adjust_height_with_variadics(call_height)

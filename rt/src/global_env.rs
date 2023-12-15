@@ -45,25 +45,37 @@ where
 
     let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, value: &mut Value<C>| {
         let Value::Table(table) = value else {
-            return Err(RuntimeError::CatchAll);
+            return Err(
+                Value::String("global env value is expected to be table".to_string()).into(),
+            );
         };
 
         let fn_assert = RustClosureRef::new(|rt: RuntimeView<_>| {
             let Some(cond) = rt.stack.get(StackSlot(0)) else {
-                return Err(RuntimeError::CatchAll);
+                return Err(
+                    Value::String("assert expects at least one argument".to_string()).into(),
+                );
             };
 
             if cond.to_bool() {
                 Ok(())
             } else {
-                Err(RuntimeError::CatchAll)
+                let err = rt
+                    .stack
+                    .get(StackSlot(1))
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("assertion failed!".to_string()));
+                Err(err.into())
             }
         });
 
-        table.borrow_mut().map_err(|_| RuntimeError::CatchAll)?.set(
-            KeyValue::String("assert".into()),
-            Value::Function(Callable::RustClosure(fn_assert)),
-        );
+        table
+            .borrow_mut()
+            .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
+            .set(
+                KeyValue::String("assert".into()),
+                Value::Function(Callable::RustClosure(fn_assert)),
+            );
 
         Ok(())
     };

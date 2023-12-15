@@ -74,6 +74,8 @@ pub struct RuntimeView<'rt, C> {
 
 impl<'rt, C> RuntimeView<'rt, C> {
     pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError<C>> {
+        use crate::error::OutOfBoundsStack;
+
         let RuntimeView {
             chunk_cache,
             global_env,
@@ -84,7 +86,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
 
         let frames = frames.view();
         let start = stack.protected_size() + start;
-        let stack = stack.view(start).ok_or(RuntimeError::CatchAll)?;
+        let stack = stack.view(start).ok_or(OutOfBoundsStack)?;
         let upvalue_stack = upvalue_stack.view_over();
 
         let r = RuntimeView {

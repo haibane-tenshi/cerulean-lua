@@ -9,6 +9,8 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
+use crate::value::Value;
+
 pub use missing_chunk::MissingChunk;
 pub use missing_function::MissingFunction;
 pub use opcode::Error as OpCodeError;
@@ -17,7 +19,6 @@ pub use upvalue_count_mismatch::UpvalueCountMismatch;
 pub use value::ValueError;
 
 pub enum RuntimeError<C> {
-    CatchAll,
     Value(ValueError<C>),
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
@@ -34,7 +35,6 @@ impl<C> RuntimeError<C> {
         use RuntimeError::*;
 
         match self {
-            CatchAll => Diagnostic::error().with_message("runtime error occurred"),
             Value(err) => err.into_diagnostic(),
             MissingChunk(err) => err.into_diagnostic(),
             MissingFunction(err) => err.into_diagnostic(),
@@ -42,6 +42,12 @@ impl<C> RuntimeError<C> {
             UpvalueCountMismatch(err) => err.into_diagnostic(),
             OpCode(err) => err.into_diagnostic(file_id),
         }
+    }
+}
+
+impl<C> From<Value<C>> for RuntimeError<C> {
+    fn from(value: Value<C>) -> Self {
+        RuntimeError::Value(ValueError(value))
     }
 }
 
@@ -84,7 +90,6 @@ impl<C> From<OpCodeError> for RuntimeError<C> {
 impl<C> Debug for RuntimeError<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CatchAll => write!(f, "CatchAll"),
             Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
             Self::MissingChunk(arg0) => f.debug_tuple("MissingChunk").field(arg0).finish(),
             Self::MissingFunction(arg0) => f.debug_tuple("MissingFunction").field(arg0).finish(),

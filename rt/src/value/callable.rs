@@ -55,10 +55,12 @@ impl<C> LuaFfiOnce<C> for RustClosureRef<C> {
 
 impl<C> LuaFfiMut<C> for RustClosureRef<C> {
     fn call_mut(&mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+        use crate::value::Value;
+
         let mut f = self
             .0
             .try_borrow_mut()
-            .map_err(|_| RuntimeError::CatchAll)?;
+            .map_err(|_| Value::String("failed to borrow closure".to_string()))?;
         f.call_mut(rt)
     }
 }

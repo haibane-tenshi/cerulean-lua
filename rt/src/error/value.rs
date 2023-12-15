@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use crate::value::Value;
 
 #[derive(Clone)]
-pub struct ValueError<C>(Value<C>);
+pub struct ValueError<C>(pub Value<C>);
 
 impl<C> ValueError<C> {
     pub(super) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
