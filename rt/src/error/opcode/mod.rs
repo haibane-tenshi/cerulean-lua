@@ -5,6 +5,7 @@ mod missing_const_id;
 mod missing_recipe;
 mod missing_stack_slot;
 mod missing_upvalue_slot;
+mod panic;
 mod table;
 mod una_op;
 
@@ -20,6 +21,7 @@ pub use missing_const_id::MissingConstId;
 pub use missing_recipe::MissingRecipe;
 pub use missing_stack_slot::MissingStackSlot;
 pub use missing_upvalue_slot::MissingUpvalue;
+pub use panic::Panic;
 pub use table::RuntimeCause as TabCause;
 pub use una_op::Cause as UnaOpCause;
 
@@ -33,6 +35,7 @@ pub struct Error {
 #[derive(Debug)]
 pub enum Cause {
     CatchAll,
+    Panic(Panic),
     IpOutOfBounds(IpOutOfBounds),
     MissingArgs(MissingArgsError),
     MissingConstId(MissingConstId),
@@ -63,6 +66,7 @@ impl Error {
 
         match cause {
             CatchAll => Diagnostic::error().with_message("diagnostic not implemented yet"),
+            Panic(err) => err.into_diagnostic(file_id, opcode, debug_info),
             IpOutOfBounds(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingArgs(err) => {
                 let debug_info = debug_info.as_ref().map(TotalSpan::total_span);
