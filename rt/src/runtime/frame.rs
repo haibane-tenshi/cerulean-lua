@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::debug_info::OpCodeDebugInfo;
-use repr::index::{ConstId, FunctionId, InstrId, RecipeId, StackSlot, UpvalueSlot};
+use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
 use repr::tivec::{TiSlice, TiVec};
@@ -14,7 +14,9 @@ use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
 use crate::chunk_cache::{ChunkCache, ChunkId};
-use crate::error::opcode::{self as opcode_err, MissingConstId, MissingUpvalue};
+use crate::error::opcode::{
+    self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
+};
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::Value;
@@ -224,6 +226,33 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             .ok_or(MissingUpvalue(index))
     }
 
+    fn get_stack(&self, index: StackSlot) -> Result<&Value<C>, MissingStackSlot> {
+        self.stack.get(index).ok_or(MissingStackSlot(index))
+    }
+
+    fn get_stack_mut(&mut self, index: StackSlot) -> Result<&mut Value<C>, MissingStackSlot> {
+        self.stack.get_mut(index).ok_or(MissingStackSlot(index))
+    }
+
+    fn increment_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
+        let err = IpOutOfBounds(self.ip);
+
+        let new_ip = self.ip.checked_add(offset).ok_or(err)?;
+        if new_ip > self.opcodes.next_key() {
+            Err(err)
+        } else {
+            self.ip = new_ip;
+            Ok(())
+        }
+    }
+
+    fn decrement_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
+        let err = IpOutOfBounds(self.ip);
+
+        self.ip = self.ip.checked_sub_offset(offset).ok_or(err)?;
+        Ok(())
+    }
+
     pub fn step(&mut self) -> Result<ControlFlow, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
@@ -239,15 +268,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
     fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow, opcode_err::Cause> {
         use crate::value::table::TableRef;
         use opcode_err::Cause;
-        use repr::index::InstrOffset;
         use repr::opcode::OpCode::*;
 
         let r = match opcode {
-            Panic => return Err(Cause::CatchAll),
+            Panic => return Err(opcode_err::Panic.into()),
             Invoke(slot) => ControlFlow::Break(ChangeFrame::Invoke(slot)),
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
-                let closure = self.construct_closure(fn_id).map_err(|_| Cause::CatchAll)?;
+                let closure = self.construct_closure(fn_id)?;
                 self.stack
                     .push(Value::Function(Callable::LuaClosure(closure.into())));
 
@@ -265,16 +293,16 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 ControlFlow::Continue(())
             }
             LoadStack(slot) => {
-                let value = self.stack.get(slot).map_err(|_| Cause::CatchAll)?.clone();
+                let value = self.get_stack(slot)?.clone();
                 self.stack.push(value);
 
                 ControlFlow::Continue(())
             }
             StoreStack(slot) => {
                 let [value] = self.stack.take1()?;
-                let slot = self.stack.get_mut(slot).map_err(|_| Cause::CatchAll)?;
+                let place = self.get_stack_mut(slot)?;
 
-                *slot = value;
+                *place = value;
 
                 ControlFlow::Continue(())
             }
@@ -311,7 +339,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
             Jump { offset } => {
                 self.ip -= InstrOffset(1);
-                self.ip += offset;
+                self.increment_ip(offset)?;
 
                 ControlFlow::Continue(())
             }
@@ -320,14 +348,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
                 if value.to_bool() == cond {
                     self.ip -= InstrOffset(1);
-                    self.ip += offset;
+                    self.increment_ip(offset)?;
                 }
 
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
                 self.ip -= InstrOffset(1);
-                self.ip = self.ip.checked_sub_offset(offset).ok_or(Cause::CatchAll)?;
+                self.decrement_ip(offset)?;
 
                 ControlFlow::Continue(())
             }
@@ -586,36 +614,38 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Some(r)
     }
 
-    pub fn construct_closure(&mut self, recipe_id: RecipeId) -> Result<Closure, RuntimeError> {
+    pub fn construct_closure(&mut self, recipe_id: RecipeId) -> Result<Closure, opcode_err::Cause> {
         let recipe = self
             .chunk
             .get_recipe(recipe_id)
-            .ok_or(RuntimeError::CatchAll)?;
+            .ok_or(opcode_err::MissingRecipe(recipe_id))?;
 
         let ClosureRecipe {
             function_id,
             upvalues,
         } = recipe;
-        let function_id = *function_id;
 
         let fn_ptr = FunctionPtr {
             chunk_id: self.closure.fn_ptr.chunk_id,
-            function_id,
+            function_id: *function_id,
         };
 
         let upvalues = upvalues
             .iter()
-            .map(|&source| {
+            .map(|&source| -> Result<_, opcode_err::Cause> {
                 use repr::chunk::UpvalueSource;
 
                 match source {
-                    UpvalueSource::Temporary(slot) => self.stack.mark_as_upvalue(slot),
+                    UpvalueSource::Temporary(slot) => self
+                        .stack
+                        .mark_as_upvalue(slot)
+                        .ok_or(opcode_err::MissingStackSlot(slot).into()),
                     UpvalueSource::Upvalue(slot) => self
                         .closure
                         .upvalues
                         .get(slot)
                         .copied()
-                        .ok_or(RuntimeError::CatchAll),
+                        .ok_or(opcode_err::MissingUpvalue(slot).into()),
                 }
             })
             .collect::<Result<_, _>>()?;

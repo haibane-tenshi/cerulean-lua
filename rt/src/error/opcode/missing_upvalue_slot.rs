@@ -3,7 +3,7 @@ use repr::debug_info::opcode::DebugInfo;
 use repr::index::UpvalueSlot;
 use repr::opcode::OpCode;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MissingUpvalue(pub UpvalueSlot);
 
 impl MissingUpvalue {
@@ -51,6 +51,10 @@ impl MissingUpvalue {
                     diag.with_label([Label::primary(file_id, ident)
                         .with_message("variable is not local to curent function")]);
                 }
+                (OpCode::MakeClosure(_), FnExpr { total_span, .. } | FnDecl { total_span, .. }) => {
+                    diag.with_label([Label::secondary(file_id, total_span)
+                        .with_message("while trying to capture upvalues for this function")])
+                }
                 (_, debug_info) => {
                     diag.with_label([Label::secondary(file_id, debug_info.total_span())
                         .with_message("triggered by this")])
@@ -74,6 +78,10 @@ impl MissingUpvalue {
             OpCode::StoreUpvalue(id) => diag.with_runtime_bug_note([
                 format!("the opcode should write to upvalue with id={id}, but it attempted to write to upvalue with id={upvalue_slot}"),
                 "likely, this diagnostic is malformed".to_string(),
+            ]),
+            OpCode::MakeClosure(_) => diag.with_compiler_bug_note([
+                "the opcode constructs closure for the function following specified recipe",
+                "construction failed because recipe erroneously referred to non-existent stack slot",
             ]),
             _ => diag.with_runtime_bug_note([
                 format!("instruction {name} doesn't access upvalues"),

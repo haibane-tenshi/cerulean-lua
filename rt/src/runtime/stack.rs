@@ -353,22 +353,22 @@ impl<'a, C> StackView<'a, C> {
         self.stack.len() - self.protected_size().0
     }
 
-    pub fn last(&self) -> Result<&Value<C>, RuntimeError> {
-        self.stack.last().ok_or(RuntimeError::CatchAll)
+    pub fn last(&self) -> Option<&Value<C>> {
+        self.stack.last()
     }
 
     pub fn top(&mut self) -> StackSlot {
         self.protected_size.slot(self.stack.top()).unwrap()
     }
 
-    pub fn get(&self, slot: StackSlot) -> Result<&Value<C>, RuntimeError> {
+    pub fn get(&self, slot: StackSlot) -> Option<&Value<C>> {
         let index = self.protected_size.index(slot);
-        self.stack.get(index).ok_or(RuntimeError::CatchAll)
+        self.stack.get(index)
     }
 
-    pub fn get_mut(&mut self, slot: StackSlot) -> Result<&mut Value<C>, RuntimeError> {
+    pub fn get_mut(&mut self, slot: StackSlot) -> Option<&mut Value<C>> {
         let index = self.protected_size.index(slot);
-        self.stack.get_mut(index).ok_or(RuntimeError::CatchAll)
+        self.stack.get_mut(index)
     }
 
     pub fn fresh_upvalue(&mut self, value: Value<C>) -> UpvalueId {
@@ -383,11 +383,9 @@ impl<'a, C> StackView<'a, C> {
         self.stack.get_upvalue_mut(upvalue)
     }
 
-    pub fn mark_as_upvalue(&mut self, slot: StackSlot) -> Result<UpvalueId, RuntimeError> {
+    pub fn mark_as_upvalue(&mut self, slot: StackSlot) -> Option<UpvalueId> {
         let slot = self.protected_size.index(slot);
-        self.stack
-            .mark_as_upvalue(slot)
-            .ok_or(RuntimeError::CatchAll)
+        self.stack.mark_as_upvalue(slot)
     }
 
     pub(crate) fn protected_size(&self) -> RawStackSlot {

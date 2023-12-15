@@ -2,7 +2,7 @@ use codespan_reporting::diagnostic::Diagnostic;
 use repr::debug_info::opcode::DebugInfo;
 use repr::opcode::OpCode;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Panic;
 
 impl Panic {

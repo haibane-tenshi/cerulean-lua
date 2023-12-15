@@ -2,7 +2,7 @@ use codespan_reporting::diagnostic::Diagnostic;
 use repr::opcode::OpCode;
 use std::ops::Range;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MissingArgsError {
     pub expected_args: usize,
     pub stack_len: usize,

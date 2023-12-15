@@ -25,16 +25,15 @@ pub use panic::Panic;
 pub use table::RuntimeCause as TabCause;
 pub use una_op::Cause as UnaOpCause;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Error {
     pub opcode: OpCode,
     pub debug_info: Option<opcode::DebugInfo>,
     pub cause: Cause,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Cause {
-    CatchAll,
     Panic(Panic),
     IpOutOfBounds(IpOutOfBounds),
     MissingArgs(MissingArgsError),
@@ -65,7 +64,6 @@ impl Error {
         let malformed_diagnostic = || Diagnostic::error().with_message("malformed diagnostic");
 
         match cause {
-            CatchAll => Diagnostic::error().with_message("diagnostic not implemented yet"),
             Panic(err) => err.into_diagnostic(file_id, opcode, debug_info),
             IpOutOfBounds(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingArgs(err) => {
@@ -100,6 +98,18 @@ impl Error {
     }
 }
 
+impl From<Panic> for Cause {
+    fn from(value: Panic) -> Self {
+        Cause::Panic(value)
+    }
+}
+
+impl From<MissingStackSlot> for Cause {
+    fn from(value: MissingStackSlot) -> Self {
+        Cause::MissingStackSlot(value)
+    }
+}
+
 impl From<MissingUpvalue> for Cause {
     fn from(value: MissingUpvalue) -> Self {
         Cause::MissingUpvalue(value)
@@ -121,6 +131,12 @@ impl From<MissingRecipe> for Cause {
 impl From<MissingArgsError> for Cause {
     fn from(value: MissingArgsError) -> Self {
         Cause::MissingArgs(value)
+    }
+}
+
+impl From<IpOutOfBounds> for Cause {
+    fn from(value: IpOutOfBounds) -> Self {
+        Cause::IpOutOfBounds(value)
     }
 }
 

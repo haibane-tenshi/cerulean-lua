@@ -83,6 +83,11 @@ impl InstrId {
         let offset = self.0.checked_sub(rhs.0)?;
         Some(InstrOffset(offset))
     }
+
+    pub fn checked_add(self, rhs: InstrOffset) -> Option<Self> {
+        let val = self.0.checked_add(rhs.0)?;
+        Some(InstrId(val))
+    }
 }
 
 impl From<usize> for InstrId {

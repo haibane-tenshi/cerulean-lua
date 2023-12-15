@@ -3,7 +3,7 @@ use repr::debug_info::OpCodeDebugInfo;
 use repr::index::ConstId;
 use repr::opcode::OpCode;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MissingConstId(pub ConstId);
 
 impl MissingConstId {

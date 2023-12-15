@@ -3,7 +3,7 @@ use repr::debug_info::OpCodeDebugInfo;
 use repr::index::InstrId;
 use repr::opcode::OpCode;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IpOutOfBounds(pub InstrId);
 
 impl IpOutOfBounds {

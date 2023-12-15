@@ -49,7 +49,7 @@ where
         };
 
         let fn_assert = RustClosureRef::new(|rt: RuntimeView<_>| {
-            let Ok(cond) = rt.stack.get(StackSlot(0)) else {
+            let Some(cond) = rt.stack.get(StackSlot(0)) else {
                 return Err(RuntimeError::CatchAll);
             };
 

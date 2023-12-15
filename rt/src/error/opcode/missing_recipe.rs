@@ -3,7 +3,7 @@ use repr::debug_info::opcode::DebugInfo;
 use repr::index::RecipeId;
 use repr::opcode::OpCode;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MissingRecipe(pub RecipeId);
 
 impl MissingRecipe {

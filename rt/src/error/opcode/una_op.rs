@@ -4,7 +4,7 @@ use repr::opcode::UnaOp;
 
 use crate::value::Type;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Cause {
     pub arg: Type,
 }

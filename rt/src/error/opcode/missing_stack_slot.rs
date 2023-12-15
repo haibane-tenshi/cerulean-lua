@@ -3,7 +3,7 @@ use repr::debug_info::opcode::DebugInfo;
 use repr::index::StackSlot;
 use repr::opcode::OpCode;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MissingStackSlot(pub StackSlot);
 
 impl MissingStackSlot {
@@ -94,6 +94,10 @@ impl MissingStackSlot {
                 (OpCode::Return(_), Return { return_ }) => diag
                     .with_label([Label::primary(file_id, return_)
                         .with_message("while trying to return from function")]),
+                (OpCode::MakeClosure(_), FnExpr { total_span, .. } | FnDecl { total_span, .. }) => {
+                    diag.with_label([Label::secondary(file_id, total_span)
+                        .with_message("while trying to capture upvalues for this function")])
+                }
                 (_, debug_info) => {
                     diag.with_label([Label::secondary(file_id, debug_info.total_span())
                         .with_message("triggered by this")])
@@ -113,6 +117,10 @@ impl MissingStackSlot {
             ]),
             OpCode::Return(id) if id == stack_slot => diag.with_compiler_bug_note([
                 "the opcode returns values from function starting from targeted slot",
+            ]),
+            OpCode::MakeClosure(_) => diag.with_compiler_bug_note([
+                "the opcode constructs closure for the function following specified recipe",
+                "construction failed because recipe erroneously referred to non-existent stack slot",
             ]),
             OpCode::LoadStack(id) | OpCode::StoreStack(id) | OpCode::Invoke(id) => diag.with_runtime_bug_note([
                 format!("the opcode should access temporary in slot with id={id}, but it attempted to access slot with id={stack_slot}"),
