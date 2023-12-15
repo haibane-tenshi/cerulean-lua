@@ -1,14 +1,17 @@
+pub mod missing_chunk;
 pub mod opcode;
 
 use codespan_reporting::diagnostic::Diagnostic;
 use std::error::Error;
 use std::fmt::Display;
 
+use missing_chunk::MissingChunk;
 use opcode::Error as OpCodeError;
 
 #[derive(Debug)]
 pub enum RuntimeError {
     CatchAll,
+    MissingChunk(MissingChunk),
     OpCode(OpCodeError),
 }
 
@@ -21,6 +24,7 @@ impl RuntimeError {
 
         match self {
             CatchAll => Diagnostic::error().with_message("runtime error occurred"),
+            MissingChunk(err) => err.into_diagnostic(),
             OpCode(err) => err.into_diagnostic(file_id),
         }
     }

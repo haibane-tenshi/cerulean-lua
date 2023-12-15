@@ -1,4 +1,5 @@
 use repr::chunk::Chunk;
+use std::fmt::Display;
 use std::num::NonZeroUsize;
 
 pub struct FailedInsertError;
@@ -50,6 +51,12 @@ impl From<usize> for ChunkId {
 impl From<ChunkId> for usize {
     fn from(value: ChunkId) -> Self {
         value.0
+    }
+}
+
+impl Display for ChunkId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
