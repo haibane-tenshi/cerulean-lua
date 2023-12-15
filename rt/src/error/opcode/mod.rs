@@ -1,4 +1,5 @@
 mod bin_op;
+mod invoke;
 mod ip_out_of_bounds;
 mod missing_args;
 mod missing_const_id;
@@ -15,6 +16,7 @@ use repr::opcode::OpCode;
 use std::ops::Range;
 
 pub use bin_op::Cause as BinOpCause;
+pub use invoke::Invoke;
 pub use ip_out_of_bounds::IpOutOfBounds;
 pub use missing_args::MissingArgsError;
 pub use missing_const_id::MissingConstId;
@@ -41,6 +43,7 @@ pub enum Cause {
     MissingRecipe(MissingRecipe),
     MissingStackSlot(MissingStackSlot),
     MissingUpvalue(MissingUpvalue),
+    Invoke(Invoke),
     UnaOp(UnaOpCause),
     BinOp(BinOpCause),
     TabGet(TabCause),
@@ -74,6 +77,7 @@ impl Error {
             MissingRecipe(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingStackSlot(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingUpvalue(err) => err.into_diagnostic(file_id, opcode, debug_info),
+            Invoke(err) => err.into_diagnostic(file_id, opcode, debug_info),
             UnaOp(cause) => {
                 if let OpCode::UnaOp(op) = opcode {
                     cause.into_diagnostic(file_id, debug_info, op)
@@ -137,6 +141,12 @@ impl From<MissingArgsError> for Cause {
 impl From<IpOutOfBounds> for Cause {
     fn from(value: IpOutOfBounds) -> Self {
         Cause::IpOutOfBounds(value)
+    }
+}
+
+impl From<Invoke> for Cause {
+    fn from(value: Invoke) -> Self {
+        Cause::Invoke(value)
     }
 }
 

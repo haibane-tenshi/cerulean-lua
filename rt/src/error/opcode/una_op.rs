@@ -45,7 +45,7 @@ impl Cause {
 
         if let Type::Table = arg {
             diag.with_help([
-                format!("by default `{op}` cannot be applied to tables,\nhowever it is possible to define it via <?> metamethod"),
+                format!("by default `{op}` cannot be applied to tables,\nhowever defining <?> metamethod will allow you to do it"),
             ])
         }
 

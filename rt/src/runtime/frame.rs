@@ -21,11 +21,11 @@ use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::Value;
 
-pub type ControlFlow = std::ops::ControlFlow<ChangeFrame>;
+pub type ControlFlow<C> = std::ops::ControlFlow<ChangeFrame<C>>;
 
-pub enum ChangeFrame {
+pub enum ChangeFrame<C> {
     Return(StackSlot),
-    Invoke(StackSlot),
+    Invoke(Callable<C>, StackSlot),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -253,7 +253,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(())
     }
 
-    pub fn step(&mut self) -> Result<ControlFlow, opcode_err::Error> {
+    pub fn step(&mut self) -> Result<ControlFlow<C>, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
         };
@@ -265,14 +265,31 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         })
     }
 
-    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow, opcode_err::Cause> {
+    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow<C>, opcode_err::Cause> {
         use crate::value::table::TableRef;
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
         let r = match opcode {
             Panic => return Err(opcode_err::Panic.into()),
-            Invoke(slot) => ControlFlow::Break(ChangeFrame::Invoke(slot)),
+            Invoke(slot) => {
+                // It is extremely annoying to keep callable on the stack (either caller or callee),
+                // however current approach causes stack adjustments on every single fn call.
+                // I would like to implement it differently,
+                // but somewhat frustratingly this seems to be the simplest workable option.
+                // The only other approach I can think of is constructing dedicated callable *stack*
+                // (single-value register doesn't work due to nested calls)
+                // and make fn invocation into two instructions: StoreCallable + Invoke.
+                // Not sure if it will work better.
+                let value = self.stack.remove(slot).ok_or(MissingStackSlot(slot))?;
+
+                let callable = match value {
+                    Value::Function(t) => t,
+                    value => return Err(opcode_err::Invoke(value.type_()).into()),
+                };
+
+                ControlFlow::Break(ChangeFrame::Invoke(callable, slot))
+            }
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
                 let closure = self.construct_closure(fn_id)?;

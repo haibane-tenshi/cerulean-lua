@@ -72,7 +72,7 @@ impl Cause {
             // Tables out first.
             // It can always provide metamethods to override the op.
             (Table, _, _) | (_, _, Table) => diag.with_help([
-                format!("by default `{op}` cannot be applied to tables,\nhowever it is possible to define it via <?> metamethod"),
+                format!("by default `{op}` cannot be applied to tables,\nhowever defining <?> metamethod will allow you to do it"),
             ]),
             // Special help in case someone tries to do logical ops on bools.
             (Bool, BinOp::Bit(And | Or | Xor) | BinOp::Ari(Exp), Bool) => {

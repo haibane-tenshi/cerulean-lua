@@ -299,12 +299,12 @@ impl<'a, C> StackView<'a, C> {
         self.stack.push(value);
     }
 
-    pub fn pop(&mut self) -> Result<Value<C>, RuntimeError> {
+    pub fn pop(&mut self) -> Option<Value<C>> {
         if self.stack.len() <= self.protected_size.0 {
-            return Err(RuntimeError::CatchAll);
+            return None;
         }
 
-        self.stack.pop().ok_or(RuntimeError::CatchAll)
+        self.stack.pop()
     }
 
     pub fn remove(&mut self, slot: StackSlot) -> Option<Value<C>> {
@@ -313,7 +313,7 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub(crate) fn take1(&mut self) -> Result<[Value<C>; 1], MissingArgsError> {
-        let v0 = self.pop().ok().ok_or_else(|| MissingArgsError {
+        let v0 = self.pop().ok_or_else(|| MissingArgsError {
             stack_len: self.stack.len(),
             expected_args: 1,
         })?;
