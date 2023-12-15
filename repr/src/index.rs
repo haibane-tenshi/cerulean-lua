@@ -214,6 +214,12 @@ impl From<StackSlot> for usize {
     }
 }
 
+impl Display for StackSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
 pub struct StackOffset(pub usize);
 

@@ -2,6 +2,7 @@ mod bin_op;
 mod missing_args;
 mod missing_const_id;
 mod missing_recipe;
+mod missing_stack_slot;
 mod missing_upvalue_slot;
 mod table;
 mod una_op;
@@ -15,6 +16,7 @@ pub use bin_op::Cause as BinOpCause;
 pub use missing_args::MissingArgsError;
 pub use missing_const_id::MissingConstId;
 pub use missing_recipe::MissingRecipe;
+pub use missing_stack_slot::MissingStackSlot;
 pub use missing_upvalue_slot::MissingUpvalue;
 pub use table::RuntimeCause as TabCause;
 pub use una_op::Cause as UnaOpCause;
@@ -32,6 +34,7 @@ pub enum Cause {
     MissingArgs(MissingArgsError),
     MissingConstId(MissingConstId),
     MissingRecipe(MissingRecipe),
+    MissingStackSlot(MissingStackSlot),
     MissingUpvalue(MissingUpvalue),
     UnaOp(UnaOpCause),
     BinOp(BinOpCause),
@@ -63,6 +66,7 @@ impl Error {
             }
             MissingConstId(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingRecipe(err) => err.into_diagnostic(file_id, opcode, debug_info),
+            MissingStackSlot(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingUpvalue(err) => err.into_diagnostic(file_id, opcode, debug_info),
             UnaOp(cause) => {
                 if let OpCode::UnaOp(op) = opcode {
