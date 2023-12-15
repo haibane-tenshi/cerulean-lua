@@ -1,4 +1,5 @@
 mod bin_op;
+mod ip_out_of_bounds;
 mod missing_args;
 mod missing_const_id;
 mod missing_recipe;
@@ -13,6 +14,7 @@ use repr::opcode::OpCode;
 use std::ops::Range;
 
 pub use bin_op::Cause as BinOpCause;
+pub use ip_out_of_bounds::IpOutOfBounds;
 pub use missing_args::MissingArgsError;
 pub use missing_const_id::MissingConstId;
 pub use missing_recipe::MissingRecipe;
@@ -31,6 +33,7 @@ pub struct Error {
 #[derive(Debug)]
 pub enum Cause {
     CatchAll,
+    IpOutOfBounds(IpOutOfBounds),
     MissingArgs(MissingArgsError),
     MissingConstId(MissingConstId),
     MissingRecipe(MissingRecipe),
@@ -60,6 +63,7 @@ impl Error {
 
         match cause {
             CatchAll => Diagnostic::error().with_message("diagnostic not implemented yet"),
+            IpOutOfBounds(err) => err.into_diagnostic(file_id, opcode, debug_info),
             MissingArgs(err) => {
                 let debug_info = debug_info.as_ref().map(TotalSpan::total_span);
                 err.into_diagnostic(file_id, opcode, debug_info)

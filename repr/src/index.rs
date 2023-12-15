@@ -97,6 +97,12 @@ impl From<InstrId> for usize {
     }
 }
 
+impl Display for InstrId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Hash)]
 pub struct InstrOffset(pub usize);
 
@@ -196,6 +202,12 @@ impl Sub<usize> for InstrOffset {
     fn sub(mut self, rhs: usize) -> Self::Output {
         self -= rhs;
         self
+    }
+}
+
+impl Display for InstrOffset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
