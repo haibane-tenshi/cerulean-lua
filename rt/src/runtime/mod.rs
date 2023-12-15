@@ -162,12 +162,14 @@ where
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = Value<C>>,
     ) -> Result<Closure, RuntimeError> {
+        use crate::error::{MissingChunk, MissingFunction};
+
         let signature = &self
             .chunk_cache
             .chunk(fn_ptr.chunk_id)
-            .ok_or(RuntimeError::CatchAll)?
+            .ok_or(MissingChunk(fn_ptr.chunk_id))?
             .get_function(fn_ptr.function_id)
-            .ok_or(RuntimeError::CatchAll)?
+            .ok_or(MissingFunction(fn_ptr))?
             .signature;
 
         let upvalues = upvalues

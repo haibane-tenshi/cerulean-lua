@@ -10,10 +10,12 @@ mod panic;
 mod table;
 mod una_op;
 
-use codespan_reporting::diagnostic::{Diagnostic, Label};
+use codespan_reporting::diagnostic::Diagnostic;
 use repr::debug_info::opcode;
 use repr::opcode::OpCode;
 use std::ops::Range;
+
+use super::ExtraDiagnostic;
 
 pub use bin_op::Cause as BinOpCause;
 pub use invoke::Invoke;
@@ -209,51 +211,5 @@ impl TotalSpan for opcode::TabConstructor {
             Field { ident, .. } => ident.clone(),
             Value { value } => value.clone(),
         }
-    }
-}
-
-trait ExtraDiagnostic<FileId> {
-    fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);
-    fn with_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
-    fn with_help(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
-    fn with_compiler_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
-    fn with_runtime_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
-    fn no_debug_info(&mut self);
-}
-
-impl<FileId> ExtraDiagnostic<FileId> for Diagnostic<FileId> {
-    fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>) {
-        self.labels.extend(iter)
-    }
-
-    fn with_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>) {
-        self.notes
-            .extend(iter.into_iter().map(|s| format!("note: {}", s.as_ref())));
-    }
-
-    fn with_help(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>) {
-        self.notes
-            .extend(iter.into_iter().map(|s| format!("help: {}", s.as_ref())));
-    }
-
-    fn with_compiler_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>) {
-        self.with_note(["this is not bug in your Lua code, error is caused by malformed bytecode"]);
-        self.with_note(iter);
-        self.with_note(["this most likely resulted from bug in compiler and should be reported"]);
-    }
-
-    fn with_runtime_bug_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>) {
-        self.with_note([
-            "this is not bug in your Lua code, error is caused by imporperly executed bytecode",
-        ]);
-        self.with_note(iter);
-        self.with_note(["this most likely resulted from bug in runtime and should be reported"]);
-    }
-
-    fn no_debug_info(&mut self) {
-        self.with_note([
-                "no debug info is available, it is possible debug info was stripped",
-                "it is also possible that erroneous bytecode was handcrafted\nplease check with where you got it",
-            ]);
     }
 }

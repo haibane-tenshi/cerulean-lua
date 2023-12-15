@@ -56,14 +56,15 @@ impl ClosureRef {
     where
         C: ChunkCache<ChunkId>,
     {
+        use crate::error::{MissingChunk, MissingFunction};
         use repr::chunk::Function;
 
         let function = rt
             .chunk_cache
             .chunk(self.fn_ptr.chunk_id)
-            .ok_or(RuntimeError::CatchAll)?
+            .ok_or(MissingChunk(self.fn_ptr.chunk_id))?
             .get_function(self.fn_ptr.function_id)
-            .ok_or(RuntimeError::CatchAll)?;
+            .ok_or(MissingFunction(self.fn_ptr))?;
 
         let Function { signature, .. } = function;
 
@@ -150,6 +151,8 @@ impl<C> Frame<C> {
     where
         C: ChunkCache<ChunkId>,
     {
+        use crate::error::{MissingChunk, MissingFunction};
+
         let RuntimeView {
             chunk_cache,
             stack,
@@ -169,10 +172,10 @@ impl<C> Frame<C> {
 
         let chunk = chunk_cache
             .chunk(fn_ptr.chunk_id)
-            .ok_or(RuntimeError::CatchAll)?;
+            .ok_or(MissingChunk(fn_ptr.chunk_id))?;
         let function = chunk
             .get_function(fn_ptr.function_id)
-            .ok_or(RuntimeError::CatchAll)?;
+            .ok_or(MissingFunction(fn_ptr))?;
 
         let constants = &chunk.constants;
         let opcodes = &function.opcodes;
