@@ -2,6 +2,7 @@ pub mod missing_chunk;
 pub mod missing_function;
 pub mod opcode;
 pub mod out_of_bounds_stack;
+pub mod upvalue_count_mismatch;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use std::error::Error;
@@ -11,6 +12,7 @@ pub use missing_chunk::MissingChunk;
 pub use missing_function::MissingFunction;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
+pub use upvalue_count_mismatch::UpvalueCountMismatch;
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -18,6 +20,7 @@ pub enum RuntimeError {
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
     OutOfBoundsStack(OutOfBoundsStack),
+    UpvalueCountMismatch(UpvalueCountMismatch),
     OpCode(OpCodeError),
 }
 
@@ -33,6 +36,7 @@ impl RuntimeError {
             MissingChunk(err) => err.into_diagnostic(),
             MissingFunction(err) => err.into_diagnostic(),
             OutOfBoundsStack(err) => err.into_diagnostic(),
+            UpvalueCountMismatch(err) => err.into_diagnostic(),
             OpCode(err) => err.into_diagnostic(file_id),
         }
     }
@@ -47,6 +51,18 @@ impl From<MissingChunk> for RuntimeError {
 impl From<MissingFunction> for RuntimeError {
     fn from(value: MissingFunction) -> Self {
         RuntimeError::MissingFunction(value)
+    }
+}
+
+impl From<OutOfBoundsStack> for RuntimeError {
+    fn from(value: OutOfBoundsStack) -> Self {
+        RuntimeError::OutOfBoundsStack(value)
+    }
+}
+
+impl From<UpvalueCountMismatch> for RuntimeError {
+    fn from(value: UpvalueCountMismatch) -> Self {
+        RuntimeError::UpvalueCountMismatch(value)
     }
 }
 
