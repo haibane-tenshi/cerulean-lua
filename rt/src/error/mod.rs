@@ -3,20 +3,22 @@ pub mod missing_function;
 pub mod opcode;
 pub mod out_of_bounds_stack;
 pub mod upvalue_count_mismatch;
+pub mod value;
 
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use std::error::Error;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 pub use missing_chunk::MissingChunk;
 pub use missing_function::MissingFunction;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use upvalue_count_mismatch::UpvalueCountMismatch;
+pub use value::ValueError;
 
-#[derive(Debug)]
-pub enum RuntimeError {
+pub enum RuntimeError<C> {
     CatchAll,
+    Value(ValueError<C>),
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
     OutOfBoundsStack(OutOfBoundsStack),
@@ -24,7 +26,7 @@ pub enum RuntimeError {
     OpCode(OpCodeError),
 }
 
-impl RuntimeError {
+impl<C> RuntimeError<C> {
     pub fn into_diagnostic<FileId>(self, file_id: FileId) -> Diagnostic<FileId>
     where
         FileId: Clone,
@@ -33,6 +35,7 @@ impl RuntimeError {
 
         match self {
             CatchAll => Diagnostic::error().with_message("runtime error occurred"),
+            Value(err) => err.into_diagnostic(),
             MissingChunk(err) => err.into_diagnostic(),
             MissingFunction(err) => err.into_diagnostic(),
             OutOfBoundsStack(err) => err.into_diagnostic(),
@@ -42,43 +45,65 @@ impl RuntimeError {
     }
 }
 
-impl From<MissingChunk> for RuntimeError {
+impl<C> From<MissingChunk> for RuntimeError<C> {
     fn from(value: MissingChunk) -> Self {
         RuntimeError::MissingChunk(value)
     }
 }
 
-impl From<MissingFunction> for RuntimeError {
+impl<C> From<MissingFunction> for RuntimeError<C> {
     fn from(value: MissingFunction) -> Self {
         RuntimeError::MissingFunction(value)
     }
 }
 
-impl From<OutOfBoundsStack> for RuntimeError {
+impl<C> From<OutOfBoundsStack> for RuntimeError<C> {
     fn from(value: OutOfBoundsStack) -> Self {
         RuntimeError::OutOfBoundsStack(value)
     }
 }
 
-impl From<UpvalueCountMismatch> for RuntimeError {
+impl<C> From<UpvalueCountMismatch> for RuntimeError<C> {
     fn from(value: UpvalueCountMismatch) -> Self {
         RuntimeError::UpvalueCountMismatch(value)
     }
 }
 
-impl From<OpCodeError> for RuntimeError {
+impl<C> From<ValueError<C>> for RuntimeError<C> {
+    fn from(value: ValueError<C>) -> Self {
+        RuntimeError::Value(value)
+    }
+}
+
+impl<C> From<OpCodeError> for RuntimeError<C> {
     fn from(value: OpCodeError) -> Self {
         RuntimeError::OpCode(value)
     }
 }
 
-impl Display for RuntimeError {
+impl<C> Debug for RuntimeError<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CatchAll => write!(f, "CatchAll"),
+            Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
+            Self::MissingChunk(arg0) => f.debug_tuple("MissingChunk").field(arg0).finish(),
+            Self::MissingFunction(arg0) => f.debug_tuple("MissingFunction").field(arg0).finish(),
+            Self::OutOfBoundsStack(arg0) => f.debug_tuple("OutOfBoundsStack").field(arg0).finish(),
+            Self::UpvalueCountMismatch(arg0) => {
+                f.debug_tuple("UpvalueCountMismatch").field(arg0).finish()
+            }
+            Self::OpCode(arg0) => f.debug_tuple("OpCode").field(arg0).finish(),
+        }
+    }
+}
+
+impl<C> Display for RuntimeError<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "runtime error")
     }
 }
 
-impl Error for RuntimeError {}
+impl<C> Error for RuntimeError<C> {}
 
 trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);

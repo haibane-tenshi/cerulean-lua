@@ -138,7 +138,7 @@ impl<C> Stack<C> {
         }
     }
 
-    fn remove_range(&mut self, range: Range<RawStackSlot>) -> Result<(), RuntimeError> {
+    fn remove_range(&mut self, range: Range<RawStackSlot>) -> Result<(), RuntimeError<C>> {
         self.evict_upvalues(range.clone());
         self.temporaries.drain(range);
 
@@ -402,7 +402,7 @@ impl<'a, C> StackView<'a, C> {
         self.stack.adjust_height_with_variadics(requested_height)
     }
 
-    pub fn drop_under(&mut self, slot: StackSlot) -> Result<(), RuntimeError> {
+    pub fn drop_under(&mut self, slot: StackSlot) -> Result<(), RuntimeError<C>> {
         let height = self.protected_size.index(slot);
         self.stack.remove_range(self.protected_size..height)?;
 

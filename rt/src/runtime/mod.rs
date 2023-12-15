@@ -73,7 +73,7 @@ pub struct RuntimeView<'rt, C> {
 }
 
 impl<'rt, C> RuntimeView<'rt, C> {
-    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError> {
+    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError<C>> {
         let RuntimeView {
             chunk_cache,
             global_env,
@@ -98,7 +98,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
         Ok(r)
     }
 
-    pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError> {
+    pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError<C>> {
         f.call_once(self.view(StackSlot(0)).unwrap())
     }
 
@@ -106,7 +106,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
         &mut self,
         f: impl LuaFfiOnce<C>,
         start: StackSlot,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<C>> {
         f.call_once(self.view(start)?)
     }
 }
@@ -115,7 +115,7 @@ impl<'rt, C> RuntimeView<'rt, C>
 where
     C: ChunkCache<ChunkId>,
 {
-    pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError> {
+    pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError<C>> {
         use crate::value::callable::Callable;
 
         let frame = closure.construct_frame(self, start)?;
@@ -161,7 +161,7 @@ where
         &mut self,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = Value<C>>,
-    ) -> Result<Closure, RuntimeError> {
+    ) -> Result<Closure, RuntimeError<C>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let signature = &self

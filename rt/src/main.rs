@@ -59,17 +59,22 @@ fn main() -> Result<()> {
             // use rt::value::table::TableRef;
             use rt::value::Value;
 
-            let (env_chunk, builder) = rt::global_env::empty()
-                .add(rt::global_env::assert())
-                .finish();
-
             let (chunk, source) = load_from_file(&path)?;
-            let chunk_cache = MainCache::new(env_chunk, SingleChunk::new(chunk));
-            let mut runtime = Runtime::new(chunk_cache, Value::Nil);
-            let global_env = builder(runtime.view(), ChunkId(0))?;
-            runtime.global_env = global_env;
 
-            if let Err(err) = runtime.view().invoke(rt::ffi::call_script(&Main)) {
+            let run = || {
+                let (env_chunk, builder) = rt::global_env::empty()
+                    .add(rt::global_env::assert())
+                    .finish();
+
+                let chunk_cache = MainCache::new(env_chunk, SingleChunk::new(chunk));
+                let mut runtime = Runtime::new(chunk_cache, Value::Nil);
+                let global_env = builder(runtime.view(), ChunkId(0))?;
+                runtime.global_env = global_env;
+
+                runtime.view().invoke(rt::ffi::call_script(&Main))
+            };
+
+            if let Err(err) = run() {
                 use codespan_reporting::files::SimpleFile;
                 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
                 use codespan_reporting::term::{emit, Config};

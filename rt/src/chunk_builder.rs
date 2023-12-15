@@ -55,9 +55,13 @@ pub struct ChunkPart<Fun, Con, Rec, F> {
 }
 
 pub fn builder<C>() -> ChunkBuilder<
-    impl for<'rt, 'a> FnOnce(RuntimeView<'rt, C>, ChunkId, &'a mut Value<C>) -> Result<(), RuntimeError>,
+    impl for<'rt, 'a> FnOnce(
+        RuntimeView<'rt, C>,
+        ChunkId,
+        &'a mut Value<C>,
+    ) -> Result<(), RuntimeError<C>>,
 > {
-    fn builder<C>(_: RuntimeView<C>, _: ChunkId, _: &mut Value<C>) -> Result<(), RuntimeError> {
+    fn builder<C>(_: RuntimeView<C>, _: ChunkId, _: &mut Value<C>) -> Result<(), RuntimeError<C>> {
         Ok(())
     }
 
@@ -90,14 +94,22 @@ impl<P> ChunkBuilder<P> {
         self,
         chunk_part: ChunkPart<Fun, Con, Rec, F>,
     ) -> ChunkBuilder<
-        impl FnOnce(RuntimeView<Cache>, ChunkId, &mut Value<Cache>) -> Result<(), RuntimeError>,
+        impl FnOnce(RuntimeView<Cache>, ChunkId, &mut Value<Cache>) -> Result<(), RuntimeError<Cache>>,
     >
     where
-        P: FnOnce(RuntimeView<Cache>, ChunkId, &mut Value<Cache>) -> Result<(), RuntimeError>,
+        P: FnOnce(
+            RuntimeView<Cache>,
+            ChunkId,
+            &mut Value<Cache>,
+        ) -> Result<(), RuntimeError<Cache>>,
         Fun: IntoIterator<Item = Function>,
         Con: IntoIterator<Item = Literal>,
         Rec: IntoIterator<Item = ClosureRecipe>,
-        F: FnOnce(RuntimeView<Cache>, ChunkRange, &mut Value<Cache>) -> Result<(), RuntimeError>,
+        F: FnOnce(
+            RuntimeView<Cache>,
+            ChunkRange,
+            &mut Value<Cache>,
+        ) -> Result<(), RuntimeError<Cache>>,
     {
         let ChunkPart {
             chunk_ext,
@@ -145,10 +157,10 @@ impl<P> ChunkBuilder<P> {
         self,
     ) -> (
         Chunk,
-        impl FnOnce(RuntimeView<C>, ChunkId) -> Result<Value<C>, RuntimeError>,
+        impl FnOnce(RuntimeView<C>, ChunkId) -> Result<Value<C>, RuntimeError<C>>,
     )
     where
-        P: FnOnce(RuntimeView<C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError>,
+        P: FnOnce(RuntimeView<C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError<C>>,
         C: ChunkCache<ChunkId>,
     {
         let ChunkBuilder { chunk, builder } = self;

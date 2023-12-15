@@ -52,7 +52,7 @@ impl ClosureRef {
         self,
         rt: &mut RuntimeView<C>,
         start: StackSlot,
-    ) -> Result<Frame<C>, RuntimeError>
+    ) -> Result<Frame<C>, RuntimeError<C>>
     where
         C: ChunkCache<ChunkId>,
     {
@@ -147,7 +147,7 @@ impl<C> Frame<C> {
     pub(crate) fn activate<'a>(
         self,
         rt: &'a mut RuntimeView<C>,
-    ) -> Result<ActiveFrame<'a, C>, RuntimeError>
+    ) -> Result<ActiveFrame<'a, C>, RuntimeError<C>>
     where
         C: ChunkCache<ChunkId>,
     {
@@ -701,7 +701,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         }
     }
 
-    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError> {
+    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<C>> {
         self.stack.drop_under(drop_under)?;
         self.upvalue_stack.clear();
 

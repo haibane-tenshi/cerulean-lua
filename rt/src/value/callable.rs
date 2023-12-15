@@ -48,13 +48,13 @@ impl<C> Hash for RustClosureRef<C> {
 }
 
 impl<C> LuaFfiOnce<C> for RustClosureRef<C> {
-    fn call_once(mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError> {
+    fn call_once(mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
         self.call_mut(rt)
     }
 }
 
 impl<C> LuaFfiMut<C> for RustClosureRef<C> {
-    fn call_mut(&mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError> {
+    fn call_mut(&mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
         let mut f = self
             .0
             .try_borrow_mut()

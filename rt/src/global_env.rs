@@ -12,7 +12,7 @@ use crate::value::Value;
 use crate::error::RuntimeError;
 
 pub fn empty<C>() -> ChunkBuilder<
-    impl for<'rt> FnOnce(RuntimeView<'rt, C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError>,
+    impl for<'rt> FnOnce(RuntimeView<'rt, C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError<C>>,
 > {
     use crate::chunk_builder;
     use crate::value::table::TableRef;
@@ -34,7 +34,7 @@ pub fn assert<C>() -> ChunkPart<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, &mut Value<C>) -> Result<(), RuntimeError>,
+    impl FnOnce(RuntimeView<C>, ChunkRange, &mut Value<C>) -> Result<(), RuntimeError<C>>,
 >
 where
     C: ChunkCache<ChunkId>,
