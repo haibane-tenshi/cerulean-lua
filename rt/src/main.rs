@@ -57,6 +57,7 @@ fn main() -> Result<()> {
             use rt::chunk_cache::ChunkId;
             use rt::runtime::Runtime;
             // use rt::value::table::TableRef;
+            use rt::backtrace::Location;
             use rt::value::Value;
 
             let (chunk, source) = load_from_file(&path)?;
@@ -64,7 +65,9 @@ fn main() -> Result<()> {
                 .add(rt::global_env::assert())
                 .finish();
 
-            let chunk_cache = MainCache::new(env_chunk, SingleChunk::new(chunk));
+            let location = Location::file(path.to_string_lossy().to_string());
+            let chunk_cache =
+                MainCache::new(env_chunk, None, SingleChunk::new(chunk, Some(location)));
             let mut runtime = Runtime::new(chunk_cache, Value::Nil);
 
             let run = || {

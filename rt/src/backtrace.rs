@@ -52,6 +52,16 @@ pub struct Location {
     pub column: usize,
 }
 
+impl Location {
+    pub fn file(file: String) -> Self {
+        Location {
+            file,
+            line: 0,
+            column: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum FrameSource {
     Lua,

@@ -220,9 +220,27 @@ where
             .map(|(chunk, function)| {
                 let name = function.name.clone();
                 let location = function.opcodes.get(ip).map(|info| {
+                    let chunk_location =
+                        chunk_cache
+                            .location(ptr.chunk_id)
+                            .unwrap_or_else(|| Location {
+                                file: "<no file location is present>".to_string(),
+                                line: 0,
+                                column: 0,
+                            });
+
                     let (line, column) = chunk.line_column(info.start());
+
+                    // The first line of chunk might be offset from the beginning of the line.
+                    let column = if line == 1 {
+                        column + chunk_location.column
+                    } else {
+                        column
+                    };
+                    let line = line + chunk_location.line;
+
                     Location {
-                        file: "<unimplemented>".to_string(),
+                        file: chunk_location.file,
                         line,
                         column,
                     }
