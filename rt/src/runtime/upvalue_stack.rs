@@ -93,7 +93,7 @@ impl<'a, C> UpvalueView<'a, C> {
             .iter_mut()
     }
 
-    pub fn clear(self) {
+    pub fn clear(&mut self) {
         self.stack.truncate(self.protected_size.0)
     }
 

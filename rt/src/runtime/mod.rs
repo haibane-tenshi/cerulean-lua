@@ -112,6 +112,34 @@ impl<'rt, C> RuntimeView<'rt, C> {
     ) -> Result<(), RuntimeError<C>> {
         f.call_once(self.view(start)?)
     }
+
+    /// Return runtime into consistent state.
+    ///
+    /// This function is useful in case you caught Lua panic
+    /// (one of the methods returned `RuntimeError`)
+    /// and you want to continue executing code inside this runtime.
+    /// Lua panic may interrupt execution at arbitrary point
+    /// potentially leaving internal structures in inconsistent state.
+    /// Resuming execution on such runtime results *Lua undefined behavior*.
+    ///
+    /// Invoking `reset` will purge stack and bring internals into consistent state
+    /// making it safe to execute Lua code once again.
+    /// As such you should collect any useful information about error (e.g. backtrace)
+    /// before resetting in case you need it.
+    ///
+    /// Note that the "consistency" part applies only to runtime itself but not to Lua constructs!
+    /// It is entirely possible for Lua to panic while modifying some state
+    /// and since most things (tables, closures, etc.) are shared through references,
+    /// this corrupted state may be observed by outside code.
+    /// If that code doesn't expect to find malformed data it may lead to weird and/or buggy behavior.
+    /// There is nothing that runtime can do to help you.
+    /// In case this presents an issue,
+    /// the best thing you can do is to discard the runtime and construct a fresh one.
+    pub fn reset(&mut self) {
+        self.stack.clear();
+        self.upvalue_stack.clear();
+        self.frames.clear();
+    }
 }
 
 impl<'rt, C> RuntimeView<'rt, C>
@@ -241,5 +269,9 @@ impl<'a, C> FrameStackView<'a, C> {
 
     fn iter(&self) -> impl Iterator<Item = &Frame<C>> {
         self.frames[self.protected_size..].iter()
+    }
+
+    fn clear(&mut self) {
+        self.frames.truncate(self.protected_size)
     }
 }
