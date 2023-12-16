@@ -81,7 +81,7 @@ impl ClosureRef {
         }
 
         // Adjust stack, move varargs into register if needed.
-        let stack_start = rt.stack.protected_size() + start;
+        let stack_start = rt.stack.boundary() + start;
         let call_height = StackSlot(0) + signature.arg_count;
         let mut stack = rt.stack.view(stack_start).ok_or(OutOfBoundsStack)?;
 
@@ -296,7 +296,9 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
     pub fn step(&mut self) -> Result<ControlFlow<C>, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
-            return Ok(ControlFlow::Break(ChangeFrame::Return(self.stack.top())));
+            return Ok(ControlFlow::Break(ChangeFrame::Return(
+                self.stack.next_slot(),
+            )));
         };
 
         self.exec(opcode).map_err(|cause| opcode_err::Error {
@@ -723,7 +725,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             ..
         } = self;
 
-        let stack_start = stack.protected_size();
+        let stack_start = stack.boundary();
         let upvalue_start = upvalue_stack.protected_size();
 
         for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter()) {
@@ -740,7 +742,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
     }
 
     pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<C>> {
-        self.stack.drop_under(drop_under)?;
+        self.stack.remove_range(StackSlot(0)..drop_under);
         self.upvalue_stack.clear();
 
         Ok(())

@@ -88,7 +88,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
         } = self;
 
         let frames = frames.view();
-        let start = stack.protected_size() + start;
+        let start = stack.boundary() + start;
         let stack = stack.view(start).ok_or(OutOfBoundsStack)?;
         let upvalue_stack = upvalue_stack.view_over();
 

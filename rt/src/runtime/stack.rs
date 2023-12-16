@@ -1,50 +1,21 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::{Add, Range, RangeBounds, Sub};
+use std::ops::{Add, Bound, RangeBounds};
 
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
 use super::Value;
 use crate::error::opcode::MissingArgsError;
-use crate::error::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct RawStackSlot(pub(crate) usize);
-
-impl RawStackSlot {
-    pub(crate) fn index(self, slot: StackSlot) -> RawStackSlot {
-        RawStackSlot(self.0 + slot.0)
-    }
-
-    pub(crate) fn slot(self, index: RawStackSlot) -> Option<StackSlot> {
-        let offset = index.0.checked_sub(self.0)?;
-
-        Some(StackSlot(offset))
-    }
-}
-
-impl Add<usize> for RawStackSlot {
-    type Output = Self;
-
-    fn add(self, rhs: usize) -> Self::Output {
-        RawStackSlot(self.0 + rhs)
-    }
-}
+pub(crate) struct RawStackSlot(usize);
 
 impl Add<StackSlot> for RawStackSlot {
     type Output = Self;
 
     fn add(self, rhs: StackSlot) -> Self::Output {
-        self.index(rhs)
-    }
-}
-
-impl Sub<usize> for RawStackSlot {
-    type Output = Self;
-
-    fn sub(self, rhs: usize) -> Self::Output {
-        RawStackSlot(self.0 - rhs)
+        RawStackSlot(self.0 + rhs.0)
     }
 }
 
@@ -68,6 +39,16 @@ impl RawUpvalueId {
         let r = *self;
         self.0 += 1;
         r
+    }
+}
+
+fn map_bound<T, U>(bound: Bound<T>, f: impl FnOnce(T) -> U) -> Bound<U> {
+    use std::ops::Bound::*;
+
+    match bound {
+        Included(t) => Included(f(t)),
+        Excluded(t) => Excluded(f(t)),
+        Unbounded => Unbounded,
     }
 }
 
@@ -138,11 +119,17 @@ impl<C> Stack<C> {
         }
     }
 
-    fn remove_range(&mut self, range: Range<RawStackSlot>) -> Result<(), RuntimeError<C>> {
-        self.evict_upvalues(range.clone());
-        self.temporaries.drain(range);
+    fn remove_range(&mut self, range: impl RangeBounds<RawStackSlot>) {
+        let start = range.start_bound().cloned();
+        let end = range.end_bound().cloned();
 
-        Ok(())
+        self.evict_upvalues((start, end));
+
+        // `TiVec` doesn't implement `TiRangeBounds` for `(Bound, Bound)` tuple :(
+        let start = map_bound(start, |RawStackSlot(t)| t);
+        let end = map_bound(end, |RawStackSlot(t)| t);
+
+        self.temporaries.raw.drain((start, end));
     }
 
     fn truncate(&mut self, new_len: RawStackSlot) {
@@ -214,8 +201,6 @@ impl<C> Stack<C> {
     }
 
     fn evict_upvalues(&mut self, range: impl RangeBounds<RawStackSlot>) {
-        use std::ops::Bound;
-
         let start = match range.start_bound() {
             Bound::Included(t) => t.0,
             Bound::Excluded(t) => t.0 + 1,
@@ -236,15 +221,6 @@ impl<C> Stack<C> {
     fn len(&self) -> usize {
         self.temporaries.len()
     }
-
-    fn top(&self) -> RawStackSlot {
-        RawStackSlot(self.temporaries.len())
-    }
-
-    // fn clear(&mut self) {
-    //     self.evict_upvalues(..);
-    //     self.temporaries.clear();
-    // }
 }
 
 impl<C> Debug for Stack<C> {
@@ -271,14 +247,14 @@ impl<C> Default for Stack<C> {
 
 pub struct StackView<'a, C> {
     stack: &'a mut Stack<C>,
-    protected_size: RawStackSlot,
+    boundary: RawStackSlot,
 }
 
 impl<'a, C> StackView<'a, C> {
     pub fn new(stack: &'a mut Stack<C>) -> Self {
         StackView {
             stack,
-            protected_size: RawStackSlot(0),
+            boundary: RawStackSlot(0),
         }
     }
 
@@ -289,7 +265,7 @@ impl<'a, C> StackView<'a, C> {
 
         let r = StackView {
             stack: self.stack,
-            protected_size,
+            boundary: protected_size,
         };
 
         Some(r)
@@ -300,7 +276,7 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn pop(&mut self) -> Option<Value<C>> {
-        if self.stack.len() <= self.protected_size.0 {
+        if self.stack.len() <= self.boundary.0 {
             return None;
         }
 
@@ -308,7 +284,7 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn remove(&mut self, slot: StackSlot) -> Option<Value<C>> {
-        let slot = self.protected_size.index(slot);
+        let slot = self.boundary + slot;
         self.stack.remove(slot)
     }
 
@@ -350,24 +326,25 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn len(&self) -> usize {
-        self.stack.len() - self.protected_size().0
+        self.stack.len() - self.boundary().0
     }
 
     pub fn last(&self) -> Option<&Value<C>> {
         self.stack.last()
     }
 
-    pub fn top(&mut self) -> StackSlot {
-        self.protected_size.slot(self.stack.top()).unwrap()
+    pub fn next_slot(&self) -> StackSlot {
+        let val = self.stack.len() - self.boundary.0;
+        StackSlot(val)
     }
 
     pub fn get(&self, slot: StackSlot) -> Option<&Value<C>> {
-        let index = self.protected_size.index(slot);
+        let index = self.boundary + slot;
         self.stack.get(index)
     }
 
     pub fn get_mut(&mut self, slot: StackSlot) -> Option<&mut Value<C>> {
-        let index = self.protected_size.index(slot);
+        let index = self.boundary + slot;
         self.stack.get_mut(index)
     }
 
@@ -384,12 +361,12 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn mark_as_upvalue(&mut self, slot: StackSlot) -> Option<UpvalueId> {
-        let slot = self.protected_size.index(slot);
+        let slot = self.boundary + slot;
         self.stack.mark_as_upvalue(slot)
     }
 
-    pub(crate) fn protected_size(&self) -> RawStackSlot {
-        self.protected_size
+    pub(crate) fn boundary(&self) -> RawStackSlot {
+        self.boundary
     }
 
     pub fn adjust_height(&mut self, height: StackSlot) {
@@ -397,16 +374,16 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn adjust_height_with_variadics(&mut self, height: StackSlot) -> Vec<Value<C>> {
-        let requested_height = self.protected_size.index(height);
+        let requested_height = self.boundary + height;
 
         self.stack.adjust_height_with_variadics(requested_height)
     }
 
-    pub fn drop_under(&mut self, slot: StackSlot) -> Result<(), RuntimeError<C>> {
-        let height = self.protected_size.index(slot);
-        self.stack.remove_range(self.protected_size..height)?;
+    pub fn remove_range(&mut self, range: impl RangeBounds<StackSlot>) {
+        let start = map_bound(range.start_bound(), |slot| self.boundary + *slot);
+        let end = map_bound(range.end_bound(), |slot| self.boundary + *slot);
 
-        Ok(())
+        self.stack.remove_range((start, end))
     }
 
     pub fn clear(&mut self) {
@@ -414,7 +391,7 @@ impl<'a, C> StackView<'a, C> {
     }
 
     pub fn truncate(&mut self, new_len: StackSlot) {
-        let new_len = self.protected_size.index(new_len);
+        let new_len = self.boundary + new_len;
         self.stack.truncate(new_len)
     }
 }
@@ -429,7 +406,7 @@ impl<'a, C> Debug for StackView<'a, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StackView")
             .field("stack", &self.stack)
-            .field("protected_size", &self.protected_size)
+            .field("protected_size", &self.boundary)
             .finish()
     }
 }
