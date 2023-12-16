@@ -211,7 +211,8 @@ where
         use crate::backtrace::{FrameSource, Location};
 
         let ptr = self.closure.fn_ptr;
-        let ip = self.ip;
+        // Instruction pointer always points at the *next* instruction.
+        let ip = self.ip - 1;
         let (name, location) = chunk_cache
             .chunk(ptr.chunk_id)
             .and_then(|chunk| chunk.debug_info.as_ref())
