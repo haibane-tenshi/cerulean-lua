@@ -158,7 +158,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
         script.signature.upvalue_count = upvalues.len();
 
         let script_debug_info = FunctionDebugInfo {
-            name: "<script>".to_string(),
+            name: "{script}".to_string(),
             span,
             opcodes,
         };

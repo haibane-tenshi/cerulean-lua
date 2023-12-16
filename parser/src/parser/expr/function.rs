@@ -24,7 +24,7 @@ pub(crate) fn function<'s, 'origin>(
             .with_mode(FailureMode::Malformed)
             .map_output(Spanned::put_range)
             .then(|span| {
-                func_body(frag.new_core(), false, "<closure>", span.span().start)
+                func_body(frag.new_core(), false, "{closure}", span.span().start)
                     .map_output(|output| keep(span, output))
             })?
             .map_output(|output| {
