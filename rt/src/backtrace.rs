@@ -9,7 +9,7 @@ impl Backtrace {
     pub fn emit(&self, writer: &mut impl Write) -> Result<()> {
         writeln!(writer, "backtrace:")?;
 
-        for (i, frame) in self.frames.iter().enumerate().rev() {
+        for (i, frame) in self.frames.iter().enumerate() {
             let BacktraceFrame {
                 name,
                 source,

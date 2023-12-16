@@ -125,8 +125,8 @@ where
         let mut active_frame = frame.activate(self)?;
 
         loop {
-            match active_frame.step()? {
-                ControlFlow::Break(ChangeFrame::Return(slot)) => {
+            match active_frame.step() {
+                Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
                     active_frame.exit(slot)?;
                     tracing::trace!(stack = ?self.stack, "adjusted stack upon function return");
 
@@ -136,7 +136,7 @@ where
 
                     active_frame = frame.activate(self)?;
                 }
-                ControlFlow::Break(ChangeFrame::Invoke(callable, start)) => {
+                Ok(ControlFlow::Break(ChangeFrame::Invoke(callable, start))) => {
                     let frame = active_frame.suspend();
                     self.frames.push(frame);
 
@@ -153,7 +153,14 @@ where
                         }
                     }
                 }
-                ControlFlow::Continue(()) => (),
+                Ok(ControlFlow::Continue(())) => (),
+                Err(err) => {
+                    // Make sure to preserve current frame in case opcode panicked.
+                    let frame = active_frame.suspend();
+                    self.frames.push(frame);
+
+                    return Err(err.into());
+                }
             }
         }
 
