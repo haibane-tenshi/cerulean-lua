@@ -1,4 +1,5 @@
 mod frame;
+mod frame_stack;
 mod stack;
 mod upvalue_stack;
 
@@ -13,6 +14,7 @@ use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
 use crate::value::Value;
 use frame::{ChangeFrame, Frame};
+use frame_stack::FrameStackView;
 use stack::{Stack, StackView};
 use upvalue_stack::UpvalueView;
 
@@ -230,48 +232,5 @@ where
             .collect();
 
         Backtrace { frames }
-    }
-}
-
-struct FrameStackView<'a, C> {
-    frames: &'a mut Vec<Frame<C>>,
-    protected_size: usize,
-}
-
-impl<'a, C> FrameStackView<'a, C> {
-    fn new(frames: &'a mut Vec<Frame<C>>) -> Self {
-        FrameStackView {
-            frames,
-            protected_size: 0,
-        }
-    }
-
-    fn view(&mut self) -> FrameStackView<C> {
-        let protected_size = self.frames.len();
-
-        FrameStackView {
-            frames: self.frames,
-            protected_size,
-        }
-    }
-
-    fn pop(&mut self) -> Option<Frame<C>> {
-        if self.frames.len() <= self.protected_size {
-            return None;
-        }
-
-        self.frames.pop()
-    }
-
-    fn push(&mut self, frame: Frame<C>) {
-        self.frames.push(frame)
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &Frame<C>> {
-        self.frames[self.protected_size..].iter()
-    }
-
-    fn clear(&mut self) {
-        self.frames.truncate(self.protected_size)
     }
 }
