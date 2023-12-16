@@ -1,44 +1,101 @@
+use repr::tivec::TiVec;
+
+use std::fmt::Debug;
+
 use super::frame::Frame;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RawFrameId(usize);
+
+impl From<usize> for RawFrameId {
+    fn from(value: usize) -> Self {
+        RawFrameId(value)
+    }
+}
+
+impl From<RawFrameId> for usize {
+    fn from(value: RawFrameId) -> Self {
+        value.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameId(usize);
+
+#[derive(Debug)]
+pub(crate) struct FrameStack<C> {
+    stack: TiVec<RawFrameId, Frame<C>>,
+}
+
+impl<C> FrameStack<C> {
+    pub(crate) fn view(&mut self) -> FrameStackView<C> {
+        FrameStackView::new(self)
+    }
+
+    fn next_id(&self) -> RawFrameId {
+        self.stack.next_key()
+    }
+
+    fn push(&mut self, frame: Frame<C>) {
+        self.stack.push(frame)
+    }
+
+    fn pop(&mut self) -> Option<Frame<C>> {
+        self.stack.pop()
+    }
+
+    fn truncate(&mut self, id: RawFrameId) {
+        self.stack.truncate(id.0)
+    }
+}
+
+impl<C> Default for FrameStack<C> {
+    fn default() -> Self {
+        Self {
+            stack: Default::default(),
+        }
+    }
+}
+
 pub(crate) struct FrameStackView<'a, C> {
-    frames: &'a mut Vec<Frame<C>>,
-    protected_size: usize,
+    stack: &'a mut FrameStack<C>,
+    boundary: RawFrameId,
 }
 
 impl<'a, C> FrameStackView<'a, C> {
-    pub(crate) fn new(frames: &'a mut Vec<Frame<C>>) -> Self {
+    pub(crate) fn new(frames: &'a mut FrameStack<C>) -> Self {
         FrameStackView {
-            frames,
-            protected_size: 0,
+            stack: frames,
+            boundary: RawFrameId(0),
         }
     }
 
     pub(crate) fn view(&mut self) -> FrameStackView<C> {
-        let protected_size = self.frames.len();
+        let boundary = self.stack.next_id();
 
         FrameStackView {
-            frames: self.frames,
-            protected_size,
+            stack: self.stack,
+            boundary,
         }
     }
 
     pub(crate) fn pop(&mut self) -> Option<Frame<C>> {
-        if self.frames.len() <= self.protected_size {
+        if self.stack.next_id() <= self.boundary {
             return None;
         }
 
-        self.frames.pop()
+        self.stack.pop()
     }
 
     pub(crate) fn push(&mut self, frame: Frame<C>) {
-        self.frames.push(frame)
+        self.stack.push(frame)
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Frame<C>> {
-        self.frames[self.protected_size..].iter()
+        self.stack.stack[self.boundary..].iter()
     }
 
     pub(crate) fn clear(&mut self) {
-        self.frames.truncate(self.protected_size)
+        self.stack.truncate(self.boundary)
     }
 }

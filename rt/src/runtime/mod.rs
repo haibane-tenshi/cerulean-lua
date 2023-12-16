@@ -13,8 +13,8 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
 use crate::value::Value;
-use frame::{ChangeFrame, Frame};
-use frame_stack::FrameStackView;
+use frame::ChangeFrame;
+use frame_stack::{FrameStack, FrameStackView};
 use stack::{Stack, StackView};
 use upvalue_stack::UpvalueView;
 
@@ -23,7 +23,7 @@ pub use frame::{Closure, ClosureRef, FunctionPtr};
 pub struct Runtime<C> {
     pub chunk_cache: C,
     pub global_env: Value<C>,
-    frames: Vec<Frame<C>>,
+    frames: FrameStack<C>,
     stack: Stack<C>,
     upvalue_stack: Vec<Value<C>>,
 }
@@ -53,7 +53,7 @@ where
             upvalue_stack,
         } = self;
 
-        let frames = FrameStackView::new(frames);
+        let frames = frames.view();
         let stack = StackView::new(stack);
         let upvalue_stack = UpvalueView::new(upvalue_stack);
 
