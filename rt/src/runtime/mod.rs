@@ -135,15 +135,16 @@ impl<'rt, C> RuntimeView<'rt, C> {
             },
         };
 
-        self.rust_backtrace_stack.push(rust_frame);
+        let mut view = self.view(start)?;
+        view.rust_backtrace_stack.push(rust_frame);
 
-        let r = f.call_once(self.view(start)?);
+        let r = f.call_once(view.view(StackSlot(0)).unwrap());
 
         // Forcefully clean up.
         // It is possible that Rust function called Lua panic but forgot to reset the runtime.
         // This guarantees that it is always safe to return control to caller when panic is not propagated.
         if r.is_ok() {
-            self.soft_reset();
+            view.soft_reset();
         }
 
         r
