@@ -11,7 +11,7 @@ use repr::tivec::{TiSlice, TiVec};
 
 use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackView};
-use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
+use super::upvalue_stack::{RawUpvalueSlot, UpvalueStackView};
 use super::RuntimeView;
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::{ChunkCache, ChunkId};
@@ -93,7 +93,7 @@ impl ClosureRef {
         };
 
         // Load upvalues onto upvalue stack.
-        let upvalue_start = rt.upvalue_stack.protected_size() + rt.upvalue_stack.len();
+        let upvalue_start = rt.upvalue_stack.next_raw_slot();
         rt.upvalue_stack.extend(
             self.upvalues
                 .iter()
@@ -248,7 +248,7 @@ pub struct ActiveFrame<'rt, C> {
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
     stack: StackView<'rt, C>,
-    upvalue_stack: UpvalueView<'rt, C>,
+    upvalue_stack: UpvalueStackView<'rt, C>,
     register_variadic: Vec<Value<C>>,
 }
 
@@ -726,7 +726,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         } = self;
 
         let stack_start = stack.boundary();
-        let upvalue_start = upvalue_stack.protected_size();
+        let upvalue_start = upvalue_stack.boundary();
 
         for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter()) {
             *stack.get_upvalue_mut(upvalue_id).unwrap() = upvalue.clone();

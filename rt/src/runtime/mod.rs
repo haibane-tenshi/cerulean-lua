@@ -16,7 +16,7 @@ use crate::value::Value;
 use frame::ChangeFrame;
 use frame_stack::{FrameStack, FrameStackView};
 use stack::{Stack, StackView};
-use upvalue_stack::UpvalueView;
+use upvalue_stack::{UpvalueStack, UpvalueStackView};
 
 pub use frame::{Closure, ClosureRef, FunctionPtr};
 
@@ -25,7 +25,7 @@ pub struct Runtime<C> {
     pub global_env: Value<C>,
     frames: FrameStack<C>,
     stack: Stack<C>,
-    upvalue_stack: Vec<Value<C>>,
+    upvalue_stack: UpvalueStack<C>,
 }
 
 impl<C> Runtime<C>
@@ -54,8 +54,8 @@ where
         } = self;
 
         let frames = frames.view();
-        let stack = StackView::new(stack);
-        let upvalue_stack = UpvalueView::new(upvalue_stack);
+        let stack = stack.view();
+        let upvalue_stack = upvalue_stack.view();
 
         RuntimeView {
             chunk_cache,
@@ -72,7 +72,7 @@ pub struct RuntimeView<'rt, C> {
     pub global_env: &'rt Value<C>,
     frames: FrameStackView<'rt, C>,
     pub stack: StackView<'rt, C>,
-    upvalue_stack: UpvalueView<'rt, C>,
+    upvalue_stack: UpvalueStackView<'rt, C>,
 }
 
 impl<'rt, C> RuntimeView<'rt, C> {

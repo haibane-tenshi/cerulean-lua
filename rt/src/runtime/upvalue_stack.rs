@@ -1,113 +1,150 @@
 use std::ops::Add;
 
 use repr::index::UpvalueSlot;
+use repr::tivec::TiVec;
 
 use super::Value;
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ProtectedSize(pub(crate) usize);
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
+pub(crate) struct RawUpvalueSlot(usize);
 
-impl ProtectedSize {
-    pub(crate) fn index(self, slot: UpvalueSlot) -> usize {
-        self.0 + slot.0
-    }
-
-    // pub(crate) fn slot(self, index: usize) -> Option<UpvalueSlot> {
-    //     let offset = index.checked_sub(self.0)?;
-    //
-    //     Some(UpvalueSlot(offset))
-    // }
-}
-
-impl Add<usize> for ProtectedSize {
-    type Output = Self;
-
-    fn add(self, rhs: usize) -> Self::Output {
-        ProtectedSize(self.0 + rhs)
-    }
-}
-
-impl Add<UpvalueSlot> for ProtectedSize {
+impl Add<UpvalueSlot> for RawUpvalueSlot {
     type Output = Self;
 
     fn add(self, rhs: UpvalueSlot) -> Self::Output {
-        let index = self.index(rhs);
-        ProtectedSize(index)
+        let index = self.0 + rhs.0;
+        RawUpvalueSlot(index)
+    }
+}
+
+impl From<usize> for RawUpvalueSlot {
+    fn from(value: usize) -> Self {
+        RawUpvalueSlot(value)
+    }
+}
+
+impl From<RawUpvalueSlot> for usize {
+    fn from(value: RawUpvalueSlot) -> Self {
+        value.0
     }
 }
 
 #[derive(Debug)]
-pub struct UpvalueView<'a, C> {
-    stack: &'a mut Vec<Value<C>>,
-    protected_size: ProtectedSize,
+pub(crate) struct UpvalueStack<C> {
+    stack: TiVec<RawUpvalueSlot, Value<C>>,
 }
 
-impl<'a, C> UpvalueView<'a, C> {
-    pub(crate) fn new(stack: &'a mut Vec<Value<C>>) -> Self {
-        UpvalueView {
+impl<C> UpvalueStack<C> {
+    pub(crate) fn view(&mut self) -> UpvalueStackView<C> {
+        UpvalueStackView::new(self)
+    }
+
+    fn next_slot(&self) -> RawUpvalueSlot {
+        self.stack.next_key()
+    }
+
+    fn get(&self, slot: RawUpvalueSlot) -> Option<&Value<C>> {
+        self.stack.get(slot)
+    }
+
+    fn get_mut(&mut self, slot: RawUpvalueSlot) -> Option<&mut Value<C>> {
+        self.stack.get_mut(slot)
+    }
+
+    fn truncate(&mut self, slot: RawUpvalueSlot) {
+        self.stack.truncate(slot.0)
+    }
+
+    fn len(&self) -> usize {
+        self.stack.len()
+    }
+}
+
+impl<C> Default for UpvalueStack<C> {
+    fn default() -> Self {
+        Self {
+            stack: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UpvalueStackView<'a, C> {
+    stack: &'a mut UpvalueStack<C>,
+    boundary: RawUpvalueSlot,
+}
+
+impl<'a, C> UpvalueStackView<'a, C> {
+    pub(crate) fn new(stack: &'a mut UpvalueStack<C>) -> Self {
+        UpvalueStackView {
             stack,
-            protected_size: ProtectedSize(0),
+            boundary: RawUpvalueSlot(0),
         }
     }
 
-    pub(crate) fn view(&mut self, protected_size: ProtectedSize) -> Option<UpvalueView<C>> {
-        if self.stack.len() < protected_size.0 {
+    pub(crate) fn view(&mut self, boundary: RawUpvalueSlot) -> Option<UpvalueStackView<C>> {
+        if self.stack.next_slot() < boundary {
             return None;
         }
 
-        let r = UpvalueView {
+        let r = UpvalueStackView {
             stack: self.stack,
-            protected_size,
+            boundary,
         };
 
         Some(r)
     }
 
-    pub(crate) fn view_over(&mut self) -> UpvalueView<C> {
-        let protected_size = ProtectedSize(self.stack.len());
+    pub(crate) fn view_over(&mut self) -> UpvalueStackView<C> {
+        let boundary = self.stack.next_slot();
 
-        UpvalueView {
+        UpvalueStackView {
             stack: self.stack,
-            protected_size,
+            boundary,
         }
     }
 
-    pub fn get(&self, slot: UpvalueSlot) -> Option<&Value<C>> {
-        let index = self.protected_size.index(slot);
+    pub(crate) fn next_raw_slot(&self) -> RawUpvalueSlot {
+        self.stack.next_slot()
+    }
+
+    pub(crate) fn get(&self, slot: UpvalueSlot) -> Option<&Value<C>> {
+        let index = self.boundary + slot;
         self.stack.get(index)
     }
 
-    pub fn get_mut(&mut self, slot: UpvalueSlot) -> Option<&mut Value<C>> {
-        let index = self.protected_size.index(slot);
+    pub(crate) fn get_mut(&mut self, slot: UpvalueSlot) -> Option<&mut Value<C>> {
+        let index = self.boundary + slot;
         self.stack.get_mut(index)
     }
 
-    pub fn iter(&self) -> std::slice::Iter<Value<C>> {
-        self.stack.get(self.protected_size.0..).unwrap().iter()
+    pub(crate) fn iter(&self) -> std::slice::Iter<Value<C>> {
+        self.stack.stack.get(self.boundary..).unwrap().iter()
     }
 
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<Value<C>> {
+    pub(crate) fn iter_mut(&mut self) -> std::slice::IterMut<Value<C>> {
         self.stack
-            .get_mut(self.protected_size.0..)
+            .stack
+            .get_mut(self.boundary..)
             .unwrap()
             .iter_mut()
     }
 
-    pub fn clear(&mut self) {
-        self.stack.truncate(self.protected_size.0)
+    pub(crate) fn clear(&mut self) {
+        self.stack.truncate(self.boundary)
     }
 
-    pub fn len(&self) -> usize {
-        self.stack.len() - self.protected_size.0
+    pub(crate) fn len(&self) -> usize {
+        self.stack.len() - self.boundary.0
     }
 
-    pub(crate) fn protected_size(&self) -> ProtectedSize {
-        self.protected_size
+    pub(crate) fn boundary(&self) -> RawUpvalueSlot {
+        self.boundary
     }
 }
 
-impl<'a, C> Extend<Value<C>> for UpvalueView<'a, C> {
+impl<'a, C> Extend<Value<C>> for UpvalueStackView<'a, C> {
     fn extend<T: IntoIterator<Item = Value<C>>>(&mut self, iter: T) {
-        self.stack.extend(iter)
+        self.stack.stack.extend(iter)
     }
 }
