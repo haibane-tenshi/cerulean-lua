@@ -109,6 +109,38 @@ pub enum DebugInfo {
     },
 }
 
+impl DebugInfo {
+    pub fn start(&self) -> usize {
+        use DebugInfo::*;
+
+        match self {
+            Generic(range) => range.start,
+            Literal(range) => range.start,
+            FnCall { callable, .. } => callable.start,
+            FnExpr { total_span, .. } => total_span.start,
+            FnDecl { total_span, .. } => total_span.start,
+            Return { return_ } => return_.start,
+            Break { break_ } => break_.start,
+            IfElse { if_ } => if_.start,
+            NumericForLoop { for_, .. } => for_.start,
+            GenericForLoop { for_, .. } => for_.start,
+            WhileLoop { while_ } => while_.start,
+            RepeatLoop { repeat, .. } => repeat.start,
+            Label(range) => range.start,
+            Goto { goto } => goto.start,
+            LoadVarargs(range) => range.start,
+            LoadPlace { ident, .. } => ident.start,
+            StorePlace { ident, .. } => ident.start,
+            UnaOp { op, .. } => op.start,
+            BinOp { lhs, .. } => lhs.start,
+            LoadTable { table, .. } => table.start,
+            StoreTable { table, .. } => table.start,
+            CreateTable { table } => table.start,
+            ConstructTable { entry, .. } => entry.start(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Place {
     Temporary,
@@ -160,4 +192,16 @@ pub enum TabConstructor {
     /// }
     /// ```
     Value { value: Range<usize> },
+}
+
+impl TabConstructor {
+    pub fn start(&self) -> usize {
+        use TabConstructor::*;
+
+        match self {
+            Index { indexing, .. } => indexing.start,
+            Field { ident, .. } => ident.start,
+            Value { value } => value.start,
+        }
+    }
 }

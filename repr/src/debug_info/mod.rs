@@ -13,6 +13,24 @@ pub struct DebugInfo {
     pub line_breaks: Vec<usize>,
 }
 
+impl DebugInfo {
+    pub fn line_column(&self, offset: usize) -> (usize, usize) {
+        let line = match self.line_breaks.binary_search(&offset) {
+            Ok(index) => index,
+            Err(index) => index,
+        };
+
+        let line_start = line
+            .checked_sub(1)
+            .and_then(|index| self.line_breaks.get(index))
+            .copied()
+            .unwrap_or_default();
+
+        // Make it 1-based.
+        (line + 1, offset - line_start)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FunctionDebugInfo {
     pub name: String,

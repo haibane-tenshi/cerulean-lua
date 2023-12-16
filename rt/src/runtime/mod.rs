@@ -7,6 +7,7 @@ use std::ops::ControlFlow;
 
 use repr::index::StackSlot;
 
+use crate::backtrace::Backtrace;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
@@ -185,6 +186,16 @@ where
 
         Ok(closure)
     }
+
+    pub fn backtrace(&self) -> Backtrace {
+        let frames = self
+            .frames
+            .iter()
+            .map(|frame| frame.backtrace(self.chunk_cache))
+            .collect();
+
+        Backtrace { frames }
+    }
 }
 
 struct FrameStackView<'a, C> {
@@ -219,5 +230,9 @@ impl<'a, C> FrameStackView<'a, C> {
 
     fn push(&mut self, frame: Frame<C>) {
         self.frames.push(frame)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Frame<C>> {
+        self.frames[self.protected_size..].iter()
     }
 }

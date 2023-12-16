@@ -1,3 +1,4 @@
+pub mod backtrace;
 pub mod chunk_builder;
 pub mod chunk_cache;
 pub mod error;

@@ -13,6 +13,7 @@ use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{ProtectedSize as RawUpvalueSlot, UpvalueView};
 use super::RuntimeView;
+use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
@@ -148,14 +149,14 @@ pub struct Frame<C> {
     register_variadic: Vec<Value<C>>,
 }
 
-impl<C> Frame<C> {
+impl<C> Frame<C>
+where
+    C: ChunkCache<ChunkId>,
+{
     pub(crate) fn activate<'a>(
         self,
         rt: &'a mut RuntimeView<C>,
-    ) -> Result<ActiveFrame<'a, C>, RuntimeError<C>>
-    where
-        C: ChunkCache<ChunkId>,
-    {
+    ) -> Result<ActiveFrame<'a, C>, RuntimeError<C>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let RuntimeView {
@@ -204,6 +205,37 @@ impl<C> Frame<C> {
         };
 
         Ok(r)
+    }
+
+    pub(crate) fn backtrace(&self, chunk_cache: &C) -> BacktraceFrame {
+        use crate::backtrace::{FrameSource, Location};
+
+        let ptr = self.closure.fn_ptr;
+        let ip = self.ip;
+        let (name, location) = chunk_cache
+            .chunk(ptr.chunk_id)
+            .and_then(|chunk| chunk.debug_info.as_ref())
+            .and_then(|info| info.functions.get(ptr.function_id).map(|func| (info, func)))
+            .map(|(chunk, function)| {
+                let name = function.name.clone();
+                let location = function.opcodes.get(ip).map(|info| {
+                    let (line, column) = chunk.line_column(info.start());
+                    Location {
+                        file: "<unimplemented>".to_string(),
+                        line,
+                        column,
+                    }
+                });
+
+                (Some(name), location)
+            })
+            .unwrap_or_default();
+
+        BacktraceFrame {
+            name,
+            source: FrameSource::Lua,
+            location,
+        }
     }
 }
 

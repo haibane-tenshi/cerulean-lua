@@ -60,14 +60,14 @@ fn main() -> Result<()> {
             use rt::value::Value;
 
             let (chunk, source) = load_from_file(&path)?;
+            let (env_chunk, builder) = rt::global_env::empty()
+                .add(rt::global_env::assert())
+                .finish();
+
+            let chunk_cache = MainCache::new(env_chunk, SingleChunk::new(chunk));
+            let mut runtime = Runtime::new(chunk_cache, Value::Nil);
 
             let run = || {
-                let (env_chunk, builder) = rt::global_env::empty()
-                    .add(rt::global_env::assert())
-                    .finish();
-
-                let chunk_cache = MainCache::new(env_chunk, SingleChunk::new(chunk));
-                let mut runtime = Runtime::new(chunk_cache, Value::Nil);
                 let global_env = builder(runtime.view(), ChunkId(0))?;
                 runtime.global_env = global_env;
 
@@ -80,6 +80,9 @@ fn main() -> Result<()> {
                 use codespan_reporting::term::{emit, Config};
 
                 let mut writer = StandardStream::stdout(ColorChoice::Always);
+
+                runtime.view().backtrace().emit(&mut writer)?;
+
                 let config = Config::default();
                 let files = SimpleFile::new(path.to_string_lossy(), source);
                 let diagnostic = err.into_diagnostic(());

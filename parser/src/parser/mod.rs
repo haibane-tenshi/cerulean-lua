@@ -175,7 +175,7 @@ pub fn chunk(s: Lexer) -> Result<Chunk, Error> {
     let recipe_table = recipe_table.resolve();
 
     let debug_info = {
-        let line_breaks = source.match_indices('\n').map(|(i, _)| i + 1).collect();
+        let line_breaks = source.match_indices('\n').map(|(i, _)| i).collect();
 
         DebugInfo {
             functions: debug_info_table,
