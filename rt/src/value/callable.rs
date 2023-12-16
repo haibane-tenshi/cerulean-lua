@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::error::RuntimeError;
-use crate::ffi::{IntoLuaFfi, LuaFfiMut, LuaFfiOnce};
+use crate::ffi::{IntoLuaFfi, IntoLuaFfiWithName, LuaFfiMut, LuaFfiOnce};
 
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
@@ -17,6 +17,15 @@ impl<C> RustClosureRef<C> {
         <F as IntoLuaFfi<C>>::Output: LuaFfiMut<C> + 'static,
     {
         let rc = Rc::new(RefCell::new(value.into_lua_ffi()));
+        RustClosureRef(rc)
+    }
+
+    pub fn with_name<F, N>(name: N, value: F) -> Self
+    where
+        F: IntoLuaFfiWithName<C, N>,
+        <F as IntoLuaFfiWithName<C, N>>::Output: LuaFfiMut<C> + 'static,
+    {
+        let rc = Rc::new(RefCell::new(value.into_lua_ffi_with_name(name)));
         RustClosureRef(rc)
     }
 }
@@ -50,6 +59,10 @@ impl<C> Hash for RustClosureRef<C> {
 impl<C> LuaFfiOnce<C> for RustClosureRef<C> {
     fn call_once(mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
         self.call_mut(rt)
+    }
+
+    fn name(&self) -> String {
+        self.0.borrow().name()
     }
 }
 

@@ -50,7 +50,7 @@ where
             );
         };
 
-        let fn_assert = RustClosureRef::new(|rt: RuntimeView<_>| {
+        let fn_assert = RustClosureRef::with_name("lua_std::assert", |rt: RuntimeView<_>| {
             let Some(cond) = rt.stack.get(StackSlot(0)) else {
                 return Err(
                     Value::String("assert expects at least one argument".to_string()).into(),

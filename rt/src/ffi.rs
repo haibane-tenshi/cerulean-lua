@@ -6,6 +6,7 @@ use crate::runtime::RuntimeView;
 
 pub trait LuaFfiOnce<C> {
     fn call_once(self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
+    fn name(&self) -> String;
 }
 
 pub trait LuaFfiMut<C>: LuaFfiOnce<C> {
@@ -22,6 +23,10 @@ where
 {
     fn call_once(self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
         self.call(rt)
+    }
+
+    fn name(&self) -> String {
+        <T as LuaFfiOnce<C>>::name(self)
     }
 }
 
@@ -41,6 +46,10 @@ where
     fn call_once(self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
         self.call_mut(rt)
     }
+
+    fn name(&self) -> String {
+        <T as LuaFfiOnce<C>>::name(self)
+    }
 }
 
 pub trait IntoLuaFfi<C> {
@@ -49,45 +58,76 @@ pub trait IntoLuaFfi<C> {
     fn into_lua_ffi(self) -> Self::Output;
 }
 
+pub trait IntoLuaFfiWithName<C, N> {
+    type Output;
+
+    fn into_lua_ffi_with_name(self, name: N) -> Self::Output;
+}
+
 impl<'rt, F, C> IntoLuaFfi<C> for F
 where
     C: 'rt,
     F: FnOnce(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
 {
-    type Output = FnWrap<F>;
+    type Output = FnWrap<F, &'static str>;
 
     fn into_lua_ffi(self) -> Self::Output {
-        FnWrap(self)
+        FnWrap {
+            func: self,
+            name: std::any::type_name::<F>(),
+        }
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct FnWrap<F>(F);
+impl<'rt, F, C, N> IntoLuaFfiWithName<C, N> for F
+where
+    C: 'rt,
+    F: FnOnce(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
+{
+    type Output = FnWrap<F, N>;
 
-impl<C, F> LuaFfiOnce<C> for FnWrap<F>
+    fn into_lua_ffi_with_name(self, name: N) -> Self::Output {
+        FnWrap { func: self, name }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FnWrap<F, N> {
+    func: F,
+    name: N,
+}
+
+impl<C, F, N> LuaFfiOnce<C> for FnWrap<F, N>
 where
     F: for<'rt> FnOnce(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
+    N: AsRef<str>,
 {
     fn call_once(self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        (self.0)(rt)
+        (self.func)(rt)
+    }
+
+    fn name(&self) -> String {
+        self.name.as_ref().to_string()
     }
 }
 
-impl<C, F> LuaFfiMut<C> for FnWrap<F>
+impl<C, F, N> LuaFfiMut<C> for FnWrap<F, N>
 where
     F: for<'rt> FnMut(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
+    N: AsRef<str>,
 {
     fn call_mut(&mut self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        (self.0)(rt)
+        (self.func)(rt)
     }
 }
 
-impl<C, F> LuaFfi<C> for FnWrap<F>
+impl<C, F, N> LuaFfi<C> for FnWrap<F, N>
 where
     F: for<'rt> Fn(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
+    N: AsRef<str>,
 {
     fn call(&self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        (self.0)(rt)
+        (self.func)(rt)
     }
 }
 
@@ -110,7 +150,7 @@ where
         rt.enter(closure, StackSlot(0))
     };
 
-    f.into_lua_ffi()
+    f.into_lua_ffi_with_name("rt::ffi::call_chunk")
 }
 
 pub fn call_script<C, Q>(script: &Q) -> impl LuaFfi<C> + Copy + '_
@@ -127,5 +167,5 @@ where
         rt.invoke(call_chunk(chunk_id))
     };
 
-    f.into_lua_ffi()
+    f.into_lua_ffi_with_name("rt::ffi::call_script")
 }
