@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::Debug;
 
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::RuntimeError;
@@ -156,13 +156,13 @@ where
 pub fn call_script<C, Q>(script: &Q) -> impl LuaFfi<C> + Copy + '_
 where
     C: KeyedChunkCache<ChunkId, Q>,
-    Q: ?Sized + Display,
+    Q: ?Sized + Debug,
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
         use crate::value::Value;
 
         let chunk_id = rt.chunk_cache.lookup(script).ok_or(Value::String(format!(
-            "chunk with key {script} does not exist"
+            "chunk with key \"{script:?}\" does not exist"
         )))?;
         rt.invoke(call_chunk(chunk_id))
     };
