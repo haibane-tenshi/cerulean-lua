@@ -1,10 +1,11 @@
 mod frame;
 mod frame_stack;
+mod rust_backtrace_stack;
 mod stack;
 mod upvalue_stack;
 
 use std::fmt::Debug;
-use std::ops::ControlFlow;
+use std::ops::{Bound, ControlFlow};
 
 use repr::index::StackSlot;
 
@@ -15,6 +16,7 @@ use crate::ffi::LuaFfiOnce;
 use crate::value::Value;
 use frame::ChangeFrame;
 use frame_stack::{FrameStack, FrameStackView};
+use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
 use stack::{Stack, StackView};
 use upvalue_stack::{UpvalueStack, UpvalueStackView};
 
@@ -26,6 +28,7 @@ pub struct Runtime<C> {
     frames: FrameStack<C>,
     stack: Stack<C>,
     upvalue_stack: UpvalueStack<C>,
+    rust_backtrace_stack: RustBacktraceStack,
 }
 
 impl<C> Runtime<C>
@@ -41,6 +44,7 @@ where
             frames: Default::default(),
             stack: Default::default(),
             upvalue_stack: Default::default(),
+            rust_backtrace_stack: Default::default(),
         }
     }
 
@@ -51,11 +55,13 @@ where
             frames,
             stack,
             upvalue_stack,
+            rust_backtrace_stack,
         } = self;
 
         let frames = frames.view();
         let stack = stack.view();
         let upvalue_stack = upvalue_stack.view();
+        let rust_backtrace_stack = rust_backtrace_stack.view();
 
         RuntimeView {
             chunk_cache,
@@ -63,6 +69,7 @@ where
             frames,
             stack,
             upvalue_stack,
+            rust_backtrace_stack,
         }
     }
 }
@@ -73,6 +80,7 @@ pub struct RuntimeView<'rt, C> {
     frames: FrameStackView<'rt, C>,
     pub stack: StackView<'rt, C>,
     upvalue_stack: UpvalueStackView<'rt, C>,
+    rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
 impl<'rt, C> RuntimeView<'rt, C> {
@@ -85,12 +93,14 @@ impl<'rt, C> RuntimeView<'rt, C> {
             frames,
             stack,
             upvalue_stack,
+            rust_backtrace_stack,
         } = self;
 
         let frames = frames.view();
         let start = stack.boundary() + start;
         let stack = stack.view(start).ok_or(OutOfBoundsStack)?;
         let upvalue_stack = upvalue_stack.view_over();
+        let rust_backtrace_stack = rust_backtrace_stack.view_over();
 
         let r = RuntimeView {
             chunk_cache: *chunk_cache,
@@ -98,13 +108,14 @@ impl<'rt, C> RuntimeView<'rt, C> {
             frames,
             stack,
             upvalue_stack,
+            rust_backtrace_stack,
         };
 
         Ok(r)
     }
 
     pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError<C>> {
-        f.call_once(self.view(StackSlot(0)).unwrap())
+        self.invoke_at(f, StackSlot(0))
     }
 
     pub fn invoke_at(
@@ -112,7 +123,30 @@ impl<'rt, C> RuntimeView<'rt, C> {
         f: impl LuaFfiOnce<C>,
         start: StackSlot,
     ) -> Result<(), RuntimeError<C>> {
-        f.call_once(self.view(start)?)
+        use crate::backtrace::{BacktraceFrame, FrameSource};
+        use rust_backtrace_stack::RustFrame;
+
+        let rust_frame = RustFrame {
+            position: self.frames.next_raw_id(),
+            backtrace: BacktraceFrame {
+                source: FrameSource::Rust,
+                name: Some(f.name()),
+                location: None,
+            },
+        };
+
+        self.rust_backtrace_stack.push(rust_frame);
+
+        let r = f.call_once(self.view(start)?);
+
+        // Forcefully clean up.
+        // It is possible that Rust function called Lua panic but forgot to reset the runtime.
+        // This guarantees that it is always safe to return control to caller when panic is not propagated.
+        if r.is_ok() {
+            self.soft_reset();
+        }
+
+        r
     }
 
     /// Return runtime into consistent state.
@@ -139,8 +173,13 @@ impl<'rt, C> RuntimeView<'rt, C> {
     /// the best thing you can do is to discard the runtime and construct a fresh one.
     pub fn reset(&mut self) {
         self.stack.clear();
+        self.soft_reset();
+    }
+
+    fn soft_reset(&mut self) {
         self.upvalue_stack.clear();
         self.frames.clear();
+        self.rust_backtrace_stack.clear();
     }
 }
 
@@ -225,12 +264,46 @@ where
     }
 
     pub fn backtrace(&self) -> Backtrace {
-        let frames = self
-            .frames
-            .iter()
-            .map(|frame| frame.backtrace(self.chunk_cache))
-            .collect();
+        use rust_backtrace_stack::RustFrame;
+
+        let mut start = self.frames.boundary();
+        let mut frames = Vec::new();
+
+        for rust_frame in self.rust_backtrace_stack.iter() {
+            let RustFrame {
+                position,
+                backtrace,
+            } = rust_frame;
+
+            frames.extend(
+                self.frames
+                    .range(start..*position)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|frame| frame.backtrace(self.chunk_cache)),
+            );
+            frames.push(backtrace.clone());
+            start = *position
+        }
+
+        frames.extend(
+            self.frames
+                .range(start..)
+                .unwrap_or_default()
+                .iter()
+                .map(|frame| frame.backtrace(self.chunk_cache)),
+        );
 
         Backtrace { frames }
+    }
+}
+
+fn map_bound<T, U>(bound: Bound<T>, f: impl FnOnce(T) -> U) -> Bound<U> {
+    use std::ops::Bound::*;
+
+    match bound {
+        Included(t) => Included(f(t)),
+        Excluded(t) => Excluded(f(t)),
+        Unbounded => Unbounded,
     }
 }

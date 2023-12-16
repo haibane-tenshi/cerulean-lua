@@ -1,8 +1,10 @@
 use repr::tivec::TiVec;
+use std::ops::RangeBounds;
 
 use std::fmt::Debug;
 
 use super::frame::Frame;
+use super::map_bound;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RawFrameId(usize);
@@ -79,6 +81,10 @@ impl<'a, C> FrameStackView<'a, C> {
         }
     }
 
+    pub(crate) fn next_raw_id(&self) -> RawFrameId {
+        self.stack.next_id()
+    }
+
     pub(crate) fn pop(&mut self) -> Option<Frame<C>> {
         if self.stack.next_id() <= self.boundary {
             return None;
@@ -91,11 +97,18 @@ impl<'a, C> FrameStackView<'a, C> {
         self.stack.push(frame)
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Frame<C>> {
-        self.stack.stack[self.boundary..].iter()
-    }
-
     pub(crate) fn clear(&mut self) {
         self.stack.truncate(self.boundary)
+    }
+
+    pub(crate) fn boundary(&self) -> RawFrameId {
+        self.boundary
+    }
+
+    pub(crate) fn range(&self, range: impl RangeBounds<RawFrameId>) -> Option<&[Frame<C>]> {
+        let start = map_bound(range.start_bound(), |id| id.0);
+        let end = map_bound(range.end_bound(), |id| id.0);
+
+        self.stack.stack.raw.get((start, end))
     }
 }

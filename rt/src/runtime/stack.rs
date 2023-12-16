@@ -5,7 +5,7 @@ use std::ops::{Add, Bound, RangeBounds};
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
-use super::Value;
+use super::{map_bound, Value};
 use crate::error::opcode::MissingArgsError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,16 +39,6 @@ impl RawUpvalueId {
         let r = *self;
         self.0 += 1;
         r
-    }
-}
-
-fn map_bound<T, U>(bound: Bound<T>, f: impl FnOnce(T) -> U) -> Bound<U> {
-    use std::ops::Bound::*;
-
-    match bound {
-        Included(t) => Included(f(t)),
-        Excluded(t) => Excluded(f(t)),
-        Unbounded => Unbounded,
     }
 }
 

@@ -54,10 +54,6 @@ impl<C> UpvalueStack<C> {
     fn truncate(&mut self, slot: RawUpvalueSlot) {
         self.stack.truncate(slot.0)
     }
-
-    fn len(&self) -> usize {
-        self.stack.len()
-    }
 }
 
 impl<C> Default for UpvalueStack<C> {
@@ -132,10 +128,6 @@ impl<'a, C> UpvalueStackView<'a, C> {
 
     pub(crate) fn clear(&mut self) {
         self.stack.truncate(self.boundary)
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.stack.len() - self.boundary.0
     }
 
     pub(crate) fn boundary(&self) -> RawUpvalueSlot {
