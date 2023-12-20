@@ -81,6 +81,10 @@ impl<'a, C> FrameStackView<'a, C> {
         }
     }
 
+    pub(crate) fn last(&self) -> Option<&Frame<C>> {
+        self.stack.stack.last()
+    }
+
     pub(crate) fn next_raw_id(&self) -> RawFrameId {
         self.stack.next_id()
     }

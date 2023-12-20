@@ -80,19 +80,15 @@ fn main() -> Result<()> {
             };
 
             if let Err(err) = run() {
-                use codespan_reporting::files::SimpleFile;
                 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-                use codespan_reporting::term::{emit, Config};
+
+                let view = runtime.view();
 
                 let mut writer = StandardStream::stdout(ColorChoice::Always);
 
-                runtime.view().backtrace().emit(&mut writer)?;
-
-                let config = Config::default();
-                let files = SimpleFile::new(path.to_string_lossy(), source);
-                let diagnostic = err.into_diagnostic(());
-
-                emit(&mut writer, &config, &files, &diagnostic)?;
+                view.backtrace().emit(&mut writer)?;
+                view.into_diagnostic(err)
+                    .emit(&mut writer, &Default::default())?;
 
                 return Err(anyhow::Error::msg("runtime error"));
             }

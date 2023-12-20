@@ -149,6 +149,12 @@ pub struct Frame<C> {
     register_variadic: Vec<Value<C>>,
 }
 
+impl<C> Frame<C> {
+    pub(crate) fn fn_ptr(&self) -> FunctionPtr {
+        self.closure.fn_ptr
+    }
+}
+
 impl<C> Frame<C>
 where
     C: ChunkCache,

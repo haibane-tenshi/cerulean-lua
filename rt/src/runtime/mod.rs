@@ -277,40 +277,6 @@ impl<'rt, C> RuntimeView<'rt, C>
 where
     C: ChunkCache,
 {
-    pub fn backtrace(&self) -> Backtrace {
-        use rust_backtrace_stack::RustFrame;
-
-        let mut start = self.frames.boundary();
-        let mut frames = Vec::new();
-
-        for rust_frame in self.rust_backtrace_stack.iter() {
-            let RustFrame {
-                position,
-                backtrace,
-            } = rust_frame;
-
-            frames.extend(
-                self.frames
-                    .range(start..*position)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|frame| frame.backtrace(self.chunk_cache)),
-            );
-            frames.push(backtrace.clone());
-            start = *position
-        }
-
-        frames.extend(
-            self.frames
-                .range(start..)
-                .unwrap_or_default()
-                .iter()
-                .map(|frame| frame.backtrace(self.chunk_cache)),
-        );
-
-        Backtrace { frames }
-    }
-
     pub fn load(
         &mut self,
         source: String,
@@ -394,6 +360,73 @@ where
 
             Ok((source, Some(location)))
         })
+    }
+}
+
+impl<'rt, C> RuntimeView<'rt, C>
+where
+    C: ChunkCache,
+{
+    pub fn backtrace(&self) -> Backtrace {
+        use rust_backtrace_stack::RustFrame;
+
+        let mut start = self.frames.boundary();
+        let mut frames = Vec::new();
+
+        for rust_frame in self.rust_backtrace_stack.iter() {
+            let RustFrame {
+                position,
+                backtrace,
+            } = rust_frame;
+
+            frames.extend(
+                self.frames
+                    .range(start..*position)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|frame| frame.backtrace(self.chunk_cache)),
+            );
+            frames.push(backtrace.clone());
+            start = *position
+        }
+
+        frames.extend(
+            self.frames
+                .range(start..)
+                .unwrap_or_default()
+                .iter()
+                .map(|frame| frame.backtrace(self.chunk_cache)),
+        );
+
+        Backtrace { frames }
+    }
+
+    pub fn into_diagnostic(&self, err: RuntimeError<C>) -> Diagnostic {
+        use codespan_reporting::files::SimpleFile;
+
+        let message = err.into_diagnostic(());
+        let (name, source) = self
+            .frames
+            .last()
+            .map(|frame| {
+                let ptr = frame.fn_ptr();
+
+                let source = self.chunk_cache.source(ptr.chunk_id);
+                let name = self
+                    .chunk_cache
+                    .location(ptr.chunk_id)
+                    .map(|location| location.file);
+
+                (name, source)
+            })
+            .unwrap_or_default();
+
+        let name = name.unwrap_or_else(|| "<unnamed>".to_string());
+        let source = source.unwrap_or_default();
+
+        let files = SimpleFile::new(name, source);
+
+        Diagnostic { files, message }
     }
 }
 
