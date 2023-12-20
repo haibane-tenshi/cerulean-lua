@@ -1,3 +1,4 @@
+pub mod diagnostic;
 pub mod missing_chunk;
 pub mod missing_function;
 pub mod opcode;

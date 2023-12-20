@@ -161,7 +161,7 @@ impl<P> ChunkBuilder<P> {
     )
     where
         P: FnOnce(RuntimeView<C>, ChunkId, &mut Value<C>) -> Result<(), RuntimeError<C>>,
-        C: ChunkCache<ChunkId>,
+        C: ChunkCache,
     {
         let ChunkBuilder { chunk, builder } = self;
 

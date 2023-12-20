@@ -37,7 +37,7 @@ pub fn assert<C>() -> ChunkPart<
     impl FnOnce(RuntimeView<C>, ChunkRange, &mut Value<C>) -> Result<(), RuntimeError<C>>,
 >
 where
-    C: ChunkCache<ChunkId>,
+    C: ChunkCache,
 {
     use crate::value::callable::RustClosureRef;
 

@@ -6,11 +6,13 @@ mod upvalue_stack;
 
 use std::fmt::Debug;
 use std::ops::{Bound, ControlFlow};
+use std::path::Path;
 
 use repr::index::StackSlot;
 
-use crate::backtrace::Backtrace;
-use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::backtrace::{Backtrace, Location};
+use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
+use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
 use crate::value::Value;
@@ -75,7 +77,7 @@ where
 }
 
 pub struct RuntimeView<'rt, C> {
-    pub chunk_cache: &'rt mut C,
+    chunk_cache: &'rt mut C,
     pub global_env: &'rt Value<C>,
     frames: FrameStackView<'rt, C>,
     pub stack: StackView<'rt, C>,
@@ -186,7 +188,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
 
 impl<'rt, C> RuntimeView<'rt, C>
 where
-    C: ChunkCache<ChunkId>,
+    C: ChunkCache,
 {
     pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError<C>> {
         use crate::value::callable::Callable;
@@ -263,7 +265,18 @@ where
 
         Ok(closure)
     }
+}
 
+impl<'rt, C> RuntimeView<'rt, C> {
+    pub fn chunk_cache(&self) -> &C {
+        self.chunk_cache
+    }
+}
+
+impl<'rt, C> RuntimeView<'rt, C>
+where
+    C: ChunkCache,
+{
     pub fn backtrace(&self) -> Backtrace {
         use rust_backtrace_stack::RustFrame;
 
@@ -297,6 +310,91 @@ where
 
         Backtrace { frames }
     }
+
+    pub fn load(
+        &mut self,
+        source: String,
+        location: Option<Location>,
+    ) -> Result<ChunkId, LoadError> {
+        use codespan_reporting::files::SimpleFile;
+        use logos::Logos;
+        use parser::lex::Token;
+
+        let lexer = Token::lexer(&source);
+        let chunk = match parser::parser::chunk(lexer) {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let name = location
+                    .map(|loc| loc.file.clone())
+                    .unwrap_or_else(|| "<unnamed>".to_string());
+                let diag = Diagnostic {
+                    files: SimpleFile::new(name, source),
+                    message: err.into_diagnostic(),
+                };
+
+                return Err(diag.into());
+            }
+        };
+
+        let chunk_id = self.chunk_cache.insert(chunk, Some(source), location)?;
+
+        Ok(chunk_id)
+    }
+
+    pub fn load_with_key<Q>(
+        &mut self,
+        key: &Q,
+        source: String,
+        location: Option<Location>,
+    ) -> Result<ChunkId, LoadError>
+    where
+        Q: ?Sized,
+        C: KeyedChunkCache<Q>,
+    {
+        let chunk_id = self.load(source, location)?;
+        let _ = self.chunk_cache.bind(key, chunk_id);
+
+        Ok(chunk_id)
+    }
+
+    pub fn precompiled_or_load_with<Q, E>(
+        &mut self,
+        key: &Q,
+        f: impl FnOnce() -> Result<(String, Option<Location>), E>,
+    ) -> Result<ChunkId, LoadWithError<E>>
+    where
+        Q: ?Sized,
+        C: KeyedChunkCache<Q>,
+    {
+        if let Some(chunk_id) = self.chunk_cache.get(key) {
+            return Ok(chunk_id);
+        }
+
+        let (source, location) = f().map_err(LoadWithError::Error)?;
+        self.load_with_key(key, source, location)
+            .map_err(Into::into)
+    }
+
+    pub fn load_from_file(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<ChunkId, LoadWithError<std::io::Error>>
+    where
+        C: KeyedChunkCache<Path>,
+    {
+        let path = path.as_ref();
+
+        self.precompiled_or_load_with(path, || {
+            let source = std::fs::read_to_string(path)?;
+            let location = Location {
+                file: path.to_string_lossy().to_string(),
+                line: 0,
+                column: 0,
+            };
+
+            Ok((source, Some(location)))
+        })
+    }
 }
 
 fn map_bound<T, U>(bound: Bound<T>, f: impl FnOnce(T) -> U) -> Bound<U> {
@@ -306,5 +404,50 @@ fn map_bound<T, U>(bound: Bound<T>, f: impl FnOnce(T) -> U) -> Bound<U> {
         Included(t) => Included(f(t)),
         Excluded(t) => Excluded(f(t)),
         Unbounded => Unbounded,
+    }
+}
+
+#[derive(Debug)]
+pub enum LoadError {
+    Immutable(crate::chunk_cache::Immutable),
+    CompilationFailure(Diagnostic),
+}
+
+impl From<crate::chunk_cache::Immutable> for LoadError {
+    fn from(value: crate::chunk_cache::Immutable) -> Self {
+        LoadError::Immutable(value)
+    }
+}
+
+impl From<Diagnostic> for LoadError {
+    fn from(value: Diagnostic) -> Self {
+        LoadError::CompilationFailure(value)
+    }
+}
+
+#[derive(Debug)]
+pub enum LoadWithError<E> {
+    Immutable(crate::chunk_cache::Immutable),
+    CompilationFailure(Diagnostic),
+    Error(E),
+}
+impl<E> From<LoadError> for LoadWithError<E> {
+    fn from(value: LoadError) -> Self {
+        match value {
+            LoadError::Immutable(t) => LoadWithError::Immutable(t),
+            LoadError::CompilationFailure(t) => LoadWithError::CompilationFailure(t),
+        }
+    }
+}
+
+impl<E> From<crate::chunk_cache::Immutable> for LoadWithError<E> {
+    fn from(value: crate::chunk_cache::Immutable) -> Self {
+        LoadWithError::Immutable(value)
+    }
+}
+
+impl<E> From<Diagnostic> for LoadWithError<E> {
+    fn from(value: Diagnostic) -> Self {
+        LoadWithError::CompilationFailure(value)
     }
 }

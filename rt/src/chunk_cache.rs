@@ -1,56 +1,46 @@
 use repr::chunk::Chunk;
 use std::fmt::Display;
-use std::num::NonZeroUsize;
-
+// use std::num::NonZeroUsize;
 use crate::backtrace::Location;
 
-pub struct FailedInsertError;
+#[derive(Debug)]
+pub struct Immutable;
 
-pub trait ChunkCache<Id> {
-    fn chunk(&self, id: Id) -> Option<&Chunk>;
-
-    fn location(&self, id: Id) -> Option<Location>;
-
-    fn insert_with_location(
+pub trait ChunkCache {
+    fn chunk(&self, id: ChunkId) -> Option<&Chunk>;
+    fn source(&self, id: ChunkId) -> Option<String>;
+    fn location(&self, id: ChunkId) -> Option<Location>;
+    fn insert(
         &mut self,
         chunk: Chunk,
+        source: Option<String>,
         location: Option<Location>,
-    ) -> Result<Id, FailedInsertError>;
-
-    fn insert(&mut self, chunk: Chunk) -> Result<Id, FailedInsertError> {
-        self.insert_with_location(chunk, None)
-    }
+    ) -> Result<ChunkId, Immutable>;
 }
 
-pub trait KeyedChunkCache<Id: Clone, Q: ?Sized>: ChunkCache<Id> {
-    fn lookup(&self, key: &Q) -> Option<Id>;
-
-    fn lookup_with_chunk(&self, key: &Q) -> Option<(Id, &Chunk)> {
-        let id = self.lookup(key)?;
-        let chunk = self.chunk(id.clone())?;
-
-        Some((id, chunk))
-    }
+pub trait KeyedChunkCache<Q: ?Sized> {
+    fn bind(&mut self, key: &Q, chunk_id: ChunkId) -> Result<(), Immutable>;
+    fn get(&self, key: &Q) -> Option<ChunkId>;
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub struct NonZeroChunkId(pub NonZeroUsize);
+// #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
+// pub struct NonZeroChunkId(pub NonZeroUsize);
 
-impl NonZeroChunkId {
-    pub fn new(chunk_id: ChunkId) -> Option<Self> {
-        let value = NonZeroUsize::new(chunk_id.0)?;
-        Some(NonZeroChunkId(value))
-    }
-}
+// impl NonZeroChunkId {
+//     pub fn new(chunk_id: ChunkId) -> Option<Self> {
+//         let value = NonZeroUsize::new(chunk_id.0)?;
+//         Some(NonZeroChunkId(value))
+//     }
+// }
 
-impl TryFrom<usize> for NonZeroChunkId {
-    type Error = std::num::TryFromIntError;
+// impl TryFrom<usize> for NonZeroChunkId {
+//     type Error = std::num::TryFromIntError;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        let value = value.try_into()?;
-        Ok(NonZeroChunkId(value))
-    }
-}
+//     fn try_from(value: usize) -> Result<Self, Self::Error> {
+//         let value = value.try_into()?;
+//         Ok(NonZeroChunkId(value))
+//     }
+// }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct ChunkId(pub usize);
@@ -73,41 +63,37 @@ impl Display for ChunkId {
     }
 }
 
-impl From<NonZeroChunkId> for ChunkId {
-    fn from(value: NonZeroChunkId) -> Self {
-        ChunkId(value.0.into())
-    }
-}
+// impl From<NonZeroChunkId> for ChunkId {
+//     fn from(value: NonZeroChunkId) -> Self {
+//         ChunkId(value.0.into())
+//     }
+// }
 
 pub mod single {
-    use super::{
-        ChunkCache, ChunkId, FailedInsertError, KeyedChunkCache, Location, NonZeroChunkId,
-    };
+    use super::{ChunkCache, ChunkId, Immutable, KeyedChunkCache, Location};
     use repr::chunk::Chunk;
-    use std::fmt::Display;
 
     #[derive(Debug, Clone, Copy)]
     pub struct Main;
 
-    impl Display for Main {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "<main script>")
-        }
-    }
-
     #[derive(Debug)]
     pub struct SingleChunk {
         chunk: Chunk,
+        source: Option<String>,
         location: Option<Location>,
     }
 
     impl SingleChunk {
-        pub fn new(chunk: Chunk, location: Option<Location>) -> Self {
-            SingleChunk { chunk, location }
+        pub fn new(chunk: Chunk, source: Option<String>, location: Option<Location>) -> Self {
+            SingleChunk {
+                chunk,
+                source,
+                location,
+            }
         }
     }
 
-    impl ChunkCache<ChunkId> for SingleChunk {
+    impl ChunkCache for SingleChunk {
         fn chunk(&self, id: ChunkId) -> Option<&Chunk> {
             match id {
                 ChunkId(0) => Some(&self.chunk),
@@ -115,12 +101,11 @@ pub mod single {
             }
         }
 
-        fn insert_with_location(
-            &mut self,
-            _: Chunk,
-            _: Option<Location>,
-        ) -> Result<ChunkId, FailedInsertError> {
-            Err(FailedInsertError)
+        fn source(&self, id: ChunkId) -> Option<String> {
+            match id {
+                ChunkId(0) => self.source.clone(),
+                _ => None,
+            }
         }
 
         fn location(&self, id: ChunkId) -> Option<Location> {
@@ -129,151 +114,105 @@ pub mod single {
                 _ => None,
             }
         }
-    }
 
-    impl KeyedChunkCache<ChunkId, Main> for SingleChunk {
-        fn lookup(&self, _: &Main) -> Option<ChunkId> {
-            Some(ChunkId(0))
-        }
-    }
-
-    impl ChunkCache<NonZeroChunkId> for SingleChunk {
-        fn chunk(&self, id: NonZeroChunkId) -> Option<&Chunk> {
-            match id.0.get() {
-                1 => Some(&self.chunk),
-                _ => None,
-            }
-        }
-
-        fn insert_with_location(
-            &mut self,
-            _chunk: Chunk,
-            _: Option<Location>,
-        ) -> Result<NonZeroChunkId, FailedInsertError> {
-            Err(FailedInsertError)
-        }
-
-        fn location(&self, id: NonZeroChunkId) -> Option<Location> {
-            match id.0.get() {
-                1 => self.location.clone(),
-                _ => None,
-            }
-        }
-    }
-
-    impl KeyedChunkCache<NonZeroChunkId, Main> for SingleChunk {
-        fn lookup(&self, _: &Main) -> Option<NonZeroChunkId> {
-            Some(NonZeroChunkId::try_from(1).unwrap())
-        }
-    }
-}
-
-pub mod path {
-    use super::{ChunkCache, ChunkId, KeyedChunkCache, Location};
-    use repr::chunk::Chunk;
-
-    use repr::tivec::TiVec;
-    use std::borrow::Borrow;
-    use std::collections::HashMap;
-    use std::hash::Hash;
-    pub use std::path::Path;
-    use std::path::PathBuf;
-
-    pub struct PathCache {
-        ids: HashMap<PathBuf, ChunkId>,
-        chunks: TiVec<ChunkId, (Chunk, Option<Location>)>,
-    }
-
-    impl ChunkCache<ChunkId> for PathCache {
-        fn chunk(&self, id: ChunkId) -> Option<&Chunk> {
-            self.chunks.get(id).map(|(chunk, _)| chunk)
-        }
-
-        fn insert_with_location(
+        fn insert(
             &mut self,
             chunk: Chunk,
-            location: Option<Location>,
-        ) -> Result<ChunkId, super::FailedInsertError> {
-            Ok(self.chunks.push_and_get_key((chunk, location)))
-        }
-
-        fn location(&self, id: ChunkId) -> Option<Location> {
-            self.chunks
-                .get(id)
-                .and_then(|(_, location)| location.clone())
+            _source: Option<String>,
+            _location: Option<Location>,
+        ) -> Result<ChunkId, Immutable> {
+            Err(Immutable)
         }
     }
 
-    impl<Q> KeyedChunkCache<ChunkId, Q> for PathCache
-    where
-        PathBuf: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        fn lookup(&self, key: &Q) -> Option<ChunkId> {
-            self.ids.get(key).copied()
+    impl KeyedChunkCache<Main> for SingleChunk {
+        fn get(&self, _key: &Main) -> Option<ChunkId> {
+            Some(ChunkId(0))
+        }
+
+        fn bind(&mut self, _key: &Main, _chunk_id: ChunkId) -> Result<(), Immutable> {
+            Err(Immutable)
         }
     }
 }
 
 pub mod main {
-    use super::{
-        ChunkCache, ChunkId, FailedInsertError, KeyedChunkCache, Location, NonZeroChunkId,
-    };
+    use super::single::SingleChunk;
+    use super::{ChunkCache, ChunkId, KeyedChunkCache};
     use repr::chunk::Chunk;
 
     #[derive(Debug)]
     pub struct MainCache<C> {
-        special: (Chunk, Option<Location>),
+        special: SingleChunk,
         cache: C,
     }
 
     impl<C> MainCache<C> {
-        pub fn new(chunk: Chunk, location: Option<Location>, cache: C) -> Self {
-            MainCache {
-                special: (chunk, location),
-                cache,
-            }
+        pub fn new(special: SingleChunk, cache: C) -> Self {
+            MainCache { special, cache }
+        }
+
+        fn to_cache_index(chunk_id: ChunkId) -> Option<ChunkId> {
+            let value = chunk_id.0.checked_sub(1)?;
+            Some(ChunkId(value))
+        }
+
+        fn from_cache_index(chunk_id: ChunkId) -> ChunkId {
+            ChunkId(chunk_id.0 + 1)
         }
     }
 
-    impl<C> ChunkCache<ChunkId> for MainCache<C>
+    impl<C> ChunkCache for MainCache<C>
     where
-        C: ChunkCache<NonZeroChunkId>,
+        C: ChunkCache,
     {
         fn chunk(&self, id: ChunkId) -> Option<&Chunk> {
-            if let Some(id) = NonZeroChunkId::new(id) {
+            if let Some(id) = Self::to_cache_index(id) {
                 self.cache.chunk(id)
             } else {
-                Some(&self.special.0)
+                self.special.chunk(id)
             }
         }
 
-        fn insert_with_location(
-            &mut self,
-            chunk: Chunk,
-            location: Option<Location>,
-        ) -> Result<ChunkId, FailedInsertError> {
-            self.cache
-                .insert_with_location(chunk, location)
-                .map(Into::into)
+        fn source(&self, id: ChunkId) -> Option<String> {
+            if let Some(id) = Self::to_cache_index(id) {
+                self.cache.source(id)
+            } else {
+                self.special.source(id)
+            }
         }
 
-        fn location(&self, id: ChunkId) -> Option<Location> {
-            if let Some(id) = NonZeroChunkId::new(id) {
+        fn location(&self, id: ChunkId) -> Option<crate::backtrace::Location> {
+            if let Some(id) = Self::to_cache_index(id) {
                 self.cache.location(id)
             } else {
-                self.special.1.clone()
+                self.special.location(id)
             }
+        }
+
+        fn insert(
+            &mut self,
+            chunk: Chunk,
+            source: Option<String>,
+            location: Option<crate::backtrace::Location>,
+        ) -> Result<ChunkId, super::Immutable> {
+            self.cache
+                .insert(chunk, source, location)
+                .map(Self::from_cache_index)
         }
     }
 
-    impl<C, Q> KeyedChunkCache<ChunkId, Q> for MainCache<C>
+    impl<C, Q> KeyedChunkCache<Q> for MainCache<C>
     where
         Q: ?Sized,
-        C: KeyedChunkCache<NonZeroChunkId, Q>,
+        C: KeyedChunkCache<Q>,
     {
-        fn lookup(&self, key: &Q) -> Option<ChunkId> {
-            self.cache.lookup(key).map(Into::into)
+        fn bind(&mut self, key: &Q, chunk_id: ChunkId) -> Result<(), super::Immutable> {
+            self.cache.bind(key, chunk_id)
+        }
+
+        fn get(&self, key: &Q) -> Option<ChunkId> {
+            self.cache.get(key)
         }
     }
 }

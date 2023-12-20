@@ -133,7 +133,7 @@ where
 
 pub fn call_chunk<C>(chunk_id: ChunkId) -> impl LuaFfi<C> + Copy + Send + Sync
 where
-    C: ChunkCache<ChunkId>,
+    C: ChunkCache,
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
         use crate::runtime::{ClosureRef, FunctionPtr};
@@ -153,19 +153,19 @@ where
     f.into_lua_ffi_with_name("rt::ffi::call_chunk")
 }
 
-pub fn call_script<C, Q>(script: &Q) -> impl LuaFfi<C> + Copy + '_
+pub fn call_precompiled<C, Q>(script: &Q) -> impl LuaFfi<C> + Copy + '_
 where
-    C: KeyedChunkCache<ChunkId, Q>,
+    C: ChunkCache + KeyedChunkCache<Q>,
     Q: ?Sized + Debug,
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
         use crate::value::Value;
 
-        let chunk_id = rt.chunk_cache.lookup(script).ok_or(Value::String(format!(
+        let chunk_id = rt.chunk_cache().get(script).ok_or(Value::String(format!(
             "chunk with key \"{script:?}\" does not exist"
         )))?;
         rt.invoke(call_chunk(chunk_id))
     };
 
-    f.into_lua_ffi_with_name("rt::ffi::call_script")
+    f.into_lua_ffi_with_name("rt::ffi::call_precompiled")
 }

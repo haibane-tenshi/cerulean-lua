@@ -55,7 +55,7 @@ impl ClosureRef {
         start: StackSlot,
     ) -> Result<Frame<C>, RuntimeError<C>>
     where
-        C: ChunkCache<ChunkId>,
+        C: ChunkCache,
     {
         use crate::error::{MissingChunk, MissingFunction, OutOfBoundsStack, UpvalueCountMismatch};
         use repr::chunk::Function;
@@ -151,7 +151,7 @@ pub struct Frame<C> {
 
 impl<C> Frame<C>
 where
-    C: ChunkCache<ChunkId>,
+    C: ChunkCache,
 {
     pub(crate) fn activate<'a>(
         self,
@@ -206,7 +206,12 @@ where
 
         Ok(r)
     }
+}
 
+impl<C> Frame<C>
+where
+    C: ChunkCache,
+{
     pub(crate) fn backtrace(&self, chunk_cache: &C) -> BacktraceFrame {
         use crate::backtrace::{FrameSource, Location};
 

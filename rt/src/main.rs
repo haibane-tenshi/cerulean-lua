@@ -66,15 +66,17 @@ fn main() -> Result<()> {
                 .finish();
 
             let location = Location::file(path.to_string_lossy().to_string());
-            let chunk_cache =
-                MainCache::new(env_chunk, None, SingleChunk::new(chunk, Some(location)));
+            let chunk_cache = MainCache::new(
+                SingleChunk::new(env_chunk, None, None),
+                SingleChunk::new(chunk, Some(source.clone()), Some(location)),
+            );
             let mut runtime = Runtime::new(chunk_cache, Value::Nil);
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0))?;
                 runtime.global_env = global_env;
 
-                runtime.view().invoke(rt::ffi::call_script(&Main))
+                runtime.view().invoke(rt::ffi::call_precompiled(&Main))
             };
 
             if let Err(err) = run() {
