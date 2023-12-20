@@ -117,7 +117,7 @@ pub mod single {
 
         fn insert(
             &mut self,
-            chunk: Chunk,
+            _chunk: Chunk,
             _source: Option<String>,
             _location: Option<Location>,
         ) -> Result<ChunkId, Immutable> {
@@ -208,11 +208,15 @@ pub mod main {
         C: KeyedChunkCache<Q>,
     {
         fn bind(&mut self, key: &Q, chunk_id: ChunkId) -> Result<(), super::Immutable> {
-            self.cache.bind(key, chunk_id)
+            if let Some(chunk_id) = Self::to_cache_index(chunk_id) {
+                self.cache.bind(key, chunk_id)
+            } else {
+                Err(super::Immutable)
+            }
         }
 
         fn get(&self, key: &Q) -> Option<ChunkId> {
-            self.cache.get(key)
+            self.cache.get(key).map(Self::from_cache_index)
         }
     }
 }
