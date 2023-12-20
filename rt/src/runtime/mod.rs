@@ -19,7 +19,7 @@ use crate::value::Value;
 use frame::ChangeFrame;
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
-use stack::{Stack, StackView};
+use stack::{RawStackSlot, Stack, StackView};
 use upvalue_stack::{UpvalueStack, UpvalueStackView};
 
 pub use frame::{Closure, ClosureRef, FunctionPtr};
@@ -87,6 +87,11 @@ pub struct RuntimeView<'rt, C> {
 
 impl<'rt, C> RuntimeView<'rt, C> {
     pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError<C>> {
+        let start = self.stack.boundary() + start;
+        self.view_raw(start)
+    }
+
+    fn view_raw(&mut self, start: RawStackSlot) -> Result<RuntimeView<C>, RuntimeError<C>> {
         use crate::error::OutOfBoundsStack;
 
         let RuntimeView {
@@ -99,7 +104,6 @@ impl<'rt, C> RuntimeView<'rt, C> {
         } = self;
 
         let frames = frames.view();
-        let start = stack.boundary() + start;
         let stack = stack.view(start).ok_or(OutOfBoundsStack)?;
         let upvalue_stack = upvalue_stack.view_over();
         let rust_backtrace_stack = rust_backtrace_stack.view_over();
@@ -125,6 +129,15 @@ impl<'rt, C> RuntimeView<'rt, C> {
         f: impl LuaFfiOnce<C>,
         start: StackSlot,
     ) -> Result<(), RuntimeError<C>> {
+        let start = self.stack.boundary() + start;
+        self.invoke_at_raw(f, start)
+    }
+
+    fn invoke_at_raw(
+        &mut self,
+        f: impl LuaFfiOnce<C>,
+        start: RawStackSlot,
+    ) -> Result<(), RuntimeError<C>> {
         use crate::backtrace::{BacktraceFrame, FrameSource};
         use rust_backtrace_stack::RustFrame;
 
@@ -137,7 +150,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
             },
         };
 
-        let mut view = self.view(start)?;
+        let mut view = self.view_raw(start)?;
         view.rust_backtrace_stack.push(rust_frame);
 
         tracing::trace!(
@@ -198,6 +211,7 @@ where
     pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError<C>> {
         use crate::value::callable::Callable;
 
+        let start = self.stack.boundary() + start;
         let frame = closure.construct_frame(self, start)?;
         let mut active_frame = frame.activate(self)?;
 
@@ -214,6 +228,10 @@ where
                 }
                 Ok(ControlFlow::Break(ChangeFrame::Invoke(callable, start))) => {
                     let frame = active_frame.suspend();
+                    // Make sure to convert slot here!
+                    // Stack slot is in relation to already suspended frame which most likely
+                    // have different boundary from view held by `enter` function itself.
+                    let start = frame.stack_boundary() + start;
                     self.frames.push(frame);
 
                     match callable {
@@ -222,7 +240,7 @@ where
                             active_frame = frame.activate(self)?;
                         }
                         Callable::RustClosure(closure) => {
-                            self.invoke_at(closure, start)?;
+                            self.invoke_at_raw(closure, start)?;
 
                             let frame = self.frames.pop().unwrap();
                             active_frame = frame.activate(self)?;

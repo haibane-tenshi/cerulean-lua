@@ -52,7 +52,7 @@ impl ClosureRef {
     pub(crate) fn construct_frame<C>(
         self,
         rt: &mut RuntimeView<C>,
-        start: StackSlot,
+        start: RawStackSlot,
     ) -> Result<Frame<C>, RuntimeError<C>>
     where
         C: ChunkCache,
@@ -81,7 +81,7 @@ impl ClosureRef {
         }
 
         // Adjust stack, move varargs into register if needed.
-        let stack_start = rt.stack.boundary() + start;
+        let stack_start = start;
         let call_height = StackSlot(0) + signature.arg_count;
         let mut stack = rt.stack.view(stack_start).ok_or(OutOfBoundsStack)?;
 
@@ -152,6 +152,10 @@ pub struct Frame<C> {
 impl<C> Frame<C> {
     pub(crate) fn fn_ptr(&self) -> FunctionPtr {
         self.closure.fn_ptr
+    }
+
+    pub(crate) fn stack_boundary(&self) -> RawStackSlot {
+        self.stack_start
     }
 }
 
