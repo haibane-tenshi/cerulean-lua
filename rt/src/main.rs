@@ -45,6 +45,7 @@ fn load_from_file(path: &Path) -> Result<(Chunk, String)> {
 fn main() -> Result<()> {
     let logger = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+        .pretty()
         .finish();
     tracing::subscriber::set_global_default(logger)?;
 

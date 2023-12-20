@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::{Add, Bound, RangeBounds};
+use std::ops::{Add, Bound, Deref, RangeBounds};
 
 use repr::index::StackSlot;
-use repr::tivec::TiVec;
+use repr::tivec::{TiSlice, TiVec};
 
 use super::{map_bound, Value};
 use crate::error::opcode::MissingArgsError;
@@ -261,6 +261,10 @@ impl<'a, C> StackView<'a, C> {
         Some(r)
     }
 
+    pub fn as_slice(&self) -> &TiSlice<StackSlot, Value<C>> {
+        self.deref()
+    }
+
     pub fn push(&mut self, value: Value<C>) {
         self.stack.push(value);
     }
@@ -317,6 +321,10 @@ impl<'a, C> StackView<'a, C> {
 
     pub fn len(&self) -> usize {
         self.stack.len() - self.boundary().0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn last(&self) -> Option<&Value<C>> {
@@ -383,6 +391,45 @@ impl<'a, C> StackView<'a, C> {
     pub fn truncate(&mut self, new_len: StackSlot) {
         let new_len = self.boundary + new_len;
         self.stack.truncate(new_len)
+    }
+
+    pub fn emit_pretty(&self, writer: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
+        if self.is_empty() {
+            return write!(writer, "[]");
+        }
+
+        writeln!(writer, "[")?;
+        for (slot, value) in self.iter_enumerated() {
+            let upvalue_mark = if self
+                .stack
+                .on_stack_upvalues
+                .contains_key(&(self.boundary + slot))
+            {
+                '*'
+            } else {
+                ' '
+            };
+
+            writeln!(writer, "    {upvalue_mark}[{slot:>2}] {value}")?;
+        }
+
+        writeln!(writer, "]")?;
+
+        Ok(())
+    }
+
+    pub fn to_pretty_string(&self) -> String {
+        let mut r = String::new();
+        self.emit_pretty(&mut r).unwrap();
+        r
+    }
+}
+
+impl<'a, C> Deref for StackView<'a, C> {
+    type Target = TiSlice<StackSlot, Value<C>>;
+
+    fn deref(&self) -> &Self::Target {
+        self.stack.temporaries[self.boundary..].raw.as_ref()
     }
 }
 

@@ -140,6 +140,11 @@ impl<'rt, C> RuntimeView<'rt, C> {
         let mut view = self.view(start)?;
         view.rust_backtrace_stack.push(rust_frame);
 
+        tracing::trace!(
+            stack = view.stack.to_pretty_string(),
+            "entering Rust function"
+        );
+
         let r = f.call_once(view.view(StackSlot(0)).unwrap());
 
         // Forcefully clean up.
@@ -200,7 +205,6 @@ where
             match active_frame.step() {
                 Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
                     active_frame.exit(slot)?;
-                    tracing::trace!(stack = ?self.stack, "adjusted stack upon function return");
 
                     let Some(frame) = self.frames.pop() else {
                         break;

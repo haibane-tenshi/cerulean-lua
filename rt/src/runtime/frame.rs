@@ -199,6 +199,8 @@ where
             *upvalue = stack.get_upvalue(upvalue_id).unwrap().clone();
         }
 
+        tracing::trace!(stack = stack.to_pretty_string(), "activated Lua frame");
+
         let r = ActiveFrame {
             closure,
             chunk,
@@ -469,7 +471,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
         };
 
-        tracing::trace!(stack = ?self.stack, "executed opcode");
+        tracing::trace!(stack = self.stack.to_pretty_string(), "executed opcode");
 
         Ok(r)
     }
