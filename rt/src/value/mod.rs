@@ -156,26 +156,32 @@ impl<C> Display for Value<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
 
-        if f.alternate() {
-            match self {
-                Nil => write!(f, "nil"),
-                Bool(v) => write!(f, "{v}"),
-                Int(v) => write!(f, "{v}_i64"),
-                Float(v) => write!(f, "{v}_f64"),
-                String(v) => write!(f, "{v:?}"),
-                Function(v) => write!(f, "{v:?}"),
-                Table(v) => write!(f, "table [{v:?}]"),
+        match self {
+            Nil => write!(f, "nil"),
+            Bool(v) => write!(f, "{v}"),
+            Int(v) => {
+                if f.alternate() {
+                    write!(f, "{v}_i64")
+                } else {
+                    write!(f, "{v}")
+                }
             }
-        } else {
-            match self {
-                Nil => write!(f, "nil"),
-                Bool(v) => write!(f, "{v}"),
-                Int(v) => write!(f, "{v}"),
-                Float(v) => write!(f, "{v}"),
-                String(v) => write!(f, "{v}"),
-                Function(v) => write!(f, "{v:?}"),
-                Table(v) => write!(f, "table [{v:?}]"),
+            Float(v) => {
+                if f.alternate() {
+                    write!(f, "{v}_f64")
+                } else {
+                    write!(f, "{v}")
+                }
             }
+            String(v) => {
+                if f.alternate() {
+                    write!(f, "{v:?}")
+                } else {
+                    write!(f, "{v}")
+                }
+            }
+            Function(v) => write!(f, "{v:?}"),
+            Table(v) => write!(f, "{{table <{v:?}>}}"),
         }
     }
 }
