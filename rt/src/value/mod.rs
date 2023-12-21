@@ -54,6 +54,20 @@ impl Display for Type {
     }
 }
 
+/// Enum representing all possible Lua values.
+///
+/// Value supports normal and alternate rendering for `Display` impl:
+///
+/// ```rust
+///     # use rt::value::Value;
+///     # local value = Value::Nil;
+///     println!("normal:    {value}");
+///     println!("alternate: {value:#}");
+/// ```
+///
+/// Default rendering will only include the contents.
+/// Alternate rendering will include type information as well,
+/// but looks a little bit nicer compared to `Debug` output.
 pub enum Value<C> {
     Nil,
     Bool(bool),
@@ -142,14 +156,26 @@ impl<C> Display for Value<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
 
-        match self {
-            Nil => write!(f, "nil"),
-            Bool(v) => write!(f, "{v}"),
-            Int(v) => write!(f, "{v}_i64"),
-            Float(v) => write!(f, "{v}_f64"),
-            String(v) => write!(f, "{v:?}"),
-            Function(v) => write!(f, "{v:?}"),
-            Table(v) => write!(f, "table [{v:?}]"),
+        if f.alternate() {
+            match self {
+                Nil => write!(f, "nil"),
+                Bool(v) => write!(f, "{v}"),
+                Int(v) => write!(f, "{v}_i64"),
+                Float(v) => write!(f, "{v}_f64"),
+                String(v) => write!(f, "{v:?}"),
+                Function(v) => write!(f, "{v:?}"),
+                Table(v) => write!(f, "table [{v:?}]"),
+            }
+        } else {
+            match self {
+                Nil => write!(f, "nil"),
+                Bool(v) => write!(f, "{v}"),
+                Int(v) => write!(f, "{v}"),
+                Float(v) => write!(f, "{v}"),
+                String(v) => write!(f, "{v}"),
+                Function(v) => write!(f, "{v:?}"),
+                Table(v) => write!(f, "table [{v:?}]"),
+            }
         }
     }
 }

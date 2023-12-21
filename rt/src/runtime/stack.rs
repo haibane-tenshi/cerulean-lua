@@ -410,7 +410,7 @@ impl<'a, C> StackView<'a, C> {
                 ' '
             };
 
-            writeln!(writer, "    {upvalue_mark}[{slot:>2}] {value}")?;
+            writeln!(writer, "    {upvalue_mark}[{slot:>2}] {value:#}")?;
         }
 
         writeln!(writer, "]")?;
