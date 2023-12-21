@@ -7,7 +7,7 @@ pub struct UpvalueCountMismatch {
 }
 
 impl UpvalueCountMismatch {
-    pub(super) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
+    pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
 
         let UpvalueCountMismatch { expected, closure } = self;

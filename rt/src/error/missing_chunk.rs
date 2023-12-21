@@ -6,7 +6,7 @@ use crate::chunk_cache::ChunkId;
 pub struct MissingChunk(pub ChunkId);
 
 impl MissingChunk {
-    pub(super) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
+    pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         let MissingChunk(chunk_id) = self;
 
         Diagnostic::error().with_message(format!(

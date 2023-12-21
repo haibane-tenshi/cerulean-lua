@@ -6,12 +6,14 @@ pub mod out_of_bounds_stack;
 pub mod upvalue_count_mismatch;
 pub mod value;
 
-use codespan_reporting::diagnostic::{Diagnostic, Label};
+use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use crate::value::Value;
 
+pub use crate::chunk_cache::Immutable;
+pub use diagnostic::Diagnostic;
 pub use missing_chunk::MissingChunk;
 pub use missing_function::MissingFunction;
 pub use opcode::Error as OpCodeError;
@@ -21,29 +23,13 @@ pub use value::ValueError;
 
 pub enum RuntimeError<C> {
     Value(ValueError<C>),
+    Immutable(Immutable),
+    Diagnostic(Diagnostic),
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
     OutOfBoundsStack(OutOfBoundsStack),
     UpvalueCountMismatch(UpvalueCountMismatch),
     OpCode(OpCodeError),
-}
-
-impl<C> RuntimeError<C> {
-    pub fn into_diagnostic<FileId>(self, file_id: FileId) -> Diagnostic<FileId>
-    where
-        FileId: Clone,
-    {
-        use RuntimeError::*;
-
-        match self {
-            Value(err) => err.into_diagnostic(),
-            MissingChunk(err) => err.into_diagnostic(),
-            MissingFunction(err) => err.into_diagnostic(),
-            OutOfBoundsStack(err) => err.into_diagnostic(),
-            UpvalueCountMismatch(err) => err.into_diagnostic(),
-            OpCode(err) => err.into_diagnostic(file_id),
-        }
-    }
 }
 
 impl<C> From<Value<C>> for RuntimeError<C> {
@@ -92,6 +78,8 @@ impl<C> Debug for RuntimeError<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
+            Self::Immutable(arg0) => f.debug_tuple("Immutable").field(arg0).finish(),
+            Self::Diagnostic(arg0) => f.debug_tuple("Diagnostic").field(arg0).finish(),
             Self::MissingChunk(arg0) => f.debug_tuple("MissingChunk").field(arg0).finish(),
             Self::MissingFunction(arg0) => f.debug_tuple("MissingFunction").field(arg0).finish(),
             Self::OutOfBoundsStack(arg0) => f.debug_tuple("OutOfBoundsStack").field(arg0).finish(),
@@ -120,7 +108,7 @@ trait ExtraDiagnostic<FileId> {
     fn no_debug_info(&mut self);
 }
 
-impl<FileId> ExtraDiagnostic<FileId> for Diagnostic<FileId> {
+impl<FileId> ExtraDiagnostic<FileId> for Message<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>) {
         self.labels.extend(iter)
     }

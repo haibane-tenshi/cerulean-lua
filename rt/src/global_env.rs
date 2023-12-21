@@ -258,30 +258,27 @@ where
 
                 let env = rt.stack.get_mut(StackSlot(2)).map(Value::take);
 
-                let chunk_id = rt.load_from_file(&filename).map_err(|err| {
-                    use crate::runtime::LoadWithError::*;
+                match rt.load_from_file(&filename) {
+                    Ok(chunk_id) => {
+                        let ptr = FunctionPtr {
+                            chunk_id,
+                            function_id: FunctionId(0),
+                        };
+                        let env = env.unwrap_or_else(|| rt.global_env.clone());
+                        let closure = rt.construct_closure(ptr, [env])?;
+                        let closure_ref = Callable::LuaClosure(ClosureRef::new(closure));
 
-                    match err {
-                        Immutable(_) => {
-                            Value::String("runtime does not support loading new chunks".to_string())
-                        }
-                        Error(err) => {
-                            Value::String(format!("failed to load file {filename}: {err}"))
-                        }
-                        CompilationFailure(diag) => Value::String(diag.emit_to_string()),
+                        rt.stack.clear();
+                        rt.stack.push(Value::Function(closure_ref));
                     }
-                })?;
+                    Err(err) => {
+                        let message = rt.into_diagnostic(err).emit_to_string();
 
-                let ptr = FunctionPtr {
-                    chunk_id,
-                    function_id: FunctionId(0),
-                };
-                let env = env.unwrap_or_else(|| rt.global_env.clone());
-                let closure = rt.construct_closure(ptr, [env])?;
-                let closure_ref = Callable::LuaClosure(ClosureRef::new(closure));
-
-                rt.stack.clear();
-                rt.stack.push(Value::Function(closure_ref));
+                        rt.stack.clear();
+                        rt.stack.push(Value::Nil);
+                        rt.stack.push(Value::String(message));
+                    }
+                }
 
                 Ok(())
             },

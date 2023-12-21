@@ -6,6 +6,16 @@ use crate::backtrace::Location;
 #[derive(Debug)]
 pub struct Immutable;
 
+impl Immutable {
+    pub(crate) fn into_diagnostic<FileId>(
+        self,
+    ) -> codespan_reporting::diagnostic::Diagnostic<FileId> {
+        use codespan_reporting::diagnostic::Diagnostic;
+
+        Diagnostic::error().with_message("runtime does not support loading new chunks")
+    }
+}
+
 pub trait ChunkCache {
     fn chunk(&self, id: ChunkId) -> Option<&Chunk>;
     fn source(&self, id: ChunkId) -> Option<String>;

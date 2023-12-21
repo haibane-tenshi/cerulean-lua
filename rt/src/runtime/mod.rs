@@ -345,11 +345,11 @@ where
         Ok(chunk_id)
     }
 
-    pub fn precompiled_or_load_with<Q, E>(
+    pub fn precompiled_or_load_with<Q>(
         &mut self,
         key: &Q,
-        f: impl FnOnce() -> Result<(String, Option<Location>), E>,
-    ) -> Result<ChunkId, LoadWithError<E>>
+        f: impl FnOnce() -> Result<(String, Option<Location>), RuntimeError<C>>,
+    ) -> Result<ChunkId, RuntimeError<C>>
     where
         Q: ?Sized,
         C: KeyedChunkCache<Q>,
@@ -358,22 +358,24 @@ where
             return Ok(chunk_id);
         }
 
-        let (source, location) = f().map_err(LoadWithError::Error)?;
+        let (source, location) = f()?;
         self.load_with_key(key, source, location)
             .map_err(Into::into)
     }
 
-    pub fn load_from_file(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<ChunkId, LoadWithError<std::io::Error>>
+    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RuntimeError<C>>
     where
         C: KeyedChunkCache<Path>,
     {
         let path = path.as_ref();
 
         self.precompiled_or_load_with(path, || {
-            let source = std::fs::read_to_string(path)?;
+            let source = std::fs::read_to_string(path).map_err(|err| {
+                Value::String(format!(
+                    "failed to load file {}: {err}",
+                    path.to_string_lossy()
+                ))
+            })?;
             let location = Location {
                 file: path.to_string_lossy().to_string(),
                 line: 0,
@@ -426,7 +428,17 @@ where
     pub fn into_diagnostic(&self, err: RuntimeError<C>) -> Diagnostic {
         use codespan_reporting::files::SimpleFile;
 
-        let message = err.into_diagnostic(());
+        let message = match err {
+            RuntimeError::Value(err) => err.into_diagnostic(),
+            RuntimeError::Immutable(err) => err.into_diagnostic(),
+            RuntimeError::Diagnostic(diag) => return diag,
+            RuntimeError::MissingChunk(err) => err.into_diagnostic(),
+            RuntimeError::MissingFunction(err) => err.into_diagnostic(),
+            RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
+            RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
+            RuntimeError::OpCode(err) => err.into_diagnostic(()),
+        };
+
         let (name, source) = self
             .frames
             .last()
@@ -480,29 +492,11 @@ impl From<Diagnostic> for LoadError {
     }
 }
 
-#[derive(Debug)]
-pub enum LoadWithError<E> {
-    Immutable(crate::chunk_cache::Immutable),
-    CompilationFailure(Diagnostic),
-    Error(E),
-}
-impl<E> From<LoadError> for LoadWithError<E> {
+impl<C> From<LoadError> for RuntimeError<C> {
     fn from(value: LoadError) -> Self {
         match value {
-            LoadError::Immutable(t) => LoadWithError::Immutable(t),
-            LoadError::CompilationFailure(t) => LoadWithError::CompilationFailure(t),
+            LoadError::Immutable(err) => RuntimeError::Immutable(err),
+            LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(diag),
         }
-    }
-}
-
-impl<E> From<crate::chunk_cache::Immutable> for LoadWithError<E> {
-    fn from(value: crate::chunk_cache::Immutable) -> Self {
-        LoadWithError::Immutable(value)
-    }
-}
-
-impl<E> From<Diagnostic> for LoadWithError<E> {
-    fn from(value: Diagnostic) -> Self {
-        LoadWithError::CompilationFailure(value)
     }
 }

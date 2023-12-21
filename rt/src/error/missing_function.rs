@@ -6,7 +6,7 @@ use crate::runtime::FunctionPtr;
 pub struct MissingFunction(pub FunctionPtr);
 
 impl MissingFunction {
-    pub(super) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
+    pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         let MissingFunction(fn_ptr) = self;
 
         Diagnostic::error().with_message(format!(

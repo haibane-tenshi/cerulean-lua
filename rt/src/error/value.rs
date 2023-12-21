@@ -7,7 +7,7 @@ use crate::value::Value;
 pub struct ValueError<C>(pub Value<C>);
 
 impl<C> ValueError<C> {
-    pub(super) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
+    pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
         use Value::*;
 
@@ -27,6 +27,12 @@ impl<C> ValueError<C> {
         }
 
         diag
+    }
+}
+
+impl<C> From<Value<C>> for ValueError<C> {
+    fn from(value: Value<C>) -> Self {
+        ValueError(value)
     }
 }
 
