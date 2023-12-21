@@ -15,4 +15,12 @@ impl Diagnostic {
 
         emit(writer, config, &self.files, &self.message)
     }
+
+    pub fn emit_to_string(&self) -> String {
+        use codespan_reporting::term::termcolor::NoColor;
+
+        let mut s = Vec::new();
+        let _ = self.emit(&mut NoColor::new(&mut s), &Default::default());
+        String::from_utf8_lossy(&s).to_string()
+    }
 }

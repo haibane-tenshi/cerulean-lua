@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::path::Path;
 
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::RuntimeError;
@@ -168,4 +169,32 @@ where
     };
 
     f.into_lua_ffi_with_name("rt::ffi::call_precompiled")
+}
+
+pub fn call_file<C>(script: impl AsRef<Path>) -> impl LuaFfi<C>
+where
+    C: ChunkCache + KeyedChunkCache<Path>,
+{
+    let f = move |mut rt: RuntimeView<C>| {
+        let script = script.as_ref();
+        let chunk_id = rt.load_from_file(script).map_err(|err| {
+            use crate::runtime::LoadWithError::*;
+            use crate::value::Value;
+
+            match err {
+                Immutable(_) => {
+                    Value::String("runtime does not support loading new chunks".to_string())
+                }
+                Error(err) => Value::String(format!(
+                    "failed to open {}: {err}",
+                    script.to_string_lossy()
+                )),
+                CompilationFailure(err) => Value::String(err.emit_to_string()),
+            }
+        })?;
+
+        rt.invoke(call_chunk(chunk_id))
+    };
+
+    f.into_lua_ffi_with_name("rt::ffi::call_file")
 }

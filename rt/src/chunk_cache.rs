@@ -91,6 +91,18 @@ pub mod single {
                 location,
             }
         }
+
+        pub fn get_chunk(&self) -> &Chunk {
+            &self.chunk
+        }
+
+        pub fn get_source(&self) -> Option<&str> {
+            self.source.as_deref()
+        }
+
+        pub fn get_location(&self) -> Option<&Location> {
+            self.location.as_ref()
+        }
     }
 
     impl ChunkCache for SingleChunk {
@@ -217,6 +229,74 @@ pub mod main {
 
         fn get(&self, key: &Q) -> Option<ChunkId> {
             self.cache.get(key).map(Self::from_cache_index)
+        }
+    }
+}
+
+pub mod path {
+    use super::single::SingleChunk;
+    use super::{Chunk, ChunkCache, ChunkId, KeyedChunkCache};
+    use repr::tivec::TiVec;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    #[derive(Debug, Default)]
+    pub struct PathCache {
+        chunks: TiVec<ChunkId, SingleChunk>,
+        paths: HashMap<PathBuf, ChunkId>,
+    }
+
+    impl PathCache {
+        pub fn new() -> Self {
+            Default::default()
+        }
+    }
+
+    impl ChunkCache for PathCache {
+        fn chunk(&self, id: ChunkId) -> Option<&Chunk> {
+            self.chunks.get(id).map(SingleChunk::get_chunk)
+        }
+
+        fn source(&self, id: ChunkId) -> Option<String> {
+            self.chunks
+                .get(id)
+                .and_then(SingleChunk::get_source)
+                .map(String::from)
+        }
+
+        fn location(&self, id: ChunkId) -> Option<crate::backtrace::Location> {
+            self.chunks
+                .get(id)
+                .and_then(SingleChunk::get_location)
+                .cloned()
+        }
+
+        fn insert(
+            &mut self,
+            chunk: Chunk,
+            source: Option<String>,
+            location: Option<crate::backtrace::Location>,
+        ) -> Result<ChunkId, super::Immutable> {
+            let c = SingleChunk::new(chunk, source, location);
+            let id = self.chunks.push_and_get_key(c);
+
+            Ok(id)
+        }
+    }
+
+    impl<Q> KeyedChunkCache<Q> for PathCache
+    where
+        Q: AsRef<Path> + ?Sized,
+    {
+        fn bind(&mut self, key: &Q, chunk_id: ChunkId) -> Result<(), super::Immutable> {
+            let path = key.as_ref().to_path_buf();
+            self.paths.insert(path, chunk_id);
+
+            Ok(())
+        }
+
+        fn get(&self, key: &Q) -> Option<ChunkId> {
+            self.paths.get(key.as_ref()).copied()
         }
     }
 }

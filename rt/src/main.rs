@@ -54,33 +54,29 @@ fn main() -> Result<()> {
     match command {
         Command::Run { path } => {
             use rt::chunk_cache::main::MainCache;
-            use rt::chunk_cache::single::{Main, SingleChunk};
+            use rt::chunk_cache::path::PathCache;
+            use rt::chunk_cache::single::SingleChunk;
             use rt::chunk_cache::ChunkId;
             use rt::runtime::Runtime;
             // use rt::value::table::TableRef;
-            use rt::backtrace::Location;
             use rt::value::Value;
 
-            let (chunk, source) = load_from_file(&path)?;
             let (env_chunk, builder) = rt::global_env::empty()
                 .add(rt::global_env::assert())
                 .add(rt::global_env::pcall())
                 .add(rt::global_env::print())
-                // .add(rt::global_env::loadfile())
+                .add(rt::global_env::loadfile())
                 .finish();
 
-            let location = Location::file(path.to_string_lossy().to_string());
-            let chunk_cache = MainCache::new(
-                SingleChunk::new(env_chunk, None, None),
-                SingleChunk::new(chunk, Some(source.clone()), Some(location)),
-            );
+            let chunk_cache =
+                MainCache::new(SingleChunk::new(env_chunk, None, None), PathCache::new());
             let mut runtime = Runtime::new(chunk_cache, Value::Nil);
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0))?;
                 runtime.global_env = global_env;
 
-                runtime.view().invoke(rt::ffi::call_precompiled(&Main))
+                runtime.view().invoke(rt::ffi::call_file(&path))
             };
 
             if let Err(err) = run() {

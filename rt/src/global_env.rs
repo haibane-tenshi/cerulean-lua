@@ -268,15 +268,7 @@ where
                         Error(err) => {
                             Value::String(format!("failed to load file {filename}: {err}"))
                         }
-                        CompilationFailure(diag) => {
-                            use codespan_reporting::term::termcolor::NoColor;
-
-                            let mut s = Vec::new();
-                            let _ = diag.emit(&mut NoColor::new(&mut s), &Default::default());
-                            let string = String::from_utf8_lossy(&s).to_string();
-
-                            Value::String(string)
-                        }
+                        CompilationFailure(diag) => Value::String(diag.emit_to_string()),
                     }
                 })?;
 
