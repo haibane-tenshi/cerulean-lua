@@ -1,9 +1,11 @@
+use std::path::Path;
+
 use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::index::StackSlot;
 use repr::literal::Literal;
 
 use crate::chunk_builder::{ChunkBuilder, ChunkPart, ChunkRange};
-use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::runtime::RuntimeView;
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
@@ -192,6 +194,113 @@ where
             .set(
                 KeyValue::String("print".into()),
                 Value::Function(Callable::RustClosure(fn_print)),
+            );
+
+        Ok(())
+    };
+
+    ChunkPart { chunk_ext, builder }
+}
+
+pub fn loadfile<C>() -> ChunkPart<
+    [Function; 0],
+    [Literal; 0],
+    [ClosureRecipe; 0],
+    impl FnOnce(RuntimeView<C>, ChunkRange, &mut Value<C>) -> Result<(), RuntimeError<C>>,
+>
+where
+    C: ChunkCache + KeyedChunkCache<Path>,
+{
+    use crate::value::callable::RustClosureRef;
+
+    let chunk_ext = ChunkExtension::empty();
+
+    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, value: &mut Value<C>| {
+        let Value::Table(table) = value else {
+            return Err(
+                Value::String("global env value is expected to be table".to_string()).into(),
+            );
+        };
+
+        let fn_loadfile = RustClosureRef::with_name(
+            "lua_std::loadfile",
+            |mut rt: RuntimeView<_>| {
+                use crate::runtime::{ClosureRef, FunctionPtr};
+                use repr::index::FunctionId;
+
+                let filename = match rt.stack.get_mut(StackSlot(0)).map(Value::take) {
+                    Some(Value::String(s)) => s,
+                    Some(value) => {
+                        return Err(Value::String(format!(
+                            "loadfile expects file name as the first argument, but it has type {}",
+                            value.type_().to_lua_name()
+                        ))
+                        .into())
+                    }
+                    None => {
+                        return Err(Value::String(
+                            "loadfile does not support loading chunks from standard input yet"
+                                .to_string(),
+                        )
+                        .into())
+                    }
+                };
+
+                let _mode = rt.stack.get_mut(StackSlot(1)).map(|value| {
+                    match value.take() {
+                        Value::String(s) => match s.as_str() {
+                            "t" | "b" | "bt" => Ok(s),
+                            _ => Err(Value::String(format!("loadfile: unrecognized mode '{s}' (expected either 't', 'b' or 'bt')")))
+                        }
+                        value => Err(Value::String(format!("loadfile expects string containing opening mode as the second argument, but it has type {}", value.type_().to_lua_name()))),
+                    }
+                }).transpose()?;
+
+                let env = rt.stack.get_mut(StackSlot(2)).map(Value::take);
+
+                let chunk_id = rt.load_from_file(&filename).map_err(|err| {
+                    use crate::runtime::LoadWithError::*;
+
+                    match err {
+                        Immutable(_) => {
+                            Value::String("runtime does not support loading new chunks".to_string())
+                        }
+                        Error(err) => {
+                            Value::String(format!("failed to load file {filename}: {err}"))
+                        }
+                        CompilationFailure(diag) => {
+                            use codespan_reporting::term::termcolor::NoColor;
+
+                            let mut s = Vec::new();
+                            let _ = diag.emit(&mut NoColor::new(&mut s), &Default::default());
+                            let string = String::from_utf8_lossy(&s).to_string();
+
+                            Value::String(string)
+                        }
+                    }
+                })?;
+
+                let ptr = FunctionPtr {
+                    chunk_id,
+                    function_id: FunctionId(0),
+                };
+                let env = env.unwrap_or_else(|| rt.global_env.clone());
+                let closure = rt.construct_closure(ptr, [env])?;
+                let closure_ref = Callable::LuaClosure(ClosureRef::new(closure));
+
+                rt.stack.clear();
+                rt.stack.push(Value::Function(closure_ref));
+
+                Ok(())
+            },
+        );
+
+        table
+            .borrow_mut()
+            .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
+            .set(
+                KeyValue::String("loadfile".into()),
+                Value::Function(Callable::RustClosure(fn_loadfile)),
             );
 
         Ok(())

@@ -66,6 +66,7 @@ fn main() -> Result<()> {
                 .add(rt::global_env::assert())
                 .add(rt::global_env::pcall())
                 .add(rt::global_env::print())
+                // .add(rt::global_env::loadfile())
                 .finish();
 
             let location = Location::file(path.to_string_lossy().to_string());
