@@ -103,7 +103,7 @@ where
             );
         };
 
-        let fn_assert = RustClosureRef::with_name("lua_std::pcall", |mut rt: RuntimeView<_>| {
+        let fn_pcall = RustClosureRef::with_name("lua_std::pcall", |mut rt: RuntimeView<_>| {
             let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
                 return Err(
                     Value::String("pcall expects at least one argument".to_string()).into(),
@@ -149,7 +149,49 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("pcall".into()),
-                Value::Function(Callable::RustClosure(fn_assert)),
+                Value::Function(Callable::RustClosure(fn_pcall)),
+            );
+
+        Ok(())
+    };
+
+    ChunkPart { chunk_ext, builder }
+}
+
+pub fn print<C>() -> ChunkPart<
+    [Function; 0],
+    [Literal; 0],
+    [ClosureRecipe; 0],
+    impl FnOnce(RuntimeView<C>, ChunkRange, &mut Value<C>) -> Result<(), RuntimeError<C>>,
+>
+where
+    C: ChunkCache,
+{
+    use crate::value::callable::RustClosureRef;
+
+    let chunk_ext = ChunkExtension::empty();
+
+    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, value: &mut Value<C>| {
+        let Value::Table(table) = value else {
+            return Err(
+                Value::String("global env value is expected to be table".to_string()).into(),
+            );
+        };
+
+        let fn_print = RustClosureRef::with_name("lua_std::print", |rt: RuntimeView<_>| {
+            for value in rt.stack.iter() {
+                print!("{value}");
+            }
+
+            Ok(())
+        });
+
+        table
+            .borrow_mut()
+            .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
+            .set(
+                KeyValue::String("print".into()),
+                Value::Function(Callable::RustClosure(fn_print)),
             );
 
         Ok(())

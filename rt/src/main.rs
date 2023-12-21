@@ -65,6 +65,7 @@ fn main() -> Result<()> {
             let (env_chunk, builder) = rt::global_env::empty()
                 .add(rt::global_env::assert())
                 .add(rt::global_env::pcall())
+                .add(rt::global_env::print())
                 .finish();
 
             let location = Location::file(path.to_string_lossy().to_string());
