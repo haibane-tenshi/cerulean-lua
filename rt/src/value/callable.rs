@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::rc::Rc;
 
+use crate::chunk_cache::ChunkCache;
 use crate::error::RuntimeError;
 use crate::ffi::{IntoLuaFfi, IntoLuaFfiWithName, LuaFfiMut, LuaFfiOnce};
 
@@ -121,5 +122,23 @@ impl<C> Hash for Callable<C> {
             Self::LuaClosure(t) => t.hash(state),
             Self::RustClosure(t) => t.hash(state),
         }
+    }
+}
+
+impl<C> LuaFfiOnce<C> for Callable<C>
+where
+    C: ChunkCache,
+{
+    fn call_once(self, mut rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+        use repr::index::StackSlot;
+
+        match self {
+            Callable::LuaClosure(f) => rt.enter(f, StackSlot(0)),
+            Callable::RustClosure(f) => rt.invoke(f),
+        }
+    }
+
+    fn name(&self) -> String {
+        "<callable wrapper>".to_string()
     }
 }
