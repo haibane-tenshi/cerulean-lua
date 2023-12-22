@@ -145,7 +145,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
             position: self.frames.next_raw_id(),
             backtrace: BacktraceFrame {
                 source: FrameSource::Rust,
-                name: Some(f.name()),
+                name: Some(f.debug_info().name),
                 location: None,
             },
         };

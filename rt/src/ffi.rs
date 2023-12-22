@@ -7,7 +7,7 @@ use crate::runtime::RuntimeView;
 
 pub trait LuaFfiOnce<C> {
     fn call_once(self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
-    fn name(&self) -> String;
+    fn debug_info(&self) -> DebugInfo;
 }
 
 pub trait LuaFfiMut<C>: LuaFfiOnce<C> {
@@ -18,6 +18,12 @@ pub trait LuaFfi<C>: LuaFfiMut<C> {
     fn call(&self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
 }
 
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct DebugInfo {
+    pub name: String,
+}
+
 impl<C, T> LuaFfiOnce<C> for &T
 where
     T: LuaFfi<C> + ?Sized,
@@ -26,8 +32,8 @@ where
         self.call(rt)
     }
 
-    fn name(&self) -> String {
-        <T as LuaFfiOnce<C>>::name(self)
+    fn debug_info(&self) -> DebugInfo {
+        <T as LuaFfiOnce<C>>::debug_info(self)
     }
 }
 
@@ -48,8 +54,8 @@ where
         self.call_mut(rt)
     }
 
-    fn name(&self) -> String {
-        <T as LuaFfiOnce<C>>::name(self)
+    fn debug_info(&self) -> DebugInfo {
+        <T as LuaFfiOnce<C>>::debug_info(self)
     }
 }
 
@@ -107,8 +113,10 @@ where
         (self.func)(rt)
     }
 
-    fn name(&self) -> String {
-        self.name.as_ref().to_string()
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: self.name.as_ref().to_string(),
+        }
     }
 }
 

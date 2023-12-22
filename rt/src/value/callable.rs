@@ -5,11 +5,16 @@ use std::rc::Rc;
 
 use crate::chunk_cache::ChunkCache;
 use crate::error::RuntimeError;
-use crate::ffi::{IntoLuaFfi, IntoLuaFfiWithName, LuaFfiMut, LuaFfiOnce};
+use crate::ffi::{DebugInfo, IntoLuaFfi, IntoLuaFfiWithName, LuaFfiMut, LuaFfiOnce};
 
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
-pub struct RustClosureRef<C>(pub Rc<RefCell<dyn LuaFfiMut<C> + 'static>>);
+pub struct RustClosureRef<C>(Rc<Inner<RefCell<dyn LuaFfiMut<C> + 'static>>>);
+
+struct Inner<T: ?Sized> {
+    debug_info: DebugInfo,
+    callable: T,
+}
 
 impl<C> RustClosureRef<C> {
     pub fn new<F>(value: F) -> Self
@@ -17,7 +22,13 @@ impl<C> RustClosureRef<C> {
         F: IntoLuaFfi<C>,
         <F as IntoLuaFfi<C>>::Output: LuaFfiMut<C> + 'static,
     {
-        let rc = Rc::new(RefCell::new(value.into_lua_ffi()));
+        let value = value.into_lua_ffi();
+        let debug_info = value.debug_info();
+        let inner = Inner {
+            debug_info,
+            callable: RefCell::new(value),
+        };
+        let rc = Rc::new(inner);
         RustClosureRef(rc)
     }
 
@@ -26,7 +37,13 @@ impl<C> RustClosureRef<C> {
         F: IntoLuaFfiWithName<C, N>,
         <F as IntoLuaFfiWithName<C, N>>::Output: LuaFfiMut<C> + 'static,
     {
-        let rc = Rc::new(RefCell::new(value.into_lua_ffi_with_name(name)));
+        let value = value.into_lua_ffi_with_name(name);
+        let debug_info = value.debug_info();
+        let inner = Inner {
+            debug_info,
+            callable: RefCell::new(value),
+        };
+        let rc = Rc::new(inner);
         RustClosureRef(rc)
     }
 }
@@ -62,8 +79,8 @@ impl<C> LuaFfiOnce<C> for RustClosureRef<C> {
         self.call_mut(rt)
     }
 
-    fn name(&self) -> String {
-        self.0.borrow().name()
+    fn debug_info(&self) -> crate::ffi::DebugInfo {
+        self.0.debug_info.clone()
     }
 }
 
@@ -73,8 +90,9 @@ impl<C> LuaFfiMut<C> for RustClosureRef<C> {
 
         let mut f = self
             .0
+            .callable
             .try_borrow_mut()
-            .map_err(|_| Value::String("failed to borrow closure".to_string()))?;
+            .map_err(|_| Value::String("failed to mutably borrow closure".to_string()))?;
         f.call_mut(rt)
     }
 }
@@ -138,7 +156,9 @@ where
         }
     }
 
-    fn name(&self) -> String {
-        "<callable wrapper>".to_string()
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "<callable wrapper>".to_string(),
+        }
     }
 }
