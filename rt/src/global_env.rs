@@ -41,7 +41,7 @@ pub fn assert<C>() -> ChunkPart<
 where
     C: ChunkCache,
 {
-    use crate::value::callable::RustClosureRef;
+    use crate::value::callable::RustClosureMut;
 
     let chunk_ext = ChunkExtension::empty();
 
@@ -52,7 +52,7 @@ where
             );
         };
 
-        let fn_assert = RustClosureRef::with_name("lua_std::assert", |rt: RuntimeView<_>| {
+        let fn_assert = RustClosureMut::with_name("lua_std::assert", |rt: RuntimeView<_>| {
             let Some(cond) = rt.stack.get(StackSlot(0)) else {
                 return Err(
                     Value::String("assert expects at least one argument".to_string()).into(),
@@ -76,7 +76,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("assert".into()),
-                Value::Function(Callable::RustClosure(fn_assert)),
+                Value::Function(Callable::RustClosureMut(fn_assert)),
             );
 
         Ok(())
@@ -151,7 +151,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("pcall".into()),
-                Value::Function(Callable::RustClosure(fn_pcall)),
+                Value::Function(Callable::RustClosureRef(fn_pcall)),
             );
 
         Ok(())
@@ -193,7 +193,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("print".into()),
-                Value::Function(Callable::RustClosure(fn_print)),
+                Value::Function(Callable::RustClosureRef(fn_print)),
             );
 
         Ok(())
@@ -296,7 +296,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("load".into()),
-                Value::Function(Callable::RustClosure(fn_load)),
+                Value::Function(Callable::RustClosureRef(fn_load)),
             );
 
         Ok(())
@@ -392,7 +392,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("loadfile".into()),
-                Value::Function(Callable::RustClosure(fn_loadfile)),
+                Value::Function(Callable::RustClosureRef(fn_loadfile)),
             );
 
         Ok(())

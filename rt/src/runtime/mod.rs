@@ -239,7 +239,13 @@ where
                             let frame = closure.construct_frame(self, start)?;
                             active_frame = frame.activate(self)?;
                         }
-                        Callable::RustClosure(closure) => {
+                        Callable::RustClosureMut(closure) => {
+                            self.invoke_at_raw(closure, start)?;
+
+                            let frame = self.frames.pop().unwrap();
+                            active_frame = frame.activate(self)?;
+                        }
+                        Callable::RustClosureRef(closure) => {
                             self.invoke_at_raw(closure, start)?;
 
                             let frame = self.frames.pop().unwrap();
