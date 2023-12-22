@@ -202,6 +202,109 @@ where
     ChunkPart { chunk_ext, builder }
 }
 
+pub fn load<C>() -> ChunkPart<
+    [Function; 0],
+    [Literal; 0],
+    [ClosureRecipe; 0],
+    impl FnOnce(RuntimeView<C>, ChunkRange, &mut Value<C>) -> Result<(), RuntimeError<C>>,
+>
+where
+    C: ChunkCache,
+{
+    use crate::value::callable::RustClosureRef;
+
+    let chunk_ext = ChunkExtension::empty();
+
+    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, value: &mut Value<C>| {
+        let Value::Table(table) = value else {
+            return Err(
+                Value::String("global env value is expected to be table".to_string()).into(),
+            );
+        };
+
+        let fn_load = RustClosureRef::with_name("lua_std::load", |mut rt: RuntimeView<_>| {
+            use crate::runtime::{ClosureRef, FunctionPtr};
+            use repr::index::FunctionId;
+
+            let source = match rt.stack.get_mut(StackSlot(0)).map(Value::take) {
+                Some(Value::String(s)) => s,
+                Some(value) => {
+                    return Err(Value::String(format!(
+                        "load expects string as the first argument, but it has type {}",
+                        value.type_().to_lua_name()
+                    ))
+                    .into())
+                }
+                None => {
+                    return Err(
+                        Value::String("load expects at least one argument".to_string()).into(),
+                    )
+                }
+            };
+
+            let _name = rt
+                .stack
+                .get_mut(StackSlot(1))
+                .map(|value| match value {
+                    Value::String(s) => Ok(s),
+                    value => Err(Value::String(format!(
+                        "load expects chunk name to be a string, but it has type {}",
+                        value.type_().to_lua_name()
+                    ))),
+                })
+                .transpose()?;
+
+            let _mode = rt.stack.get_mut(StackSlot(1)).map(|value| {
+                    match value.take() {
+                        Value::String(s) => match s.as_str() {
+                            "t" | "b" | "bt" => Ok(s),
+                            _ => Err(Value::String(format!("load: unrecognized mode '{s}' (expected either 't', 'b' or 'bt')")))
+                        }
+                        value => Err(Value::String(format!("load expects string containing opening mode as the second argument, but it has type {}", value.type_().to_lua_name()))),
+                    }
+                }).transpose()?;
+
+            let env = rt.stack.get_mut(StackSlot(2)).map(Value::take);
+
+            match rt.load(source, None) {
+                Ok(chunk_id) => {
+                    let ptr = FunctionPtr {
+                        chunk_id,
+                        function_id: FunctionId(0),
+                    };
+                    let env = env.unwrap_or_else(|| rt.global_env.clone());
+                    let closure = rt.construct_closure(ptr, [env])?;
+                    let closure_ref = Callable::LuaClosure(ClosureRef::new(closure));
+
+                    rt.stack.clear();
+                    rt.stack.push(Value::Function(closure_ref));
+                }
+                Err(err) => {
+                    let message = rt.into_diagnostic(err.into()).emit_to_string();
+
+                    rt.stack.clear();
+                    rt.stack.push(Value::Nil);
+                    rt.stack.push(Value::String(message));
+                }
+            }
+
+            Ok(())
+        });
+
+        table
+            .borrow_mut()
+            .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
+            .set(
+                KeyValue::String("load".into()),
+                Value::Function(Callable::RustClosure(fn_load)),
+            );
+
+        Ok(())
+    };
+
+    ChunkPart { chunk_ext, builder }
+}
+
 pub fn loadfile<C>() -> ChunkPart<
     [Function; 0],
     [Literal; 0],
