@@ -7,6 +7,8 @@ use repr::chunk::Chunk;
 
 #[derive(Debug, Parser)]
 struct Cli {
+    #[arg(long)]
+    trace: bool,
     #[clap(subcommand)]
     command: Command,
 }
@@ -43,13 +45,15 @@ fn load_from_file(path: &Path) -> Result<(Chunk, String)> {
 }
 
 fn main() -> Result<()> {
-    let logger = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
-        .pretty()
-        .finish();
-    tracing::subscriber::set_global_default(logger)?;
+    let Cli { trace, command } = Cli::try_parse()?;
 
-    let Cli { command } = Cli::try_parse()?;
+    if trace {
+        let logger = tracing_subscriber::FmtSubscriber::builder()
+            .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+            .pretty()
+            .finish();
+        tracing::subscriber::set_global_default(logger)?;
+    }
 
     match command {
         Command::Run { path } => {
