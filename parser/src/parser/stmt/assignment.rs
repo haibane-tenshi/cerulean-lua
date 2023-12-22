@@ -40,7 +40,7 @@ pub(crate) fn assignment<'s, 'origin>(
                     let status = expr_list_adjusted_to(count, frag.new_core())
                         .parse_once(s)?
                         .inspect(|output| {
-                            let expr_slots = (expr_start.0..).map(StackSlot);
+                            let expr_slots = (expr_start.0..).map(FragmentStackSlot);
                             for (expr_slot, place) in expr_slots.zip(places) {
                                 match place {
                                     Place::Temporary(slot, ident) => {
@@ -51,7 +51,7 @@ pub(crate) fn assignment<'s, 'origin>(
                                             expr: output.span(),
                                         };
 
-                                        frag.emit(OpCode::LoadStack(expr_slot), debug_info.clone());
+                                        frag.emit_load_stack(expr_slot, debug_info.clone());
                                         frag.emit(OpCode::StoreStack(slot), debug_info);
                                     }
                                     Place::Upvalue(slot, ident) => {
@@ -62,7 +62,7 @@ pub(crate) fn assignment<'s, 'origin>(
                                             expr: output.span(),
                                         };
 
-                                        frag.emit(OpCode::LoadStack(expr_slot), debug_info.clone());
+                                        frag.emit_load_stack(expr_slot, debug_info.clone());
                                         frag.emit(OpCode::StoreUpvalue(slot), debug_info);
                                     }
                                     Place::TableField(debug_info) => {
@@ -96,7 +96,7 @@ pub(crate) fn assignment<'s, 'origin>(
 
                                         frag.emit(OpCode::LoadStack(table), debug_info.clone());
                                         frag.emit(OpCode::LoadStack(field), debug_info.clone());
-                                        frag.emit(OpCode::LoadStack(expr_slot), debug_info.clone());
+                                        frag.emit_load_stack(expr_slot, debug_info.clone());
                                         frag.emit(OpCode::TabSet, debug_info);
                                     }
                                 }
