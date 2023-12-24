@@ -12,13 +12,6 @@ pub(crate) fn if_then<'s, 'origin>(
     FailFast = FailFast,
 > + 'origin {
     move |s: Lexer<'s>| {
-        use crate::parser::block::block;
-        use crate::parser::expr::expr_adjusted_to_1;
-
-        let token_if =
-            match_token(Token::If).map_failure(|f| ParseFailure::from(IfThenFailure::If(f)));
-        let token_then =
-            match_token(Token::Then).map_failure(|f| ParseFailure::from(IfThenFailure::Then(f)));
         let token_end =
             match_token(Token::End).map_failure(|f| ParseFailure::from(IfThenFailure::End(f)));
 
@@ -29,29 +22,7 @@ pub(crate) fn if_then<'s, 'origin>(
         let _span = trace_span!("if_then").entered();
 
         let state = Source(s)
-            .and(token_if)?
-            .with_mode(FailureMode::Malformed)
-            .map_output(Spanned::put_range)
-            .and(expr_adjusted_to_1(envelope.new_core()), discard)?
-            .and(token_then, discard)?
-            .inspect(|output| {
-                envelope.emit_jump_to_end(
-                    Some(false),
-                    DebugInfo::IfElse {
-                        if_: output.value.clone(),
-                    },
-                );
-            })
-            .and(block(envelope.new_core()), opt_discard)?
-            .inspect(|output| {
-                envelope.emit_jump_to(
-                    envelope_id,
-                    None,
-                    DebugInfo::IfElse {
-                        if_: output.value.clone(),
-                    },
-                );
-            })
+            .and(if_clause(envelope_id, envelope.new_core()))?
             .and(
                 (|s| else_if_clause(envelope_id, envelope.new_core()).parse_once(s))
                     .repeat_with(discard)
@@ -67,8 +38,7 @@ pub(crate) fn if_then<'s, 'origin>(
                 trace!(span=?span.span(), str=&source[span.span()]);
 
                 span
-            })
-            .collapse();
+            });
 
         Ok(state)
     }
@@ -86,6 +56,55 @@ pub(crate) enum IfThenFailure {
     Else(#[source] TokenMismatch),
     #[error("missing `end` token")]
     End(#[source] TokenMismatch),
+}
+
+fn if_clause<'s, 'origin>(
+    envelope: FragmentId,
+    core: Core<'s, 'origin>,
+) -> impl ParseOnce<
+    Lexer<'s>,
+    Output = Spanned<()>,
+    Success = CompleteOr<ParseFailure>,
+    Failure = ParseFailure,
+    FailFast = FailFast,
+> + 'origin {
+    move |s: Lexer<'s>| {
+        use crate::parser::block::block;
+        use crate::parser::expr::expr_adjusted_to_1;
+
+        let token_if =
+            match_token(Token::If).map_failure(|f| ParseFailure::from(IfThenFailure::If(f)));
+        let token_then =
+            match_token(Token::Then).map_failure(|f| ParseFailure::from(IfThenFailure::Then(f)));
+
+        let mut frag = core.expr();
+
+        let state = Source(s)
+            .and(token_if)?
+            .with_mode(FailureMode::Malformed)
+            .map_output(Spanned::put_range)
+            .and(expr_adjusted_to_1(frag.new_core()), discard)?
+            .and(token_then, discard)?
+            .inspect(|output| {
+                frag.emit_jump_to_end(
+                    Some(false),
+                    DebugInfo::IfElse {
+                        if_: output.value.clone(),
+                    },
+                );
+            })
+            .and(block(frag.new_core()), opt_discard)?
+            .map_output(|output| {
+                let (if_span, output) = output.take();
+
+                frag.emit_jump_to(envelope, None, DebugInfo::IfElse { if_: if_span });
+
+                output
+            })
+            .collapse();
+
+        Ok(state)
+    }
 }
 
 fn else_if_clause<'s, 'origin>(
