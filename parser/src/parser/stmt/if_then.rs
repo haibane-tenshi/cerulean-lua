@@ -98,6 +98,7 @@ fn if_clause<'s, 'origin>(
                 let (if_span, output) = output.take();
 
                 frag.emit_jump_to(envelope, None, DebugInfo::IfElse { if_: if_span });
+                frag.commit();
 
                 output
             })
