@@ -97,10 +97,6 @@ pub(crate) fn numerical_for<'s, 'origin>(
                     StackSlotOrConstId::StackSlot(step, ref _step_span) => {
                         let zero = envelope.const_table_mut().insert(Literal::Int(0));
 
-                        let error_msg = envelope
-                            .const_table_mut()
-                            .insert(Literal::String("loop increment is 0".to_string()));
-
                         // Panic if increment is 0.
                         let mut zero_check = envelope.new_expr();
 
@@ -109,7 +105,9 @@ pub(crate) fn numerical_for<'s, 'origin>(
                         zero_check.emit(RelBinOp::Eq.into(), debug_info.clone());
                         zero_check.emit_jump_to_end(Some(false), debug_info.clone());
 
-                        zero_check.emit(OpCode::LoadConstant(error_msg), debug_info.clone());
+                        // Technically, this is what we need to emit here.
+                        // Currently this is disallowed.
+                        // zero_check.emit(OpCode::AdjustStack(StackSlot(0)), debug_info.clone());
                         zero_check.emit(OpCode::Panic, debug_info.clone());
 
                         zero_check.commit();

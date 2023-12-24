@@ -568,7 +568,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
             OpCode::Return(_) => (),
             // This opcode never returns, however it grabs the top value as panic message.
             OpCode::Panic => {
-                self.pop();
+                // self.pop();
             }
             OpCode::Invoke(slot) => {
                 let height = self

@@ -547,6 +547,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     }
 }
 
+#[derive(Debug)]
 pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
 
 impl<'s, 'origin> Scope<'s, 'origin> {
