@@ -78,6 +78,8 @@ impl<'a> JumpsView<'a> {
             }
         }
 
+        std::mem::forget(self);
+
         stack_state
     }
 }
