@@ -40,6 +40,12 @@ local test = function(...)
     end
     
     local _ = g(f())
+    
+    f()
+    local n = 0
+    assert(n == 0)
+    n = 10
+    assert(n == 10)
 end
 
 test(4, 5)
