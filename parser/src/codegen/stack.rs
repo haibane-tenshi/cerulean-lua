@@ -645,11 +645,8 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     pub fn commit(self, kind: CommitKind) {
         match kind {
             CommitKind::Decl => (),
-            CommitKind::Expr => {
+            CommitKind::Expr | CommitKind::Scope => {
                 self.stack.remove_idents();
-            }
-            CommitKind::Scope => {
-                self.stack.adjust_to(FragmentStackSlot(0));
             }
         }
 

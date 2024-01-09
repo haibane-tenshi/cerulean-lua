@@ -15,6 +15,7 @@ use crate::codegen::function::{Function, FunctionView, Signature};
 use crate::codegen::jumps::{Jumps, JumpsView};
 use crate::codegen::labels::{Labels, LabelsView, PushLabelError};
 use crate::codegen::loop_stack::LoopStack;
+use crate::codegen::pending_adjust::{PendingAdjustStack, PendingAdjustStackView};
 use crate::codegen::reachability::Reachability;
 use crate::codegen::recipe_table::{RecipeTable, RecipeTableView};
 use crate::codegen::stack::{CommitKind, FragmentStackSlot, Stack, StackView};
@@ -61,6 +62,7 @@ pub struct Core<'s, 'origin> {
     labels: &'origin mut Labels<'s>,
     loop_stack: LoopStack,
     reachability: Reachability,
+    pending_adjust: &'origin mut PendingAdjustStack,
 }
 
 impl<'s, 'origin> Core<'s, 'origin> {
@@ -77,6 +79,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         } = self;
 
         let fragment_id = fragment_id + 1;
@@ -88,6 +91,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let stack = stack.view();
         let jumps = jumps.view(fragment_id, fun.next_id());
         let labels = labels.view_scope(fun.next_id());
+        let pending_adjust = pending_adjust.view();
 
         // trace!(?fragment_id, "construct");
 
@@ -103,6 +107,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         };
 
         Scope(frag)
@@ -121,6 +126,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         } = self;
 
         let fragment_id = fragment_id + 1;
@@ -132,6 +138,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let stack = stack.view();
         let jumps = jumps.view(fragment_id, fun.next_id());
         let labels = labels.view_expr();
+        let pending_adjust = pending_adjust.view();
 
         // trace!(?fragment_id, "construct");
 
@@ -147,6 +154,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         };
 
         Decl(frag)
@@ -165,6 +173,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         } = self;
 
         let fragment_id = fragment_id + 1;
@@ -176,6 +185,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let stack = stack.view();
         let jumps = jumps.view(fragment_id, fun.next_id());
         let labels = labels.view_expr();
+        let pending_adjust = pending_adjust.view();
 
         // trace!(?fragment_id, "construct");
 
@@ -191,6 +201,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         };
 
         Expr(frag)
@@ -209,6 +220,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         } = self;
 
         let fragment_id = fragment_id + 1;
@@ -220,6 +232,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
         let stack = stack.view_at(slot);
         let jumps = jumps.view(fragment_id, fun.next_id());
         let labels = labels.view_expr();
+        let pending_adjust = pending_adjust.view();
 
         // trace!(?fragment_id, "construct");
 
@@ -235,6 +248,7 @@ impl<'s, 'origin> Core<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         };
 
         Expr(frag)
@@ -258,6 +272,7 @@ pub struct Fragment<'s, 'origin> {
     labels: LabelsView<'s, 'origin>,
     loop_stack: LoopStack,
     reachability: Reachability,
+    pending_adjust: PendingAdjustStackView<'origin>,
 }
 
 impl<'s, 'origin> Fragment<'s, 'origin> {
@@ -351,10 +366,18 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         r
     }
 
-    pub fn emit(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
+    fn emit_raw(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
         self.stack.emit(&opcode);
         self.reachability.emit(&opcode);
-        let r = self.fun.emit(opcode, debug_info);
+        self.fun.emit(opcode, debug_info)
+    }
+
+    pub fn emit(&mut self, opcode: OpCode, debug_info: OpCodeDebugInfo) -> InstrId {
+        if let Some(slot) = self.pending_adjust.take() {
+            self.emit_raw(OpCode::AdjustStack(slot), debug_info.clone());
+        }
+
+        let r = self.emit_raw(opcode, debug_info);
 
         trace!(fragment_id=?self.id(), ?opcode, "emit opcode");
 
@@ -366,17 +389,18 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         slot: FragmentStackSlot,
         debug_info: DebugInfo,
     ) -> Option<InstrId> {
-        let instr_id = if self.stack.need_adjustment_to(slot) {
+        if self.stack.need_adjustment_to(slot) {
             let slot = self.stack.fragment_to_frame(slot);
             let id = self.emit(OpCode::AdjustStack(slot), debug_info);
             Some(id)
         } else {
             None
-        };
+        }
+    }
 
-        trace!(fragment_id=?self.id(), ?slot, "emitted optional AdjustStack");
-
-        instr_id
+    pub fn pending_adjust_to(&mut self, slot: FragmentStackSlot) {
+        let slot = self.stack.fragment_to_frame(slot);
+        self.pending_adjust.push(slot);
     }
 
     pub fn emit_jump_to(
@@ -501,6 +525,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         } = self;
 
         let fragment_id = *fragment_id;
@@ -514,6 +539,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
         let labels = labels.borrow();
         let loop_stack = *loop_stack;
         let reachability = *reachability;
+        let pending_adjust = pending_adjust.borrow();
 
         Core {
             fragment_id,
@@ -527,6 +553,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         }
     }
 
@@ -545,13 +572,8 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
     pub fn new_expr_at(&mut self, slot: FragmentStackSlot) -> Expr<'s, '_> {
         self.new_core().expr_at(slot)
     }
-}
 
-#[derive(Debug)]
-pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
-
-impl<'s, 'origin> Scope<'s, 'origin> {
-    pub fn commit(self, span: Range<usize>) {
+    fn commit(self, kind: CommitKind) {
         let Fragment {
             fragment_id,
             func_table,
@@ -564,7 +586,8 @@ impl<'s, 'origin> Scope<'s, 'origin> {
             labels,
             loop_stack: _,
             reachability,
-        } = self.0;
+            mut pending_adjust,
+        } = self;
 
         let is_reachable = reachability.commit();
 
@@ -585,18 +608,28 @@ impl<'s, 'origin> Scope<'s, 'origin> {
             stack.apply(state);
         }
 
-        if final_state.is_some() && stack.need_adjustment_to(FragmentStackSlot(0)) {
-            let slot = stack.fragment_to_frame(FragmentStackSlot(0));
-            let debug_info = OpCodeDebugInfo::Generic(span);
-            fun.emit(OpCode::AdjustStack(slot), debug_info);
+        // Delay emitting AdjustStack caused by convergence of codepaths.
+        if stack.need_adjustment_to(stack.len()) && !matches!(kind, CommitKind::Expr) {
+            let slot = stack.fragment_to_frame(stack.len());
+            pending_adjust.push(slot);
         }
 
-        labels.commit(CommitKind::Scope);
+        labels.commit(kind);
         fun.commit();
         upvalues.commit();
-        stack.commit(CommitKind::Scope);
+        stack.commit(kind);
+        pending_adjust.commit();
 
         trace!(?fragment_id, "commit");
+    }
+}
+
+#[derive(Debug)]
+pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
+
+impl<'s, 'origin> Scope<'s, 'origin> {
+    pub fn commit(self, _span: Range<usize>) {
+        self.0.commit(CommitKind::Scope)
     }
 }
 
@@ -618,45 +651,7 @@ pub struct Decl<'s, 'origin>(Fragment<'s, 'origin>);
 
 impl<'s, 'origin> Decl<'s, 'origin> {
     pub fn commit(self) {
-        let Fragment {
-            fragment_id,
-            func_table,
-            const_table,
-            recipe_table,
-            mut fun,
-            upvalues,
-            mut stack,
-            jumps,
-            labels,
-            loop_stack: _,
-            reachability,
-        } = self.0;
-
-        let is_reachable = reachability.commit();
-
-        func_table.commit();
-        const_table.commit();
-        recipe_table.commit();
-
-        let sequence_state = is_reachable.then(|| stack.state());
-        let jump_state = jumps.commit(&mut fun);
-
-        let final_state = match (sequence_state, jump_state) {
-            (Some(a), Some(b)) => Some(a | b),
-            (Some(a), _) | (_, Some(a)) => Some(a),
-            (None, None) => None,
-        };
-
-        if let Some(state) = final_state {
-            stack.apply(state);
-        }
-
-        labels.commit(CommitKind::Decl);
-        fun.commit();
-        upvalues.commit();
-        stack.commit(CommitKind::Decl);
-
-        trace!(?fragment_id, "commit");
+        self.0.commit(CommitKind::Decl)
     }
 }
 
@@ -678,45 +673,7 @@ pub struct Expr<'s, 'origin>(Fragment<'s, 'origin>);
 
 impl<'s, 'origin> Expr<'s, 'origin> {
     pub fn commit(self) {
-        let Fragment {
-            fragment_id,
-            func_table,
-            const_table,
-            recipe_table,
-            mut fun,
-            upvalues,
-            mut stack,
-            jumps,
-            labels,
-            loop_stack: _,
-            reachability,
-        } = self.0;
-
-        let is_reachable = reachability.commit();
-
-        func_table.commit();
-        const_table.commit();
-        recipe_table.commit();
-
-        let sequence_state = is_reachable.then(|| stack.state());
-        let jump_state = jumps.commit(&mut fun);
-
-        let final_state = match (sequence_state, jump_state) {
-            (Some(a), Some(b)) => Some(a | b),
-            (Some(a), _) | (_, Some(a)) => Some(a),
-            (None, None) => None,
-        };
-
-        if let Some(state) = final_state {
-            stack.apply(state);
-        }
-
-        labels.commit(CommitKind::Expr);
-        fun.commit();
-        upvalues.commit();
-        stack.commit(CommitKind::Expr);
-
-        trace!(?fragment_id, "commit");
+        self.0.commit(CommitKind::Expr)
     }
 }
 
@@ -744,6 +701,7 @@ pub struct Frame<'s, 'origin> {
     upvalues: Upvalues<'s>,
     jumps: Jumps,
     labels: Labels<'s>,
+    pending_adjust: PendingAdjustStack,
 }
 
 impl<'s, 'origin> Frame<'s, 'origin> {
@@ -764,6 +722,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
         let upvalues = Upvalues::new();
         let jumps = Jumps::new();
         let labels = Labels::new(InstrId(0));
+        let pending_adjust = PendingAdjustStack::new();
 
         Frame {
             func_table,
@@ -774,6 +733,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             upvalues,
             jumps,
             labels,
+            pending_adjust,
         }
     }
 
@@ -798,6 +758,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             upvalues,
             jumps: Jumps::new(),
             labels: Labels::new(InstrId(0)),
+            pending_adjust: PendingAdjustStack::new(),
         }
     }
 
@@ -811,6 +772,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             upvalues,
             jumps,
             labels,
+            pending_adjust,
         } = self;
 
         let fragment_id = FragmentId::default();
@@ -833,6 +795,7 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             labels,
             loop_stack,
             reachability,
+            pending_adjust,
         }
     }
 
@@ -846,12 +809,15 @@ impl<'s, 'origin> Frame<'s, 'origin> {
             upvalues,
             jumps: _,
             labels,
+            pending_adjust: _,
         } = self;
 
         func_table.commit();
         const_table.commit();
         recipe_table.commit();
-        stack.commit(CommitKind::Scope);
+
+        // None of this should be observable outside of current function.
+        drop(stack);
 
         if labels.is_resolved() {
             Ok((fun, upvalues))

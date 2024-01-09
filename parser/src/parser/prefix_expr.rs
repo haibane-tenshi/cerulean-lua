@@ -183,6 +183,7 @@ pub(crate) fn func_call<'s, 'origin>(
                 }
             })
             .inspect(|output| {
+                frag.pending_adjust_to(FragmentStackSlot(0));
                 frag.commit(output.span());
 
                 trace!(span=?output.span(), str=&source[output.span()]);

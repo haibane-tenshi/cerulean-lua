@@ -5,6 +5,7 @@ pub(crate) mod function;
 pub(crate) mod jumps;
 pub(crate) mod labels;
 pub(crate) mod loop_stack;
+pub(crate) mod pending_adjust;
 pub(crate) mod reachability;
 pub(crate) mod recipe_table;
 pub(crate) mod stack;
