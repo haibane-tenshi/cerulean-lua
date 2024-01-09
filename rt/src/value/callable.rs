@@ -234,7 +234,7 @@ where
 
     fn debug_info(&self) -> DebugInfo {
         DebugInfo {
-            name: "<callable wrapper>".to_string(),
+            name: "{callable wrapper}".to_string(),
         }
     }
 }
