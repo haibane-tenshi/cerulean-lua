@@ -224,3 +224,64 @@ impl<C> From<Float> for Value<C> {
         Value::Float(value)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MetaValue {
+    Neg,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    FloorDiv,
+    Rem,
+    Pow,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Concat,
+    Len,
+    Eq,
+    LessThan,
+    LessThanOrEq,
+    Index,
+    NewIndex,
+    Call,
+}
+
+impl MetaValue {
+    pub fn to_str(&self) -> &'static str {
+        use MetaValue::*;
+
+        match self {
+            Neg => "__unm",
+            Add => "__add",
+            Sub => "__sub",
+            Mul => "__mul",
+            Div => "__div",
+            FloorDiv => "__idiv",
+            Rem => "__mod",
+            Pow => "__pow",
+            BitAnd => "__band",
+            BitOr => "__bor",
+            BitXor => "__bxor",
+            Shl => "__shl",
+            Shr => "__shr",
+            Concat => "__concat",
+            Len => "__len",
+            Eq => "__eq",
+            LessThan => "__lt",
+            LessThanOrEq => "__le",
+            Index => "__index",
+            NewIndex => "__newindex",
+            Call => "__call",
+        }
+    }
+}
+
+impl Display for MetaValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}

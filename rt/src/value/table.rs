@@ -7,10 +7,11 @@ use std::rc::Rc;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::Value;
+use super::{MetaValue, Value};
 
 pub struct Table<C> {
     data: HashMap<KeyValue<C>, Value<C>>,
+    metatable: Option<TableRef<C>>,
 }
 
 impl<C> Table<C> {
@@ -32,6 +33,15 @@ impl<C> Table<C> {
             .find(|&i| !self.data.contains_key(&KeyValue::Int(i + 1)))
             .unwrap_or(i64::MAX)
     }
+
+    pub fn metatable(&self) -> Option<TableRef<C>> {
+        self.metatable.clone()
+    }
+
+    pub fn set_metatable(&mut self, mut metatable: Option<TableRef<C>>) -> Option<TableRef<C>> {
+        std::mem::swap(&mut self.metatable, &mut metatable);
+        metatable
+    }
 }
 
 impl<C> Debug for Table<C> {
@@ -44,6 +54,7 @@ impl<C> Clone for Table<C> {
     fn clone(&self) -> Self {
         Self {
             data: self.data.clone(),
+            metatable: self.metatable.clone(),
         }
     }
 }
@@ -58,6 +69,7 @@ impl<C> Default for Table<C> {
     fn default() -> Self {
         Self {
             data: Default::default(),
+            metatable: Default::default(),
         }
     }
 }
@@ -142,6 +154,12 @@ impl InvalidTableKeyError {
             InvalidTableKeyError::Nan => "NaN",
             InvalidTableKeyError::Nil => "nil",
         }
+    }
+}
+
+impl<C> From<MetaValue> for KeyValue<C> {
+    fn from(value: MetaValue) -> Self {
+        KeyValue::String(value.to_string())
     }
 }
 
