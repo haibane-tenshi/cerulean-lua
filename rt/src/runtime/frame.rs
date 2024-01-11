@@ -485,18 +485,20 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         args: [Value<C>; 1],
         op: UnaOp,
     ) -> Result<(), opcode_err::UnaOpCause> {
+        use crate::value::{Float, Int};
+
         let [val] = args;
 
         let err = opcode_err::UnaOpCause { arg: val.type_() };
 
         let r = match op {
             UnaOp::AriNeg => match val {
-                Value::Int(val) => Value::Int(-val),
-                Value::Float(val) => Value::Float(-val),
+                Value::Int(val) => (-Int(val)).into(),
+                Value::Float(val) => (-Float(val)).into(),
                 _ => return Err(err),
             },
             UnaOp::BitNot => match val {
-                Value::Int(val) => Value::Int(!val),
+                Value::Int(val) => (!Int(val)).into(),
                 _ => return Err(err),
             },
             UnaOp::StrLen => match val {
@@ -584,35 +586,15 @@ impl<'rt, C> ActiveFrame<'rt, C> {
     }
 
     fn exec_bin_op_bit(&mut self, args: [Value<C>; 2], op: BitBinOp) -> Option<Value<C>> {
+        use crate::value::Int;
+
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
-                BitBinOp::And => Value::Int(lhs & rhs),
-                BitBinOp::Or => Value::Int(lhs | rhs),
-                BitBinOp::Xor => Value::Int(lhs ^ rhs),
-                BitBinOp::ShL => {
-                    let r = if let Ok(rhs) = rhs.try_into() {
-                        lhs.checked_shl(rhs).unwrap_or_default()
-                    } else if let Ok(rhs) = (-rhs).try_into() {
-                        let lhs = lhs as u64;
-                        lhs.checked_shr(rhs).unwrap_or_default() as i64
-                    } else {
-                        0
-                    };
-
-                    Value::Int(r)
-                }
-                BitBinOp::ShR => {
-                    let r = if let Ok(rhs) = rhs.try_into() {
-                        let lhs = lhs as u64;
-                        lhs.checked_shr(rhs).unwrap_or_default() as i64
-                    } else if let Ok(rhs) = (-rhs).try_into() {
-                        lhs.checked_shl(rhs).unwrap_or_default()
-                    } else {
-                        0
-                    };
-
-                    Value::Int(r)
-                }
+                BitBinOp::And => (Int(lhs) & Int(rhs)).into(),
+                BitBinOp::Or => (Int(lhs) | Int(rhs)).into(),
+                BitBinOp::Xor => (Int(lhs) ^ Int(rhs)).into(),
+                BitBinOp::ShL => (Int(lhs) << Int(rhs)).into(),
+                BitBinOp::ShR => (Int(lhs) >> Int(rhs)).into(),
             },
             _ => return None,
         };
@@ -621,33 +603,26 @@ impl<'rt, C> ActiveFrame<'rt, C> {
     }
 
     fn exec_bin_op_ari(&mut self, args: [Value<C>; 2], op: AriBinOp) -> Option<Value<C>> {
+        use crate::value::{Float, Int};
+
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
-                AriBinOp::Add => Value::Int(lhs.wrapping_add(rhs)),
-                AriBinOp::Sub => Value::Int(lhs.wrapping_sub(rhs)),
-                AriBinOp::Mul => Value::Int(lhs.wrapping_mul(rhs)),
-                AriBinOp::Rem => Value::Int(lhs.rem_euclid(rhs)),
-                AriBinOp::Div => {
-                    let r = (lhs as f64) / (rhs as f64);
-                    Value::Float(r)
-                }
-                AriBinOp::FloorDiv => {
-                    let r = ((lhs as f64) / (rhs as f64)).floor() as i64;
-                    Value::Int(r)
-                }
-                AriBinOp::Exp => {
-                    let r = (lhs as f64).powf(rhs as f64);
-                    Value::Float(r)
-                }
+                AriBinOp::Add => (Int(lhs) + Int(rhs)).into(),
+                AriBinOp::Sub => (Int(lhs) - Int(rhs)).into(),
+                AriBinOp::Mul => (Int(lhs) * Int(rhs)).into(),
+                AriBinOp::Rem => (Int(lhs) % Int(rhs)).into(),
+                AriBinOp::Div => (Int(lhs) / Int(rhs)).into(),
+                AriBinOp::FloorDiv => Int(lhs).floor_div(Int(rhs)).into(),
+                AriBinOp::Exp => Float(lhs as f64).exp(Float(rhs as f64)).into(),
             },
             [Value::Float(lhs), Value::Float(rhs)] => match op {
-                AriBinOp::Add => Value::Float(lhs + rhs),
-                AriBinOp::Sub => Value::Float(lhs - rhs),
-                AriBinOp::Mul => Value::Float(lhs * rhs),
-                AriBinOp::Div => Value::Float(lhs / rhs),
-                AriBinOp::FloorDiv => Value::Float((lhs / rhs).floor()),
-                AriBinOp::Rem => Value::Float(lhs - rhs * (lhs / rhs).floor()),
-                AriBinOp::Exp => Value::Float(lhs.powf(rhs)),
+                AriBinOp::Add => (Float(lhs) + Float(rhs)).into(),
+                AriBinOp::Sub => (Float(lhs) - Float(rhs)).into(),
+                AriBinOp::Mul => (Float(lhs) * Float(rhs)).into(),
+                AriBinOp::Div => (Float(lhs) / Float(rhs)).into(),
+                AriBinOp::FloorDiv => Float(lhs).floor_div(Float(rhs)).into(),
+                AriBinOp::Rem => (Float(lhs) % Float(rhs)).into(),
+                AriBinOp::Exp => Float(lhs).exp(Float(rhs)).into(),
             },
             _ => return None,
         };

@@ -1,11 +1,19 @@
+pub mod boolean;
 pub mod callable;
+pub mod float;
+pub mod int;
+pub mod nil;
 pub mod table;
 
 use std::fmt::{Debug, Display};
 
 use repr::literal::Literal;
 
+pub use boolean::Boolean;
 use callable::Callable;
+pub use float::Float;
+pub use int::Int;
+pub use nil::Nil;
 use table::TableRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -157,21 +165,13 @@ impl<C> Display for Value<C> {
         use Value::*;
 
         match self {
-            Nil => write!(f, "nil"),
-            Bool(v) => write!(f, "{v}"),
+            Nil => write!(f, "{}", nil::Nil),
+            Bool(v) => write!(f, "{}", boolean::Boolean(*v)),
             Int(v) => {
-                if f.alternate() {
-                    write!(f, "{v}_i64")
-                } else {
-                    write!(f, "{v}")
-                }
+                write!(f, "{}", int::Int(*v))
             }
             Float(v) => {
-                if f.alternate() {
-                    write!(f, "{v}_f64")
-                } else {
-                    write!(f, "{v}")
-                }
+                write!(f, "{}", float::Float(*v))
             }
             String(v) => {
                 if f.alternate() {
@@ -195,5 +195,32 @@ impl<C> From<Literal> for Value<C> {
             Literal::Float(value) => Value::Float(value.into_inner()),
             Literal::String(value) => Value::String(value),
         }
+    }
+}
+
+impl<C> From<Nil> for Value<C> {
+    fn from(_value: Nil) -> Self {
+        Value::Nil
+    }
+}
+
+impl<C> From<Boolean> for Value<C> {
+    fn from(value: Boolean) -> Self {
+        let Boolean(value) = value;
+        Value::Bool(value)
+    }
+}
+
+impl<C> From<Int> for Value<C> {
+    fn from(value: Int) -> Self {
+        let Int(value) = value;
+        Value::Int(value)
+    }
+}
+
+impl<C> From<Float> for Value<C> {
+    fn from(value: Float) -> Self {
+        let Float(value) = value;
+        Value::Float(value)
     }
 }
