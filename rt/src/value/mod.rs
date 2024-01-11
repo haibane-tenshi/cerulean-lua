@@ -7,6 +7,7 @@ pub mod table;
 
 use std::fmt::{Debug, Display};
 
+use enumoid::Enumoid;
 use repr::literal::Literal;
 
 pub use boolean::Boolean;
@@ -14,9 +15,9 @@ use callable::Callable;
 pub use float::Float;
 pub use int::Int;
 pub use nil::Nil;
-use table::TableRef;
+pub use table::{Table, TableRef};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Enumoid)]
 pub enum Type {
     Nil,
     Bool,

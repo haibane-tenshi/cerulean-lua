@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 
+use enumoid::EnumMap;
 use repr::index::StackSlot;
 
 use crate::backtrace::{Backtrace, Location};
@@ -15,7 +16,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
-use crate::value::Value;
+use crate::value::{TableRef, Type, Value};
 use frame::ChangeFrame;
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
@@ -30,6 +31,7 @@ pub struct Runtime<C> {
     frames: FrameStack<C>,
     stack: Stack<C>,
     upvalue_stack: UpvalueStack<C>,
+    primary_metatables: EnumMap<Type, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
@@ -46,6 +48,7 @@ where
             frames: Default::default(),
             stack: Default::default(),
             upvalue_stack: Default::default(),
+            primary_metatables: Default::default(),
             rust_backtrace_stack: Default::default(),
         }
     }
@@ -57,6 +60,7 @@ where
             frames,
             stack,
             upvalue_stack,
+            primary_metatables,
             rust_backtrace_stack,
         } = self;
 
@@ -71,6 +75,7 @@ where
             frames,
             stack,
             upvalue_stack,
+            primary_metatables,
             rust_backtrace_stack,
         }
     }
@@ -82,6 +87,7 @@ pub struct RuntimeView<'rt, C> {
     frames: FrameStackView<'rt, C>,
     pub stack: StackView<'rt, C>,
     upvalue_stack: UpvalueStackView<'rt, C>,
+    primary_metatables: &'rt mut EnumMap<Type, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
@@ -100,6 +106,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
             frames,
             stack,
             upvalue_stack,
+            primary_metatables,
             rust_backtrace_stack,
         } = self;
 
@@ -114,6 +121,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
             frames,
             stack,
             upvalue_stack,
+            primary_metatables,
             rust_backtrace_stack,
         };
 

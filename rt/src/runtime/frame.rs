@@ -2,6 +2,7 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
+use enumoid::EnumMap;
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
@@ -20,7 +21,7 @@ use crate::error::opcode::{
 };
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
-use crate::value::Value;
+use crate::value::{TableRef, Type, Value};
 
 pub type ControlFlow<C> = std::ops::ControlFlow<ChangeFrame<C>>;
 
@@ -173,6 +174,7 @@ where
             chunk_cache,
             stack,
             upvalue_stack,
+            primary_metatables,
             ..
         } = rt;
 
@@ -214,6 +216,7 @@ where
             stack,
             upvalue_stack,
             register_variadic,
+            primary_metatables,
         };
 
         Ok(r)
@@ -285,6 +288,7 @@ pub struct ActiveFrame<'rt, C> {
     stack: StackView<'rt, C>,
     upvalue_stack: UpvalueStackView<'rt, C>,
     register_variadic: Vec<Value<C>>,
+    primary_metatables: &'rt EnumMap<Type, Option<TableRef<C>>>,
 }
 
 impl<'rt, C> ActiveFrame<'rt, C> {
