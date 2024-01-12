@@ -4,7 +4,7 @@ use std::ops::{
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
-use super::Type;
+use super::{Float, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int(pub i64);
@@ -32,6 +32,36 @@ impl Display for Int {
         }
     }
 }
+
+impl TryFrom<Float> for Int {
+    type Error = NotExactIntError;
+
+    /// Attempt to convert float to integer in Lua sense.
+    ///
+    /// Convertion succeeds under two conditions:
+    /// * float contains exactly integer (e.g. there is no fractional part)
+    /// * resulting integer is representable
+    fn try_from(value: Float) -> Result<Self, Self::Error> {
+        let Float(value) = value;
+
+        // Integer to float casts produce exact representation if possible,
+        // otherwise result is rounded towards 0.0.
+        // https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#numeric-cast
+        // This is good for us:
+        // after rounding we get (inclusive) boundaries where
+        // exact in-range integer representation is possible by float type.
+        const MIN: f64 = i64::MIN as f64;
+        const MAX: f64 = i64::MAX as f64;
+
+        if (MIN..=MAX).contains(&value) && value == value.trunc() {
+            Ok(Int(value as i64))
+        } else {
+            Err(NotExactIntError)
+        }
+    }
+}
+
+pub struct NotExactIntError;
 
 impl Neg for Int {
     type Output = Self;

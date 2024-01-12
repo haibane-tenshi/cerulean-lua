@@ -3,7 +3,7 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 
-use super::Type;
+use super::{Int, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Float(pub f64);
@@ -36,6 +36,26 @@ impl Display for Float {
         } else {
             write!(f, "{}", self.0)
         }
+    }
+}
+
+impl From<Int> for Float {
+    /// Convert integer to float in Lua sense.
+    ///
+    /// [Lua specifies][lua#3.4.3] that convertion results in
+    /// * exact float representation if possible
+    /// * otherwise nearest lower *or* nearest higher representable value
+    ///
+    /// # Note
+    /// Specification seems to be ambiguous in this case,
+    /// it doesn't specify *the nearest* but *either of*.
+    /// We take liberty in implementation and give it the same sematics
+    /// as Rust's [int-to-float casts][rust_ref#numeric-cast].
+    ///
+    /// [lua#3.4.3]: https://www.lua.org/manual/5.4/manual.html#3.4.3
+    /// [rust_ref#numeric-cast]: https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#numeric-cast
+    fn from(value: Int) -> Self {
+        Float(value.0 as f64)
     }
 }
 
