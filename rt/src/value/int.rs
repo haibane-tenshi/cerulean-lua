@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
@@ -62,6 +63,52 @@ impl TryFrom<Float> for Int {
 }
 
 pub struct NotExactIntError;
+
+impl PartialEq<Float> for Int {
+    /// Compare two values according to mathematical value they represent.
+    ///
+    /// Lua spec prescribes that two [numbers should be compared according to their methematical values][lua_ref#3.4.4]
+    /// regardless of underlying type.
+    /// The function provides implementation of such comparison between integers and floats.
+    ///
+    /// [lua_ref#3.4.4]: https://www.lua.org/manual/5.4/manual.html#3.4.4
+    fn eq(&self, other: &Float) -> bool {
+        if let Ok(rhs) = Int::try_from(*other) {
+            *self == rhs
+        } else {
+            false
+        }
+    }
+}
+
+impl PartialOrd<Float> for Int {
+    /// Compare two values according to mathematical value they represent.
+    ///
+    /// Lua spec prescribes that two [numbers should be compared according to their methematical values][lua_ref#3.4.4]
+    /// regardless of underlying type.
+    /// The function provides implementation of such comparison between integers and floats.
+    ///
+    /// [lua_ref#3.4.4]: https://www.lua.org/manual/5.4/manual.html#3.4.4
+    fn partial_cmp(&self, other: &Float) -> Option<std::cmp::Ordering> {
+        if let Ok(rhs) = Int::try_from(*other) {
+            // Float represents exact integer.
+            PartialOrd::partial_cmp(self, &rhs)
+        } else if let Ok(rhs) = Int::try_from(Float(other.0.floor())) {
+            // The actual rhs value has fractional part,
+            // therefore equality breaks into less.
+            match PartialOrd::partial_cmp(self, &rhs) {
+                Some(Ordering::Equal) => Some(Ordering::Less),
+                ord => ord,
+            }
+
+            // Otherwise we are outside `i64::MIN..=i64::MAX`
+        } else if other.0 > 0.0 {
+            Some(Ordering::Less)
+        } else {
+            Some(Ordering::Greater)
+        }
+    }
+}
 
 impl Neg for Int {
     type Output = Self;
