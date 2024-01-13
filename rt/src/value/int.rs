@@ -22,6 +22,10 @@ impl Int {
     pub fn floor_div(self, rhs: Self) -> Self {
         self / rhs
     }
+
+    pub fn exp(self, rhs: Self) -> Option<Self> {
+        rhs.0.try_into().ok().map(|rhs| self.0.pow(rhs)).map(Int)
+    }
 }
 
 impl Display for Int {

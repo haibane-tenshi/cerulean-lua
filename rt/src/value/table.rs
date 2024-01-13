@@ -27,6 +27,10 @@ impl<C> Table<C> {
         }
     }
 
+    pub fn contains_key(&self, key: &KeyValue<C>) -> bool {
+        self.data.contains_key(key)
+    }
+
     pub fn border(&self) -> i64 {
         // Inefficient, but will get fixed when table layout is improved.
         (0..)

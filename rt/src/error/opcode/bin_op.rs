@@ -23,7 +23,7 @@ impl Cause {
         use super::{ExtraDiagnostic, TotalSpan};
         use codespan_reporting::diagnostic::Label;
         use repr::opcode::{
-            AriBinOp::{Add, Exp},
+            AriBinOp::{Add, Pow},
             BitBinOp::{And, Or, Xor},
         };
         use Type::*;
@@ -75,7 +75,7 @@ impl Cause {
                 format!("by default `{op}` cannot be applied to tables,\nhowever defining <?> metamethod will allow you to do it"),
             ]),
             // Special help in case someone tries to do logical ops on bools.
-            (Bool, BinOp::Bit(And | Or | Xor) | BinOp::Ari(Exp), Bool) => {
+            (Bool, BinOp::Bit(And | Or | Xor) | BinOp::Ari(Pow), Bool) => {
                 diag.with_help([
                     "it appears you are trying to perform logical op on booleans\nLua does not define bitwise operations for this purpose"
                 ]);
@@ -86,7 +86,7 @@ impl Cause {
                     BinOp::Bit(Or) => diag.with_help([
                         "use `or` operator instead"
                     ]),
-                    BinOp::Bit(Xor) | BinOp::Ari(Exp) => diag.with_help([
+                    BinOp::Bit(Xor) | BinOp::Ari(Pow) => diag.with_help([
                         "there is no logical XOR, but you can write it as combination of `and`, `or` and `not` operators"
                     ]),
                     _ => (),
@@ -94,7 +94,7 @@ impl Cause {
                 diag.with_help([
                     "alternatively, you can convert arguments to integers first\nremember to convert the result back!\nLua treats all integer values (including 0) as `true`",
                 ]);
-                if let BinOp::Ari(Exp) = op{
+                if let BinOp::Ari(Pow) = op{
                     diag.with_note([
                         "Lua defines `^` as exponentiation operator and `~` as bitwise XOR\nboth are well defined for integers, mixing the two will lead to silently wrong results",
                     ]);

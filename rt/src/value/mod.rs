@@ -7,8 +7,9 @@ pub mod table;
 
 use std::fmt::{Debug, Display};
 
-use enumoid::Enumoid;
+use enumoid::{EnumMap, Enumoid};
 use repr::literal::Literal;
+use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp};
 
 pub use boolean::Boolean;
 use callable::Callable;
@@ -17,7 +18,7 @@ pub use int::Int;
 pub use nil::Nil;
 pub use table::{Table, TableRef};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Enumoid)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
     Nil,
     Bool,
@@ -35,15 +36,8 @@ impl Type {
     /// Technically Lua has only one numeric type - `number`,
     /// but on the implementation side we distinguish between ints and floats.
     pub fn to_lua_name(self) -> &'static str {
-        match self {
-            Type::Nil => "nil",
-            Type::Bool => "boolean",
-            Type::Int => "number",
-            Type::Float => "number",
-            Type::String => "string",
-            Type::Function => "function",
-            Type::Table => "table",
-        }
+        let ty: LuaType = self.into();
+        ty.to_str()
     }
 }
 
@@ -60,6 +54,85 @@ impl Display for Type {
         };
 
         write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum LuaType {
+    Nil,
+    Boolean,
+    Number,
+    String,
+    Function,
+    Table,
+}
+
+impl LuaType {
+    pub fn to_str(self) -> &'static str {
+        use LuaType::*;
+
+        match self {
+            Nil => "nil",
+            Boolean => "boolean",
+            Number => "number",
+            String => "string",
+            Function => "function",
+            Table => "table",
+        }
+    }
+}
+
+impl Display for LuaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}
+
+impl From<Type> for LuaType {
+    fn from(value: Type) -> Self {
+        match value {
+            Type::Nil => LuaType::Nil,
+            Type::Bool => LuaType::Boolean,
+            Type::Int => LuaType::Number,
+            Type::Float => LuaType::Number,
+            Type::String => LuaType::String,
+            Type::Function => LuaType::Function,
+            Type::Table => LuaType::Table,
+        }
+    }
+}
+
+impl From<LuaTypeWithoutMetatable> for LuaType {
+    fn from(value: LuaTypeWithoutMetatable) -> Self {
+        match value {
+            LuaTypeWithoutMetatable::Nil => LuaType::Nil,
+            LuaTypeWithoutMetatable::Boolean => LuaType::Boolean,
+            LuaTypeWithoutMetatable::Number => LuaType::Number,
+            LuaTypeWithoutMetatable::String => LuaType::String,
+            LuaTypeWithoutMetatable::Function => LuaType::Function,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Enumoid)]
+pub enum LuaTypeWithoutMetatable {
+    Nil,
+    Boolean,
+    Number,
+    String,
+    Function,
+}
+
+impl LuaTypeWithoutMetatable {
+    pub fn to_str(self) -> &'static str {
+        let ty: LuaType = self.into();
+        ty.to_str()
+    }
+}
+
+impl Display for LuaTypeWithoutMetatable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
     }
 }
 
@@ -106,6 +179,22 @@ impl<C> Value<C> {
 
     pub fn take(&mut self) -> Value<C> {
         std::mem::take(self)
+    }
+
+    pub(crate) fn metatable<'a>(
+        &'a self,
+        primary_metatables: &'a EnumMap<LuaTypeWithoutMetatable, Option<TableRef<C>>>,
+    ) -> Option<TableRef<C>> {
+        match self {
+            Value::Nil => primary_metatables[LuaTypeWithoutMetatable::Nil].clone(),
+            Value::Bool(_) => primary_metatables[LuaTypeWithoutMetatable::Boolean].clone(),
+            Value::Int(_) | Value::Float(_) => {
+                primary_metatables[LuaTypeWithoutMetatable::Number].clone()
+            }
+            Value::String(_) => primary_metatables[LuaTypeWithoutMetatable::String].clone(),
+            Value::Function(_) => primary_metatables[LuaTypeWithoutMetatable::Function].clone(),
+            Value::Table(t) => t.borrow().unwrap().metatable(),
+        }
     }
 }
 
@@ -236,16 +325,17 @@ pub enum MetaValue {
     FloorDiv,
     Rem,
     Pow,
+    BitNot,
     BitAnd,
     BitOr,
     BitXor,
-    Shl,
-    Shr,
+    ShL,
+    ShR,
     Concat,
     Len,
     Eq,
-    LessThan,
-    LessThanOrEq,
+    Lt,
+    LtEq,
     Index,
     NewIndex,
     Call,
@@ -264,16 +354,17 @@ impl MetaValue {
             FloorDiv => "__idiv",
             Rem => "__mod",
             Pow => "__pow",
+            BitNot => "__bnot",
             BitAnd => "__band",
             BitOr => "__bor",
             BitXor => "__bxor",
-            Shl => "__shl",
-            Shr => "__shr",
+            ShL => "__shl",
+            ShR => "__shr",
             Concat => "__concat",
             Len => "__len",
             Eq => "__eq",
-            LessThan => "__lt",
-            LessThanOrEq => "__le",
+            Lt => "__lt",
+            LtEq => "__le",
             Index => "__index",
             NewIndex => "__newindex",
             Call => "__call",
@@ -284,5 +375,68 @@ impl MetaValue {
 impl Display for MetaValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_str())
+    }
+}
+
+impl From<BinOp> for MetaValue {
+    fn from(value: BinOp) -> Self {
+        match value {
+            BinOp::Ari(t) => t.into(),
+            BinOp::Bit(t) => t.into(),
+            BinOp::Str(t) => t.into(),
+            BinOp::Eq(t) => t.into(),
+            BinOp::Rel(t) => t.into(),
+        }
+    }
+}
+
+impl From<AriBinOp> for MetaValue {
+    fn from(value: AriBinOp) -> Self {
+        match value {
+            AriBinOp::Add => MetaValue::Add,
+            AriBinOp::Sub => MetaValue::Sub,
+            AriBinOp::Mul => MetaValue::Mul,
+            AriBinOp::Div => MetaValue::Div,
+            AriBinOp::FloorDiv => MetaValue::FloorDiv,
+            AriBinOp::Rem => MetaValue::Rem,
+            AriBinOp::Pow => MetaValue::Pow,
+        }
+    }
+}
+
+impl From<BitBinOp> for MetaValue {
+    fn from(value: BitBinOp) -> Self {
+        match value {
+            BitBinOp::And => MetaValue::BitAnd,
+            BitBinOp::Or => MetaValue::BitOr,
+            BitBinOp::Xor => MetaValue::BitXor,
+            BitBinOp::ShL => MetaValue::ShL,
+            BitBinOp::ShR => MetaValue::ShR,
+        }
+    }
+}
+
+impl From<StrBinOp> for MetaValue {
+    fn from(value: StrBinOp) -> Self {
+        match value {
+            StrBinOp::Concat => MetaValue::Concat,
+        }
+    }
+}
+
+impl From<EqBinOp> for MetaValue {
+    fn from(value: EqBinOp) -> Self {
+        match value {
+            EqBinOp::Eq => MetaValue::Eq,
+        }
+    }
+}
+
+impl From<RelBinOp> for MetaValue {
+    fn from(value: RelBinOp) -> Self {
+        match value {
+            RelBinOp::Gt | RelBinOp::Lt => MetaValue::Lt,
+            RelBinOp::GtEq | RelBinOp::LtEq => MetaValue::LtEq,
+        }
     }
 }

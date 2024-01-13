@@ -61,7 +61,7 @@ fn main() -> Result<()> {
             use rt::chunk_cache::path::PathCache;
             use rt::chunk_cache::single::SingleChunk;
             use rt::chunk_cache::ChunkId;
-            use rt::runtime::Runtime;
+            use rt::runtime::{DialectBuilder, Runtime};
             // use rt::value::table::TableRef;
             use rt::value::Value;
 
@@ -75,7 +75,7 @@ fn main() -> Result<()> {
 
             let chunk_cache =
                 MainCache::new(SingleChunk::new(env_chunk, None, None), PathCache::new());
-            let mut runtime = Runtime::new(chunk_cache, Value::Nil);
+            let mut runtime = Runtime::new(chunk_cache, Value::Nil, DialectBuilder::lua_5_4());
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0))?;

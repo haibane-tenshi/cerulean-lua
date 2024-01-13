@@ -1,4 +1,5 @@
 use std::hash::Hash;
+use std::ops::ControlFlow;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -7,13 +8,13 @@ use repr::chunk::{Chunk, ClosureRecipe};
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
-use repr::opcode::{AriBinOp, BinOp, BitBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
+use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
 use repr::tivec::{TiSlice, TiVec};
 
 use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{RawUpvalueSlot, UpvalueStackView};
-use super::RuntimeView;
+use super::{DialectBuilder, RuntimeView};
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::opcode::{
@@ -21,13 +22,31 @@ use crate::error::opcode::{
 };
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
-use crate::value::{TableRef, Type, Value};
-
-pub type ControlFlow<C> = std::ops::ControlFlow<ChangeFrame<C>>;
+use crate::value::{LuaTypeWithoutMetatable, MetaValue, TableRef, Value};
 
 pub enum ChangeFrame<C> {
     Return(StackSlot),
-    Invoke(Callable<C>, StackSlot),
+    Invoke(Option<MetaValue>, Callable<C>, StackSlot),
+}
+
+trait MapControlFlow<F> {
+    type Output;
+
+    fn map_br(self, f: F) -> Self::Output;
+}
+
+impl<B, C, T, F> MapControlFlow<F> for ControlFlow<B, C>
+where
+    F: FnOnce(B) -> T,
+{
+    type Output = ControlFlow<T, C>;
+
+    fn map_br(self, f: F) -> Self::Output {
+        match self {
+            ControlFlow::Continue(t) => ControlFlow::Continue(t),
+            ControlFlow::Break(t) => ControlFlow::Break(f(t)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -54,6 +73,7 @@ impl ClosureRef {
         self,
         rt: &mut RuntimeView<C>,
         start: RawStackSlot,
+        metavalue: Option<MetaValue>,
     ) -> Result<Frame<C>, RuntimeError<C>>
     where
         C: ChunkCache,
@@ -107,6 +127,7 @@ impl ClosureRef {
             stack_start,
             upvalue_start,
             register_variadic,
+            metavalue,
         };
 
         Ok(r)
@@ -148,6 +169,8 @@ pub struct Frame<C> {
     stack_start: RawStackSlot,
     upvalue_start: RawUpvalueSlot,
     register_variadic: Vec<Value<C>>,
+    /// Frame is evaluated as metamethod.
+    metavalue: Option<MetaValue>,
 }
 
 impl<C> Frame<C> {
@@ -175,6 +198,7 @@ where
             stack,
             upvalue_stack,
             primary_metatables,
+            dialect,
             ..
         } = rt;
 
@@ -184,6 +208,7 @@ where
             stack_start,
             upvalue_start,
             register_variadic,
+            metavalue,
         } = self;
 
         let fn_ptr = closure.fn_ptr;
@@ -217,6 +242,8 @@ where
             upvalue_stack,
             register_variadic,
             primary_metatables,
+            dialect: *dialect,
+            metavalue,
         };
 
         Ok(r)
@@ -288,7 +315,10 @@ pub struct ActiveFrame<'rt, C> {
     stack: StackView<'rt, C>,
     upvalue_stack: UpvalueStackView<'rt, C>,
     register_variadic: Vec<Value<C>>,
-    primary_metatables: &'rt EnumMap<Type, Option<TableRef<C>>>,
+    primary_metatables: &'rt EnumMap<LuaTypeWithoutMetatable, Option<TableRef<C>>>,
+    dialect: DialectBuilder,
+    /// Frame is being evaluated as metamethod.
+    metavalue: Option<MetaValue>,
 }
 
 impl<'rt, C> ActiveFrame<'rt, C> {
@@ -333,7 +363,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(())
     }
 
-    pub fn step(&mut self) -> Result<ControlFlow<C>, opcode_err::Error> {
+    pub fn step(&mut self) -> Result<ControlFlow<ChangeFrame<C>>, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
                 self.stack.next_slot(),
@@ -347,8 +377,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         })
     }
 
-    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow<C>, opcode_err::Cause> {
-        use crate::value::table::TableRef;
+    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow<ChangeFrame<C>>, opcode_err::Cause> {
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -364,13 +393,13 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 // and make fn invocation into two instructions: StoreCallable + Invoke.
                 // Not sure if it will work better.
                 let value = self.stack.remove(slot).ok_or(MissingStackSlot(slot))?;
+                let type_ = value.type_();
 
-                let callable = match value {
-                    Value::Function(t) => t,
-                    value => return Err(opcode_err::Invoke(value.type_()).into()),
-                };
+                let (callable, start) = self
+                    .prepare_invoke(value, slot)
+                    .ok_or(opcode_err::Invoke(type_))?;
 
-                ControlFlow::Break(ChangeFrame::Invoke(callable, slot))
+                ControlFlow::Break(ChangeFrame::Invoke(None, callable, start))
             }
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
@@ -426,15 +455,17 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
             UnaOp(op) => {
                 let args = self.stack.take1()?;
-                self.exec_una_op(args, op)?;
-
-                ControlFlow::Continue(())
+                self.exec_una_op(args, op)?
+                    .map_br(|(metavalue, callable, start)| {
+                        ChangeFrame::Invoke(Some(metavalue), callable, start)
+                    })
             }
             BinOp(op) => {
                 let args = self.stack.take2()?;
-                self.exec_bin_op(args, op)?;
-
-                ControlFlow::Continue(())
+                self.exec_bin_op(args, op)?
+                    .map_br(|(metavalue, callable, start)| {
+                        ChangeFrame::Invoke(Some(metavalue), callable, start)
+                    })
             }
             Jump { offset } => {
                 self.ip -= InstrOffset(1);
@@ -467,15 +498,19 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
             TabGet => {
                 let args = self.stack.take2()?;
-                self.exec_tab_get(args).map_err(Cause::TabGet)?;
-
-                ControlFlow::Continue(())
+                self.exec_tab_get(args)
+                    .map_err(Cause::TabGet)?
+                    .map_br(|(callable, start)| {
+                        ChangeFrame::Invoke(Some(MetaValue::Index), callable, start)
+                    })
             }
             TabSet => {
                 let args = self.stack.take3()?;
-                self.exec_tab_set(args).map_err(Cause::TabSet)?;
-
-                ControlFlow::Continue(())
+                self.exec_tab_set(args)
+                    .map_err(Cause::TabSet)?
+                    .map_br(|(callable, start)| {
+                        ChangeFrame::Invoke(Some(MetaValue::NewIndex), callable, start)
+                    })
             }
         };
 
@@ -488,109 +523,224 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         &mut self,
         args: [Value<C>; 1],
         op: UnaOp,
-    ) -> Result<(), opcode_err::UnaOpCause> {
+    ) -> Result<ControlFlow<(MetaValue, Callable<C>, StackSlot)>, opcode_err::UnaOpCause> {
         use crate::value::{Float, Int};
+        use ControlFlow::*;
 
-        let [val] = args;
+        let [val] = &args;
 
         let err = opcode_err::UnaOpCause { arg: val.type_() };
 
-        let r = match op {
-            UnaOp::AriNeg => match val {
-                Value::Int(val) => (-Int(val)).into(),
-                Value::Float(val) => (-Float(val)).into(),
-                _ => return Err(err),
+        let eval = match op {
+            UnaOp::AriNeg => match args {
+                [Value::Int(val)] => Continue((-Int(val)).into()),
+                [Value::Float(val)] => Continue((-Float(val)).into()),
+                args => Break((MetaValue::Neg, args)),
             },
-            UnaOp::BitNot => match val {
-                Value::Int(val) => (!Int(val)).into(),
-                _ => return Err(err),
-            },
-            UnaOp::StrLen => match val {
-                Value::String(val) => Value::Int(val.len().try_into().unwrap()),
-                Value::Table(val) => {
-                    let border = val.borrow().unwrap().border();
+            UnaOp::BitNot => {
+                use super::CoerceArgs;
 
-                    Value::Int(border)
+                let args = self.dialect.coerce_una_op_bit(args);
+
+                match args {
+                    [Value::Int(val)] => Continue((!Int(val)).into()),
+                    args => Break((MetaValue::BitNot, args)),
                 }
-                _ => return Err(err),
+            }
+            UnaOp::StrLen => match args {
+                [Value::String(val)] => {
+                    let len = val.len().try_into().unwrap();
+
+                    Continue(Value::Int(len))
+                }
+                // Table builtin triggers after metamethod attempt.
+                args => Break((MetaValue::Len, args)),
             },
-            UnaOp::LogNot => Value::Bool(!val.to_bool()),
+            UnaOp::LogNot => {
+                let [arg] = args;
+                let r = Value::Bool(!arg.to_bool());
+                self.stack.push(r);
+
+                return Ok(Continue(()));
+            }
         };
 
-        self.stack.push(r);
+        match eval {
+            Continue(value) => {
+                self.stack.push(value);
+                Ok(Continue(()))
+            }
+            Break((key, args)) => {
+                let [arg] = &args;
+                let metavalue = arg
+                    .metatable(self.primary_metatables)
+                    .map(|mt| mt.borrow().unwrap().get(key.into()));
 
-        Ok(())
+                match metavalue {
+                    Some(metavalue) => {
+                        let start = self.stack.next_slot();
+
+                        self.stack.extend(args);
+                        let (callable, start) = self.prepare_invoke(metavalue, start).ok_or(err)?;
+
+                        Ok(Break((key, callable, start)))
+                    }
+                    None => match (op, args) {
+                        // Trigger table len builtin on failed metamethod lookup.
+                        (UnaOp::StrLen, [Value::Table(tab)]) => {
+                            let border = tab.borrow().unwrap().border();
+                            self.stack.push(Value::Int(border));
+
+                            Ok(Continue(()))
+                        }
+                        _ => Err(err),
+                    },
+                }
+            }
+        }
     }
 
     fn exec_bin_op(
         &mut self,
         args: [Value<C>; 2],
         op: BinOp,
-    ) -> Result<(), opcode_err::BinOpCause> {
+    ) -> Result<std::ops::ControlFlow<(MetaValue, Callable<C>, StackSlot)>, opcode_err::BinOpCause>
+    {
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
             rhs: args[1].type_(),
         };
 
-        let result = match op {
+        let eval = match op {
             BinOp::Ari(op) => self.exec_bin_op_ari(args, op),
             BinOp::Bit(op) => self.exec_bin_op_bit(args, op),
+            BinOp::Eq(op) => ControlFlow::Continue(Some(self.exec_bin_op_eq(args, op))),
             BinOp::Rel(op) => self.exec_bin_op_rel(args, op),
             BinOp::Str(op) => self.exec_bin_op_str(args, op),
         };
 
-        if let Some(value) = result {
-            self.stack.push(value);
+        match eval {
+            ControlFlow::Continue(Some(value)) => {
+                self.stack.push(value);
+                Ok(ControlFlow::Continue(()))
+            }
+            ControlFlow::Continue(None) => Err(err),
+            ControlFlow::Break(args) => {
+                let key: MetaValue = op.into();
 
-            Ok(())
-        } else {
-            Err(err)
+                // Swap arguments for greater/greater-or-eq comparisons.
+                // Those desugar into Lt/LtEq metamethods with swapped arguments.
+                let args = match op {
+                    BinOp::Rel(RelBinOp::Gt | RelBinOp::GtEq) => {
+                        let [rhs, lhs] = args;
+                        [lhs, rhs]
+                    }
+                    _ => args,
+                };
+
+                let [lhs, rhs] = args;
+                let (callable, start) = lhs
+                    .metatable(self.primary_metatables)
+                    .or_else(|| rhs.metatable(self.primary_metatables))
+                    .map(|mt| mt.borrow().unwrap().get(key.into()))
+                    .and_then(|metavalue| {
+                        let start = self.stack.next_slot();
+                        self.stack.extend([lhs, rhs]);
+                        self.prepare_invoke(metavalue, start)
+                    })
+                    .ok_or(err)?;
+
+                Ok(ControlFlow::Break((key, callable, start)))
+            }
         }
     }
 
-    fn exec_bin_op_str(&mut self, args: [Value<C>; 2], op: StrBinOp) -> Option<Value<C>> {
+    fn exec_bin_op_str(
+        &mut self,
+        args: [Value<C>; 2],
+        op: StrBinOp,
+    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+        use super::CoerceArgs;
+
+        let args = self.dialect.coerce_bin_op_str(op, args);
+
         match args {
             [Value::String(lhs), Value::String(rhs)] => match op {
-                StrBinOp::Concat => Some(Value::String(lhs + &rhs)),
+                StrBinOp::Concat => ControlFlow::Continue(Some(Value::String(lhs + &rhs))),
             },
-            _ => None,
+            args => ControlFlow::Break(args),
         }
     }
 
-    fn exec_bin_op_rel(&mut self, args: [Value<C>; 2], op: RelBinOp) -> Option<Value<C>> {
+    fn exec_bin_op_eq(&mut self, args: [Value<C>; 2], op: EqBinOp) -> Value<C> {
+        use super::CoerceArgs;
+        use crate::value::{Float, Int};
+        use EqBinOp::*;
+
+        let cmp = self.dialect.cmp_float_and_int();
+
+        let equal = match args {
+            [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
+            [Value::Float(lhs), Value::Int(rhs)] if cmp => Float(lhs) == Int(rhs),
+
+            [lhs, rhs] => lhs == rhs,
+        };
+
+        let r = match op {
+            Eq => equal,
+        };
+
+        Value::Bool(r)
+    }
+
+    fn exec_bin_op_rel(
+        &mut self,
+        args: [Value<C>; 2],
+        op: RelBinOp,
+    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+        use super::CoerceArgs;
+        use crate::value;
         use RelBinOp::*;
         use Value::*;
 
-        let [lhs, rhs] = args;
+        let cmp = self.dialect.cmp_float_and_int();
 
-        let r = match (op, lhs, rhs) {
-            (Eq, lhs, rhs) => lhs == rhs,
-            (Neq, lhs, rhs) => lhs != rhs,
-
-            (Lt, Int(lhs), Int(rhs)) => lhs < rhs,
-            (Lt, Float(lhs), Float(rhs)) => lhs < rhs,
-            (Lt, String(lhs), String(rhs)) => lhs < rhs,
-
-            (LtEq, Int(lhs), Int(rhs)) => lhs <= rhs,
-            (LtEq, Float(lhs), Float(rhs)) => lhs <= rhs,
-            (LtEq, String(lhs), String(rhs)) => lhs <= rhs,
-
-            (Gt, Int(lhs), Int(rhs)) => lhs > rhs,
-            (Gt, Float(lhs), Float(rhs)) => lhs > rhs,
-            (Gt, String(lhs), String(rhs)) => lhs > rhs,
-
-            (GtEq, Int(lhs), Int(rhs)) => lhs >= rhs,
-            (GtEq, Float(lhs), Float(rhs)) => lhs >= rhs,
-            (GtEq, String(lhs), String(rhs)) => lhs >= rhs,
-
-            _ => return None,
+        let ord = match &args {
+            [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
+            [Float(lhs), Float(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
+            [String(lhs), String(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
+            [Int(lhs), Float(rhs)] if cmp => {
+                PartialOrd::partial_cmp(&value::Int(*lhs), &value::Float(*rhs))
+            }
+            [Float(lhs), Int(rhs)] if cmp => {
+                PartialOrd::partial_cmp(&value::Float(*lhs), &value::Int(*rhs))
+            }
+            _ => None,
         };
 
-        Some(Value::Bool(r))
+        let Some(ord) = ord else {
+            return ControlFlow::Break(args);
+        };
+
+        let r = match op {
+            Lt => ord.is_lt(),
+            LtEq => ord.is_le(),
+            Gt => ord.is_gt(),
+            GtEq => ord.is_ge(),
+        };
+
+        ControlFlow::Continue(Some(Value::Bool(r)))
     }
 
-    fn exec_bin_op_bit(&mut self, args: [Value<C>; 2], op: BitBinOp) -> Option<Value<C>> {
+    fn exec_bin_op_bit(
+        &mut self,
+        args: [Value<C>; 2],
+        op: BitBinOp,
+    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+        use super::CoerceArgs;
         use crate::value::Int;
+
+        let args = self.dialect.coerce_bin_op_bit(op, args);
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
@@ -600,73 +750,213 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 BitBinOp::ShL => (Int(lhs) << Int(rhs)).into(),
                 BitBinOp::ShR => (Int(lhs) >> Int(rhs)).into(),
             },
-            _ => return None,
+            args => return ControlFlow::Break(args),
         };
 
-        Some(r)
+        ControlFlow::Continue(Some(r))
     }
 
-    fn exec_bin_op_ari(&mut self, args: [Value<C>; 2], op: AriBinOp) -> Option<Value<C>> {
+    fn exec_bin_op_ari(
+        &mut self,
+        args: [Value<C>; 2],
+        op: AriBinOp,
+    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+        use super::CoerceArgs;
         use crate::value::{Float, Int};
+        use AriBinOp::*;
+
+        // Coercions.
+        let args = self.dialect.coerce_bin_op_ari(op, args);
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
-                AriBinOp::Add => (Int(lhs) + Int(rhs)).into(),
-                AriBinOp::Sub => (Int(lhs) - Int(rhs)).into(),
-                AriBinOp::Mul => (Int(lhs) * Int(rhs)).into(),
-                AriBinOp::Rem => (Int(lhs) % Int(rhs)).into(),
-                AriBinOp::Div => (Int(lhs) / Int(rhs)).into(),
-                AriBinOp::FloorDiv => Int(lhs).floor_div(Int(rhs)).into(),
-                AriBinOp::Exp => Float(lhs as f64).exp(Float(rhs as f64)).into(),
+                Add => Some((Int(lhs) + Int(rhs)).into()),
+                Sub => Some((Int(lhs) - Int(rhs)).into()),
+                Mul => Some((Int(lhs) * Int(rhs)).into()),
+                Div | FloorDiv | Rem if rhs == 0 => None,
+                Rem => Some((Int(lhs) % Int(rhs)).into()),
+                Div => Some((Int(lhs) / Int(rhs)).into()),
+                FloorDiv => Some(Int(lhs).floor_div(Int(rhs)).into()),
+                Pow => Int(lhs).exp(Int(rhs)).map(Into::into),
             },
             [Value::Float(lhs), Value::Float(rhs)] => match op {
-                AriBinOp::Add => (Float(lhs) + Float(rhs)).into(),
-                AriBinOp::Sub => (Float(lhs) - Float(rhs)).into(),
-                AriBinOp::Mul => (Float(lhs) * Float(rhs)).into(),
-                AriBinOp::Div => (Float(lhs) / Float(rhs)).into(),
-                AriBinOp::FloorDiv => Float(lhs).floor_div(Float(rhs)).into(),
-                AriBinOp::Rem => (Float(lhs) % Float(rhs)).into(),
-                AriBinOp::Exp => Float(lhs).exp(Float(rhs)).into(),
+                Add => Some((Float(lhs) + Float(rhs)).into()),
+                Sub => Some((Float(lhs) - Float(rhs)).into()),
+                Mul => Some((Float(lhs) * Float(rhs)).into()),
+                Div => Some((Float(lhs) / Float(rhs)).into()),
+                FloorDiv => Some(Float(lhs).floor_div(Float(rhs)).into()),
+                Rem => Some((Float(lhs) % Float(rhs)).into()),
+                Pow => Some(Float(lhs).exp(Float(rhs)).into()),
             },
-            _ => return None,
+            args => return ControlFlow::Break(args),
         };
 
-        Some(r)
+        ControlFlow::Continue(r)
     }
 
-    fn exec_tab_get(&mut self, args: [Value<C>; 2]) -> Result<(), opcode_err::TabCause> {
+    fn exec_tab_get(
+        &mut self,
+        args: [Value<C>; 2],
+    ) -> Result<ControlFlow<(Callable<C>, StackSlot)>, opcode_err::TabCause> {
+        use super::CoerceArgs;
         use opcode_err::TabCause::*;
+        use ControlFlow::*;
 
-        let [table, index] = args;
+        let [mut table, index] = args;
 
-        let table = match table {
-            Value::Table(t) => t,
-            t => return Err(TableTypeMismatch(t.type_())),
-        };
+        'outer: loop {
+            // First: try raw table access.
+            if let Value::Table(table) = &table {
+                let index = self.dialect.coerce_tab_get(index.clone());
 
-        let key = index.try_into().map_err(InvalidKey)?;
-        let value = table.borrow().unwrap().get(key);
+                let key = index.try_into().map_err(InvalidKey)?;
+                let value = table.borrow().unwrap().get(key);
 
-        self.stack.push(value);
+                // It succeeds if any non-nil value is produced.
+                if value != Value::Nil {
+                    self.stack.push(value);
+                    return Ok(Continue(()));
+                }
+            };
 
-        Ok(())
+            // Second: try detecting compatible metavalue
+            loop {
+                let metavalue = table
+                    .metatable(self.primary_metatables)
+                    .map(|mt| mt.borrow().unwrap().get(MetaValue::Index.into()))
+                    .unwrap_or_default();
+
+                match metavalue {
+                    // Keyes associated with nil are considered to be absent from table.
+                    Value::Nil => {
+                        if matches!(table, Value::Table(_)) {
+                            // Third: Fallback to producing nil.
+                            // This can only be reached if raw table access returned nil and there is no metamethod.
+
+                            self.stack.push(Value::Nil);
+                            return Ok(Continue(()));
+                        } else {
+                            return Err(TableTypeMismatch(table.type_()));
+                        }
+                    }
+                    // Table simply goes on another spin of recursive table lookup.
+                    tab @ Value::Table(_) => {
+                        table = tab;
+                        continue 'outer;
+                    }
+                    // Function is invoked with table and *original* (before coercions!) index.
+                    // It only picks up the latest "table" value which metamethod we tried to look up.
+                    Value::Function(callable) => {
+                        let start = self.stack.next_slot();
+                        self.stack.extend([table, index]);
+                        return Ok(Break((callable, start)));
+                    }
+                    // If everything fails, try to recursively lookup metamethod in the new value.
+                    // Lua affirms to ignore function-like (e.g. with __call metamethod) objects in table indexing.
+                    value => {
+                        table = value;
+                    }
+                }
+            }
+        }
     }
 
-    fn exec_tab_set(&mut self, args: [Value<C>; 3]) -> Result<(), opcode_err::TabCause> {
+    fn exec_tab_set(
+        &mut self,
+        args: [Value<C>; 3],
+    ) -> Result<ControlFlow<(Callable<C>, StackSlot)>, opcode_err::TabCause> {
+        use super::CoerceArgs;
         use opcode_err::TabCause::*;
+        use ControlFlow::*;
 
-        let [table, index, value] = args;
+        let [mut table, index, value] = args;
 
-        let table = match table {
-            Value::Table(t) => t,
-            t => return Err(TableTypeMismatch(t.type_())),
-        };
+        'outer: loop {
+            // First: try raw table access.
+            if let Value::Table(table) = &table {
+                let index = self.dialect.coerce_tab_set(index.clone());
+                let key = index.try_into().map_err(InvalidKey)?;
 
-        let key = index.try_into().map_err(InvalidKey)?;
+                let mut table = table.borrow_mut().unwrap();
 
-        table.borrow_mut().unwrap().set(key, value);
+                // It succeeds if key is already populated.
+                if table.contains_key(&key) {
+                    table.set(key, value);
 
-        Ok(())
+                    return Ok(Continue(()));
+                }
+            };
+
+            // Second: try detecting compatible metavalue
+            loop {
+                let metavalue = table
+                    .metatable(self.primary_metatables)
+                    .map(|mt| mt.borrow().unwrap().get(MetaValue::NewIndex.into()))
+                    .unwrap_or_default();
+
+                match metavalue {
+                    // Keyes associated with nil are considered to be absent from table.
+                    Value::Nil => {
+                        if let Value::Table(table) = table {
+                            // Third: Fallback to raw assignment.
+                            // This can only be reached if raw table access returned nil and there is no metamethod.
+
+                            let index = self.dialect.coerce_tab_set(index);
+                            let key = index.try_into().map_err(InvalidKey)?;
+
+                            table.borrow_mut().unwrap().set(key, value);
+
+                            return Ok(Continue(()));
+                        } else {
+                            return Err(TableTypeMismatch(table.type_()));
+                        }
+                    }
+                    // Table simply goes on another spin of recursive table assignment.
+                    tab @ Value::Table(_) => {
+                        table = tab;
+                        continue 'outer;
+                    }
+                    // Function is invoked with table, *original* (before coercions!) index and value.
+                    // It only picks up the latest "table" value which metamethod we tried to look up.
+                    Value::Function(callable) => {
+                        let start = self.stack.next_slot();
+                        self.stack.extend([table, index, value]);
+                        return Ok(Break((callable, start)));
+                    }
+                    // If everything fails, try to recursively lookup metamethod in the new value.
+                    // Lua affirms to ignore function-like (e.g. with __call metamethod) objects in table indexing.
+                    value => {
+                        table = value;
+                    }
+                }
+            }
+        }
+    }
+
+    fn prepare_invoke(
+        &mut self,
+        mut callable: Value<C>,
+        start: StackSlot,
+    ) -> Option<(Callable<C>, StackSlot)> {
+        loop {
+            callable = match callable {
+                Value::Function(r) => return Some((r, start)),
+                t => t,
+            };
+
+            let new_callable = callable
+                .metatable(self.primary_metatables)
+                .map(|mt| mt.borrow().unwrap().get(MetaValue::Call.into()))
+                .unwrap_or_default();
+
+            // Keys associated with nil are not considered part of the table.
+            if new_callable == Value::Nil {
+                return None;
+            }
+
+            self.stack.insert(start, callable);
+            callable = new_callable;
+        }
     }
 
     fn opcode_debug_info(&self, ip: InstrId) -> Option<OpCodeDebugInfo> {
@@ -736,6 +1026,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             mut stack,
             upvalue_stack,
             register_variadic,
+            metavalue,
             ..
         } = self;
 
@@ -752,13 +1043,18 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             stack_start,
             upvalue_start,
             register_variadic,
+            metavalue,
         }
     }
 
-    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<C>> {
+    pub fn exit(
+        mut self,
+        drop_under: StackSlot,
+    ) -> Result<Option<(MetaValue, RawStackSlot)>, RuntimeError<C>> {
         self.stack.remove_range(StackSlot(0)..drop_under);
         self.upvalue_stack.clear();
 
-        Ok(())
+        let r = self.metavalue.map(|mv| (mv, self.stack.boundary()));
+        Ok(r)
     }
 }

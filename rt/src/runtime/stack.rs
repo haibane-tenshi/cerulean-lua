@@ -11,6 +11,12 @@ use crate::error::opcode::MissingArgsError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct RawStackSlot(usize);
 
+impl RawStackSlot {
+    pub(crate) fn checked_sub(self, other: Self) -> Option<StackSlot> {
+        self.0.checked_sub(other.0).map(StackSlot)
+    }
+}
+
 impl Add<StackSlot> for RawStackSlot {
     type Output = Self;
 
@@ -78,6 +84,11 @@ impl<C> Stack<C> {
         }
 
         r
+    }
+
+    fn insert(&mut self, slot: RawStackSlot, value: Value<C>) {
+        self.evict_upvalues(slot..);
+        self.temporaries.insert(slot, value);
     }
 
     fn remove(&mut self, slot: RawStackSlot) -> Option<Value<C>> {
@@ -275,6 +286,11 @@ impl<'a, C> StackView<'a, C> {
         }
 
         self.stack.pop()
+    }
+
+    pub fn insert(&mut self, slot: StackSlot, value: Value<C>) {
+        let slot = self.boundary + slot;
+        self.stack.insert(slot, value)
     }
 
     pub fn remove(&mut self, slot: StackSlot) -> Option<Value<C>> {

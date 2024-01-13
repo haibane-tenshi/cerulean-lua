@@ -1,3 +1,4 @@
+mod dialect;
 mod frame;
 mod frame_stack;
 mod rust_backtrace_stack;
@@ -16,22 +17,24 @@ use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
-use crate::value::{TableRef, Type, Value};
+use crate::value::{LuaTypeWithoutMetatable, MetaValue, TableRef, Value};
 use frame::ChangeFrame;
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
 use stack::{RawStackSlot, Stack, StackView};
 use upvalue_stack::{UpvalueStack, UpvalueStackView};
 
+pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, ClosureRef, FunctionPtr};
 
 pub struct Runtime<C> {
     pub chunk_cache: C,
     pub global_env: Value<C>,
+    dialect: DialectBuilder,
     frames: FrameStack<C>,
     stack: Stack<C>,
     upvalue_stack: UpvalueStack<C>,
-    primary_metatables: EnumMap<Type, Option<TableRef<C>>>,
+    primary_metatables: EnumMap<LuaTypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
@@ -39,12 +42,13 @@ impl<C> Runtime<C>
 where
     C: Debug,
 {
-    pub fn new(chunk_cache: C, global_env: Value<C>) -> Self {
+    pub fn new(chunk_cache: C, global_env: Value<C>, dialect: DialectBuilder) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         Runtime {
             chunk_cache,
             global_env,
+            dialect,
             frames: Default::default(),
             stack: Default::default(),
             upvalue_stack: Default::default(),
@@ -57,6 +61,7 @@ where
         let Runtime {
             chunk_cache,
             global_env,
+            dialect,
             frames,
             stack,
             upvalue_stack,
@@ -72,6 +77,7 @@ where
         RuntimeView {
             chunk_cache,
             global_env,
+            dialect: *dialect,
             frames,
             stack,
             upvalue_stack,
@@ -84,10 +90,11 @@ where
 pub struct RuntimeView<'rt, C> {
     chunk_cache: &'rt mut C,
     pub global_env: &'rt Value<C>,
+    dialect: DialectBuilder,
     frames: FrameStackView<'rt, C>,
     pub stack: StackView<'rt, C>,
     upvalue_stack: UpvalueStackView<'rt, C>,
-    primary_metatables: &'rt mut EnumMap<Type, Option<TableRef<C>>>,
+    primary_metatables: &'rt mut EnumMap<LuaTypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
@@ -103,6 +110,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
         let RuntimeView {
             chunk_cache,
             global_env,
+            dialect,
             frames,
             stack,
             upvalue_stack,
@@ -118,6 +126,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
         let r = RuntimeView {
             chunk_cache: *chunk_cache,
             global_env,
+            dialect: *dialect,
             frames,
             stack,
             upvalue_stack,
@@ -220,13 +229,15 @@ where
         use crate::value::callable::Callable;
 
         let start = self.stack.boundary() + start;
-        let frame = closure.construct_frame(self, start)?;
+        let frame = closure.construct_frame(self, start, None)?;
         let mut active_frame = frame.activate(self)?;
 
         loop {
             match active_frame.step() {
                 Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
-                    active_frame.exit(slot)?;
+                    if let Some((metavalue, slot)) = active_frame.exit(slot)? {
+                        self.cleanup_metamethod(metavalue, slot);
+                    }
 
                     let Some(frame) = self.frames.pop() else {
                         break;
@@ -234,7 +245,7 @@ where
 
                     active_frame = frame.activate(self)?;
                 }
-                Ok(ControlFlow::Break(ChangeFrame::Invoke(callable, start))) => {
+                Ok(ControlFlow::Break(ChangeFrame::Invoke(metavalue, callable, start))) => {
                     let frame = active_frame.suspend();
                     // Make sure to convert slot here!
                     // Stack slot is in relation to already suspended frame which most likely
@@ -244,17 +255,25 @@ where
 
                     match callable {
                         Callable::LuaClosure(closure) => {
-                            let frame = closure.construct_frame(self, start)?;
+                            let frame = closure.construct_frame(self, start, metavalue)?;
                             active_frame = frame.activate(self)?;
                         }
                         Callable::RustClosureMut(closure) => {
                             self.invoke_at_raw(closure, start)?;
+
+                            if let Some(metavalue) = metavalue {
+                                self.cleanup_metamethod(metavalue, start);
+                            }
 
                             let frame = self.frames.pop().unwrap();
                             active_frame = frame.activate(self)?;
                         }
                         Callable::RustClosureRef(closure) => {
                             self.invoke_at_raw(closure, start)?;
+
+                            if let Some(metavalue) = metavalue {
+                                self.cleanup_metamethod(metavalue, start);
+                            }
 
                             let frame = self.frames.pop().unwrap();
                             active_frame = frame.activate(self)?;
@@ -300,6 +319,37 @@ where
         let closure = Closure { fn_ptr, upvalues };
 
         Ok(closure)
+    }
+
+    fn cleanup_metamethod(&mut self, metavalue: MetaValue, slot: RawStackSlot) {
+        use MetaValue::*;
+
+        let slot = self.stack.boundary().checked_sub(slot).unwrap();
+        assert!(slot < self.stack.next_slot());
+
+        match metavalue {
+            // Ops resulting in single value.
+            Add | Sub | Mul | Div | FloorDiv | Rem | Pow | BitAnd | BitOr | BitXor | ShL | ShR
+            | Neg | BitNot | Len | Concat => {
+                self.stack.adjust_height(slot + 1);
+            }
+            // Ops resulting in single value + coercion to bool.
+            Eq | Lt | LtEq => {
+                self.stack.adjust_height(slot + 1);
+                let value = self.stack.pop().unwrap();
+                self.stack.push(Value::Bool(value.to_bool()));
+            }
+            // Index getter results in single value.
+            Index => {
+                self.stack.adjust_height(slot + 1);
+            }
+            // Index setter results in no values.
+            NewIndex => {
+                self.stack.adjust_height(slot);
+            }
+            // Calls don't adjust results.
+            Call => (),
+        }
     }
 }
 
