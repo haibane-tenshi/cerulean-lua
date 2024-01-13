@@ -394,14 +394,14 @@ fn infix_op(
         Ok(Token::Slash) => Infix::BinOp(BinOp::Ari(AriBinOp::Div)),
         Ok(Token::DoubleSlash) => Infix::BinOp(BinOp::Ari(AriBinOp::FloorDiv)),
         Ok(Token::PercentSign) => Infix::BinOp(BinOp::Ari(AriBinOp::Rem)),
-        Ok(Token::Circumflex) => Infix::BinOp(BinOp::Ari(AriBinOp::Exp)),
+        Ok(Token::Circumflex) => Infix::BinOp(BinOp::Ari(AriBinOp::Pow)),
         Ok(Token::Ampersand) => Infix::BinOp(BinOp::Bit(BitBinOp::And)),
         Ok(Token::Pipe) => Infix::BinOp(BinOp::Bit(BitBinOp::Or)),
         Ok(Token::Tilde) => Infix::BinOp(BinOp::Bit(BitBinOp::Xor)),
         Ok(Token::DoubleAngleL) => Infix::BinOp(BinOp::Bit(BitBinOp::ShL)),
         Ok(Token::DoubleAngleR) => Infix::BinOp(BinOp::Bit(BitBinOp::ShR)),
-        Ok(Token::DoubleEqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::Eq)),
-        Ok(Token::TildeEqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::Neq)),
+        Ok(Token::DoubleEqualsSign) => Infix::BinOp(BinOp::Eq(EqBinOp::Eq)),
+        Ok(Token::TildeEqualsSign) => todo!(), //Infix::BinOp(BinOp::Eq(EqBinOp::Neq)),
         Ok(Token::AngleL) => Infix::BinOp(BinOp::Rel(RelBinOp::Lt)),
         Ok(Token::AngleLEqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::LtEq)),
         Ok(Token::AngleR) => Infix::BinOp(BinOp::Rel(RelBinOp::Gt)),
@@ -453,7 +453,7 @@ impl Infix {
                 match op {
                     Add | Sub => (19, 20),
                     Mul | Div | FloorDiv | Rem => (21, 22),
-                    Exp => (25, 26),
+                    Pow => (25, 26),
                 }
             }
             Infix::BinOp(BinOp::Bit(op)) => {
@@ -466,7 +466,7 @@ impl Infix {
                     ShL | ShR => (13, 14),
                 }
             }
-            Infix::BinOp(BinOp::Rel(_)) => (5, 6),
+            Infix::BinOp(BinOp::Rel(_) | BinOp::Eq(_)) => (5, 6),
             Infix::BinOp(BinOp::Str(_)) => (15, 16),
             Infix::Logical(op) => match op {
                 Logical::Or => (1, 2),

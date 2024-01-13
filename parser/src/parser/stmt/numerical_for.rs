@@ -102,7 +102,7 @@ pub(crate) fn numerical_for<'s, 'origin>(
 
                         zero_check.emit(OpCode::LoadStack(step), debug_info.clone());
                         zero_check.emit(OpCode::LoadConstant(zero), debug_info.clone());
-                        zero_check.emit(RelBinOp::Eq.into(), debug_info.clone());
+                        zero_check.emit(EqBinOp::Eq.into(), debug_info.clone());
                         zero_check.emit_jump_to_end(Some(false), debug_info.clone());
 
                         // Technically, this is what we need to emit here.

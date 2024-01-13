@@ -244,6 +244,12 @@ impl From<BitBinOp> for OpCode {
     }
 }
 
+impl From<EqBinOp> for OpCode {
+    fn from(value: EqBinOp) -> Self {
+        OpCode::BinOp(value.into())
+    }
+}
+
 impl From<RelBinOp> for OpCode {
     fn from(value: RelBinOp) -> Self {
         OpCode::BinOp(value.into())
@@ -302,7 +308,7 @@ pub enum AriBinOp {
     Div,
     FloorDiv,
     Rem,
-    Exp,
+    Pow,
 }
 
 impl Display for AriBinOp {
@@ -316,7 +322,7 @@ impl Display for AriBinOp {
             Div => "/",
             FloorDiv => "//",
             Rem => "%",
-            Exp => "^",
+            Pow => "^",
         };
 
         write!(f, "{s}")
@@ -347,9 +353,22 @@ impl Display for BitBinOp {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum RelBinOp {
+pub enum EqBinOp {
     Eq,
-    Neq,
+}
+
+impl Display for EqBinOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match *self {
+            EqBinOp::Eq => "==",
+        };
+
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RelBinOp {
     LtEq,
     Lt,
     GtEq,
@@ -359,8 +378,6 @@ pub enum RelBinOp {
 impl Display for RelBinOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match *self {
-            RelBinOp::Eq => "==",
-            RelBinOp::Neq => "~=",
             RelBinOp::LtEq => "<=",
             RelBinOp::Lt => "<",
             RelBinOp::GtEq => ">=",
@@ -390,6 +407,7 @@ impl Display for StrBinOp {
 pub enum BinOp {
     Ari(AriBinOp),
     Bit(BitBinOp),
+    Eq(EqBinOp),
     Rel(RelBinOp),
     Str(StrBinOp),
 }
@@ -399,6 +417,7 @@ impl Display for BinOp {
         match self {
             BinOp::Ari(t) => write!(f, "{}", t),
             BinOp::Bit(t) => write!(f, "{}", t),
+            BinOp::Eq(t) => write!(f, "{}", t),
             BinOp::Rel(t) => write!(f, "{}", t),
             BinOp::Str(t) => write!(f, "{}", t),
         }
@@ -414,6 +433,12 @@ impl From<AriBinOp> for BinOp {
 impl From<BitBinOp> for BinOp {
     fn from(value: BitBinOp) -> Self {
         BinOp::Bit(value)
+    }
+}
+
+impl From<EqBinOp> for BinOp {
+    fn from(value: EqBinOp) -> Self {
+        BinOp::Eq(value)
     }
 }
 

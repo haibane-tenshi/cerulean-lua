@@ -17,5 +17,5 @@ pub(crate) use repr::debug_info::opcode::{
 };
 pub(crate) use repr::index::{ConstId, StackSlot, UpvalueSlot};
 pub(crate) use repr::literal::Literal;
-pub(crate) use repr::opcode::{AriBinOp, BitBinOp, OpCode, RelBinOp, StrBinOp};
+pub(crate) use repr::opcode::{AriBinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp};
 pub(crate) use tracing::{trace, trace_span};

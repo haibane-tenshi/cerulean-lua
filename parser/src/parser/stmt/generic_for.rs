@@ -74,7 +74,7 @@ pub(crate) fn generic_for<'s, 'origin>(
 
                     loop_body.emit(OpCode::LoadStack(new_control), debug_info.clone());
                     loop_body.emit_load_literal(Literal::Nil, debug_info.clone());
-                    loop_body.emit(RelBinOp::Eq.into(), debug_info.clone());
+                    loop_body.emit(EqBinOp::Eq.into(), debug_info.clone());
                     loop_body.emit_jump_to_end(Some(true), debug_info.clone());
 
                     loop_body.emit(OpCode::LoadStack(new_control), debug_info.clone());
