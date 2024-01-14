@@ -17,8 +17,8 @@ use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
-use crate::value::{LuaTypeWithoutMetatable, MetaValue, TableRef, Value};
-use frame::ChangeFrame;
+use crate::value::{LuaTypeWithoutMetatable, TableRef, Value};
+use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
 use stack::{RawStackSlot, Stack, StackView};
@@ -235,8 +235,8 @@ where
         loop {
             match active_frame.step() {
                 Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
-                    if let Some((metavalue, slot)) = active_frame.exit(slot)? {
-                        self.cleanup_metamethod(metavalue, slot);
+                    if let Some((event, slot)) = active_frame.exit(slot)? {
+                        self.cleanup_metamethod(event, slot);
                     }
 
                     let Some(frame) = self.frames.pop() else {
@@ -245,7 +245,7 @@ where
 
                     active_frame = frame.activate(self)?;
                 }
-                Ok(ControlFlow::Break(ChangeFrame::Invoke(metavalue, callable, start))) => {
+                Ok(ControlFlow::Break(ChangeFrame::Invoke(event, callable, start))) => {
                     let frame = active_frame.suspend();
                     // Make sure to convert slot here!
                     // Stack slot is in relation to already suspended frame which most likely
@@ -255,14 +255,14 @@ where
 
                     match callable {
                         Callable::LuaClosure(closure) => {
-                            let frame = closure.construct_frame(self, start, metavalue)?;
+                            let frame = closure.construct_frame(self, start, event)?;
                             active_frame = frame.activate(self)?;
                         }
                         Callable::RustClosureMut(closure) => {
                             self.invoke_at_raw(closure, start)?;
 
-                            if let Some(metavalue) = metavalue {
-                                self.cleanup_metamethod(metavalue, start);
+                            if let Some(event) = event {
+                                self.cleanup_metamethod(event, start);
                             }
 
                             let frame = self.frames.pop().unwrap();
@@ -271,8 +271,8 @@ where
                         Callable::RustClosureRef(closure) => {
                             self.invoke_at_raw(closure, start)?;
 
-                            if let Some(metavalue) = metavalue {
-                                self.cleanup_metamethod(metavalue, start);
+                            if let Some(event) = event {
+                                self.cleanup_metamethod(event, start);
                             }
 
                             let frame = self.frames.pop().unwrap();
@@ -321,13 +321,13 @@ where
         Ok(closure)
     }
 
-    fn cleanup_metamethod(&mut self, metavalue: MetaValue, slot: RawStackSlot) {
-        use MetaValue::*;
+    fn cleanup_metamethod(&mut self, event: Event, slot: RawStackSlot) {
+        use Event::*;
 
         let slot = self.stack.boundary().checked_sub(slot).unwrap();
         assert!(slot < self.stack.next_slot());
 
-        match metavalue {
+        match event {
             // Ops resulting in single value.
             Add | Sub | Mul | Div | FloorDiv | Rem | Pow | BitAnd | BitOr | BitXor | ShL | ShR
             | Neg | BitNot | Len | Concat => {
@@ -338,6 +338,12 @@ where
                 self.stack.adjust_height(slot + 1);
                 let value = self.stack.pop().unwrap();
                 self.stack.push(Value::Bool(value.to_bool()));
+            }
+            // Not-equal additionally needs to inverse the resulting boolean.
+            Neq => {
+                self.stack.adjust_height(slot + 1);
+                let value = self.stack.pop().unwrap();
+                self.stack.push(Value::Bool(!value.to_bool()));
             }
             // Index getter results in single value.
             Index => {

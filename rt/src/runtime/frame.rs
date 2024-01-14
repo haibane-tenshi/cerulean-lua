@@ -22,11 +22,11 @@ use crate::error::opcode::{
 };
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
-use crate::value::{LuaTypeWithoutMetatable, MetaValue, TableRef, Value};
+use crate::value::{LuaTypeWithoutMetatable, TableRef, Value};
 
-pub enum ChangeFrame<C> {
+pub(crate) enum ChangeFrame<C> {
     Return(StackSlot),
-    Invoke(Option<MetaValue>, Callable<C>, StackSlot),
+    Invoke(Option<Event>, Callable<C>, StackSlot),
 }
 
 trait MapControlFlow<F> {
@@ -73,7 +73,7 @@ impl ClosureRef {
         self,
         rt: &mut RuntimeView<C>,
         start: RawStackSlot,
-        metavalue: Option<MetaValue>,
+        event: Option<Event>,
     ) -> Result<Frame<C>, RuntimeError<C>>
     where
         C: ChunkCache,
@@ -127,7 +127,7 @@ impl ClosureRef {
             stack_start,
             upvalue_start,
             register_variadic,
-            metavalue,
+            event,
         };
 
         Ok(r)
@@ -169,8 +169,11 @@ pub struct Frame<C> {
     stack_start: RawStackSlot,
     upvalue_start: RawUpvalueSlot,
     register_variadic: Vec<Value<C>>,
-    /// Frame is evaluated as metamethod.
-    metavalue: Option<MetaValue>,
+    /// Whether frame was created as result of evaluating metamethod.
+    ///
+    /// Metamethods in general mimic builtin behavior of opcodes,
+    /// therefore need cleanup to ensure correct stack state after frame is exited.
+    event: Option<Event>,
 }
 
 impl<C> Frame<C> {
@@ -208,7 +211,7 @@ where
             stack_start,
             upvalue_start,
             register_variadic,
-            metavalue,
+            event,
         } = self;
 
         let fn_ptr = closure.fn_ptr;
@@ -243,7 +246,7 @@ where
             register_variadic,
             primary_metatables,
             dialect: *dialect,
-            metavalue,
+            event,
         };
 
         Ok(r)
@@ -317,8 +320,11 @@ pub struct ActiveFrame<'rt, C> {
     register_variadic: Vec<Value<C>>,
     primary_metatables: &'rt EnumMap<LuaTypeWithoutMetatable, Option<TableRef<C>>>,
     dialect: DialectBuilder,
-    /// Frame is being evaluated as metamethod.
-    metavalue: Option<MetaValue>,
+    /// Whether frame was created as result of evaluating metamethod.
+    ///
+    /// Metamethods in general mimic builtin behavior of opcodes,
+    /// therefore need cleanup to ensure correct stack state after frame is exited.
+    event: Option<Event>,
 }
 
 impl<'rt, C> ActiveFrame<'rt, C> {
@@ -456,15 +462,15 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             UnaOp(op) => {
                 let args = self.stack.take1()?;
                 self.exec_una_op(args, op)?
-                    .map_br(|(metavalue, callable, start)| {
-                        ChangeFrame::Invoke(Some(metavalue), callable, start)
+                    .map_br(|(event, callable, start)| {
+                        ChangeFrame::Invoke(Some(event), callable, start)
                     })
             }
             BinOp(op) => {
                 let args = self.stack.take2()?;
                 self.exec_bin_op(args, op)?
-                    .map_br(|(metavalue, callable, start)| {
-                        ChangeFrame::Invoke(Some(metavalue), callable, start)
+                    .map_br(|(event, callable, start)| {
+                        ChangeFrame::Invoke(Some(event), callable, start)
                     })
             }
             Jump { offset } => {
@@ -501,7 +507,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 self.exec_tab_get(args)
                     .map_err(Cause::TabGet)?
                     .map_br(|(callable, start)| {
-                        ChangeFrame::Invoke(Some(MetaValue::Index), callable, start)
+                        ChangeFrame::Invoke(Some(Event::Index), callable, start)
                     })
             }
             TabSet => {
@@ -509,7 +515,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 self.exec_tab_set(args)
                     .map_err(Cause::TabSet)?
                     .map_br(|(callable, start)| {
-                        ChangeFrame::Invoke(Some(MetaValue::NewIndex), callable, start)
+                        ChangeFrame::Invoke(Some(Event::NewIndex), callable, start)
                     })
             }
         };
@@ -523,7 +529,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         &mut self,
         args: [Value<C>; 1],
         op: UnaOp,
-    ) -> Result<ControlFlow<(MetaValue, Callable<C>, StackSlot)>, opcode_err::UnaOpCause> {
+    ) -> Result<ControlFlow<(Event, Callable<C>, StackSlot)>, opcode_err::UnaOpCause> {
         use crate::value::{Float, Int};
         use ControlFlow::*;
 
@@ -535,7 +541,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             UnaOp::AriNeg => match args {
                 [Value::Int(val)] => Continue((-Int(val)).into()),
                 [Value::Float(val)] => Continue((-Float(val)).into()),
-                args => Break((MetaValue::Neg, args)),
+                args => Break((Event::Neg, args)),
             },
             UnaOp::BitNot => {
                 use super::CoerceArgs;
@@ -544,7 +550,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
                 match args {
                     [Value::Int(val)] => Continue((!Int(val)).into()),
-                    args => Break((MetaValue::BitNot, args)),
+                    args => Break((Event::BitNot, args)),
                 }
             }
             UnaOp::StrLen => match args {
@@ -554,7 +560,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     Continue(Value::Int(len))
                 }
                 // Table builtin triggers after metamethod attempt.
-                args => Break((MetaValue::Len, args)),
+                args => Break((Event::Len, args)),
             },
             UnaOp::LogNot => {
                 let [arg] = args;
@@ -570,11 +576,11 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 self.stack.push(value);
                 Ok(Continue(()))
             }
-            Break((key, args)) => {
+            Break((event, args)) => {
                 let [arg] = &args;
                 let metavalue = arg
                     .metatable(self.primary_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(key.into()));
+                    .map(|mt| mt.borrow().unwrap().get(event.into()));
 
                 match metavalue {
                     Some(metavalue) => {
@@ -583,7 +589,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                         self.stack.extend(args);
                         let (callable, start) = self.prepare_invoke(metavalue, start).ok_or(err)?;
 
-                        Ok(Break((key, callable, start)))
+                        Ok(Break((event, callable, start)))
                     }
                     None => match (op, args) {
                         // Trigger table len builtin on failed metamethod lookup.
@@ -604,7 +610,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         &mut self,
         args: [Value<C>; 2],
         op: BinOp,
-    ) -> Result<std::ops::ControlFlow<(MetaValue, Callable<C>, StackSlot)>, opcode_err::BinOpCause>
+    ) -> Result<std::ops::ControlFlow<(Event, Callable<C>, StackSlot)>, opcode_err::BinOpCause>
     {
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
@@ -626,7 +632,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             }
             ControlFlow::Continue(None) => Err(err),
             ControlFlow::Break(args) => {
-                let key: MetaValue = op.into();
+                let event: Event = op.into();
 
                 // Swap arguments for greater/greater-or-eq comparisons.
                 // Those desugar into Lt/LtEq metamethods with swapped arguments.
@@ -642,7 +648,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 let (callable, start) = lhs
                     .metatable(self.primary_metatables)
                     .or_else(|| rhs.metatable(self.primary_metatables))
-                    .map(|mt| mt.borrow().unwrap().get(key.into()))
+                    .map(|mt| mt.borrow().unwrap().get(event.into()))
                     .and_then(|metavalue| {
                         let start = self.stack.next_slot();
                         self.stack.extend([lhs, rhs]);
@@ -650,7 +656,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     })
                     .ok_or(err)?;
 
-                Ok(ControlFlow::Break((key, callable, start)))
+                Ok(ControlFlow::Break((event, callable, start)))
             }
         }
     }
@@ -824,7 +830,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             loop {
                 let metavalue = table
                     .metatable(self.primary_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(MetaValue::Index.into()))
+                    .map(|mt| mt.borrow().unwrap().get(Event::Index.into()))
                     .unwrap_or_default();
 
                 match metavalue {
@@ -892,7 +898,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             loop {
                 let metavalue = table
                     .metatable(self.primary_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(MetaValue::NewIndex.into()))
+                    .map(|mt| mt.borrow().unwrap().get(Event::NewIndex.into()))
                     .unwrap_or_default();
 
                 match metavalue {
@@ -947,7 +953,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
             let new_callable = callable
                 .metatable(self.primary_metatables)
-                .map(|mt| mt.borrow().unwrap().get(MetaValue::Call.into()))
+                .map(|mt| mt.borrow().unwrap().get(Event::Call.into()))
                 .unwrap_or_default();
 
             // Keys associated with nil are not considered part of the table.
@@ -1027,7 +1033,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             mut stack,
             upvalue_stack,
             register_variadic,
-            metavalue,
+            event,
             ..
         } = self;
 
@@ -1044,18 +1050,148 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             stack_start,
             upvalue_start,
             register_variadic,
-            metavalue,
+            event,
         }
     }
 
     pub fn exit(
         mut self,
         drop_under: StackSlot,
-    ) -> Result<Option<(MetaValue, RawStackSlot)>, RuntimeError<C>> {
+    ) -> Result<Option<(Event, RawStackSlot)>, RuntimeError<C>> {
         self.stack.remove_range(StackSlot(0)..drop_under);
         self.upvalue_stack.clear();
 
-        let r = self.metavalue.map(|mv| (mv, self.stack.boundary()));
+        let r = self.event.map(|mv| (mv, self.stack.boundary()));
         Ok(r)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Event {
+    Neg,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    FloorDiv,
+    Rem,
+    Pow,
+    BitNot,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShL,
+    ShR,
+    Concat,
+    Len,
+    Eq,
+    Neq,
+    Lt,
+    LtEq,
+    Index,
+    NewIndex,
+    Call,
+}
+
+impl Event {
+    pub fn to_str(&self) -> &'static str {
+        use Event::*;
+
+        match self {
+            Neg => "__unm",
+            Add => "__add",
+            Sub => "__sub",
+            Mul => "__mul",
+            Div => "__div",
+            FloorDiv => "__idiv",
+            Rem => "__mod",
+            Pow => "__pow",
+            BitNot => "__bnot",
+            BitAnd => "__band",
+            BitOr => "__bor",
+            BitXor => "__bxor",
+            ShL => "__shl",
+            ShR => "__shr",
+            Concat => "__concat",
+            Len => "__len",
+            Eq => "__eq",
+            Neq => "__eq",
+            Lt => "__lt",
+            LtEq => "__le",
+            Index => "__index",
+            NewIndex => "__newindex",
+            Call => "__call",
+        }
+    }
+}
+
+impl From<BinOp> for Event {
+    fn from(value: BinOp) -> Self {
+        match value {
+            BinOp::Ari(t) => t.into(),
+            BinOp::Bit(t) => t.into(),
+            BinOp::Str(t) => t.into(),
+            BinOp::Eq(t) => t.into(),
+            BinOp::Rel(t) => t.into(),
+        }
+    }
+}
+
+impl From<AriBinOp> for Event {
+    fn from(value: AriBinOp) -> Self {
+        match value {
+            AriBinOp::Add => Event::Add,
+            AriBinOp::Sub => Event::Sub,
+            AriBinOp::Mul => Event::Mul,
+            AriBinOp::Div => Event::Div,
+            AriBinOp::FloorDiv => Event::FloorDiv,
+            AriBinOp::Rem => Event::Rem,
+            AriBinOp::Pow => Event::Pow,
+        }
+    }
+}
+
+impl From<BitBinOp> for Event {
+    fn from(value: BitBinOp) -> Self {
+        match value {
+            BitBinOp::And => Event::BitAnd,
+            BitBinOp::Or => Event::BitOr,
+            BitBinOp::Xor => Event::BitXor,
+            BitBinOp::ShL => Event::ShL,
+            BitBinOp::ShR => Event::ShR,
+        }
+    }
+}
+
+impl From<StrBinOp> for Event {
+    fn from(value: StrBinOp) -> Self {
+        match value {
+            StrBinOp::Concat => Event::Concat,
+        }
+    }
+}
+
+impl From<EqBinOp> for Event {
+    fn from(value: EqBinOp) -> Self {
+        match value {
+            EqBinOp::Eq => Event::Eq,
+            EqBinOp::Neq => Event::Neq,
+        }
+    }
+}
+
+impl From<RelBinOp> for Event {
+    fn from(value: RelBinOp) -> Self {
+        match value {
+            RelBinOp::Gt | RelBinOp::Lt => Event::Lt,
+            RelBinOp::GtEq | RelBinOp::LtEq => Event::LtEq,
+        }
+    }
+}
+
+impl<C> From<Event> for crate::value::table::KeyValue<C> {
+    fn from(value: Event) -> Self {
+        use crate::value::table::KeyValue;
+        KeyValue::String(value.to_str().to_string())
     }
 }

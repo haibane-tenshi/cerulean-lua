@@ -7,7 +7,7 @@ use std::rc::Rc;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::{MetaValue, Value};
+use super::Value;
 
 pub struct Table<C> {
     data: HashMap<KeyValue<C>, Value<C>>,
@@ -158,12 +158,6 @@ impl InvalidTableKeyError {
             InvalidTableKeyError::Nan => "NaN",
             InvalidTableKeyError::Nil => "nil",
         }
-    }
-}
-
-impl<C> From<MetaValue> for KeyValue<C> {
-    fn from(value: MetaValue) -> Self {
-        KeyValue::String(value.to_string())
     }
 }
 
