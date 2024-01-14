@@ -56,6 +56,19 @@ impl Display for Type {
     }
 }
 
+impl From<TypeWithoutMetatable> for Type {
+    fn from(value: TypeWithoutMetatable) -> Self {
+        match value {
+            TypeWithoutMetatable::Nil => Type::Nil,
+            TypeWithoutMetatable::Bool => Type::Bool,
+            TypeWithoutMetatable::Int => Type::Int,
+            TypeWithoutMetatable::Float => Type::Float,
+            TypeWithoutMetatable::String => Type::String,
+            TypeWithoutMetatable::Function => Type::Function,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum LuaType {
     Nil,
@@ -101,35 +114,37 @@ impl From<Type> for LuaType {
     }
 }
 
-impl From<LuaTypeWithoutMetatable> for LuaType {
-    fn from(value: LuaTypeWithoutMetatable) -> Self {
+impl From<TypeWithoutMetatable> for LuaType {
+    fn from(value: TypeWithoutMetatable) -> Self {
         match value {
-            LuaTypeWithoutMetatable::Nil => LuaType::Nil,
-            LuaTypeWithoutMetatable::Boolean => LuaType::Boolean,
-            LuaTypeWithoutMetatable::Number => LuaType::Number,
-            LuaTypeWithoutMetatable::String => LuaType::String,
-            LuaTypeWithoutMetatable::Function => LuaType::Function,
+            TypeWithoutMetatable::Nil => LuaType::Nil,
+            TypeWithoutMetatable::Bool => LuaType::Boolean,
+            TypeWithoutMetatable::Int => LuaType::Number,
+            TypeWithoutMetatable::Float => LuaType::Number,
+            TypeWithoutMetatable::String => LuaType::String,
+            TypeWithoutMetatable::Function => LuaType::Function,
         }
     }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Enumoid)]
-pub enum LuaTypeWithoutMetatable {
+pub enum TypeWithoutMetatable {
     Nil,
-    Boolean,
-    Number,
+    Bool,
+    Int,
+    Float,
     String,
     Function,
 }
 
-impl LuaTypeWithoutMetatable {
+impl TypeWithoutMetatable {
     pub fn to_str(self) -> &'static str {
         let ty: LuaType = self.into();
         ty.to_str()
     }
 }
 
-impl Display for LuaTypeWithoutMetatable {
+impl Display for TypeWithoutMetatable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_str())
     }
@@ -182,16 +197,15 @@ impl<C> Value<C> {
 
     pub(crate) fn metatable<'a>(
         &'a self,
-        primary_metatables: &'a EnumMap<LuaTypeWithoutMetatable, Option<TableRef<C>>>,
+        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     ) -> Option<TableRef<C>> {
         match self {
-            Value::Nil => primary_metatables[LuaTypeWithoutMetatable::Nil].clone(),
-            Value::Bool(_) => primary_metatables[LuaTypeWithoutMetatable::Boolean].clone(),
-            Value::Int(_) | Value::Float(_) => {
-                primary_metatables[LuaTypeWithoutMetatable::Number].clone()
-            }
-            Value::String(_) => primary_metatables[LuaTypeWithoutMetatable::String].clone(),
-            Value::Function(_) => primary_metatables[LuaTypeWithoutMetatable::Function].clone(),
+            Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].clone(),
+            Value::Bool(_) => primitive_metatables[TypeWithoutMetatable::Bool].clone(),
+            Value::Int(_) => primitive_metatables[TypeWithoutMetatable::Int].clone(),
+            Value::Float(_) => primitive_metatables[TypeWithoutMetatable::Float].clone(),
+            Value::String(_) => primitive_metatables[TypeWithoutMetatable::String].clone(),
+            Value::Function(_) => primitive_metatables[TypeWithoutMetatable::Function].clone(),
             Value::Table(t) => t.borrow().unwrap().metatable(),
         }
     }

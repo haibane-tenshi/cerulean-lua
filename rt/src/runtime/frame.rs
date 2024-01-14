@@ -22,7 +22,7 @@ use crate::error::opcode::{
 };
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
-use crate::value::{LuaTypeWithoutMetatable, TableRef, Value};
+use crate::value::{TableRef, TypeWithoutMetatable, Value};
 
 pub(crate) enum ChangeFrame<C> {
     Return(StackSlot),
@@ -200,7 +200,7 @@ where
             chunk_cache,
             stack,
             upvalue_stack,
-            primary_metatables,
+            primitive_metatables,
             dialect,
             ..
         } = rt;
@@ -244,7 +244,7 @@ where
             stack,
             upvalue_stack,
             register_variadic,
-            primary_metatables,
+            primitive_metatables,
             dialect: *dialect,
             event,
         };
@@ -318,7 +318,7 @@ pub struct ActiveFrame<'rt, C> {
     stack: StackView<'rt, C>,
     upvalue_stack: UpvalueStackView<'rt, C>,
     register_variadic: Vec<Value<C>>,
-    primary_metatables: &'rt EnumMap<LuaTypeWithoutMetatable, Option<TableRef<C>>>,
+    primitive_metatables: &'rt EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     dialect: DialectBuilder,
     /// Whether frame was created as result of evaluating metamethod.
     ///
@@ -579,7 +579,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             Break((event, args)) => {
                 let [arg] = &args;
                 let metavalue = arg
-                    .metatable(self.primary_metatables)
+                    .metatable(self.primitive_metatables)
                     .map(|mt| mt.borrow().unwrap().get(event.into()));
 
                 match metavalue {
@@ -645,8 +645,8 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                 };
 
                 let metavalue = lhs
-                    .metatable(self.primary_metatables)
-                    .or_else(|| rhs.metatable(self.primary_metatables))
+                    .metatable(self.primitive_metatables)
+                    .or_else(|| rhs.metatable(self.primitive_metatables))
                     .map(|mt| mt.borrow().unwrap().get(event.into()));
 
                 match metavalue {
@@ -856,7 +856,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             // Second: try detecting compatible metavalue
             loop {
                 let metavalue = table
-                    .metatable(self.primary_metatables)
+                    .metatable(self.primitive_metatables)
                     .map(|mt| mt.borrow().unwrap().get(Event::Index.into()))
                     .unwrap_or_default();
 
@@ -924,7 +924,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             // Second: try detecting compatible metavalue
             loop {
                 let metavalue = table
-                    .metatable(self.primary_metatables)
+                    .metatable(self.primitive_metatables)
                     .map(|mt| mt.borrow().unwrap().get(Event::NewIndex.into()))
                     .unwrap_or_default();
 
@@ -979,7 +979,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             };
 
             let new_callable = callable
-                .metatable(self.primary_metatables)
+                .metatable(self.primitive_metatables)
                 .map(|mt| mt.borrow().unwrap().get(Event::Call.into()))
                 .unwrap_or_default();
 
