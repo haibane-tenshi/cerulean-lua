@@ -57,8 +57,40 @@ pub struct FunctionPtr {
 
 #[derive(Debug, Clone)]
 pub struct Closure {
-    pub(super) fn_ptr: FunctionPtr,
-    pub(super) upvalues: TiVec<UpvalueSlot, UpvalueId>,
+    fn_ptr: FunctionPtr,
+    upvalues: TiVec<UpvalueSlot, UpvalueId>,
+}
+
+impl Closure {
+    pub(crate) fn new<C>(
+        rt: &mut RuntimeView<C>,
+        fn_ptr: FunctionPtr,
+        upvalues: impl IntoIterator<Item = Value<C>>,
+    ) -> Result<Self, RuntimeError<C>>
+    where
+        C: ChunkCache,
+    {
+        use crate::error::{MissingChunk, MissingFunction};
+
+        let signature = &rt
+            .chunk_cache
+            .chunk(fn_ptr.chunk_id)
+            .ok_or(MissingChunk(fn_ptr.chunk_id))?
+            .get_function(fn_ptr.function_id)
+            .ok_or(MissingFunction(fn_ptr))?
+            .signature;
+
+        let upvalues = upvalues
+            .into_iter()
+            .chain(std::iter::repeat(Value::Nil))
+            .take(signature.upvalue_count)
+            .map(|value| rt.stack.fresh_upvalue(value))
+            .collect();
+
+        let closure = Closure { fn_ptr, upvalues };
+
+        Ok(closure)
+    }
 }
 
 #[derive(Debug, Clone)]

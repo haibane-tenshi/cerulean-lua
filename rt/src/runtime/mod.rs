@@ -299,26 +299,7 @@ where
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = Value<C>>,
     ) -> Result<Closure, RuntimeError<C>> {
-        use crate::error::{MissingChunk, MissingFunction};
-
-        let signature = &self
-            .chunk_cache
-            .chunk(fn_ptr.chunk_id)
-            .ok_or(MissingChunk(fn_ptr.chunk_id))?
-            .get_function(fn_ptr.function_id)
-            .ok_or(MissingFunction(fn_ptr))?
-            .signature;
-
-        let upvalues = upvalues
-            .into_iter()
-            .chain(std::iter::repeat(Value::Nil))
-            .take(signature.upvalue_count)
-            .map(|value| self.stack.fresh_upvalue(value))
-            .collect();
-
-        let closure = Closure { fn_ptr, upvalues };
-
-        Ok(closure)
+        Closure::new(self, fn_ptr, upvalues)
     }
 
     fn cleanup_metamethod(&mut self, event: Event, slot: RawStackSlot) {
