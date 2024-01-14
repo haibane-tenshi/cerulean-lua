@@ -1,9 +1,7 @@
-use std::ops::Add;
+use std::ops::{Add, Deref, DerefMut};
 
 use repr::index::UpvalueSlot;
-use repr::tivec::TiVec;
-
-use super::Value;
+use repr::tivec::{TiSlice, TiVec};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
 pub(crate) struct RawUpvalueSlot(usize);
@@ -30,12 +28,12 @@ impl From<RawUpvalueSlot> for usize {
 }
 
 #[derive(Debug)]
-pub(crate) struct UpvalueStack<C> {
-    stack: TiVec<RawUpvalueSlot, Value<C>>,
+pub(crate) struct UpvalueStack<Value> {
+    stack: TiVec<RawUpvalueSlot, Value>,
 }
 
-impl<C> UpvalueStack<C> {
-    pub(crate) fn view(&mut self) -> UpvalueStackView<C> {
+impl<Value> UpvalueStack<Value> {
+    pub(crate) fn view(&mut self) -> UpvalueStackView<Value> {
         UpvalueStackView::new(self)
     }
 
@@ -43,20 +41,12 @@ impl<C> UpvalueStack<C> {
         self.stack.next_key()
     }
 
-    fn get(&self, slot: RawUpvalueSlot) -> Option<&Value<C>> {
-        self.stack.get(slot)
-    }
-
-    fn get_mut(&mut self, slot: RawUpvalueSlot) -> Option<&mut Value<C>> {
-        self.stack.get_mut(slot)
-    }
-
     fn truncate(&mut self, slot: RawUpvalueSlot) {
         self.stack.truncate(slot.0)
     }
 }
 
-impl<C> Default for UpvalueStack<C> {
+impl<Value> Default for UpvalueStack<Value> {
     fn default() -> Self {
         Self {
             stack: Default::default(),
@@ -65,20 +55,20 @@ impl<C> Default for UpvalueStack<C> {
 }
 
 #[derive(Debug)]
-pub struct UpvalueStackView<'a, C> {
-    stack: &'a mut UpvalueStack<C>,
+pub(crate) struct UpvalueStackView<'a, Value> {
+    stack: &'a mut UpvalueStack<Value>,
     boundary: RawUpvalueSlot,
 }
 
-impl<'a, C> UpvalueStackView<'a, C> {
-    pub(crate) fn new(stack: &'a mut UpvalueStack<C>) -> Self {
+impl<'a, Value> UpvalueStackView<'a, Value> {
+    pub(crate) fn new(stack: &'a mut UpvalueStack<Value>) -> Self {
         UpvalueStackView {
             stack,
             boundary: RawUpvalueSlot(0),
         }
     }
 
-    pub(crate) fn view(&mut self, boundary: RawUpvalueSlot) -> Option<UpvalueStackView<C>> {
+    pub(crate) fn view(&mut self, boundary: RawUpvalueSlot) -> Option<UpvalueStackView<Value>> {
         if self.stack.next_slot() < boundary {
             return None;
         }
@@ -91,7 +81,7 @@ impl<'a, C> UpvalueStackView<'a, C> {
         Some(r)
     }
 
-    pub(crate) fn view_over(&mut self) -> UpvalueStackView<C> {
+    pub(crate) fn view_over(&mut self) -> UpvalueStackView<Value> {
         let boundary = self.stack.next_slot();
 
         UpvalueStackView {
@@ -104,28 +94,6 @@ impl<'a, C> UpvalueStackView<'a, C> {
         self.stack.next_slot()
     }
 
-    pub(crate) fn get(&self, slot: UpvalueSlot) -> Option<&Value<C>> {
-        let index = self.boundary + slot;
-        self.stack.get(index)
-    }
-
-    pub(crate) fn get_mut(&mut self, slot: UpvalueSlot) -> Option<&mut Value<C>> {
-        let index = self.boundary + slot;
-        self.stack.get_mut(index)
-    }
-
-    pub(crate) fn iter(&self) -> std::slice::Iter<Value<C>> {
-        self.stack.stack.get(self.boundary..).unwrap().iter()
-    }
-
-    pub(crate) fn iter_mut(&mut self) -> std::slice::IterMut<Value<C>> {
-        self.stack
-            .stack
-            .get_mut(self.boundary..)
-            .unwrap()
-            .iter_mut()
-    }
-
     pub(crate) fn clear(&mut self) {
         self.stack.truncate(self.boundary)
     }
@@ -135,8 +103,22 @@ impl<'a, C> UpvalueStackView<'a, C> {
     }
 }
 
-impl<'a, C> Extend<Value<C>> for UpvalueStackView<'a, C> {
-    fn extend<T: IntoIterator<Item = Value<C>>>(&mut self, iter: T) {
+impl<'a, Value> Extend<Value> for UpvalueStackView<'a, Value> {
+    fn extend<T: IntoIterator<Item = Value>>(&mut self, iter: T) {
         self.stack.stack.extend(iter)
+    }
+}
+
+impl<'a, Value> Deref for UpvalueStackView<'a, Value> {
+    type Target = TiSlice<UpvalueSlot, Value>;
+
+    fn deref(&self) -> &Self::Target {
+        self.stack.stack[self.boundary..].raw.as_ref()
+    }
+}
+
+impl<'a, Value> DerefMut for UpvalueStackView<'a, Value> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.stack.stack[self.boundary..].raw.as_mut()
     }
 }

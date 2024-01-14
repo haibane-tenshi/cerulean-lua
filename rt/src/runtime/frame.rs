@@ -316,7 +316,7 @@ pub struct ActiveFrame<'rt, C> {
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
     stack: StackView<'rt, Value<C>>,
-    upvalue_stack: UpvalueStackView<'rt, C>,
+    upvalue_stack: UpvalueStackView<'rt, Value<C>>,
     register_variadic: Vec<Value<C>>,
     primitive_metatables: &'rt EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     dialect: DialectBuilder,

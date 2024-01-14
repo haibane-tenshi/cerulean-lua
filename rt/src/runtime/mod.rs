@@ -33,7 +33,7 @@ pub struct Runtime<C> {
     dialect: DialectBuilder,
     frames: FrameStack<C>,
     stack: Stack<Value<C>>,
-    upvalue_stack: UpvalueStack<C>,
+    upvalue_stack: UpvalueStack<Value<C>>,
     primitive_metatables: EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
@@ -93,7 +93,7 @@ pub struct RuntimeView<'rt, C> {
     dialect: DialectBuilder,
     frames: FrameStackView<'rt, C>,
     pub stack: StackView<'rt, Value<C>>,
-    upvalue_stack: UpvalueStackView<'rt, C>,
+    upvalue_stack: UpvalueStackView<'rt, Value<C>>,
     primitive_metatables: &'rt mut EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
