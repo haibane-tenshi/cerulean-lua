@@ -620,7 +620,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         let eval = match op {
             BinOp::Ari(op) => self.exec_bin_op_ari(args, op),
             BinOp::Bit(op) => self.exec_bin_op_bit(args, op),
-            BinOp::Eq(op) => ControlFlow::Continue(Some(self.exec_bin_op_eq(args, op))),
+            BinOp::Eq(op) => self.exec_bin_op_eq(args, op),
             BinOp::Rel(op) => self.exec_bin_op_rel(args, op),
             BinOp::Str(op) => self.exec_bin_op_str(args, op),
         };
@@ -636,7 +636,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
                 // Swap arguments for greater/greater-or-eq comparisons.
                 // Those desugar into Lt/LtEq metamethods with swapped arguments.
-                let args = match op {
+                let [lhs, rhs] = match op {
                     BinOp::Rel(RelBinOp::Gt | RelBinOp::GtEq) => {
                         let [rhs, lhs] = args;
                         [lhs, rhs]
@@ -644,19 +644,37 @@ impl<'rt, C> ActiveFrame<'rt, C> {
                     _ => args,
                 };
 
-                let [lhs, rhs] = args;
-                let (callable, start) = lhs
+                let metavalue = lhs
                     .metatable(self.primary_metatables)
                     .or_else(|| rhs.metatable(self.primary_metatables))
-                    .map(|mt| mt.borrow().unwrap().get(event.into()))
-                    .and_then(|metavalue| {
+                    .map(|mt| mt.borrow().unwrap().get(event.into()));
+
+                match metavalue {
+                    Some(metavalue) => {
                         let start = self.stack.next_slot();
                         self.stack.extend([lhs, rhs]);
-                        self.prepare_invoke(metavalue, start)
-                    })
-                    .ok_or(err)?;
+                        let (callable, start) = self.prepare_invoke(metavalue, start).ok_or(err)?;
 
-                Ok(ControlFlow::Break((event, callable, start)))
+                        Ok(ControlFlow::Break((event, callable, start)))
+                    }
+                    None => {
+                        // Fallback on raw comparison for (in)equality in case metamethod is not found.
+                        let fallback_result = match op {
+                            BinOp::Eq(eq_op) => match eq_op {
+                                EqBinOp::Eq => Some(Value::Bool(lhs == rhs)),
+                                EqBinOp::Neq => Some(Value::Bool(lhs != rhs)),
+                            },
+                            _ => None,
+                        };
+
+                        if let Some(r) = fallback_result {
+                            self.stack.push(r);
+                            Ok(ControlFlow::Continue(()))
+                        } else {
+                            Err(err)
+                        }
+                    }
+                }
             }
         }
     }
@@ -665,7 +683,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         &mut self,
         args: [Value<C>; 2],
         op: StrBinOp,
-    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
         use super::CoerceArgs;
 
         let args = self.dialect.coerce_bin_op_str(op, args);
@@ -678,7 +696,11 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         }
     }
 
-    fn exec_bin_op_eq(&mut self, args: [Value<C>; 2], op: EqBinOp) -> Value<C> {
+    fn exec_bin_op_eq(
+        &mut self,
+        args: [Value<C>; 2],
+        op: EqBinOp,
+    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
@@ -689,6 +711,11 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
             [Value::Float(lhs), Value::Int(rhs)] if cmp => Float(lhs) == Int(rhs),
 
+            [Value::Table(lhs), Value::Table(rhs)] if lhs != rhs => {
+                let args = [Value::Table(lhs), Value::Table(rhs)];
+                return ControlFlow::Break(args);
+            }
+
             [lhs, rhs] => lhs == rhs,
         };
 
@@ -697,14 +724,14 @@ impl<'rt, C> ActiveFrame<'rt, C> {
             Neq => !equal,
         };
 
-        Value::Bool(r)
+        ControlFlow::Continue(Some(Value::Bool(r)))
     }
 
     fn exec_bin_op_rel(
         &mut self,
         args: [Value<C>; 2],
         op: RelBinOp,
-    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
         use super::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
@@ -743,7 +770,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         &mut self,
         args: [Value<C>; 2],
         op: BitBinOp,
-    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
         use super::CoerceArgs;
         use crate::value::Int;
 
@@ -767,7 +794,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         &mut self,
         args: [Value<C>; 2],
         op: AriBinOp,
-    ) -> std::ops::ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
