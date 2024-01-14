@@ -106,7 +106,7 @@ impl ClosureRef {
         rt: &mut RuntimeView<C>,
         start: RawStackSlot,
         event: Option<Event>,
-    ) -> Result<Frame<C>, RuntimeError<C>>
+    ) -> Result<Frame<Value<C>>, RuntimeError<C>>
     where
         C: ChunkCache,
     {
@@ -195,12 +195,12 @@ impl From<Closure> for ClosureRef {
 }
 
 #[derive(Debug)]
-pub struct Frame<C> {
+pub struct Frame<Value> {
     closure: ClosureRef,
     ip: InstrId,
     stack_start: RawStackSlot,
     upvalue_start: RawUpvalueSlot,
-    register_variadic: Vec<Value<C>>,
+    register_variadic: Vec<Value>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -208,7 +208,7 @@ pub struct Frame<C> {
     event: Option<Event>,
 }
 
-impl<C> Frame<C> {
+impl<Value> Frame<Value> {
     pub(crate) fn fn_ptr(&self) -> FunctionPtr {
         self.closure.fn_ptr
     }
@@ -218,14 +218,14 @@ impl<C> Frame<C> {
     }
 }
 
-impl<C> Frame<C>
+impl<C> Frame<Value<C>>
 where
     C: ChunkCache,
 {
     pub(crate) fn activate<'a>(
         self,
         rt: &'a mut RuntimeView<C>,
-    ) -> Result<ActiveFrame<'a, C>, RuntimeError<C>> {
+    ) -> Result<ActiveFrame<'a, Value<C>, TableRef<C>>, RuntimeError<C>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let RuntimeView {
@@ -285,7 +285,7 @@ where
     }
 }
 
-impl<C> Frame<C>
+impl<C> Frame<Value<C>>
 where
     C: ChunkCache,
 {
@@ -341,16 +341,16 @@ where
 }
 
 #[derive(Debug)]
-pub struct ActiveFrame<'rt, C> {
+pub struct ActiveFrame<'rt, Value, TableRef> {
     closure: ClosureRef,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt, Value<C>>,
-    upvalue_stack: UpvalueStackView<'rt, Value<C>>,
-    register_variadic: Vec<Value<C>>,
-    primitive_metatables: &'rt EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
+    stack: StackView<'rt, Value>,
+    upvalue_stack: UpvalueStackView<'rt, Value>,
+    register_variadic: Vec<Value>,
+    primitive_metatables: &'rt EnumMap<TypeWithoutMetatable, Option<TableRef>>,
     dialect: DialectBuilder,
     /// Whether frame was created as result of evaluating metamethod.
     ///
@@ -359,7 +359,7 @@ pub struct ActiveFrame<'rt, C> {
     event: Option<Event>,
 }
 
-impl<'rt, C> ActiveFrame<'rt, C> {
+impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
     pub fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
         self.constants.get(index).ok_or(MissingConstId(index))
     }
@@ -1085,7 +1085,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
         Ok(r)
     }
 
-    pub fn suspend(self) -> Frame<C> {
+    pub fn suspend(self) -> Frame<Value<C>> {
         let ActiveFrame {
             closure,
             ip,
