@@ -428,6 +428,7 @@ impl From<EqBinOp> for MetaValue {
     fn from(value: EqBinOp) -> Self {
         match value {
             EqBinOp::Eq => MetaValue::Eq,
+            EqBinOp::Neq => todo!(),
         }
     }
 }

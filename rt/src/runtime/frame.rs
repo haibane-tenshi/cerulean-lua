@@ -688,6 +688,7 @@ impl<'rt, C> ActiveFrame<'rt, C> {
 
         let r = match op {
             Eq => equal,
+            Neq => !equal,
         };
 
         Value::Bool(r)

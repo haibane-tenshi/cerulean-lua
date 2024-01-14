@@ -355,12 +355,14 @@ impl Display for BitBinOp {
 #[derive(Debug, Copy, Clone)]
 pub enum EqBinOp {
     Eq,
+    Neq,
 }
 
 impl Display for EqBinOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match *self {
             EqBinOp::Eq => "==",
+            EqBinOp::Neq => "~=",
         };
 
         write!(f, "{s}")

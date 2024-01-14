@@ -401,7 +401,7 @@ fn infix_op(
         Ok(Token::DoubleAngleL) => Infix::BinOp(BinOp::Bit(BitBinOp::ShL)),
         Ok(Token::DoubleAngleR) => Infix::BinOp(BinOp::Bit(BitBinOp::ShR)),
         Ok(Token::DoubleEqualsSign) => Infix::BinOp(BinOp::Eq(EqBinOp::Eq)),
-        Ok(Token::TildeEqualsSign) => todo!(), //Infix::BinOp(BinOp::Eq(EqBinOp::Neq)),
+        Ok(Token::TildeEqualsSign) => Infix::BinOp(BinOp::Eq(EqBinOp::Neq)),
         Ok(Token::AngleL) => Infix::BinOp(BinOp::Rel(RelBinOp::Lt)),
         Ok(Token::AngleLEqualsSign) => Infix::BinOp(BinOp::Rel(RelBinOp::LtEq)),
         Ok(Token::AngleR) => Infix::BinOp(BinOp::Rel(RelBinOp::Gt)),
