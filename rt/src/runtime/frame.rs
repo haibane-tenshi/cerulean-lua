@@ -107,7 +107,7 @@ impl ClosureRef {
         let mut stack = rt.stack.view(stack_start).ok_or(OutOfBoundsStack)?;
 
         let register_variadic = if signature.is_variadic {
-            stack.adjust_height_with_variadics(call_height)
+            stack.adjust_height_and_collect(call_height)
         } else {
             stack.adjust_height(call_height);
             Default::default()
@@ -315,7 +315,7 @@ pub struct ActiveFrame<'rt, C> {
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt, C>,
+    stack: StackView<'rt, Value<C>>,
     upvalue_stack: UpvalueStackView<'rt, C>,
     register_variadic: Vec<Value<C>>,
     primitive_metatables: &'rt EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,

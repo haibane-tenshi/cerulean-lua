@@ -32,7 +32,7 @@ pub struct Runtime<C> {
     pub global_env: Value<C>,
     dialect: DialectBuilder,
     frames: FrameStack<C>,
-    stack: Stack<C>,
+    stack: Stack<Value<C>>,
     upvalue_stack: UpvalueStack<C>,
     primitive_metatables: EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStack,
@@ -92,7 +92,7 @@ pub struct RuntimeView<'rt, C> {
     pub global_env: &'rt Value<C>,
     dialect: DialectBuilder,
     frames: FrameStackView<'rt, C>,
-    pub stack: StackView<'rt, C>,
+    pub stack: StackView<'rt, Value<C>>,
     upvalue_stack: UpvalueStackView<'rt, C>,
     primitive_metatables: &'rt mut EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
@@ -534,13 +534,26 @@ where
     }
 }
 
-fn map_bound<T, U>(bound: Bound<T>, f: impl FnOnce(T) -> U) -> Bound<U> {
-    use std::ops::Bound::*;
+trait MapBound<F> {
+    type Output;
 
-    match bound {
-        Included(t) => Included(f(t)),
-        Excluded(t) => Excluded(f(t)),
-        Unbounded => Unbounded,
+    fn mapb(self, f: F) -> Self::Output;
+}
+
+impl<F, T, U> MapBound<F> for Bound<T>
+where
+    F: FnOnce(T) -> U,
+{
+    type Output = Bound<U>;
+
+    fn mapb(self, f: F) -> Self::Output {
+        use Bound::*;
+
+        match self {
+            Included(t) => Included(f(t)),
+            Excluded(t) => Excluded(f(t)),
+            Unbounded => Unbounded,
+        }
     }
 }
 

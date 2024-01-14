@@ -4,7 +4,7 @@ use std::ops::RangeBounds;
 use std::fmt::Debug;
 
 use super::frame::Frame;
-use super::map_bound;
+use super::MapBound;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RawFrameId(usize);
@@ -110,8 +110,8 @@ impl<'a, C> FrameStackView<'a, C> {
     }
 
     pub(crate) fn range(&self, range: impl RangeBounds<RawFrameId>) -> Option<&[Frame<C>]> {
-        let start = map_bound(range.start_bound(), |id| id.0);
-        let end = map_bound(range.end_bound(), |id| id.0);
+        let start = range.start_bound().mapb(|id| id.0);
+        let end = range.end_bound().mapb(|id| id.0);
 
         self.stack.stack.raw.get((start, end))
     }
