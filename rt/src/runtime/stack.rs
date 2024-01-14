@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Display};
-use std::ops::{Add, Bound, Deref, RangeBounds};
+use std::ops::{Add, Bound, Deref, DerefMut, RangeBounds};
 
 use repr::index::StackSlot;
 use repr::tivec::{TiSlice, TiVec};
@@ -475,6 +475,12 @@ impl<'a, Value> Deref for StackView<'a, Value> {
 
     fn deref(&self) -> &Self::Target {
         self.stack.temporaries[self.boundary..].raw.as_ref()
+    }
+}
+
+impl<'a, Value> DerefMut for StackView<'a, Value> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.stack.temporaries[self.boundary..].raw.as_mut()
     }
 }
 
