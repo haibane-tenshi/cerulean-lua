@@ -26,7 +26,7 @@ use crate::value::{TableRef, TypeWithoutMetatable, Value};
 
 pub(crate) enum ChangeFrame<C> {
     Return(StackSlot),
-    Invoke(Option<Event>, Callable<C>, StackSlot),
+    Invoke(Option<Event>, Callable<C>, RawStackSlot),
 }
 
 trait MapControlFlow<F> {
@@ -437,6 +437,8 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
                     .prepare_invoke(value, slot)
                     .ok_or(opcode_err::Invoke(type_))?;
 
+                let start = self.stack.boundary() + start;
+
                 ControlFlow::Break(ChangeFrame::Invoke(None, callable, start))
             }
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
@@ -495,6 +497,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
                 let args = self.stack.take1()?;
                 self.exec_una_op(args, op)?
                     .map_br(|(event, callable, start)| {
+                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(event), callable, start)
                     })
             }
@@ -502,6 +505,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
                 let args = self.stack.take2()?;
                 self.exec_bin_op(args, op)?
                     .map_br(|(event, callable, start)| {
+                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(event), callable, start)
                     })
             }
@@ -539,6 +543,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
                 self.exec_tab_get(args)
                     .map_err(Cause::TabGet)?
                     .map_br(|(callable, start)| {
+                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(Event::Index), callable, start)
                     })
             }
@@ -547,6 +552,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
                 self.exec_tab_set(args)
                     .map_err(Cause::TabSet)?
                     .map_br(|(callable, start)| {
+                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(Event::NewIndex), callable, start)
                     })
             }

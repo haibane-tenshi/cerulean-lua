@@ -247,10 +247,6 @@ where
                 }
                 Ok(ControlFlow::Break(ChangeFrame::Invoke(event, callable, start))) => {
                     let frame = active_frame.suspend();
-                    // Make sure to convert slot here!
-                    // Stack slot is in relation to already suspended frame which most likely
-                    // have different boundary from view held by `enter` function itself.
-                    let start = frame.stack_boundary() + start;
                     self.frames.push(frame);
 
                     match callable {
