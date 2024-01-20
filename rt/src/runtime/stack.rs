@@ -5,7 +5,7 @@ use std::ops::{Add, Bound, Deref, DerefMut, RangeBounds};
 use repr::index::StackSlot;
 use repr::tivec::{TiSlice, TiVec};
 
-use super::MapBound;
+use super::{Event, MapBound};
 use crate::error::opcode::MissingArgsError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -467,6 +467,43 @@ where
         let mut r = String::new();
         self.emit_pretty(&mut r).unwrap();
         r
+    }
+}
+
+impl<'a, C> StackView<'a, crate::value::Value<C>> {
+    pub(crate) fn adjust_event_returns(&mut self, event: Event) {
+        use crate::value::Value;
+        use Event::*;
+
+        match event {
+            // Ops resulting in single value.
+            Add | Sub | Mul | Div | FloorDiv | Rem | Pow | BitAnd | BitOr | BitXor | ShL | ShR
+            | Neg | BitNot | Len | Concat => {
+                self.adjust_height(StackSlot(1));
+            }
+            // Ops resulting in single value + coercion to bool.
+            Eq | Lt | LtEq => {
+                self.adjust_height(StackSlot(1));
+                let value = self.stack.pop().unwrap();
+                self.push(Value::Bool(value.to_bool()));
+            }
+            // Not-equal additionally needs to inverse the resulting boolean.
+            Neq => {
+                self.adjust_height(StackSlot(1));
+                let value = self.stack.pop().unwrap();
+                self.push(Value::Bool(!value.to_bool()));
+            }
+            // Index getter results in single value.
+            Index => {
+                self.adjust_height(StackSlot(1));
+            }
+            // Index setter results in no values.
+            NewIndex => {
+                self.adjust_height(StackSlot(0));
+            }
+            // Calls don't adjust results.
+            Call => (),
+        }
     }
 }
 

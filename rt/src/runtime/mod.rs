@@ -235,9 +235,7 @@ where
         loop {
             match active_frame.step() {
                 Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
-                    if let Some((event, slot)) = active_frame.exit(slot)? {
-                        self.cleanup_metamethod(event, slot);
-                    }
+                    active_frame.exit(slot)?;
 
                     let Some(frame) = self.frames.pop() else {
                         break;
@@ -258,7 +256,8 @@ where
                             self.invoke_at_raw(closure, start)?;
 
                             if let Some(event) = event {
-                                self.cleanup_metamethod(event, start);
+                                let mut stack = self.stack.view(start).unwrap();
+                                stack.adjust_event_returns(event);
                             }
 
                             let frame = self.frames.pop().unwrap();
@@ -286,43 +285,6 @@ where
         upvalues: impl IntoIterator<Item = Value<C>>,
     ) -> Result<Closure, RuntimeError<C>> {
         Closure::new(self, fn_ptr, upvalues)
-    }
-
-    fn cleanup_metamethod(&mut self, event: Event, slot: RawStackSlot) {
-        use Event::*;
-
-        let slot = self.stack.boundary().checked_sub(slot).unwrap();
-        assert!(slot < self.stack.next_slot());
-
-        match event {
-            // Ops resulting in single value.
-            Add | Sub | Mul | Div | FloorDiv | Rem | Pow | BitAnd | BitOr | BitXor | ShL | ShR
-            | Neg | BitNot | Len | Concat => {
-                self.stack.adjust_height(slot + 1);
-            }
-            // Ops resulting in single value + coercion to bool.
-            Eq | Lt | LtEq => {
-                self.stack.adjust_height(slot + 1);
-                let value = self.stack.pop().unwrap();
-                self.stack.push(Value::Bool(value.to_bool()));
-            }
-            // Not-equal additionally needs to inverse the resulting boolean.
-            Neq => {
-                self.stack.adjust_height(slot + 1);
-                let value = self.stack.pop().unwrap();
-                self.stack.push(Value::Bool(!value.to_bool()));
-            }
-            // Index getter results in single value.
-            Index => {
-                self.stack.adjust_height(slot + 1);
-            }
-            // Index setter results in no values.
-            NewIndex => {
-                self.stack.adjust_height(slot);
-            }
-            // Calls don't adjust results.
-            Call => (),
-        }
     }
 }
 

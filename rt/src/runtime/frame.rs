@@ -1119,15 +1119,15 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
         }
     }
 
-    pub fn exit(
-        mut self,
-        drop_under: StackSlot,
-    ) -> Result<Option<(Event, RawStackSlot)>, RuntimeError<C>> {
+    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<C>> {
         self.stack.remove_range(StackSlot(0)..drop_under);
         self.upvalue_stack.clear();
 
-        let r = self.event.map(|mv| (mv, self.stack.boundary()));
-        Ok(r)
+        if let Some(event) = self.event {
+            self.stack.adjust_event_returns(event);
+        }
+
+        Ok(())
     }
 }
 
