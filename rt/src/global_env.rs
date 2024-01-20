@@ -76,7 +76,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("assert".into()),
-                Value::Function(Callable::RustClosureMut(fn_assert)),
+                Value::Function(fn_assert.into()),
             );
 
         Ok(())
@@ -151,7 +151,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("pcall".into()),
-                Value::Function(Callable::RustClosureRef(fn_pcall)),
+                Value::Function(fn_pcall.into()),
             );
 
         Ok(())
@@ -193,7 +193,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("print".into()),
-                Value::Function(Callable::RustClosureRef(fn_print)),
+                Value::Function(fn_print.into()),
             );
 
         Ok(())
@@ -274,7 +274,7 @@ where
                     };
                     let env = env.unwrap_or_else(|| rt.global_env.clone());
                     let closure = rt.construct_closure(ptr, [env])?;
-                    let closure_ref = Callable::LuaClosure(ClosureRef::new(closure));
+                    let closure_ref = Callable::Lua(ClosureRef::new(closure));
 
                     rt.stack.clear();
                     rt.stack.push(Value::Function(closure_ref));
@@ -296,7 +296,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("load".into()),
-                Value::Function(Callable::RustClosureRef(fn_load)),
+                Value::Function(fn_load.into()),
             );
 
         Ok(())
@@ -369,7 +369,7 @@ where
                         };
                         let env = env.unwrap_or_else(|| rt.global_env.clone());
                         let closure = rt.construct_closure(ptr, [env])?;
-                        let closure_ref = Callable::LuaClosure(ClosureRef::new(closure));
+                        let closure_ref = Callable::Lua(ClosureRef::new(closure));
 
                         rt.stack.clear();
                         rt.stack.push(Value::Function(closure_ref));
@@ -392,7 +392,7 @@ where
             .map_err(|_| Value::String("failed to borrow global env table".to_string()))?
             .set(
                 KeyValue::String("loadfile".into()),
-                Value::Function(Callable::RustClosureRef(fn_loadfile)),
+                Value::Function(fn_loadfile.into()),
             );
 
         Ok(())

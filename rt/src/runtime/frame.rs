@@ -443,7 +443,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
             MakeClosure(fn_id) => {
                 let closure = self.construct_closure(fn_id)?;
                 self.stack
-                    .push(Value::Function(Callable::LuaClosure(closure.into())));
+                    .push(Value::Function(Callable::Lua(closure.into())));
 
                 ControlFlow::Continue(())
             }

@@ -254,21 +254,11 @@ where
                     self.frames.push(frame);
 
                     match callable {
-                        Callable::LuaClosure(closure) => {
+                        Callable::Lua(closure) => {
                             let frame = closure.construct_frame(self, start, event)?;
                             active_frame = frame.activate(self)?;
                         }
-                        Callable::RustClosureMut(closure) => {
-                            self.invoke_at_raw(closure, start)?;
-
-                            if let Some(event) = event {
-                                self.cleanup_metamethod(event, start);
-                            }
-
-                            let frame = self.frames.pop().unwrap();
-                            active_frame = frame.activate(self)?;
-                        }
-                        Callable::RustClosureRef(closure) => {
+                        Callable::Rust(closure) => {
                             self.invoke_at_raw(closure, start)?;
 
                             if let Some(event) = event {

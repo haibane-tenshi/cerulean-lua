@@ -167,18 +167,89 @@ impl<C> LuaFfi<C> for RustClosureRef<C> {
     }
 }
 
+pub enum RustCallable<C> {
+    Mut(RustClosureMut<C>),
+    Ref(RustClosureRef<C>),
+}
+
+impl<C> Debug for RustCallable<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mut(arg0) => f.debug_tuple("Mut").field(arg0).finish(),
+            Self::Ref(arg0) => f.debug_tuple("Ref").field(arg0).finish(),
+        }
+    }
+}
+
+impl<C> Clone for RustCallable<C> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Mut(arg0) => Self::Mut(arg0.clone()),
+            Self::Ref(arg0) => Self::Ref(arg0.clone()),
+        }
+    }
+}
+
+impl<C> PartialEq for RustCallable<C> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Mut(l0), Self::Mut(r0)) => l0 == r0,
+            (Self::Ref(l0), Self::Ref(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
+}
+
+impl<C> Eq for RustCallable<C> {}
+
+impl<C> Hash for RustCallable<C> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+
+        match self {
+            Self::Mut(t) => t.hash(state),
+            Self::Ref(t) => t.hash(state),
+        }
+    }
+}
+
+impl<C> LuaFfiOnce<C> for RustCallable<C> {
+    fn call_once(self, mut rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+        match self {
+            Self::Mut(f) => rt.invoke(f),
+            Self::Ref(f) => rt.invoke(f),
+        }
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "{rust callable wrapper}".to_string(),
+        }
+    }
+}
+
+impl<C> From<RustClosureMut<C>> for RustCallable<C> {
+    fn from(value: RustClosureMut<C>) -> Self {
+        Self::Mut(value)
+    }
+}
+
+impl<C> From<RustClosureRef<C>> for RustCallable<C> {
+    fn from(value: RustClosureRef<C>) -> Self {
+        Self::Ref(value)
+    }
+}
+
 pub enum Callable<C> {
-    LuaClosure(LuaClosureRef),
-    RustClosureMut(RustClosureMut<C>),
-    RustClosureRef(RustClosureRef<C>),
+    Lua(LuaClosureRef),
+    Rust(RustCallable<C>),
 }
 
 impl<C> Debug for Callable<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::LuaClosure(arg0) => f.debug_tuple("LuaClosure").field(arg0).finish(),
-            Self::RustClosureMut(arg0) => f.debug_tuple("RustClosureMut").field(arg0).finish(),
-            Self::RustClosureRef(arg0) => f.debug_tuple("RustClosureRef").field(arg0).finish(),
+            Self::Lua(arg0) => f.debug_tuple("LuaClosure").field(arg0).finish(),
+            Self::Rust(arg0) => f.debug_tuple("RustCallable").field(arg0).finish(),
         }
     }
 }
@@ -186,9 +257,8 @@ impl<C> Debug for Callable<C> {
 impl<C> Clone for Callable<C> {
     fn clone(&self) -> Self {
         match self {
-            Self::LuaClosure(arg0) => Self::LuaClosure(arg0.clone()),
-            Self::RustClosureMut(arg0) => Self::RustClosureMut(arg0.clone()),
-            Self::RustClosureRef(arg0) => Self::RustClosureRef(arg0.clone()),
+            Self::Lua(arg0) => Self::Lua(arg0.clone()),
+            Self::Rust(arg0) => Self::Rust(arg0.clone()),
         }
     }
 }
@@ -196,9 +266,8 @@ impl<C> Clone for Callable<C> {
 impl<C> PartialEq for Callable<C> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::LuaClosure(l0), Self::LuaClosure(r0)) => l0 == r0,
-            (Self::RustClosureMut(l0), Self::RustClosureMut(r0)) => l0 == r0,
-            (Self::RustClosureRef(l0), Self::RustClosureRef(r0)) => l0 == r0,
+            (Self::Lua(l0), Self::Lua(r0)) => l0 == r0,
+            (Self::Rust(l0), Self::Rust(r0)) => l0 == r0,
             _ => false,
         }
     }
@@ -211,9 +280,8 @@ impl<C> Hash for Callable<C> {
         core::mem::discriminant(self).hash(state);
 
         match self {
-            Self::LuaClosure(t) => t.hash(state),
-            Self::RustClosureMut(t) => t.hash(state),
-            Self::RustClosureRef(t) => t.hash(state),
+            Self::Lua(t) => t.hash(state),
+            Self::Rust(t) => t.hash(state),
         }
     }
 }
@@ -226,15 +294,38 @@ where
         use repr::index::StackSlot;
 
         match self {
-            Callable::LuaClosure(f) => rt.enter(f, StackSlot(0)),
-            Callable::RustClosureMut(f) => rt.invoke(f),
-            Callable::RustClosureRef(f) => rt.invoke(f),
+            Callable::Lua(f) => rt.enter(f, StackSlot(0)),
+            Callable::Rust(f) => rt.invoke(f),
         }
     }
 
     fn debug_info(&self) -> DebugInfo {
         DebugInfo {
-            name: "{callable wrapper}".to_string(),
+            name: "{generic callable wrapper}".to_string(),
         }
+    }
+}
+
+impl<C> From<LuaClosureRef> for Callable<C> {
+    fn from(value: LuaClosureRef) -> Self {
+        Self::Lua(value)
+    }
+}
+
+impl<C> From<RustCallable<C>> for Callable<C> {
+    fn from(value: RustCallable<C>) -> Self {
+        Self::Rust(value)
+    }
+}
+
+impl<C> From<RustClosureMut<C>> for Callable<C> {
+    fn from(value: RustClosureMut<C>) -> Self {
+        Self::Rust(value.into())
+    }
+}
+
+impl<C> From<RustClosureRef<C>> for Callable<C> {
+    fn from(value: RustClosureRef<C>) -> Self {
+        Self::Rust(value.into())
     }
 }
