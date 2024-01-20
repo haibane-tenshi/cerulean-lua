@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::chunk_cache::ChunkCache;
 use crate::error::RuntimeError;
-use crate::ffi::{DebugInfo, IntoLuaFfi, IntoLuaFfiWithName, LuaFfi, LuaFfiMut, LuaFfiOnce};
+use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
 
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
@@ -17,12 +17,7 @@ struct Inner<T: ?Sized> {
 }
 
 impl<C> RustClosureMut<C> {
-    pub fn new<F>(value: F) -> Self
-    where
-        F: IntoLuaFfi<C>,
-        <F as IntoLuaFfi<C>>::Output: LuaFfiMut<C> + 'static,
-    {
-        let value = value.into_lua_ffi();
+    pub fn new(value: impl LuaFfiMut<C> + 'static) -> Self {
         let debug_info = value.debug_info();
         let inner = Inner {
             debug_info,
@@ -32,19 +27,10 @@ impl<C> RustClosureMut<C> {
         RustClosureMut(rc)
     }
 
-    pub fn with_name<F, N>(name: N, value: F) -> Self
-    where
-        F: IntoLuaFfiWithName<C, N>,
-        <F as IntoLuaFfiWithName<C, N>>::Output: LuaFfiMut<C> + 'static,
-    {
-        let value = value.into_lua_ffi_with_name(name);
-        let debug_info = value.debug_info();
-        let inner = Inner {
-            debug_info,
-            callable: RefCell::new(value),
-        };
-        let rc = Rc::new(inner);
-        RustClosureMut(rc)
+    pub fn with_name(name: impl AsRef<str> + 'static, value: impl LuaFfiMut<C> + 'static) -> Self {
+        use crate::ffi::WithName;
+
+        Self::new(value.with_name(name))
     }
 }
 
@@ -100,22 +86,15 @@ impl<C> LuaFfiMut<C> for RustClosureMut<C> {
 pub struct RustClosureRef<C>(Rc<dyn LuaFfi<C> + 'static>);
 
 impl<C> RustClosureRef<C> {
-    pub fn new<F>(value: F) -> Self
-    where
-        F: IntoLuaFfi<C>,
-        <F as IntoLuaFfi<C>>::Output: LuaFfi<C> + 'static,
-    {
-        let rc = Rc::new(value.into_lua_ffi());
+    pub fn new(value: impl LuaFfi<C> + 'static) -> Self {
+        let rc = Rc::new(value);
         RustClosureRef(rc)
     }
 
-    pub fn with_name<F, N>(name: N, value: F) -> Self
-    where
-        F: IntoLuaFfiWithName<C, N>,
-        <F as IntoLuaFfiWithName<C, N>>::Output: LuaFfi<C> + 'static,
-    {
-        let rc = Rc::new(value.into_lua_ffi_with_name(name));
-        RustClosureRef(rc)
+    pub fn with_name(name: impl AsRef<str> + 'static, value: impl LuaFfi<C> + 'static) -> Self {
+        use crate::ffi::WithName;
+
+        Self::new(value.with_name(name))
     }
 }
 
