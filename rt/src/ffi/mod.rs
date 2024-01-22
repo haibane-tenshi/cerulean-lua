@@ -72,9 +72,9 @@ pub trait IntoLuaFfi<C, Marker> {
 
 impl<C, F, Args> IntoLuaFfi<C, Args> for F
 where
-    FnThunk<F, ()>: LuaFfiOnce<C>,
+    FnThunk<F, Args>: LuaFfiOnce<C>,
 {
-    type Output = FnThunk<F, ()>;
+    type Output = FnThunk<F, Args>;
 
     fn into_lua_ffi(self) -> Self::Output {
         FnThunk {
