@@ -10,7 +10,7 @@ use crate::runtime::RuntimeView;
 use crate::value::Value;
 
 use arg_adapter::{FormatReturns, ParseArgs};
-use signature::Signature;
+use signature::{Signature, SignatureMut, SignatureOnce};
 
 pub trait LuaFfiOnce<C> {
     fn call_once(self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
@@ -89,23 +89,18 @@ pub struct FnThunk<F, In> {
     _marker: std::marker::PhantomData<In>,
 }
 
-impl<C, F, In> LuaFfiOnce<C> for FnThunk<F, In>
-where
-    F: Signature<In>,
-    for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
-    <F as Signature<In>>::Output: FormatReturns<C>,
-{
-    fn call_once(self, mut rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        let (view, args) = rt
-            .stack
-            .as_slice()
-            .raw
+impl<F, In> FnThunk<F, In> {
+    fn parse_args<C>(stack: &[Value<C>]) -> Result<In, RuntimeError<C>>
+    where
+        for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
+    {
+        let (view, args) = stack
             .extract()
             .map_err(|err| Value::String(err.to_string()))?;
 
         if !view.is_empty() {
-            let expected_args = rt.stack.len() - view.len();
-            let recieved_args = rt.stack.len();
+            let expected_args = stack.len() - view.len();
+            let recieved_args = stack.len();
 
             return Err(Value::String(format!(
                 "function expects {expected_args} arguments, but {recieved_args} was found"
@@ -113,9 +108,21 @@ where
             .into());
         }
 
+        Ok(args)
+    }
+}
+
+impl<C, F, In> LuaFfiOnce<C> for FnThunk<F, In>
+where
+    F: SignatureOnce<In>,
+    for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
+    <F as SignatureOnce<In>>::Output: FormatReturns<C>,
+{
+    fn call_once(self, mut rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+        let args = Self::parse_args(&rt.stack.as_slice().raw)?;
         rt.stack.clear();
 
-        let ret = self.func.call(args);
+        let ret = self.func.call_once(args);
 
         rt.stack.extend(ret.format());
 
@@ -126,6 +133,42 @@ where
         DebugInfo {
             name: std::any::type_name::<F>().to_string(),
         }
+    }
+}
+
+impl<C, F, In> LuaFfiMut<C> for FnThunk<F, In>
+where
+    F: SignatureMut<In>,
+    for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
+    <F as SignatureOnce<In>>::Output: FormatReturns<C>,
+{
+    fn call_mut(&mut self, mut rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+        let args = Self::parse_args(&rt.stack.as_slice().raw)?;
+        rt.stack.clear();
+
+        let ret = self.func.call_mut(args);
+
+        rt.stack.extend(ret.format());
+
+        Ok(())
+    }
+}
+
+impl<C, F, In> LuaFfi<C> for FnThunk<F, In>
+where
+    F: Signature<In>,
+    for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
+    <F as SignatureOnce<In>>::Output: FormatReturns<C>,
+{
+    fn call(&self, mut rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+        let args = Self::parse_args(&rt.stack.as_slice().raw)?;
+        rt.stack.clear();
+
+        let ret = self.func.call(args);
+
+        rt.stack.extend(ret.format());
+
+        Ok(())
     }
 }
 
