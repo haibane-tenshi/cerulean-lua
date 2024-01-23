@@ -10,7 +10,7 @@ use crate::error::RuntimeError;
 use crate::runtime::RuntimeView;
 use crate::value::Value;
 
-use arg_adapter::{FormatReturns, ParseArgs};
+use arg_adapter::{ExtractArgs, FormatReturns, MissingArg, ParseArgs};
 use signature::{Signature, SignatureWithRt};
 
 pub use arg_adapter::Opts;
@@ -70,24 +70,14 @@ where
 pub fn invoke<'rt, C, F, Args>(mut rt: RuntimeView<'rt, C>, f: F) -> Result<(), RuntimeError<C>>
 where
     F: Signature<Args>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    for<'a> &'a [crate::value::Value<C>]: ExtractArgs<Args>,
     <F as Signature<Args>>::Output: FormatReturns<C>,
 {
-    let (view, args) = rt
+    let args = rt
         .stack
         .raw
         .extract()
         .map_err(|err| Value::String(err.to_string()))?;
-
-    if !view.is_empty() {
-        let expected_args = rt.stack.len() - view.len();
-        let recieved_args = rt.stack.len();
-
-        return Err(Value::String(format!(
-            "function expects {expected_args} arguments, but {recieved_args} was found"
-        ))
-        .into());
-    }
 
     rt.stack.clear();
 
@@ -104,24 +94,14 @@ pub fn try_invoke<'rt, C, F, Args, R>(
 ) -> Result<(), RuntimeError<C>>
 where
     F: Signature<Args, Output = Result<R, RuntimeError<C>>>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    for<'a> &'a [crate::value::Value<C>]: ExtractArgs<Args>,
     R: FormatReturns<C>,
 {
-    let (view, args) = rt
+    let args = rt
         .stack
         .raw
         .extract()
         .map_err(|err| Value::String(err.to_string()))?;
-
-    if !view.is_empty() {
-        let expected_args = rt.stack.len() - view.len();
-        let recieved_args = rt.stack.len();
-
-        return Err(Value::String(format!(
-            "function expects {expected_args} arguments, but {recieved_args} was found"
-        ))
-        .into());
-    }
 
     rt.stack.clear();
 
@@ -138,26 +118,16 @@ pub fn invoke_with_rt<'rt, C, F, Args>(
 ) -> Result<(), RuntimeError<C>>
 where
     for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    for<'a> &'a [crate::value::Value<C>]: ExtractArgs<Args>,
     for<'a> <F as SignatureWithRt<RuntimeView<'a, C>, Args>>::Output: FormatReturns<C>,
 {
     use repr::index::StackSlot;
 
-    let (view, args) = rt
+    let args = rt
         .stack
         .raw
         .extract()
         .map_err(|err| Value::String(err.to_string()))?;
-
-    if !view.is_empty() {
-        let expected_args = rt.stack.len() - view.len();
-        let recieved_args = rt.stack.len();
-
-        return Err(Value::String(format!(
-            "function expects {expected_args} arguments, but {recieved_args} was found"
-        ))
-        .into());
-    }
 
     rt.stack.clear();
 
@@ -175,26 +145,16 @@ pub fn try_invoke_with_rt<'rt, C, F, Args, R>(
 ) -> Result<(), RuntimeError<C>>
 where
     for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args, Output = Result<R, RuntimeError<C>>>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    for<'a> &'a [crate::value::Value<C>]: ExtractArgs<Args>,
     R: FormatReturns<C>,
 {
     use repr::index::StackSlot;
 
-    let (view, args) = rt
+    let args = rt
         .stack
         .raw
         .extract()
         .map_err(|err| Value::String(err.to_string()))?;
-
-    if !view.is_empty() {
-        let expected_args = rt.stack.len() - view.len();
-        let recieved_args = rt.stack.len();
-
-        return Err(Value::String(format!(
-            "function expects {expected_args} arguments, but {recieved_args} was found"
-        ))
-        .into());
-    }
 
     rt.stack.clear();
 

@@ -4,16 +4,93 @@ use std::fmt::{Debug, Display};
 use super::{Maybe, NilOr};
 use crate::value::Value;
 
-pub(super) trait ParseArgs<Values>: Sized {
+pub(super) trait ExtractArgs<Values> {
     type Error: Error;
 
-    fn extract(self) -> Result<(Self, Values), Self::Error>;
+    fn extract(self) -> Result<Values, ExtractError<Self::Error>>;
+}
+
+impl<'a, Value, Values> ExtractArgs<Values> for &'a [Value]
+where
+    Self: ParseArgs<Values>,
+    <<Self as ParseArgs<Values>>::Error as BubbleUp>::Output: Error,
+{
+    type Error = <<Self as ParseArgs<Values>>::Error as BubbleUp>::Output;
+
+    fn extract(self) -> Result<Values, ExtractError<Self::Error>> {
+        match self.parse() {
+            Ok((view, args)) if view.is_empty() => Ok(args),
+            Ok((view, _)) => {
+                let expected = self.len() - view.len();
+                let found = self.len();
+                let err = ExtractError::TooManyArgs { found, expected };
+
+                Err(err)
+            }
+            Err(err) => match err.bubble_up() {
+                MissingArg::Missing => {
+                    let found = self.len();
+                    let err = ExtractError::TooFewArgs { found };
+
+                    Err(err)
+                }
+                MissingArg::Other { leftover_args, err } => {
+                    let index = self.len() - leftover_args;
+                    let err = ExtractError::ConversionFailure { index, err };
+
+                    Err(err)
+                }
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum ExtractError<E> {
+    TooFewArgs { found: usize },
+    TooManyArgs { found: usize, expected: usize },
+    ConversionFailure { index: usize, err: E },
+}
+
+impl<E> Display for ExtractError<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ExtractError::*;
+
+        match self {
+            TooFewArgs { found } => {
+                write!(
+                    f,
+                    "function recieved {found} args, but not all required args were provided"
+                )
+            }
+            TooManyArgs { found, expected } => {
+                write!(
+                    f,
+                    "function expects {expected} args, but {found} was provided"
+                )
+            }
+            ConversionFailure { index, err } => {
+                write!(f, "failed to convert arg[{index}]: {err}")
+            }
+        }
+    }
+}
+
+impl<E> Error for ExtractError<E> where Self: Debug + Display {}
+
+pub(super) trait ParseArgs<Values>: Sized {
+    type Error: BubbleUp;
+
+    fn parse(self) -> Result<(Self, Values), Self::Error>;
 }
 
 impl<'a, Value> ParseArgs<()> for &'a [Value] {
     type Error = std::convert::Infallible;
 
-    fn extract(self) -> Result<(Self, ()), Self::Error> {
+    fn parse(self) -> Result<(Self, ()), Self::Error> {
         Ok((self, ()))
     }
 }
@@ -24,8 +101,8 @@ where
 {
     type Error = <Self as ParseArgs<A>>::Error;
 
-    fn extract(self) -> Result<(Self, (A,)), Self::Error> {
-        let (view, a) = self.extract()?;
+    fn parse(self) -> Result<(Self, (A,)), Self::Error> {
+        let (view, a) = self.parse()?;
         Ok((view, (a,)))
     }
 }
@@ -36,33 +113,12 @@ where
 {
     type Error = Error2<<Self as ParseArgs<A>>::Error, <Self as ParseArgs<B>>::Error>;
 
-    fn extract(self) -> Result<(Self, (A, B)), Self::Error> {
-        let (view, a) = self.extract().map_err(Error2::A)?;
-        let (view, b) = view.extract().map_err(Error2::B)?;
+    fn parse(self) -> Result<(Self, (A, B)), Self::Error> {
+        let (view, a) = self.parse().map_err(Error2::A)?;
+        let (view, b) = view.parse().map_err(Error2::B)?;
         Ok((view, (a, b)))
     }
 }
-
-#[derive(Debug)]
-pub(super) enum Error2<A, B> {
-    A(A),
-    B(B),
-}
-
-impl<A, B> Display for Error2<A, B>
-where
-    A: Display,
-    B: Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error2::A(err) => write!(f, "{}", err),
-            Error2::B(err) => write!(f, "{}", err),
-        }
-    }
-}
-
-impl<A, B> Error for Error2<A, B> where Self: Debug + Display {}
 
 impl<'a, Value, T> ParseArgs<Maybe<T>> for &'a [Value]
 where
@@ -70,8 +126,8 @@ where
 {
     type Error = std::convert::Infallible;
 
-    fn extract(self) -> Result<(Self, Maybe<T>), Self::Error> {
-        match self.extract().ok() {
+    fn parse(self) -> Result<(Self, Maybe<T>), Self::Error> {
+        match self.parse().ok() {
             Some((view, value)) => Ok((view, Maybe::Some(value))),
             None => Ok((self, Maybe::None)),
         }
@@ -84,24 +140,28 @@ where
 {
     type Error = <Self as ParseArgs<T>>::Error;
 
-    fn extract(mut self) -> Result<(Self, [T; N]), Self::Error> {
+    fn parse(mut self) -> Result<(Self, [T; N]), Self::Error> {
         // Unfortunately std::array::try_from_fn is still unstable.
         // The following is ugly... but best we can do for now without unsafe.
         let r = std::array::from_fn(|_| {
-            self.extract().map(|(view, value)| {
+            self.parse().map(|(view, value)| {
                 self = view;
                 value
             })
         });
 
         if r.iter().any(|t| t.is_err()) {
-            let Err(err) = self.extract() else {
+            let Err(err) = self.parse() else {
                 unreachable!()
             };
             return Err(err);
         }
 
-        let r = r.map(|t| t.unwrap());
+        let r = r.map(|t| {
+            let Ok(t) = t else { unreachable!() };
+
+            t
+        });
 
         Ok((self, r))
     }
@@ -113,9 +173,9 @@ where
 {
     type Error = std::convert::Infallible;
 
-    fn extract(mut self) -> Result<(Self, Vec<T>), Self::Error> {
+    fn parse(mut self) -> Result<(Self, Vec<T>), Self::Error> {
         let r = std::iter::from_fn(|| {
-            self.extract().ok().map(|(view, value)| {
+            self.parse().ok().map(|(view, value)| {
                 self = view;
                 value
             })
@@ -133,33 +193,92 @@ where
 {
     type Error = MissingArg<<T as TryFrom<Value<C>>>::Error>;
 
-    fn extract(self) -> Result<(Self, T), Self::Error> {
+    fn parse(self) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;
-        let value = value.clone().try_into().map_err(MissingArg::Other)?;
+        let value = value.clone().try_into().map_err(|err| MissingArg::Other {
+            leftover_args: view.len() + 1,
+            err,
+        })?;
 
         Ok((view, value))
     }
 }
 
 #[derive(Debug)]
-pub(super) enum MissingArg<E> {
-    Missing,
-    Other(E),
+pub(super) enum Error2<A, B> {
+    A(A),
+    B(B),
 }
 
-impl<E> Display for MissingArg<E>
+impl<A, B> Display for Error2<A, B>
 where
-    E: Display,
+    A: Display,
+    B: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MissingArg::Missing => write!(f, "argument is missing"),
-            MissingArg::Other(err) => write!(f, "{}", err),
+            Error2::A(err) => write!(f, "{err}"),
+            Error2::B(err) => write!(f, "{err}"),
         }
     }
 }
 
-impl<E> Error for MissingArg<E> where Self: Debug + Display {}
+impl<A, B> Error for Error2<A, B> where Self: Debug + Display {}
+
+#[derive(Debug)]
+pub(super) enum MissingArg<E> {
+    Missing,
+    Other { leftover_args: usize, err: E },
+}
+
+impl<E> MissingArg<E> {
+    fn map<T>(self, f: impl FnOnce(E) -> T) -> MissingArg<T> {
+        match self {
+            MissingArg::Missing => MissingArg::Missing,
+            MissingArg::Other { leftover_args, err } => MissingArg::Other {
+                leftover_args,
+                err: f(err),
+            },
+        }
+    }
+}
+
+pub(super) trait BubbleUp {
+    type Output;
+
+    fn bubble_up(self) -> MissingArg<Self::Output>;
+}
+
+impl BubbleUp for std::convert::Infallible {
+    type Output = Self;
+
+    fn bubble_up(self) -> MissingArg<Self::Output> {
+        match self {}
+    }
+}
+
+impl<E> BubbleUp for MissingArg<E> {
+    type Output = E;
+
+    fn bubble_up(self) -> MissingArg<Self::Output> {
+        self
+    }
+}
+
+impl<A, B> BubbleUp for Error2<A, B>
+where
+    A: BubbleUp,
+    B: BubbleUp,
+{
+    type Output = Error2<<A as BubbleUp>::Output, <B as BubbleUp>::Output>;
+
+    fn bubble_up(self) -> MissingArg<Self::Output> {
+        match self {
+            Error2::A(err) => err.bubble_up().map(Error2::A),
+            Error2::B(err) => err.bubble_up().map(Error2::B),
+        }
+    }
+}
 
 pub(super) trait FormatReturns<C> {
     type Iter: Iterator<Item = Value<C>>;
