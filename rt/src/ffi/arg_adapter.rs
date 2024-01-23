@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use super::Maybe;
+use super::{Maybe, NilOr};
 use crate::value::Value;
 
 pub(super) trait ParseArgs<Values>: Sized {
@@ -251,4 +251,34 @@ where
     fn format(self) -> Self::Iter {
         std::iter::once(self.into())
     }
+}
+
+pub type Opts<T> = <T as OptsImpl>::Output;
+
+pub(super) trait OptsImpl {
+    type Output;
+}
+
+impl OptsImpl for () {
+    type Output = ();
+}
+
+impl<A> OptsImpl for (A,) {
+    type Output = Maybe<NilOr<A>>;
+}
+
+impl<A, B> OptsImpl for (A, B) {
+    type Output = Maybe<(NilOr<A>, Opts<(B,)>)>;
+}
+
+impl<A, B, C> OptsImpl for (A, B, C) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C)>)>;
+}
+
+impl<A, B, C, D> OptsImpl for (A, B, C, D) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D)>)>;
+}
+
+impl<A, B, C, D, E> OptsImpl for (A, B, C, D, E) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E)>)>;
 }

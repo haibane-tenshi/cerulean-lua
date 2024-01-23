@@ -1,6 +1,7 @@
 mod arg_adapter;
 mod signature;
 
+use std::error::Error;
 use std::fmt::Debug;
 use std::path::Path;
 
@@ -10,7 +11,9 @@ use crate::runtime::RuntimeView;
 use crate::value::Value;
 
 use arg_adapter::{FormatReturns, ParseArgs};
-use signature::{Signature, SignatureMut, SignatureOnce};
+use signature::{Signature, SignatureWithRt};
+
+pub use arg_adapter::Opts;
 
 pub trait LuaFfiOnce<C> {
     fn call_once(self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
@@ -64,112 +67,147 @@ where
     }
 }
 
-pub trait IntoLuaFfi<C, Marker> {
-    type Output: LuaFfiOnce<C>;
-
-    fn into_lua_ffi(self) -> Self::Output;
-}
-
-impl<C, F, Args> IntoLuaFfi<C, Args> for F
+pub fn invoke<'rt, C, F, Args>(mut rt: RuntimeView<'rt, C>, f: F) -> Result<(), RuntimeError<C>>
 where
-    FnThunk<F, Args>: LuaFfiOnce<C>,
+    F: Signature<Args>,
+    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    <F as Signature<Args>>::Output: FormatReturns<C>,
 {
-    type Output = FnThunk<F, Args>;
+    let (view, args) = rt
+        .stack
+        .raw
+        .extract()
+        .map_err(|err| Value::String(err.to_string()))?;
 
-    fn into_lua_ffi(self) -> Self::Output {
-        FnThunk {
-            func: self,
-            _marker: std::marker::PhantomData,
-        }
+    if !view.is_empty() {
+        let expected_args = rt.stack.len() - view.len();
+        let recieved_args = rt.stack.len();
+
+        return Err(Value::String(format!(
+            "function expects {expected_args} arguments, but {recieved_args} was found"
+        ))
+        .into());
     }
+
+    rt.stack.clear();
+
+    let ret = f.call(args);
+
+    rt.stack.extend(ret.format());
+
+    Ok(())
 }
 
-pub struct FnThunk<F, In> {
-    func: F,
-    _marker: std::marker::PhantomData<In>,
-}
-
-impl<F, In> FnThunk<F, In> {
-    fn parse_args<C>(stack: &[Value<C>]) -> Result<In, RuntimeError<C>>
-    where
-        for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
-    {
-        let (view, args) = stack
-            .extract()
-            .map_err(|err| Value::String(err.to_string()))?;
-
-        if !view.is_empty() {
-            let expected_args = stack.len() - view.len();
-            let recieved_args = stack.len();
-
-            return Err(Value::String(format!(
-                "function expects {expected_args} arguments, but {recieved_args} was found"
-            ))
-            .into());
-        }
-
-        Ok(args)
-    }
-}
-
-impl<C, F, In> LuaFfiOnce<C> for FnThunk<F, In>
+pub fn try_invoke<'rt, C, F, Args, R, E>(
+    mut rt: RuntimeView<'rt, C>,
+    f: F,
+) -> Result<(), RuntimeError<C>>
 where
-    F: SignatureOnce<In>,
-    for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
-    <F as SignatureOnce<In>>::Output: FormatReturns<C>,
+    F: Signature<Args, Output = Result<R, E>>,
+    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    R: FormatReturns<C>,
+    E: Error,
 {
-    fn call_once(self, mut rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        let args = Self::parse_args(&rt.stack.as_slice().raw)?;
-        rt.stack.clear();
+    let (view, args) = rt
+        .stack
+        .raw
+        .extract()
+        .map_err(|err| Value::String(err.to_string()))?;
 
-        let ret = self.func.call_once(args);
+    if !view.is_empty() {
+        let expected_args = rt.stack.len() - view.len();
+        let recieved_args = rt.stack.len();
 
-        rt.stack.extend(ret.format());
-
-        Ok(())
+        return Err(Value::String(format!(
+            "function expects {expected_args} arguments, but {recieved_args} was found"
+        ))
+        .into());
     }
 
-    fn debug_info(&self) -> DebugInfo {
-        DebugInfo {
-            name: std::any::type_name::<F>().to_string(),
-        }
-    }
+    rt.stack.clear();
+
+    let ret = f.call(args).map_err(|err| Value::String(err.to_string()))?;
+
+    rt.stack.extend(ret.format());
+
+    Ok(())
 }
 
-impl<C, F, In> LuaFfiMut<C> for FnThunk<F, In>
+pub fn invoke_with_rt<'rt, C, F, Args>(
+    mut rt: RuntimeView<'rt, C>,
+    f: F,
+) -> Result<(), RuntimeError<C>>
 where
-    F: SignatureMut<In>,
-    for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
-    <F as SignatureOnce<In>>::Output: FormatReturns<C>,
+    for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args>,
+    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    for<'a> <F as SignatureWithRt<RuntimeView<'a, C>, Args>>::Output: FormatReturns<C>,
 {
-    fn call_mut(&mut self, mut rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        let args = Self::parse_args(&rt.stack.as_slice().raw)?;
-        rt.stack.clear();
+    use repr::index::StackSlot;
 
-        let ret = self.func.call_mut(args);
+    let (view, args) = rt
+        .stack
+        .raw
+        .extract()
+        .map_err(|err| Value::String(err.to_string()))?;
 
-        rt.stack.extend(ret.format());
+    if !view.is_empty() {
+        let expected_args = rt.stack.len() - view.len();
+        let recieved_args = rt.stack.len();
 
-        Ok(())
+        return Err(Value::String(format!(
+            "function expects {expected_args} arguments, but {recieved_args} was found"
+        ))
+        .into());
     }
+
+    rt.stack.clear();
+
+    let ret = f.call(rt.view(StackSlot(0)).unwrap(), args);
+    let ret: Vec<_> = ret.format().collect();
+
+    rt.stack.extend(ret);
+
+    Ok(())
 }
 
-impl<C, F, In> LuaFfi<C> for FnThunk<F, In>
+pub fn try_invoke_with_rt<'rt, C, F, Args, R, E>(
+    mut rt: RuntimeView<'rt, C>,
+    f: F,
+) -> Result<(), RuntimeError<C>>
 where
-    F: Signature<In>,
-    for<'rt> &'rt [crate::value::Value<C>]: ParseArgs<In>,
-    <F as SignatureOnce<In>>::Output: FormatReturns<C>,
+    for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args, Output = Result<R, E>>,
+    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
+    R: FormatReturns<C>,
+    E: Error,
 {
-    fn call(&self, mut rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        let args = Self::parse_args(&rt.stack.as_slice().raw)?;
-        rt.stack.clear();
+    use repr::index::StackSlot;
 
-        let ret = self.func.call(args);
+    let (view, args) = rt
+        .stack
+        .raw
+        .extract()
+        .map_err(|err| Value::String(err.to_string()))?;
 
-        rt.stack.extend(ret.format());
+    if !view.is_empty() {
+        let expected_args = rt.stack.len() - view.len();
+        let recieved_args = rt.stack.len();
 
-        Ok(())
+        return Err(Value::String(format!(
+            "function expects {expected_args} arguments, but {recieved_args} was found"
+        ))
+        .into());
     }
+
+    rt.stack.clear();
+
+    let ret = f
+        .call(rt.view(StackSlot(0)).unwrap(), args)
+        .map_err(|err| Value::String(err.to_string()))?;
+    let ret: Vec<_> = ret.format().collect();
+
+    rt.stack.extend(ret);
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
