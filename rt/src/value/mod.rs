@@ -5,10 +5,13 @@ pub mod int;
 pub mod nil;
 pub mod table;
 
+use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use enumoid::{EnumMap, Enumoid};
 use repr::literal::Literal;
+
+use crate::runtime::ClosureRef;
 
 pub use boolean::Boolean;
 pub use callable::Callable;
@@ -325,5 +328,71 @@ impl<C> From<Float> for Value<C> {
     fn from(value: Float) -> Self {
         let Float(value) = value;
         Value::Float(value)
+    }
+}
+
+impl<C> From<String> for Value<C> {
+    fn from(value: String) -> Self {
+        Value::String(value)
+    }
+}
+
+impl<C> From<ClosureRef> for Value<C> {
+    fn from(value: ClosureRef) -> Self {
+        Value::Function(value.into())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TypeMismatchError {
+    pub found: Type,
+    pub expected: Type,
+}
+
+impl Display for TypeMismatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let TypeMismatchError { found, expected } = self;
+
+        write!(f, "expected value of type `{expected}`, found `{found}`")
+    }
+}
+
+impl Error for TypeMismatchError {}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TypeMismatchOrError<E> {
+    TypeMismatch(TypeMismatchError),
+    Other(E),
+}
+
+impl<E> Display for TypeMismatchOrError<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeMismatchOrError::TypeMismatch(err) => write!(f, "{err}"),
+            TypeMismatchOrError::Other(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl<E> Error for TypeMismatchOrError<E> where Self: Debug + Display {}
+
+impl<C> TryFrom<Value<C>> for String {
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(t) => Ok(t),
+            value => {
+                let err = TypeMismatchError {
+                    found: value.type_(),
+                    expected: Type::String,
+                };
+
+                Err(err)
+            }
+        }
     }
 }

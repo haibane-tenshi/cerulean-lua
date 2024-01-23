@@ -1,10 +1,13 @@
 use repr::index::StackSlot;
+use std::error::Error;
+use std::fmt::{Debug, Display};
 use std::path::Path;
 
 use crate::chunk_cache::{ChunkCache, KeyedChunkCache};
-use crate::ffi::{IntoLuaFfi, LuaFfi, WithName};
-use crate::runtime::RuntimeView;
-use crate::value::{Callable, Value};
+use crate::error::RuntimeError;
+use crate::ffi::{self, LuaFfi, Maybe, NilOr, Opts, WithName};
+use crate::runtime::{ClosureRef, RuntimeView};
+use crate::value::{Callable, TypeMismatchError, TypeMismatchOrError, Value};
 
 pub fn assert<C>() -> impl LuaFfi<C> + 'static {
     (|rt: RuntimeView<'_, C>| {
@@ -27,10 +30,12 @@ pub fn assert<C>() -> impl LuaFfi<C> + 'static {
 }
 
 pub fn print<C>() -> impl LuaFfi<C> + 'static {
-    (|rt: RuntimeView<'_, C>| {
+    (|mut rt: RuntimeView<'_, C>| {
         for value in rt.stack.iter() {
             print!("{value}");
         }
+
+        rt.stack.clear();
 
         Ok(())
     })
@@ -82,117 +87,191 @@ where
     .with_name("lua_std::pcall")
 }
 
+#[derive(Default)]
+enum Mode {
+    Binary,
+    Text,
+    #[default]
+    BinaryOrText,
+}
+
+#[derive(Debug)]
+struct ModeError;
+
+impl Display for ModeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown loading mode, expected 't', 'b' or 'bt'")
+    }
+}
+
+impl Error for ModeError {}
+
+impl<C> TryFrom<Value<C>> for Mode {
+    type Error = TypeMismatchOrError<ModeError>;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        use crate::value::Type;
+
+        let s = match value {
+            Value::String(s) => s,
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::String,
+                    found: value.type_(),
+                };
+
+                return Err(TypeMismatchOrError::TypeMismatch(err));
+            }
+        };
+
+        let r = match s.as_str() {
+            "t" => Mode::Text,
+            "b" => Mode::Binary,
+            "bt" => Mode::BinaryOrText,
+            _ => return Err(TypeMismatchOrError::Other(ModeError)),
+        };
+
+        Ok(r)
+    }
+}
+
 pub fn load<C>() -> impl LuaFfi<C> + 'static
 where
     C: ChunkCache,
 {
-    (|mut rt: RuntimeView<'_, C>| {
-        use crate::runtime::{ClosureRef, FunctionPtr};
-            use repr::index::FunctionId;
+    use crate::value::Type;
 
-            let source = match rt.stack.get_mut(StackSlot(0)).map(Value::take) {
-                Some(Value::String(s)) => s,
-                Some(value) => {
-                    return Err(Value::String(format!(
-                        "load expects string as the first argument, but it has type {}",
-                        value.type_().to_lua_name()
-                    ))
-                    .into())
-                }
-                None => {
-                    return Err(
-                        Value::String("load expects at least one argument".to_string()).into(),
-                    )
-                }
-            };
+    enum ChunkSource<C> {
+        String(String),
+        Function(Callable<C>),
+    }
 
-            let _name = rt
-                .stack
-                .get_mut(StackSlot(1))
-                .map(|value| match value {
-                    Value::String(s) => Ok(s),
-                    value => Err(Value::String(format!(
-                        "load expects chunk name to be a string, but it has type {}",
-                        value.type_().to_lua_name()
-                    ))),
-                })
-                .transpose()?;
+    #[derive(Debug)]
+    struct ChunkSourceError {
+        found: Type,
+    }
 
-            let _mode = rt.stack.get_mut(StackSlot(1)).map(|value| {
-                    match value.take() {
-                        Value::String(s) => match s.as_str() {
-                            "t" | "b" | "bt" => Ok(s),
-                            _ => Err(Value::String(format!("load: unrecognized mode '{s}' (expected either 't', 'b' or 'bt')")))
-                        }
-                        value => Err(Value::String(format!("load expects string containing opening mode as the second argument, but it has type {}", value.type_().to_lua_name()))),
-                    }
-                }).transpose()?;
+    impl Display for ChunkSourceError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let Self { found } = self;
 
-            let env = rt.stack.get_mut(StackSlot(2)).map(Value::take);
+            write!(
+                f,
+                "expected value of type `{}` or `{}`, found `{found}`",
+                Type::String,
+                Type::Function
+            )
+        }
+    }
 
-            match rt.load(source, None) {
-                Ok(chunk_id) => {
-                    let ptr = FunctionPtr {
-                        chunk_id,
-                        function_id: FunctionId(0),
+    impl Error for ChunkSourceError {}
+
+    impl<C> TryFrom<Value<C>> for ChunkSource<C> {
+        type Error = ChunkSourceError;
+
+        fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+            match value {
+                Value::Function(t) => Ok(ChunkSource::Function(t)),
+                Value::String(t) => Ok(ChunkSource::String(t)),
+                value => {
+                    let err = ChunkSourceError {
+                        found: value.type_(),
                     };
-                    let env = env.unwrap_or_else(|| rt.global_env.clone());
-                    let closure = rt.construct_closure(ptr, [env])?;
-                    let closure_ref = Callable::Lua(ClosureRef::new(closure));
 
-                    rt.stack.clear();
-                    rt.stack.push(Value::Function(closure_ref));
-                }
-                Err(err) => {
-                    let message = rt.into_diagnostic(err.into()).emit_to_string();
-
-                    rt.stack.clear();
-                    rt.stack.push(Value::Nil);
-                    rt.stack.push(Value::String(message));
+                    Err(err)
                 }
             }
+        }
+    }
 
-            Ok(())
-    }).with_name("lua_std::load")
+    let f = |rt: RuntimeView<'_, C>| {
+        ffi::try_invoke_with_rt(
+            rt,
+            |mut rt: RuntimeView<'_, C>,
+             source: ChunkSource<C>,
+             opts: Opts<(String, Mode, Value<C>)>|
+             -> Result<_, RuntimeError<C>> {
+                use crate::runtime::FunctionPtr;
+                use repr::index::FunctionId;
+
+                let (_name, _mode, env) = match opts {
+                    Maybe::None => (None, Default::default(), None),
+                    Maybe::Some((name, Maybe::None)) => {
+                        (name.into_option(), Default::default(), None)
+                    }
+                    Maybe::Some((name, Maybe::Some((mode, env)))) => (
+                        name.into_option(),
+                        mode.into_option().unwrap_or_default(),
+                        env.flatten_into_option(),
+                    ),
+                };
+
+                let source = match source {
+                    ChunkSource::String(s) => s,
+                    ChunkSource::Function(_) => {
+                        return Err(Value::String(
+                            "source functions are not yet supported".to_string(),
+                        )
+                        .into())
+                    }
+                };
+
+                match rt.load(source, None) {
+                    Ok(chunk_id) => {
+                        let ptr = FunctionPtr {
+                            chunk_id,
+                            function_id: FunctionId(0),
+                        };
+                        let env = env.unwrap_or_else(|| rt.global_env.clone());
+                        let closure = rt.construct_closure(ptr, [env])?;
+                        let closure_ref = ClosureRef::new(closure);
+
+                        Ok((NilOr::Some(closure_ref), Maybe::None))
+                    }
+                    Err(err) => {
+                        let message = rt.into_diagnostic(err.into()).emit_to_string();
+
+                        Ok((NilOr::Nil, Maybe::Some(message)))
+                    }
+                }
+            },
+        )
+    };
+
+    f.with_name("lua_std::load")
 }
 
 pub fn loadfile<C>() -> impl LuaFfi<C> + 'static
 where
     C: ChunkCache + KeyedChunkCache<Path>,
 {
-    (|mut rt: RuntimeView<'_, C>| {
-        use crate::runtime::{ClosureRef, FunctionPtr};
+    let f = |rt: RuntimeView<'_, C>| {
+        ffi::try_invoke_with_rt(
+            rt,
+            |mut rt: RuntimeView<'_, C>,
+             opts: Opts<(String, Mode, Value<C>)>|
+             -> Result<_, RuntimeError<C>> {
+                use crate::runtime::FunctionPtr;
                 use repr::index::FunctionId;
 
-                let filename = match rt.stack.get_mut(StackSlot(0)).map(Value::take) {
-                    Some(Value::String(s)) => s,
-                    Some(value) => {
-                        return Err(Value::String(format!(
-                            "loadfile expects file name as the first argument, but it has type {}",
-                            value.type_().to_lua_name()
-                        ))
-                        .into())
+                let (filename, _mode, env) = match opts {
+                    Maybe::None => (None, Default::default(), None),
+                    Maybe::Some((filename, Maybe::None)) => {
+                        (filename.into_option(), Default::default(), None)
                     }
-                    None => {
-                        return Err(Value::String(
-                            "loadfile does not support loading chunks from standard input yet"
-                                .to_string(),
-                        )
-                        .into())
-                    }
+                    Maybe::Some((filename, Maybe::Some((mode, env)))) => (
+                        filename.into_option(),
+                        mode.into_option().unwrap_or_default(),
+                        env.flatten_into_option(),
+                    ),
                 };
 
-                let _mode = rt.stack.get_mut(StackSlot(1)).map(|value| {
-                    match value.take() {
-                        Value::String(s) => match s.as_str() {
-                            "t" | "b" | "bt" => Ok(s),
-                            _ => Err(Value::String(format!("loadfile: unrecognized mode '{s}' (expected either 't', 'b' or 'bt')")))
-                        }
-                        value => Err(Value::String(format!("loadfile expects string containing opening mode as the second argument, but it has type {}", value.type_().to_lua_name()))),
-                    }
-                }).transpose()?;
-
-                let env = rt.stack.get_mut(StackSlot(2)).map(Value::take);
+                let Some(filename) = filename else {
+                    return Err(Value::String(
+                        "loadfile doesn't yet support loading chunks from stdin".to_string(),
+                    )
+                    .into());
+                };
 
                 match rt.load_from_file(&filename) {
                     Ok(chunk_id) => {
@@ -202,20 +281,19 @@ where
                         };
                         let env = env.unwrap_or_else(|| rt.global_env.clone());
                         let closure = rt.construct_closure(ptr, [env])?;
-                        let closure_ref = Callable::Lua(ClosureRef::new(closure));
+                        let closure_ref = ClosureRef::new(closure);
 
-                        rt.stack.clear();
-                        rt.stack.push(Value::Function(closure_ref));
+                        Ok((NilOr::Some(closure_ref), Maybe::None))
                     }
                     Err(err) => {
                         let message = rt.into_diagnostic(err).emit_to_string();
 
-                        rt.stack.clear();
-                        rt.stack.push(Value::Nil);
-                        rt.stack.push(Value::String(message));
+                        Ok((NilOr::Nil, Maybe::Some(message)))
                     }
                 }
+            },
+        )
+    };
 
-                Ok(())
-    }).with_name("lua_std::loadfile")
+    f.with_name("lua_std::loadfile")
 }
