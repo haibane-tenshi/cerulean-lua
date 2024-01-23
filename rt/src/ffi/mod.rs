@@ -1,5 +1,5 @@
 mod arg_adapter;
-mod signature;
+pub mod signature;
 
 use std::error::Error;
 use std::fmt::Debug;
@@ -11,7 +11,7 @@ use crate::runtime::RuntimeView;
 use crate::value::Value;
 
 use arg_adapter::{ExtractArgs, FormatReturns, MissingArg, ParseArgs};
-use signature::{Signature, SignatureWithRt};
+use signature::{Signature, SignatureWithFirst};
 
 pub use arg_adapter::Opts;
 
@@ -117,9 +117,9 @@ pub fn invoke_with_rt<'rt, C, F, Args>(
     f: F,
 ) -> Result<(), RuntimeError<C>>
 where
-    for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args>,
+    for<'a> F: SignatureWithFirst<RuntimeView<'a, C>, Args>,
     for<'a> &'a [crate::value::Value<C>]: ExtractArgs<Args>,
-    for<'a> <F as SignatureWithRt<RuntimeView<'a, C>, Args>>::Output: FormatReturns<C>,
+    for<'a> <F as SignatureWithFirst<RuntimeView<'a, C>, Args>>::Output: FormatReturns<C>,
 {
     use repr::index::StackSlot;
 
@@ -144,7 +144,7 @@ pub fn try_invoke_with_rt<'rt, C, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<C>>
 where
-    for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args, Output = Result<R, RuntimeError<C>>>,
+    for<'a> F: SignatureWithFirst<RuntimeView<'a, C>, Args, Output = Result<R, RuntimeError<C>>>,
     for<'a> &'a [crate::value::Value<C>]: ExtractArgs<Args>,
     R: FormatReturns<C>,
 {
