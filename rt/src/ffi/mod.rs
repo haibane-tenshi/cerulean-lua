@@ -98,15 +98,14 @@ where
     Ok(())
 }
 
-pub fn try_invoke<'rt, C, F, Args, R, E>(
+pub fn try_invoke<'rt, C, F, Args, R>(
     mut rt: RuntimeView<'rt, C>,
     f: F,
 ) -> Result<(), RuntimeError<C>>
 where
-    F: Signature<Args, Output = Result<R, E>>,
+    F: Signature<Args, Output = Result<R, RuntimeError<C>>>,
     for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
     R: FormatReturns<C>,
-    E: Error,
 {
     let (view, args) = rt
         .stack
@@ -126,7 +125,7 @@ where
 
     rt.stack.clear();
 
-    let ret = f.call(args).map_err(|err| Value::String(err.to_string()))?;
+    let ret = f.call(args)?;
 
     rt.stack.extend(ret.format());
 
@@ -170,15 +169,14 @@ where
     Ok(())
 }
 
-pub fn try_invoke_with_rt<'rt, C, F, Args, R, E>(
+pub fn try_invoke_with_rt<'rt, C, F, Args, R>(
     mut rt: RuntimeView<'rt, C>,
     f: F,
 ) -> Result<(), RuntimeError<C>>
 where
-    for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args, Output = Result<R, E>>,
+    for<'a> F: SignatureWithRt<RuntimeView<'a, C>, Args, Output = Result<R, RuntimeError<C>>>,
     for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
     R: FormatReturns<C>,
-    E: Error,
 {
     use repr::index::StackSlot;
 
@@ -200,9 +198,7 @@ where
 
     rt.stack.clear();
 
-    let ret = f
-        .call(rt.view(StackSlot(0)).unwrap(), args)
-        .map_err(|err| Value::String(err.to_string()))?;
+    let ret = f.call(rt.view(StackSlot(0)).unwrap(), args)?;
     let ret: Vec<_> = ret.format().collect();
 
     rt.stack.extend(ret);
