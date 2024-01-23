@@ -11,7 +11,7 @@ use enumoid::{EnumMap, Enumoid};
 use repr::literal::Literal;
 
 pub use boolean::Boolean;
-use callable::Callable;
+pub use callable::Callable;
 pub use float::Float;
 pub use int::Int;
 pub use nil::Nil;
