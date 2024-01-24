@@ -212,10 +212,6 @@ impl<Value> Frame<Value> {
     pub(crate) fn fn_ptr(&self) -> FunctionPtr {
         self.closure.fn_ptr
     }
-
-    pub(crate) fn stack_boundary(&self) -> RawStackSlot {
-        self.stack_start
-    }
 }
 
 impl<C> Frame<Value<C>>
@@ -1159,7 +1155,7 @@ pub(crate) enum Event {
 }
 
 impl Event {
-    pub fn to_str(&self) -> &'static str {
+    pub fn to_str(self) -> &'static str {
         use Event::*;
 
         match self {

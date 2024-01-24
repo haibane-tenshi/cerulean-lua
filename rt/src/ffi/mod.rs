@@ -178,7 +178,7 @@ impl<T> Maybe<T> {
 
 impl<T> Maybe<NilOr<T>> {
     pub fn flatten_into_option(self) -> Option<T> {
-        self.into_option().map(NilOr::into_option).flatten()
+        self.into_option().and_then(NilOr::into_option)
     }
 }
 
@@ -340,8 +340,6 @@ where
     Q: ?Sized + Debug,
 {
     let f = move |mut rt: RuntimeView<'_, C>| {
-        use crate::value::Value;
-
         let chunk_id = rt.chunk_cache().get(script).ok_or(Value::String(format!(
             "chunk with key \"{script:?}\" does not exist"
         )))?;

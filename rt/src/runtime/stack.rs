@@ -12,9 +12,9 @@ use crate::error::opcode::MissingArgsError;
 pub(crate) struct RawStackSlot(usize);
 
 impl RawStackSlot {
-    pub(crate) fn checked_sub(self, other: Self) -> Option<StackSlot> {
-        self.0.checked_sub(other.0).map(StackSlot)
-    }
+    // pub(crate) fn checked_sub(self, other: Self) -> Option<StackSlot> {
+    //     self.0.checked_sub(other.0).map(StackSlot)
+    // }
 }
 
 impl Add<StackSlot> for RawStackSlot {

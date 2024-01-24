@@ -11,8 +11,6 @@ use std::fmt::{Debug, Display};
 use enumoid::{EnumMap, Enumoid};
 use repr::literal::Literal;
 
-use crate::runtime::ClosureRef;
-
 pub use boolean::Boolean;
 pub use callable::Callable;
 pub use float::Float;

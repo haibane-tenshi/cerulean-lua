@@ -74,8 +74,6 @@ impl<C> LuaFfiOnce<C> for RustClosureMut<C> {
 
 impl<C> LuaFfiMut<C> for RustClosureMut<C> {
     fn call_mut(&mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
-        use crate::value::Value;
-
         let mut f = self
             .0
             .callable
