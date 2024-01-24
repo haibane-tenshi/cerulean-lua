@@ -71,6 +71,8 @@ fn main() -> Result<()> {
                 .include(rt::global_env::print())
                 .include(rt::global_env::load())
                 .include(rt::global_env::loadfile())
+                .include(rt::global_env::setmetatable())
+                .include(rt::global_env::getmetatable())
                 .finish();
 
             let chunk_cache =

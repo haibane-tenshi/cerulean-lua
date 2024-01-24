@@ -282,3 +282,59 @@ where
 
     f.with_name("lua_std::loadfile")
 }
+
+pub fn getmetatable<C>() -> impl LuaFfi<C> + 'static {
+    let f = |rt: RuntimeView<'_, C>| {
+        ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, C>, value: Value<C>| {
+            value
+                .metatable(rt.primitive_metatables)
+                .map(|metatable| {
+                    use crate::value::table::KeyValue;
+
+                    let __metatable = metatable
+                        .borrow()
+                        .unwrap()
+                        .get(KeyValue::String("__metatable".to_string()));
+
+                    if __metatable == Value::Nil {
+                        Value::Table(metatable)
+                    } else {
+                        __metatable
+                    }
+                })
+                .unwrap_or_default()
+        })
+    };
+
+    f.with_name("lua_std::getmetatable")
+}
+
+pub fn setmetatable<C>() -> impl LuaFfi<C> + 'static {
+    let f = |rt: RuntimeView<'_, C>| {
+        use crate::value::table::{KeyValue, TableRef};
+
+        ffi::try_invoke(rt, |table: TableRef<C>, metatable: NilOr<TableRef<C>>| {
+            let mut t = table.borrow_mut().unwrap();
+
+            let has_meta = t.metatable().is_some_and(|metatable| {
+                metatable
+                    .borrow()
+                    .unwrap()
+                    .contains_key(&KeyValue::String("__metatable".to_string()))
+            });
+
+            if has_meta {
+                return Err(
+                    Value::String("table's metatable has '__metatable' field".to_string()).into(),
+                );
+            }
+
+            t.set_metatable(metatable.into());
+            drop(t);
+
+            Ok(Value::Table(table))
+        })
+    };
+
+    f.with_name("lua_std::getmetatable")
+}

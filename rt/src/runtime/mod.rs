@@ -94,7 +94,7 @@ pub struct RuntimeView<'rt, C> {
     frames: FrameStackView<'rt, Value<C>>,
     pub stack: StackView<'rt, Value<C>>,
     upvalue_stack: UpvalueStackView<'rt, Value<C>>,
-    primitive_metatables: &'rt mut EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
+    pub primitive_metatables: &'rt mut EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 

@@ -155,3 +155,47 @@ where
 
     Part { chunk_ext, builder }
 }
+
+pub fn setmetatable<C>() -> Part<
+    [Function; 0],
+    [Literal; 0],
+    [ClosureRecipe; 0],
+    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
+> {
+    let chunk_ext = ChunkExtension::empty();
+
+    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+        let f = RustClosureRef::new(crate::lua_std::impl_::setmetatable());
+
+        value.set(
+            KeyValue::String("setmetatable".into()),
+            Value::Function(f.into()),
+        );
+
+        Ok(value)
+    };
+
+    Part { chunk_ext, builder }
+}
+
+pub fn getmetatable<C>() -> Part<
+    [Function; 0],
+    [Literal; 0],
+    [ClosureRecipe; 0],
+    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
+> {
+    let chunk_ext = ChunkExtension::empty();
+
+    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+        let f = RustClosureRef::new(crate::lua_std::impl_::getmetatable());
+
+        value.set(
+            KeyValue::String("getmetatable".into()),
+            Value::Function(f.into()),
+        );
+
+        Ok(value)
+    };
+
+    Part { chunk_ext, builder }
+}
