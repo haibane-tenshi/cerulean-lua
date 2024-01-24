@@ -181,27 +181,27 @@ where
 pub trait SignatureWithFirst<First, Args> {
     type Output;
 
-    fn call(&self, rt: First, args: Args) -> Self::Output;
+    fn call(self, rt: First, args: Args) -> Self::Output;
 }
 
 impl<Fun, First, Ret> SignatureWithFirst<First, ()> for Fun
 where
-    Fun: Fn(First) -> Ret,
+    Fun: FnOnce(First) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, (): ()) -> Self::Output {
+    fn call(self, rt: First, (): ()) -> Self::Output {
         (self)(rt)
     }
 }
 
 impl<Fun, First, Ret, A> SignatureWithFirst<First, (A,)> for Fun
 where
-    Fun: Fn(First, A) -> Ret,
+    Fun: FnOnce(First, A) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A,)) -> Self::Output {
+    fn call(self, rt: First, args: (A,)) -> Self::Output {
         let (a,) = args;
         (self)(rt, a)
     }
@@ -209,11 +209,11 @@ where
 
 impl<Fun, First, Ret, A, B> SignatureWithFirst<First, (A, B)> for Fun
 where
-    Fun: Fn(First, A, B) -> Ret,
+    Fun: FnOnce(First, A, B) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B)) -> Self::Output {
         let (a, b) = args;
         (self)(rt, a, b)
     }
@@ -221,11 +221,11 @@ where
 
 impl<Fun, First, Ret, A, B, C> SignatureWithFirst<First, (A, B, C)> for Fun
 where
-    Fun: Fn(First, A, B, C) -> Ret,
+    Fun: FnOnce(First, A, B, C) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C)) -> Self::Output {
         let (a, b, c) = args;
         (self)(rt, a, b, c)
     }
@@ -233,11 +233,11 @@ where
 
 impl<Fun, First, Ret, A, B, C, D> SignatureWithFirst<First, (A, B, C, D)> for Fun
 where
-    Fun: Fn(First, A, B, C, D) -> Ret,
+    Fun: FnOnce(First, A, B, C, D) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D)) -> Self::Output {
         let (a, b, c, d) = args;
         (self)(rt, a, b, c, d)
     }
@@ -245,11 +245,11 @@ where
 
 impl<Fun, First, Ret, A, B, C, D, E> SignatureWithFirst<First, (A, B, C, D, E)> for Fun
 where
-    Fun: Fn(First, A, B, C, D, E) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E)) -> Self::Output {
         let (a, b, c, d, e) = args;
         (self)(rt, a, b, c, d, e)
     }
@@ -257,11 +257,11 @@ where
 
 impl<Fun, First, Ret, A, B, C, D, E, F> SignatureWithFirst<First, (A, B, C, D, E, F)> for Fun
 where
-    Fun: Fn(First, A, B, C, D, E, F) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E, F) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E, F)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E, F)) -> Self::Output {
         let (a, b, c, d, e, f) = args;
         (self)(rt, a, b, c, d, e, f)
     }
@@ -269,11 +269,11 @@ where
 
 impl<Fun, First, Ret, A, B, C, D, E, F, G> SignatureWithFirst<First, (A, B, C, D, E, F, G)> for Fun
 where
-    Fun: Fn(First, A, B, C, D, E, F, G) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E, F, G) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E, F, G)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E, F, G)) -> Self::Output {
         let (a, b, c, d, e, f, g) = args;
         (self)(rt, a, b, c, d, e, f, g)
     }
@@ -282,11 +282,11 @@ where
 impl<Fun, First, Ret, A, B, C, D, E, F, G, H> SignatureWithFirst<First, (A, B, C, D, E, F, G, H)>
     for Fun
 where
-    Fun: Fn(First, A, B, C, D, E, F, G, H) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E, F, G, H) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E, F, G, H)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E, F, G, H)) -> Self::Output {
         let (a, b, c, d, e, f, g, h) = args;
         (self)(rt, a, b, c, d, e, f, g, h)
     }
@@ -295,11 +295,11 @@ where
 impl<Fun, First, Ret, A, B, C, D, E, F, G, H, I>
     SignatureWithFirst<First, (A, B, C, D, E, F, G, H, I)> for Fun
 where
-    Fun: Fn(First, A, B, C, D, E, F, G, H, I) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E, F, G, H, I) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E, F, G, H, I)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E, F, G, H, I)) -> Self::Output {
         let (a, b, c, d, e, f, g, h, i) = args;
         (self)(rt, a, b, c, d, e, f, g, h, i)
     }
@@ -308,11 +308,11 @@ where
 impl<Fun, First, Ret, A, B, C, D, E, F, G, H, I, J>
     SignatureWithFirst<First, (A, B, C, D, E, F, G, H, I, J)> for Fun
 where
-    Fun: Fn(First, A, B, C, D, E, F, G, H, I, J) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E, F, G, H, I, J) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E, F, G, H, I, J)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E, F, G, H, I, J)) -> Self::Output {
         let (a, b, c, d, e, f, g, h, i, j) = args;
         (self)(rt, a, b, c, d, e, f, g, h, i, j)
     }
@@ -321,11 +321,11 @@ where
 impl<Fun, First, Ret, A, B, C, D, E, F, G, H, I, J, K>
     SignatureWithFirst<First, (A, B, C, D, E, F, G, H, I, J, K)> for Fun
 where
-    Fun: Fn(First, A, B, C, D, E, F, G, H, I, J, K) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E, F, G, H, I, J, K) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E, F, G, H, I, J, K)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E, F, G, H, I, J, K)) -> Self::Output {
         let (a, b, c, d, e, f, g, h, i, j, k) = args;
         (self)(rt, a, b, c, d, e, f, g, h, i, j, k)
     }
@@ -334,11 +334,11 @@ where
 impl<Fun, First, Ret, A, B, C, D, E, F, G, H, I, J, K, L>
     SignatureWithFirst<First, (A, B, C, D, E, F, G, H, I, J, K, L)> for Fun
 where
-    Fun: Fn(First, A, B, C, D, E, F, G, H, I, J, K, L) -> Ret,
+    Fun: FnOnce(First, A, B, C, D, E, F, G, H, I, J, K, L) -> Ret,
 {
     type Output = Ret;
 
-    fn call(&self, rt: First, args: (A, B, C, D, E, F, G, H, I, J, K, L)) -> Self::Output {
+    fn call(self, rt: First, args: (A, B, C, D, E, F, G, H, I, J, K, L)) -> Self::Output {
         let (a, b, c, d, e, f, g, h, i, j, k, l) = args;
         (self)(rt, a, b, c, d, e, f, g, h, i, j, k, l)
     }
