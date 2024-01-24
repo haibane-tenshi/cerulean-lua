@@ -7,7 +7,7 @@ use std::rc::Rc;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::Value;
+use super::{TypeMismatchError, Value};
 
 pub struct Table<C> {
     data: HashMap<KeyValue<C>, Value<C>>,
@@ -246,5 +246,31 @@ impl<C> Hash for TableRef<C> {
 impl<C> From<Table<C>> for TableRef<C> {
     fn from(value: Table<C>) -> Self {
         TableRef(Rc::new(RefCell::new(value)))
+    }
+}
+
+impl<C> TryFrom<Value<C>> for TableRef<C> {
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        use super::Type;
+
+        match value {
+            Value::Table(value) => Ok(value),
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::Table,
+                    found: value.type_(),
+                };
+
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<C> From<TableRef<C>> for Value<C> {
+    fn from(value: TableRef<C>) -> Self {
+        Value::Table(value)
     }
 }

@@ -5,7 +5,7 @@ use std::ops::{
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
-use super::{Float, Type};
+use super::{Float, Type, TypeMismatchError, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int(pub i64);
@@ -291,5 +291,30 @@ impl Shr for Int {
 impl ShrAssign for Int {
     fn shr_assign(&mut self, rhs: Self) {
         *self = *self >> rhs;
+    }
+}
+
+impl<C> TryFrom<Value<C>> for Int {
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Int(value) => Ok(Int(value)),
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::Int,
+                    found: value.type_(),
+                };
+
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<C> From<Int> for Value<C> {
+    fn from(value: Int) -> Self {
+        let Int(value) = value;
+        Value::Int(value)
     }
 }

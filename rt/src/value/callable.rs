@@ -7,6 +7,8 @@ use crate::chunk_cache::ChunkCache;
 use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
 
+use super::{TypeMismatchError, Value};
+
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
 pub struct RustClosureMut<C>(Rc<Inner<RefCell<dyn LuaFfiMut<C> + 'static>>>);
@@ -219,6 +221,30 @@ impl<C> From<RustClosureRef<C>> for RustCallable<C> {
     }
 }
 
+impl<C> From<LuaClosureRef> for Value<C> {
+    fn from(value: LuaClosureRef) -> Self {
+        Value::Function(value.into())
+    }
+}
+
+impl<C> From<RustCallable<C>> for Value<C> {
+    fn from(value: RustCallable<C>) -> Self {
+        Value::Function(value.into())
+    }
+}
+
+impl<C> From<RustClosureRef<C>> for Value<C> {
+    fn from(value: RustClosureRef<C>) -> Self {
+        Value::Function(value.into())
+    }
+}
+
+impl<C> From<RustClosureMut<C>> for Value<C> {
+    fn from(value: RustClosureMut<C>) -> Self {
+        Value::Function(value.into())
+    }
+}
+
 pub enum Callable<C> {
     Lua(LuaClosureRef),
     Rust(RustCallable<C>),
@@ -306,5 +332,31 @@ impl<C> From<RustClosureMut<C>> for Callable<C> {
 impl<C> From<RustClosureRef<C>> for Callable<C> {
     fn from(value: RustClosureRef<C>) -> Self {
         Self::Rust(value.into())
+    }
+}
+
+impl<C> TryFrom<Value<C>> for Callable<C> {
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        use super::Type;
+
+        match value {
+            Value::Function(value) => Ok(value),
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::Function,
+                    found: value.type_(),
+                };
+
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<C> From<Callable<C>> for Value<C> {
+    fn from(value: Callable<C>) -> Self {
+        Value::Function(value)
     }
 }

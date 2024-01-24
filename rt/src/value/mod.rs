@@ -304,42 +304,27 @@ impl<C> From<Literal> for Value<C> {
     }
 }
 
-impl<C> From<Nil> for Value<C> {
-    fn from(_value: Nil) -> Self {
-        Value::Nil
-    }
-}
-
-impl<C> From<Boolean> for Value<C> {
-    fn from(value: Boolean) -> Self {
-        let Boolean(value) = value;
-        Value::Bool(value)
-    }
-}
-
-impl<C> From<Int> for Value<C> {
-    fn from(value: Int) -> Self {
-        let Int(value) = value;
-        Value::Int(value)
-    }
-}
-
-impl<C> From<Float> for Value<C> {
-    fn from(value: Float) -> Self {
-        let Float(value) = value;
-        Value::Float(value)
-    }
-}
-
 impl<C> From<String> for Value<C> {
     fn from(value: String) -> Self {
         Value::String(value)
     }
 }
 
-impl<C> From<ClosureRef> for Value<C> {
-    fn from(value: ClosureRef) -> Self {
-        Value::Function(value.into())
+impl<C> TryFrom<Value<C>> for String {
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(value) => Ok(value),
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::String,
+                    found: value.type_(),
+                };
+
+                Err(err)
+            }
+        }
     }
 }
 
@@ -378,21 +363,3 @@ where
 }
 
 impl<E> Error for TypeMismatchOrError<E> where Self: Debug + Display {}
-
-impl<C> TryFrom<Value<C>> for String {
-    type Error = TypeMismatchError;
-
-    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(t) => Ok(t),
-            value => {
-                let err = TypeMismatchError {
-                    found: value.type_(),
-                    expected: Type::String,
-                };
-
-                Err(err)
-            }
-        }
-    }
-}

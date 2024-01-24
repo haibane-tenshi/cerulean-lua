@@ -4,7 +4,7 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 
-use super::{Int, Type};
+use super::{Int, Type, TypeMismatchError, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Float(pub f64);
@@ -165,5 +165,30 @@ impl Rem for Float {
 impl RemAssign for Float {
     fn rem_assign(&mut self, rhs: Self) {
         *self = *self % rhs;
+    }
+}
+
+impl<C> TryFrom<Value<C>> for Float {
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Float(value) => Ok(Float(value)),
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::Float,
+                    found: value.type_(),
+                };
+
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<C> From<Float> for Value<C> {
+    fn from(value: Float) -> Self {
+        let Float(value) = value;
+        Value::Float(value)
     }
 }
