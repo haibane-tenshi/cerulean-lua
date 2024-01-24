@@ -242,3 +242,9 @@ impl<C> Hash for TableRef<C> {
         Rc::as_ptr(&self.0).hash(state)
     }
 }
+
+impl<C> From<Table<C>> for TableRef<C> {
+    fn from(value: Table<C>) -> Self {
+        TableRef(Rc::new(RefCell::new(value)))
+    }
+}

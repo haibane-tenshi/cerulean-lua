@@ -66,11 +66,11 @@ fn main() -> Result<()> {
             use rt::value::Value;
 
             let (env_chunk, builder) = rt::global_env::empty()
-                .add(rt::global_env::assert())
-                .add(rt::global_env::pcall())
-                .add(rt::global_env::print())
-                .add(rt::global_env::load())
-                .add(rt::global_env::loadfile())
+                .include(rt::global_env::assert())
+                .include(rt::global_env::pcall())
+                .include(rt::global_env::print())
+                .include(rt::global_env::load())
+                .include(rt::global_env::loadfile())
                 .finish();
 
             let chunk_cache =
@@ -78,8 +78,8 @@ fn main() -> Result<()> {
             let mut runtime = Runtime::new(chunk_cache, Value::Nil, DialectBuilder::lua_5_4());
 
             let run = || {
-                let global_env = builder(runtime.view(), ChunkId(0))?;
-                runtime.global_env = global_env;
+                let global_env = builder(runtime.view(), ChunkId(0), ())?;
+                runtime.global_env = Value::Table(global_env.into());
 
                 runtime.view().invoke(rt::ffi::call_file(&path))
             };
