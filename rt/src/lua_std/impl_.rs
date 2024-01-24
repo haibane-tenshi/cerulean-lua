@@ -324,9 +324,10 @@ pub fn setmetatable<C>() -> impl LuaFfi<C> + 'static {
             });
 
             if has_meta {
-                return Err(
-                    Value::String("table's metatable has '__metatable' field".to_string()).into(),
-                );
+                return Err(Value::String(
+                    "table already has metatable with '__metatable' field".to_string(),
+                )
+                .into());
             }
 
             t.set_metatable(metatable.into());
