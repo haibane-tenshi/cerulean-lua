@@ -44,3 +44,66 @@ impl<C> From<Nil> for Value<C> {
         Value::Nil
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum NilOr<T> {
+    #[default]
+    Nil,
+    Some(T),
+}
+
+impl<T> NilOr<T> {
+    pub fn into_option(self) -> Option<T> {
+        self.into()
+    }
+}
+
+impl<T> From<Option<T>> for NilOr<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(t) => NilOr::Some(t),
+            None => NilOr::Nil,
+        }
+    }
+}
+
+impl<T> From<NilOr<T>> for Option<T> {
+    fn from(value: NilOr<T>) -> Self {
+        match value {
+            NilOr::Nil => None,
+            NilOr::Some(t) => Some(t),
+        }
+    }
+}
+
+impl<T, C> TryFrom<Value<C>> for NilOr<T>
+where
+    T: TryFrom<Value<C>>,
+{
+    type Error = <T as TryFrom<Value<C>>>::Error;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Nil => Ok(Self::Nil),
+            value => Ok(Self::Some(value.try_into()?)),
+        }
+    }
+}
+
+impl<T> From<Nil> for NilOr<T> {
+    fn from(Nil: Nil) -> Self {
+        NilOr::Nil
+    }
+}
+
+impl<T, C> From<NilOr<T>> for Value<C>
+where
+    T: Into<Value<C>>,
+{
+    fn from(value: NilOr<T>) -> Self {
+        match value {
+            NilOr::Nil => Value::Nil,
+            NilOr::Some(value) => value.into(),
+        }
+    }
+}

@@ -15,7 +15,7 @@ pub use boolean::Boolean;
 pub use callable::Callable;
 pub use float::Float;
 pub use int::Int;
-pub use nil::Nil;
+pub use nil::{Nil, NilOr};
 pub use table::{Table, TableRef};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

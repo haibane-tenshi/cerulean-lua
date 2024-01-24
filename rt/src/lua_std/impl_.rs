@@ -5,9 +5,9 @@ use std::path::Path;
 
 use crate::chunk_cache::{ChunkCache, KeyedChunkCache};
 use crate::error::RuntimeError;
-use crate::ffi::{self, LuaFfi, Maybe, NilOr, Opts, WithName};
+use crate::ffi::{self, LuaFfi, Maybe, Opts, WithName};
 use crate::runtime::{ClosureRef, RuntimeView};
-use crate::value::{Callable, TypeMismatchError, TypeMismatchOrError, Value};
+use crate::value::{Callable, NilOr, TypeMismatchError, TypeMismatchOrError, Value};
 
 pub fn assert<C>() -> impl LuaFfi<C> + 'static {
     (|rt: RuntimeView<'_, C>| {
