@@ -109,14 +109,14 @@ where
     Ok(())
 }
 
-pub fn invoke_with_rt<'rt, C, F, Args>(
+pub fn invoke_with_rt<'rt, C, F, Args, R>(
     mut rt: RuntimeView<'rt, C>,
     f: F,
 ) -> Result<(), RuntimeError<C>>
 where
-    for<'a> F: SignatureWithFirst<RuntimeView<'a, C>, Args>,
+    for<'a> F: SignatureWithFirst<RuntimeView<'a, C>, Args, Output = R>,
     for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
-    for<'a> <F as SignatureWithFirst<RuntimeView<'a, C>, Args>>::Output: FormatReturns<C>,
+    R: FormatReturns<C>,
 {
     use repr::index::StackSlot;
 
