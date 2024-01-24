@@ -191,20 +191,13 @@ where
              source: ChunkSource<C>,
              opts: Opts<(String, Mode, Value<C>)>|
              -> Result<_, RuntimeError<C>> {
+                use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
                 use repr::index::FunctionId;
 
-                let (_name, _mode, env) = match opts {
-                    Maybe::None => (None, Default::default(), None),
-                    Maybe::Some((name, Maybe::None)) => {
-                        (name.into_option(), Default::default(), None)
-                    }
-                    Maybe::Some((name, Maybe::Some((mode, env)))) => (
-                        name.into_option(),
-                        mode.into_option().unwrap_or_default(),
-                        env.flatten_into_option(),
-                    ),
-                };
+                let (_name, mode, env) = opts.split();
+
+                let _mode = mode.unwrap_or_default();
 
                 let source = match source {
                     ChunkSource::String(s) => s,
@@ -251,20 +244,12 @@ where
             |mut rt: RuntimeView<'_, C>,
              opts: Opts<(String, Mode, Value<C>)>|
              -> Result<_, RuntimeError<C>> {
+                use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
                 use repr::index::FunctionId;
 
-                let (filename, _mode, env) = match opts {
-                    Maybe::None => (None, Default::default(), None),
-                    Maybe::Some((filename, Maybe::None)) => {
-                        (filename.into_option(), Default::default(), None)
-                    }
-                    Maybe::Some((filename, Maybe::Some((mode, env)))) => (
-                        filename.into_option(),
-                        mode.into_option().unwrap_or_default(),
-                        env.flatten_into_option(),
-                    ),
-                };
+                let (filename, mode, env) = opts.split();
+                let _mode = mode.unwrap_or_default();
 
                 let Some(filename) = filename else {
                     return Err(Value::String(
