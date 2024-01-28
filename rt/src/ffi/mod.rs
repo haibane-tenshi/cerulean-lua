@@ -1,5 +1,6 @@
 pub mod arg_parser;
 pub mod signature;
+pub mod tuple;
 
 use std::fmt::Debug;
 use std::path::Path;
@@ -11,6 +12,7 @@ use crate::value::{NilOr, Value};
 
 use arg_parser::{FormatReturns, ParseArgs};
 use signature::{Signature, SignatureWithFirst};
+use tuple::Tuple;
 
 pub trait LuaFfiOnce<C> {
     fn call_once(self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
@@ -173,6 +175,10 @@ pub enum Maybe<T> {
 impl<T> Maybe<T> {
     pub fn into_option(self) -> Option<T> {
         self.into()
+    }
+
+    pub fn take(&mut self) -> Self {
+        std::mem::take(self)
     }
 }
 
@@ -737,7 +743,7 @@ mod sealed {
 pub type Opts<T> = <T as OptsImpl>::Output;
 
 #[doc(hidden)]
-pub trait OptsImpl: sealed2::Sealed {
+pub trait OptsImpl: Tuple {
     type Output;
 }
 
@@ -791,34 +797,4 @@ impl<A, B, C, D, E, F, G, H, I, J, K> OptsImpl for (A, B, C, D, E, F, G, H, I, J
 
 impl<A, B, C, D, E, F, G, H, I, J, K, L> OptsImpl for (A, B, C, D, E, F, G, H, I, J, K, L) {
     type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J, K, L)>)>;
-}
-
-mod sealed2 {
-    pub trait Sealed {}
-
-    impl Sealed for () {}
-
-    impl<A> Sealed for (A,) {}
-
-    impl<A, B> Sealed for (A, B) {}
-
-    impl<A, B, C> Sealed for (A, B, C) {}
-
-    impl<A, B, C, D> Sealed for (A, B, C, D) {}
-
-    impl<A, B, C, D, E> Sealed for (A, B, C, D, E) {}
-
-    impl<A, B, C, D, E, F> Sealed for (A, B, C, D, E, F) {}
-
-    impl<A, B, C, D, E, F, G> Sealed for (A, B, C, D, E, F, G) {}
-
-    impl<A, B, C, D, E, F, G, H> Sealed for (A, B, C, D, E, F, G, H) {}
-
-    impl<A, B, C, D, E, F, G, H, I> Sealed for (A, B, C, D, E, F, G, H, I) {}
-
-    impl<A, B, C, D, E, F, G, H, I, J> Sealed for (A, B, C, D, E, F, G, H, I, J) {}
-
-    impl<A, B, C, D, E, F, G, H, I, J, K> Sealed for (A, B, C, D, E, F, G, H, I, J, K) {}
-
-    impl<A, B, C, D, E, F, G, H, I, J, K, L> Sealed for (A, B, C, D, E, F, G, H, I, J, K, L) {}
 }
