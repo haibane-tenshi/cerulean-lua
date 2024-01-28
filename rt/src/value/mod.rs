@@ -4,6 +4,7 @@ pub mod float;
 pub mod int;
 pub mod nil;
 pub mod table;
+pub mod userdata;
 
 use std::error::Error;
 use std::fmt::{Debug, Display};
