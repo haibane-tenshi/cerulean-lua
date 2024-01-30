@@ -1,10 +1,12 @@
 use std::cell::{Cell, RefCell};
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::error::RuntimeError;
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
-use crate::value::TableRef;
+use crate::value::{TableRef, TypeMismatchError, Value};
 
 pub trait Userdata<C> {
     fn method(
@@ -321,5 +323,60 @@ impl<C> Userdata<C> for UserdataRef<C> {
         rt: RuntimeView<'_, C>,
     ) -> Option<Result<(), RuntimeError<C>>> {
         self.0.value.method(scope, name, rt)
+    }
+}
+
+impl<C> Debug for UserdataRef<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserdataRef")
+            .field("value", &"<omitted>")
+            .field("metatable", &self.0.metatable)
+            .finish()
+    }
+}
+
+impl<C> Clone for UserdataRef<C> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<C> PartialEq for UserdataRef<C> {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl<C> Eq for UserdataRef<C> {}
+
+impl<C> Hash for UserdataRef<C> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.0).hash(state);
+    }
+}
+
+impl<C> From<UserdataRef<C>> for Value<C> {
+    fn from(value: UserdataRef<C>) -> Self {
+        Value::Userdata(value)
+    }
+}
+
+impl<C> TryFrom<Value<C>> for UserdataRef<C> {
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+        use super::Type;
+
+        match value {
+            Value::Userdata(t) => Ok(t),
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::Userdata,
+                    found: value.type_(),
+                };
+
+                Err(err)
+            }
+        }
     }
 }

@@ -7,7 +7,7 @@ use std::rc::Rc;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::{TypeMismatchError, Value};
+use super::{TypeMismatchError, UserdataRef, Value};
 
 pub struct Table<C> {
     data: HashMap<KeyValue<C>, Value<C>>,
@@ -85,6 +85,7 @@ pub enum KeyValue<C> {
     String(String),
     Function(Callable<C>),
     Table(TableRef<C>),
+    Userdata(UserdataRef<C>),
 }
 
 impl<C> Debug for KeyValue<C> {
@@ -96,6 +97,7 @@ impl<C> Debug for KeyValue<C> {
             Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
             Self::Function(arg0) => f.debug_tuple("Function").field(arg0).finish(),
             Self::Table(arg0) => f.debug_tuple("Table").field(arg0).finish(),
+            Self::Userdata(arg0) => f.debug_tuple("Userdata").field(arg0).finish(),
         }
     }
 }
@@ -111,6 +113,7 @@ impl<C> Clone for KeyValue<C> {
             Self::String(arg0) => Self::String(arg0.clone()),
             Self::Function(arg0) => Self::Function(arg0.clone()),
             Self::Table(arg0) => Self::Table(arg0.clone()),
+            Self::Userdata(arg0) => Self::Userdata(arg0.clone()),
         }
     }
 }
@@ -124,6 +127,7 @@ impl<C> PartialEq for KeyValue<C> {
             (Self::String(l0), Self::String(r0)) => l0 == r0,
             (Self::Function(l0), Self::Function(r0)) => l0 == r0,
             (Self::Table(l0), Self::Table(r0)) => l0 == r0,
+            (Self::Userdata(l0), Self::Userdata(r0)) => l0 == r0,
             _ => false,
         }
     }
@@ -142,6 +146,7 @@ impl<C> Hash for KeyValue<C> {
             Self::String(t) => t.hash(state),
             Self::Function(t) => t.hash(state),
             Self::Table(t) => t.hash(state),
+            Self::Userdata(t) => t.hash(state),
         }
     }
 }
@@ -175,6 +180,7 @@ impl<C> TryFrom<Value<C>> for KeyValue<C> {
             Value::String(t) => KeyValue::String(t),
             Value::Function(t) => KeyValue::Function(t),
             Value::Table(t) => KeyValue::Table(t),
+            Value::Userdata(t) => KeyValue::Userdata(t),
             Value::Nil => return Err(InvalidTableKeyError::Nil),
         };
 
@@ -191,6 +197,7 @@ impl<C> From<KeyValue<C>> for Value<C> {
             KeyValue::Function(t) => Value::Function(t),
             KeyValue::String(t) => Value::String(t),
             KeyValue::Table(t) => Value::Table(t),
+            KeyValue::Userdata(t) => Value::Userdata(t),
         }
     }
 }

@@ -18,6 +18,7 @@ pub use float::Float;
 pub use int::Int;
 pub use nil::{Nil, NilOr};
 pub use table::{Table, TableRef};
+pub use userdata::UserdataRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
@@ -28,6 +29,7 @@ pub enum Type {
     String,
     Function,
     Table,
+    Userdata,
 }
 
 impl Type {
@@ -52,6 +54,7 @@ impl Display for Type {
             Type::String => "string",
             Type::Function => "function",
             Type::Table => "table",
+            Type::Userdata => "userdata",
         };
 
         write!(f, "{s}")
@@ -79,6 +82,7 @@ pub enum LuaType {
     String,
     Function,
     Table,
+    Userdata,
 }
 
 impl LuaType {
@@ -92,6 +96,7 @@ impl LuaType {
             String => "string",
             Function => "function",
             Table => "table",
+            Userdata => "userdata",
         }
     }
 }
@@ -112,6 +117,7 @@ impl From<Type> for LuaType {
             Type::String => LuaType::String,
             Type::Function => LuaType::Function,
             Type::Table => LuaType::Table,
+            Type::Userdata => LuaType::Userdata,
         }
     }
 }
@@ -174,6 +180,7 @@ pub enum Value<C> {
     String(String),
     Function(Callable<C>),
     Table(TableRef<C>),
+    Userdata(UserdataRef<C>),
 }
 
 impl<C> Value<C> {
@@ -190,6 +197,7 @@ impl<C> Value<C> {
             Value::String(_) => Type::String,
             Value::Function(_) => Type::Function,
             Value::Table(_) => Type::Table,
+            Value::Userdata(_) => Type::Userdata,
         }
     }
 
@@ -209,6 +217,7 @@ impl<C> Value<C> {
             Value::String(_) => primitive_metatables[TypeWithoutMetatable::String].clone(),
             Value::Function(_) => primitive_metatables[TypeWithoutMetatable::Function].clone(),
             Value::Table(t) => t.borrow().unwrap().metatable(),
+            Value::Userdata(t) => t.metatable(),
         }
     }
 }
@@ -223,6 +232,7 @@ impl<C> Debug for Value<C> {
             Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
             Self::Function(arg0) => f.debug_tuple("Function").field(arg0).finish(),
             Self::Table(arg0) => f.debug_tuple("Table").field(arg0).finish(),
+            Self::Userdata(arg0) => f.debug_tuple("Userdata").field(arg0).finish(),
         }
     }
 }
@@ -239,6 +249,7 @@ impl<C> Clone for Value<C> {
             Self::String(arg0) => Self::String(arg0.clone()),
             Self::Function(arg0) => Self::Function(arg0.clone()),
             Self::Table(arg0) => Self::Table(arg0.clone()),
+            Self::Userdata(arg0) => Self::Userdata(arg0.clone()),
         }
     }
 }
@@ -252,6 +263,7 @@ impl<C> PartialEq for Value<C> {
             (Self::String(l0), Self::String(r0)) => l0 == r0,
             (Self::Function(l0), Self::Function(r0)) => l0 == r0,
             (Self::Table(l0), Self::Table(r0)) => l0 == r0,
+            (Self::Userdata(l0), Self::Userdata(r0)) => l0 == r0,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -287,6 +299,7 @@ impl<C> Display for Value<C> {
             }
             Function(v) => write!(f, "{v:?}"),
             Table(v) => write!(f, "{{table <{v:?}>}}"),
+            Userdata(v) => write!(f, "{{userdata <{v:?}>}}"),
         }
     }
 }
