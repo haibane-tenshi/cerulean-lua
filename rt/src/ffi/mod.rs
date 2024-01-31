@@ -274,7 +274,7 @@ where
             function_id: FunctionId(0),
         };
 
-        let closure = rt.construct_closure(ptr, [rt.global_env.clone()])?;
+        let closure = rt.construct_closure(ptr, [rt.core.global_env.clone()])?;
         let closure = ClosureRef::new(closure);
 
         rt.enter(closure, StackSlot(0))

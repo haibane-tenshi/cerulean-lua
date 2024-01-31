@@ -61,7 +61,7 @@ fn main() -> Result<()> {
             use rt::chunk_cache::path::PathCache;
             use rt::chunk_cache::single::SingleChunk;
             use rt::chunk_cache::ChunkId;
-            use rt::runtime::{DialectBuilder, Runtime};
+            use rt::runtime::{Core, DialectBuilder, Runtime};
             // use rt::value::table::TableRef;
             use rt::value::Value;
 
@@ -77,11 +77,18 @@ fn main() -> Result<()> {
 
             let chunk_cache =
                 MainCache::new(SingleChunk::new(env_chunk, None, None), PathCache::new());
-            let mut runtime = Runtime::new(chunk_cache, Value::Nil, DialectBuilder::lua_5_4());
+
+            let core = Core {
+                global_env: Value::Nil,
+                dialect: DialectBuilder::lua_5_4(),
+                primitive_metatables: Default::default(),
+            };
+
+            let mut runtime = Runtime::new(chunk_cache, core);
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0), ())?;
-                runtime.global_env = Value::Table(global_env.into());
+                runtime.core.global_env = Value::Table(global_env.into());
 
                 runtime.view().invoke(rt::ffi::call_file(&path))
             };

@@ -27,14 +27,28 @@ use upvalue_stack::{UpvalueStack, UpvalueStackView};
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, ClosureRef, FunctionPtr};
 
-pub struct Runtime<C> {
-    pub chunk_cache: C,
+pub struct Core<C> {
     pub global_env: Value<C>,
-    dialect: DialectBuilder,
+    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
+    pub dialect: DialectBuilder,
+}
+
+impl<C> Debug for Core<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Core")
+            .field("global_env", &self.global_env)
+            .field("primitive_metatables", &self.primitive_metatables)
+            .field("dialect", &self.dialect)
+            .finish()
+    }
+}
+
+pub struct Runtime<C> {
+    pub core: Core<C>,
+    pub chunk_cache: C,
     frames: FrameStack<Value<C>>,
     stack: Stack<Value<C>>,
     upvalue_stack: UpvalueStack<Value<C>>,
-    primitive_metatables: EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
@@ -42,30 +56,26 @@ impl<C> Runtime<C>
 where
     C: Debug,
 {
-    pub fn new(chunk_cache: C, global_env: Value<C>, dialect: DialectBuilder) -> Self {
+    pub fn new(chunk_cache: C, core: Core<C>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         Runtime {
+            core,
             chunk_cache,
-            global_env,
-            dialect,
             frames: Default::default(),
             stack: Default::default(),
             upvalue_stack: Default::default(),
-            primitive_metatables: Default::default(),
             rust_backtrace_stack: Default::default(),
         }
     }
 
     pub fn view(&mut self) -> RuntimeView<C> {
         let Runtime {
+            core,
             chunk_cache,
-            global_env,
-            dialect,
             frames,
             stack,
             upvalue_stack,
-            primitive_metatables,
             rust_backtrace_stack,
         } = self;
 
@@ -75,26 +85,22 @@ where
         let rust_backtrace_stack = rust_backtrace_stack.view();
 
         RuntimeView {
+            core,
             chunk_cache,
-            global_env,
-            dialect: *dialect,
             frames,
             stack,
             upvalue_stack,
-            primitive_metatables,
             rust_backtrace_stack,
         }
     }
 }
 
 pub struct RuntimeView<'rt, C> {
-    chunk_cache: &'rt mut C,
-    pub global_env: &'rt Value<C>,
-    dialect: DialectBuilder,
+    pub core: &'rt mut Core<C>,
+    pub chunk_cache: &'rt mut C,
     frames: FrameStackView<'rt, Value<C>>,
     pub stack: StackView<'rt, Value<C>>,
     upvalue_stack: UpvalueStackView<'rt, Value<C>>,
-    pub primitive_metatables: &'rt mut EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
@@ -108,13 +114,11 @@ impl<'rt, C> RuntimeView<'rt, C> {
         use crate::error::OutOfBoundsStack;
 
         let RuntimeView {
+            core,
             chunk_cache,
-            global_env,
-            dialect,
             frames,
             stack,
             upvalue_stack,
-            primitive_metatables,
             rust_backtrace_stack,
         } = self;
 
@@ -124,13 +128,11 @@ impl<'rt, C> RuntimeView<'rt, C> {
         let rust_backtrace_stack = rust_backtrace_stack.view_over();
 
         let r = RuntimeView {
+            core,
             chunk_cache: *chunk_cache,
-            global_env,
-            dialect: *dialect,
             frames,
             stack,
             upvalue_stack,
-            primitive_metatables,
             rust_backtrace_stack,
         };
 

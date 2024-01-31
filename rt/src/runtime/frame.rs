@@ -3,7 +3,6 @@ use std::ops::ControlFlow;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use enumoid::EnumMap;
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
@@ -14,7 +13,7 @@ use repr::tivec::{TiSlice, TiVec};
 use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackView};
 use super::upvalue_stack::{RawUpvalueSlot, UpvalueStackView};
-use super::{DialectBuilder, RuntimeView};
+use super::{Core, RuntimeView};
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::opcode::{
@@ -22,7 +21,7 @@ use crate::error::opcode::{
 };
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
-use crate::value::{TableRef, TypeWithoutMetatable, Value};
+use crate::value::{TableRef, Value};
 
 pub(crate) enum ChangeFrame<C> {
     Return(StackSlot),
@@ -221,15 +220,14 @@ where
     pub(crate) fn activate<'a>(
         self,
         rt: &'a mut RuntimeView<C>,
-    ) -> Result<ActiveFrame<'a, Value<C>, TableRef<C>>, RuntimeError<C>> {
+    ) -> Result<ActiveFrame<'a, Value<C>, C>, RuntimeError<C>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let RuntimeView {
+            core,
             chunk_cache,
             stack,
             upvalue_stack,
-            primitive_metatables,
-            dialect,
             ..
         } = rt;
 
@@ -264,6 +262,7 @@ where
         tracing::trace!(stack = stack.to_pretty_string(), "activated Lua frame");
 
         let r = ActiveFrame {
+            core,
             closure,
             chunk,
             constants,
@@ -272,8 +271,6 @@ where
             stack,
             upvalue_stack,
             register_variadic,
-            primitive_metatables,
-            dialect: *dialect,
             event,
         };
 
@@ -337,7 +334,8 @@ where
 }
 
 #[derive(Debug)]
-pub struct ActiveFrame<'rt, Value, TableRef> {
+pub struct ActiveFrame<'rt, Value, C> {
+    core: &'rt Core<C>,
     closure: ClosureRef,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
@@ -346,8 +344,6 @@ pub struct ActiveFrame<'rt, Value, TableRef> {
     stack: StackView<'rt, Value>,
     upvalue_stack: UpvalueStackView<'rt, Value>,
     register_variadic: Vec<Value>,
-    primitive_metatables: &'rt EnumMap<TypeWithoutMetatable, Option<TableRef>>,
-    dialect: DialectBuilder,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -355,7 +351,7 @@ pub struct ActiveFrame<'rt, Value, TableRef> {
     event: Option<Event>,
 }
 
-impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
+impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
     pub fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
         self.constants.get(index).ok_or(MissingConstId(index))
     }
@@ -580,7 +576,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
             UnaOp::BitNot => {
                 use super::CoerceArgs;
 
-                let args = self.dialect.coerce_una_op_bit(args);
+                let args = self.core.dialect.coerce_una_op_bit(args);
 
                 match args {
                     [Value::Int(val)] => Continue((!Int(val)).into()),
@@ -613,7 +609,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
             Break((event, args)) => {
                 let [arg] = &args;
                 let metavalue = arg
-                    .metatable(self.primitive_metatables)
+                    .metatable(&self.core.primitive_metatables)
                     .map(|mt| mt.borrow().unwrap().get(event.into()));
 
                 match metavalue {
@@ -679,8 +675,8 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
                 };
 
                 let metavalue = lhs
-                    .metatable(self.primitive_metatables)
-                    .or_else(|| rhs.metatable(self.primitive_metatables))
+                    .metatable(&self.core.primitive_metatables)
+                    .or_else(|| rhs.metatable(&self.core.primitive_metatables))
                     .map(|mt| mt.borrow().unwrap().get(event.into()));
 
                 match metavalue {
@@ -720,7 +716,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
     ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
         use super::CoerceArgs;
 
-        let args = self.dialect.coerce_bin_op_str(op, args);
+        let args = self.core.dialect.coerce_bin_op_str(op, args);
 
         match args {
             [Value::String(lhs), Value::String(rhs)] => match op {
@@ -739,7 +735,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
-        let cmp = self.dialect.cmp_float_and_int();
+        let cmp = self.core.dialect.cmp_float_and_int();
 
         let equal = match args {
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
@@ -771,7 +767,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
         use RelBinOp::*;
         use Value::*;
 
-        let cmp = self.dialect.cmp_float_and_int();
+        let cmp = self.core.dialect.cmp_float_and_int();
 
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
@@ -808,7 +804,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
         use super::CoerceArgs;
         use crate::value::Int;
 
-        let args = self.dialect.coerce_bin_op_bit(op, args);
+        let args = self.core.dialect.coerce_bin_op_bit(op, args);
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
@@ -834,7 +830,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
         use AriBinOp::*;
 
         // Coercions.
-        let args = self.dialect.coerce_bin_op_ari(op, args);
+        let args = self.core.dialect.coerce_bin_op_ari(op, args);
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
@@ -875,7 +871,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(table) = &table {
-                let index = self.dialect.coerce_tab_get(index.clone());
+                let index = self.core.dialect.coerce_tab_get(index.clone());
 
                 let key = index.try_into().map_err(InvalidKey)?;
                 let value = table.borrow().unwrap().get(key);
@@ -890,7 +886,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
             // Second: try detecting compatible metavalue
             loop {
                 let metavalue = table
-                    .metatable(self.primitive_metatables)
+                    .metatable(&self.core.primitive_metatables)
                     .map(|mt| mt.borrow().unwrap().get(Event::Index.into()))
                     .unwrap_or_default();
 
@@ -942,7 +938,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(table) = &table {
-                let index = self.dialect.coerce_tab_set(index.clone());
+                let index = self.core.dialect.coerce_tab_set(index.clone());
                 let key = index.try_into().map_err(InvalidKey)?;
 
                 let mut table = table.borrow_mut().unwrap();
@@ -958,7 +954,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
             // Second: try detecting compatible metavalue
             loop {
                 let metavalue = table
-                    .metatable(self.primitive_metatables)
+                    .metatable(&self.core.primitive_metatables)
                     .map(|mt| mt.borrow().unwrap().get(Event::NewIndex.into()))
                     .unwrap_or_default();
 
@@ -969,7 +965,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
                             // Third: Fallback to raw assignment.
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
-                            let index = self.dialect.coerce_tab_set(index);
+                            let index = self.core.dialect.coerce_tab_set(index);
                             let key = index.try_into().map_err(InvalidKey)?;
 
                             table.borrow_mut().unwrap().set(key, value);
@@ -1013,7 +1009,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, TableRef<C>> {
             };
 
             let new_callable = callable
-                .metatable(self.primitive_metatables)
+                .metatable(&self.core.primitive_metatables)
                 .map(|mt| mt.borrow().unwrap().get(Event::Call.into()))
                 .unwrap_or_default();
 

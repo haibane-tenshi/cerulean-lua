@@ -215,7 +215,7 @@ where
                             chunk_id,
                             function_id: FunctionId(0),
                         };
-                        let env = env.unwrap_or_else(|| rt.global_env.clone());
+                        let env = env.unwrap_or_else(|| rt.core.global_env.clone());
                         let closure = rt.construct_closure(ptr, [env])?;
                         let closure_ref = ClosureRef::new(closure);
 
@@ -264,7 +264,7 @@ where
                             chunk_id,
                             function_id: FunctionId(0),
                         };
-                        let env = env.unwrap_or_else(|| rt.global_env.clone());
+                        let env = env.unwrap_or_else(|| rt.core.global_env.clone());
                         let closure = rt.construct_closure(ptr, [env])?;
                         let closure_ref = ClosureRef::new(closure);
 
@@ -287,7 +287,7 @@ pub fn getmetatable<C>() -> impl LuaFfi<C> + 'static {
     let f = |rt: RuntimeView<'_, C>| {
         ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, C>, value: Value<C>| {
             value
-                .metatable(rt.primitive_metatables)
+                .metatable(&rt.core.primitive_metatables)
                 .map(|metatable| {
                     use crate::value::table::KeyValue;
 
