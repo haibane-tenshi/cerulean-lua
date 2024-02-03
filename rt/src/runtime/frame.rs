@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::ControlFlow;
 use std::ops::Deref;
@@ -21,11 +22,12 @@ use crate::error::opcode::{
 };
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
-use crate::value::{TableRef, Value};
+use crate::value::table::KeyValue;
+use crate::value::{TableRef, TypeProvider, Value};
 
-pub(crate) enum ChangeFrame<C> {
+pub(crate) enum ChangeFrame<RsC> {
     Return(StackSlot),
-    Invoke(Option<Event>, Callable<C>, RawStackSlot),
+    Invoke(Option<Event>, Callable<RsC>, RawStackSlot),
 }
 
 trait MapControlFlow<F> {
@@ -61,11 +63,11 @@ pub struct Closure {
 }
 
 impl Closure {
-    pub(crate) fn new<C>(
-        rt: &mut RuntimeView<C>,
+    pub(crate) fn new<Types: TypeProvider, C>(
+        rt: &mut RuntimeView<Types, C>,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = Value<C>>,
-    ) -> Result<Self, RuntimeError<C>>
+        upvalues: impl IntoIterator<Item = Value<Types>>,
+    ) -> Result<Self, RuntimeError<Types>>
     where
         C: ChunkCache,
     {
@@ -81,7 +83,7 @@ impl Closure {
 
         let upvalues = upvalues
             .into_iter()
-            .chain(std::iter::repeat(Value::Nil))
+            .chain(std::iter::repeat_with(|| Value::Nil))
             .take(signature.upvalue_count)
             .map(|value| rt.stack.fresh_upvalue(value))
             .collect();
@@ -100,14 +102,15 @@ impl ClosureRef {
         ClosureRef(Rc::new(closure))
     }
 
-    pub(crate) fn construct_frame<C>(
+    pub(crate) fn construct_frame<Types: TypeProvider, C>(
         self,
-        rt: &mut RuntimeView<C>,
+        rt: &mut RuntimeView<Types, C>,
         start: RawStackSlot,
         event: Option<Event>,
-    ) -> Result<Frame<Value<C>>, RuntimeError<C>>
+    ) -> Result<Frame<Value<Types>>, RuntimeError<Types>>
     where
         C: ChunkCache,
+        Value<Types>: Clone,
     {
         use crate::error::{MissingChunk, MissingFunction, OutOfBoundsStack, UpvalueCountMismatch};
         use repr::chunk::Function;
@@ -213,14 +216,15 @@ impl<Value> Frame<Value> {
     }
 }
 
-impl<C> Frame<Value<C>>
+impl<Types> Frame<Value<Types>>
 where
-    C: ChunkCache,
+    Types: TypeProvider,
+    Value<Types>: Clone + Display,
 {
-    pub(crate) fn activate<'a>(
+    pub(crate) fn activate<'a, C: ChunkCache>(
         self,
-        rt: &'a mut RuntimeView<C>,
-    ) -> Result<ActiveFrame<'a, Value<C>, C>, RuntimeError<C>> {
+        rt: &'a mut RuntimeView<Types, C>,
+    ) -> Result<ActiveFrame<'a, Types>, RuntimeError<Types>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let RuntimeView {
@@ -278,11 +282,14 @@ where
     }
 }
 
-impl<C> Frame<Value<C>>
+impl<Types> Frame<Value<Types>>
 where
-    C: ChunkCache,
+    Types: TypeProvider,
 {
-    pub(crate) fn backtrace(&self, chunk_cache: &C) -> BacktraceFrame {
+    pub(crate) fn backtrace<C>(&self, chunk_cache: &C) -> BacktraceFrame
+    where
+        C: ChunkCache,
+    {
         use crate::backtrace::{FrameSource, Location};
 
         let ptr = self.closure.fn_ptr;
@@ -333,17 +340,16 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct ActiveFrame<'rt, Value, C> {
-    core: &'rt Core<C>,
+pub struct ActiveFrame<'rt, Types: TypeProvider> {
+    core: &'rt Core<Types>,
     closure: ClosureRef,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt, Value>,
-    upvalue_stack: UpvalueStackView<'rt, Value>,
-    register_variadic: Vec<Value>,
+    stack: StackView<'rt, Value<Types>>,
+    upvalue_stack: UpvalueStackView<'rt, Value<Types>>,
+    register_variadic: Vec<Value<Types>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -351,26 +357,29 @@ pub struct ActiveFrame<'rt, Value, C> {
     event: Option<Event>,
 }
 
-impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
+impl<'rt, Types> ActiveFrame<'rt, Types>
+where
+    Types: TypeProvider,
+{
     pub fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
-    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&Value<C>, MissingUpvalue> {
+    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&Value<Types>, MissingUpvalue> {
         self.upvalue_stack.get(index).ok_or(MissingUpvalue(index))
     }
 
-    fn get_upvalue_mut(&mut self, index: UpvalueSlot) -> Result<&mut Value<C>, MissingUpvalue> {
+    fn get_upvalue_mut(&mut self, index: UpvalueSlot) -> Result<&mut Value<Types>, MissingUpvalue> {
         self.upvalue_stack
             .get_mut(index)
             .ok_or(MissingUpvalue(index))
     }
 
-    fn get_stack(&self, index: StackSlot) -> Result<&Value<C>, MissingStackSlot> {
+    fn get_stack(&self, index: StackSlot) -> Result<&Value<Types>, MissingStackSlot> {
         self.stack.get(index).ok_or(MissingStackSlot(index))
     }
 
-    fn get_stack_mut(&mut self, index: StackSlot) -> Result<&mut Value<C>, MissingStackSlot> {
+    fn get_stack_mut(&mut self, index: StackSlot) -> Result<&mut Value<Types>, MissingStackSlot> {
         self.stack.get_mut(index).ok_or(MissingStackSlot(index))
     }
 
@@ -392,8 +401,17 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
         self.ip = self.ip.checked_sub_offset(offset).ok_or(err)?;
         Ok(())
     }
+}
 
-    pub fn step(&mut self) -> Result<ControlFlow<ChangeFrame<C>>, opcode_err::Error> {
+impl<'rt, Types> ActiveFrame<'rt, Types>
+where
+    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Value<Types>: Clone + Display + PartialEq,
+    KeyValue<Types>: Hash + Eq + From<Event>,
+{
+    pub fn step(
+        &mut self,
+    ) -> Result<ControlFlow<ChangeFrame<Types::RustCallable>>, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
                 self.stack.next_slot(),
@@ -407,7 +425,10 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
         })
     }
 
-    fn exec(&mut self, opcode: OpCode) -> Result<ControlFlow<ChangeFrame<C>>, opcode_err::Cause> {
+    fn exec(
+        &mut self,
+        opcode: OpCode,
+    ) -> Result<ControlFlow<ChangeFrame<Types::RustCallable>>, opcode_err::Cause> {
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -524,7 +545,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
                 ControlFlow::Continue(())
             }
             TabCreate => {
-                let value = TableRef::new();
+                let value = Default::default();
 
                 self.stack.push(Value::Table(value));
 
@@ -557,9 +578,12 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_una_op(
         &mut self,
-        args: [Value<C>; 1],
+        args: [Value<Types>; 1],
         op: UnaOp,
-    ) -> Result<ControlFlow<(Event, Callable<C>, StackSlot)>, opcode_err::UnaOpCause> {
+    ) -> Result<
+        ControlFlow<(Event, Callable<Types::RustCallable>, StackSlot)>,
+        opcode_err::UnaOpCause,
+    > {
         use crate::value::{Float, Int};
         use ControlFlow::*;
 
@@ -610,7 +634,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
                 let [arg] = &args;
                 let metavalue = arg
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(event.into()));
+                    .map(|mt| mt.borrow().unwrap().get(&event.into()));
 
                 match metavalue {
                     Some(metavalue) => {
@@ -638,10 +662,12 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_bin_op(
         &mut self,
-        args: [Value<C>; 2],
+        args: [Value<Types>; 2],
         op: BinOp,
-    ) -> Result<std::ops::ControlFlow<(Event, Callable<C>, StackSlot)>, opcode_err::BinOpCause>
-    {
+    ) -> Result<
+        std::ops::ControlFlow<(Event, Callable<Types::RustCallable>, StackSlot)>,
+        opcode_err::BinOpCause,
+    > {
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
             rhs: args[1].type_(),
@@ -677,7 +703,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
                 let metavalue = lhs
                     .metatable(&self.core.primitive_metatables)
                     .or_else(|| rhs.metatable(&self.core.primitive_metatables))
-                    .map(|mt| mt.borrow().unwrap().get(event.into()));
+                    .map(|mt| mt.borrow().unwrap().get(&event.into()));
 
                 match metavalue {
                     Some(metavalue) => {
@@ -711,9 +737,9 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_bin_op_str(
         &mut self,
-        args: [Value<C>; 2],
+        args: [Value<Types>; 2],
         op: StrBinOp,
-    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
         use super::CoerceArgs;
 
         let args = self.core.dialect.coerce_bin_op_str(op, args);
@@ -728,14 +754,14 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_bin_op_eq(
         &mut self,
-        args: [Value<C>; 2],
+        args: [Value<Types>; 2],
         op: EqBinOp,
-    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
-        let cmp = self.core.dialect.cmp_float_and_int();
+        let cmp = <_ as CoerceArgs<Types>>::cmp_float_and_int(&self.core.dialect);
 
         let equal = match args {
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
@@ -759,15 +785,15 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_bin_op_rel(
         &mut self,
-        args: [Value<C>; 2],
+        args: [Value<Types>; 2],
         op: RelBinOp,
-    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
         use super::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
         use Value::*;
 
-        let cmp = self.core.dialect.cmp_float_and_int();
+        let cmp = <_ as CoerceArgs<Types>>::cmp_float_and_int(&self.core.dialect);
 
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
@@ -798,9 +824,9 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_bin_op_bit(
         &mut self,
-        args: [Value<C>; 2],
+        args: [Value<Types>; 2],
         op: BitBinOp,
-    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
         use super::CoerceArgs;
         use crate::value::Int;
 
@@ -822,9 +848,9 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_bin_op_ari(
         &mut self,
-        args: [Value<C>; 2],
+        args: [Value<Types>; 2],
         op: AriBinOp,
-    ) -> ControlFlow<[Value<C>; 2], Option<Value<C>>> {
+    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
@@ -860,8 +886,8 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_tab_get(
         &mut self,
-        args: [Value<C>; 2],
-    ) -> Result<ControlFlow<(Callable<C>, StackSlot)>, opcode_err::TabCause> {
+        args: [Value<Types>; 2],
+    ) -> Result<ControlFlow<(Callable<Types::RustCallable>, StackSlot)>, opcode_err::TabCause> {
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -874,7 +900,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
                 let index = self.core.dialect.coerce_tab_get(index.clone());
 
                 let key = index.try_into().map_err(InvalidKey)?;
-                let value = table.borrow().unwrap().get(key);
+                let value = table.borrow().unwrap().get(&key);
 
                 // It succeeds if any non-nil value is produced.
                 if value != Value::Nil {
@@ -887,7 +913,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
             loop {
                 let metavalue = table
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(Event::Index.into()))
+                    .map(|mt| mt.borrow().unwrap().get(&Event::Index.into()))
                     .unwrap_or_default();
 
                 match metavalue {
@@ -927,8 +953,8 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn exec_tab_set(
         &mut self,
-        args: [Value<C>; 3],
-    ) -> Result<ControlFlow<(Callable<C>, StackSlot)>, opcode_err::TabCause> {
+        args: [Value<Types>; 3],
+    ) -> Result<ControlFlow<(Callable<Types::RustCallable>, StackSlot)>, opcode_err::TabCause> {
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -955,7 +981,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
             loop {
                 let metavalue = table
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(Event::NewIndex.into()))
+                    .map(|mt| mt.borrow().unwrap().get(&Event::NewIndex.into()))
                     .unwrap_or_default();
 
                 match metavalue {
@@ -999,9 +1025,9 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
     fn prepare_invoke(
         &mut self,
-        mut callable: Value<C>,
+        mut callable: Value<Types>,
         start: StackSlot,
-    ) -> Option<(Callable<C>, StackSlot)> {
+    ) -> Option<(Callable<Types::RustCallable>, StackSlot)> {
         loop {
             callable = match callable {
                 Value::Function(r) => return Some((r, start)),
@@ -1010,7 +1036,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
 
             let new_callable = callable
                 .metatable(&self.core.primitive_metatables)
-                .map(|mt| mt.borrow().unwrap().get(Event::Call.into()))
+                .map(|mt| mt.borrow().unwrap().get(&Event::Call.into()))
                 .unwrap_or_default();
 
             // Keys associated with nil are not considered part of the table.
@@ -1083,7 +1109,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
         Ok(r)
     }
 
-    pub fn suspend(self) -> Frame<Value<C>> {
+    pub fn suspend(self) -> Frame<Value<Types>> {
         let ActiveFrame {
             closure,
             ip,
@@ -1111,7 +1137,7 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
         }
     }
 
-    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<C>> {
+    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Types>> {
         self.stack.remove_range(StackSlot(0)..drop_under);
         self.upvalue_stack.clear();
 
@@ -1120,6 +1146,28 @@ impl<'rt, C> ActiveFrame<'rt, Value<C>, C> {
         }
 
         Ok(())
+    }
+}
+
+impl<'rt, Types> Debug for ActiveFrame<'rt, Types>
+where
+    Types: TypeProvider,
+    Types::Table: Debug,
+    Value<Types>: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveFrame")
+            .field("core", &self.core)
+            .field("closure", &self.closure)
+            .field("chunk", &self.chunk)
+            .field("constants", &self.constants)
+            .field("opcodes", &self.opcodes)
+            .field("ip", &self.ip)
+            .field("stack", &self.stack)
+            .field("upvalue_stack", &self.upvalue_stack)
+            .field("register_variadic", &self.register_variadic)
+            .field("event", &self.event)
+            .finish()
     }
 }
 
@@ -1246,9 +1294,12 @@ impl From<RelBinOp> for Event {
     }
 }
 
-impl<C> From<Event> for crate::value::table::KeyValue<C> {
+impl<Types> From<Event> for crate::value::table::KeyValue<Types>
+where
+    Types: TypeProvider,
+    Types::String: From<&'static str>,
+{
     fn from(value: Event) -> Self {
-        use crate::value::table::KeyValue;
-        KeyValue::String(value.to_str().to_string())
+        KeyValue::String(value.to_str().into())
     }
 }

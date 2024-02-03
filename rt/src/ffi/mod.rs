@@ -2,29 +2,40 @@ pub mod arg_parser;
 pub mod signature;
 pub mod tuple;
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::path::Path;
 
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::RuntimeError;
 use crate::runtime::RuntimeView;
-use crate::value::{NilOr, Value};
+use crate::value::table::KeyValue;
+use crate::value::{NilOr, TableRef, TypeProvider, Value};
 
 use arg_parser::{FormatReturns, ParseArgs};
 use signature::{Signature, SignatureWithFirst};
 use tuple::Tuple;
 
-pub trait LuaFfiOnce<C> {
-    fn call_once(self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
+pub trait LuaFfiOnce<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn call_once(self, _: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>>;
     fn debug_info(&self) -> DebugInfo;
 }
 
-pub trait LuaFfiMut<C>: LuaFfiOnce<C> {
-    fn call_mut(&mut self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
+pub trait LuaFfiMut<Types, C>: LuaFfiOnce<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn call_mut(&mut self, _: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>>;
 }
 
-pub trait LuaFfi<C>: LuaFfiMut<C> {
-    fn call(&self, _: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>>;
+pub trait LuaFfi<Types, C>: LuaFfiMut<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn call(&self, _: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>>;
 }
 
 #[derive(Debug, Clone)]
@@ -33,11 +44,12 @@ pub struct DebugInfo {
     pub name: String,
 }
 
-impl<C, F> LuaFfiOnce<C> for F
+impl<Types, C, F> LuaFfiOnce<Types, C> for F
 where
-    F: for<'rt> FnOnce(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
+    Types: TypeProvider,
+    F: for<'rt> FnOnce(RuntimeView<'rt, Types, C>) -> Result<(), RuntimeError<Types>>,
 {
-    fn call_once(self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+    fn call_once(self, rt: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>> {
         (self)(rt)
     }
 
@@ -48,29 +60,36 @@ where
     }
 }
 
-impl<C, F> LuaFfiMut<C> for F
+impl<Types, C, F> LuaFfiMut<Types, C> for F
 where
-    F: for<'rt> FnMut(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
+    Types: TypeProvider,
+    F: for<'rt> FnMut(RuntimeView<'rt, Types, C>) -> Result<(), RuntimeError<Types>>,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+    fn call_mut(&mut self, rt: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>> {
         (self)(rt)
     }
 }
 
-impl<C, F> LuaFfi<C> for F
+impl<Types, C, F> LuaFfi<Types, C> for F
 where
-    F: for<'rt> Fn(RuntimeView<'rt, C>) -> Result<(), RuntimeError<C>>,
+    Types: TypeProvider,
+    F: for<'rt> Fn(RuntimeView<'rt, Types, C>) -> Result<(), RuntimeError<Types>>,
 {
-    fn call(&self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+    fn call(&self, rt: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>> {
         (self)(rt)
     }
 }
 
-pub fn invoke<'rt, C, F, Args>(mut rt: RuntimeView<'rt, C>, f: F) -> Result<(), RuntimeError<C>>
+pub fn invoke<'rt, Types, C, F, Args>(
+    mut rt: RuntimeView<'rt, Types, C>,
+    f: F,
+) -> Result<(), RuntimeError<Types>>
 where
+    Types: TypeProvider<String = String>,
+    Value<Types>: Clone,
     F: Signature<Args>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
-    <F as Signature<Args>>::Output: FormatReturns<C>,
+    for<'a> &'a [crate::value::Value<Types>]: ParseArgs<Args>,
+    <F as Signature<Args>>::Output: FormatReturns<Types>,
 {
     let args = rt
         .stack
@@ -87,14 +106,16 @@ where
     Ok(())
 }
 
-pub fn try_invoke<'rt, C, F, Args, R>(
-    mut rt: RuntimeView<'rt, C>,
+pub fn try_invoke<'rt, Types, C, F, Args, R>(
+    mut rt: RuntimeView<'rt, Types, C>,
     f: F,
-) -> Result<(), RuntimeError<C>>
+) -> Result<(), RuntimeError<Types>>
 where
-    F: Signature<Args, Output = Result<R, RuntimeError<C>>>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
-    R: FormatReturns<C>,
+    Types: TypeProvider<String = String>,
+    Value<Types>: Clone,
+    F: Signature<Args, Output = Result<R, RuntimeError<Types>>>,
+    for<'a> &'a [crate::value::Value<Types>]: ParseArgs<Args>,
+    R: FormatReturns<Types>,
 {
     let args = rt
         .stack
@@ -111,14 +132,16 @@ where
     Ok(())
 }
 
-pub fn invoke_with_rt<'rt, C, F, Args, R>(
-    mut rt: RuntimeView<'rt, C>,
+pub fn invoke_with_rt<'rt, Types, C, F, Args, R>(
+    mut rt: RuntimeView<'rt, Types, C>,
     f: F,
-) -> Result<(), RuntimeError<C>>
+) -> Result<(), RuntimeError<Types>>
 where
-    for<'a> F: SignatureWithFirst<RuntimeView<'a, C>, Args, Output = R>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
-    R: FormatReturns<C>,
+    Types: TypeProvider<String = String>,
+    Value<Types>: Clone + Display + Debug,
+    for<'a> F: SignatureWithFirst<RuntimeView<'a, Types, C>, Args, Output = R>,
+    for<'a> &'a [crate::value::Value<Types>]: ParseArgs<Args>,
+    R: FormatReturns<Types>,
 {
     use repr::index::StackSlot;
 
@@ -138,14 +161,20 @@ where
     Ok(())
 }
 
-pub fn try_invoke_with_rt<'rt, C, F, Args, R>(
-    mut rt: RuntimeView<'rt, C>,
+pub fn try_invoke_with_rt<'rt, Types, C, F, Args, R>(
+    mut rt: RuntimeView<'rt, Types, C>,
     f: F,
-) -> Result<(), RuntimeError<C>>
+) -> Result<(), RuntimeError<Types>>
 where
-    for<'a> F: SignatureWithFirst<RuntimeView<'a, C>, Args, Output = Result<R, RuntimeError<C>>>,
-    for<'a> &'a [crate::value::Value<C>]: ParseArgs<Args>,
-    R: FormatReturns<C>,
+    Types: TypeProvider<String = String>,
+    Value<Types>: Clone + Debug + Display,
+    for<'a> F: SignatureWithFirst<
+        RuntimeView<'a, Types, C>,
+        Args,
+        Output = Result<R, RuntimeError<Types>>,
+    >,
+    for<'a> &'a [crate::value::Value<Types>]: ParseArgs<Args>,
+    R: FormatReturns<Types>,
 {
     use repr::index::StackSlot;
 
@@ -206,13 +235,14 @@ impl<T> From<Maybe<T>> for Option<T> {
     }
 }
 
-pub trait WithName<C>: Sized {
+pub trait WithName<Types, C>: Sized {
     fn with_name<N>(self, name: N) -> DebugInfoWrap<Self, N>;
 }
 
-impl<F, C> WithName<C> for F
+impl<F, Types, C> WithName<Types, C> for F
 where
-    F: LuaFfiOnce<C>,
+    Types: TypeProvider,
+    F: LuaFfiOnce<Types, C>,
 {
     fn with_name<N>(self, name: N) -> DebugInfoWrap<Self, N> {
         DebugInfoWrap { func: self, name }
@@ -225,12 +255,13 @@ pub struct DebugInfoWrap<F, N> {
     name: N,
 }
 
-impl<C, F, N> LuaFfiOnce<C> for DebugInfoWrap<F, N>
+impl<Types, C, F, N> LuaFfiOnce<Types, C> for DebugInfoWrap<F, N>
 where
-    F: LuaFfiOnce<C>,
+    Types: TypeProvider,
+    F: LuaFfiOnce<Types, C>,
     N: AsRef<str>,
 {
-    fn call_once(self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+    fn call_once(self, rt: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>> {
         self.func.call_once(rt)
     }
 
@@ -241,31 +272,37 @@ where
     }
 }
 
-impl<C, F, N> LuaFfiMut<C> for DebugInfoWrap<F, N>
+impl<Types, C, F, N> LuaFfiMut<Types, C> for DebugInfoWrap<F, N>
 where
-    F: LuaFfiMut<C>,
+    Types: TypeProvider,
+    F: LuaFfiMut<Types, C>,
     N: AsRef<str>,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+    fn call_mut(&mut self, rt: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>> {
         self.func.call_mut(rt)
     }
 }
 
-impl<C, F, N> LuaFfi<C> for DebugInfoWrap<F, N>
+impl<Types, C, F, N> LuaFfi<Types, C> for DebugInfoWrap<F, N>
 where
-    F: LuaFfi<C>,
+    Types: TypeProvider,
+    F: LuaFfi<Types, C>,
     N: AsRef<str>,
 {
-    fn call(&self, rt: RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+    fn call(&self, rt: RuntimeView<'_, Types, C>) -> Result<(), RuntimeError<Types>> {
         self.func.call(rt)
     }
 }
 
-pub fn call_chunk<C>(chunk_id: ChunkId) -> impl LuaFfi<C> + Copy + Send + Sync
+pub fn call_chunk<Types, C>(chunk_id: ChunkId) -> impl LuaFfi<Types, C> + Copy + Send + Sync
 where
     C: ChunkCache,
+    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types::RustCallable: LuaFfiOnce<Types, C>,
+    Value<Types>: Clone + PartialEq + Display,
+    KeyValue<Types>: Hash + Eq,
 {
-    let f = move |mut rt: RuntimeView<'_, C>| {
+    let f = move |mut rt: RuntimeView<'_, Types, C>| {
         use crate::runtime::{ClosureRef, FunctionPtr};
         use repr::index::{FunctionId, StackSlot};
 
@@ -283,12 +320,16 @@ where
     f.with_name("rt::ffi::call_chunk")
 }
 
-pub fn call_precompiled<C, Q>(script: &Q) -> impl LuaFfi<C> + Copy + '_
+pub fn call_precompiled<Types, C, Q>(script: &Q) -> impl LuaFfi<Types, C> + Copy + '_
 where
     C: ChunkCache + KeyedChunkCache<Q>,
     Q: ?Sized + Debug,
+    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types::RustCallable: LuaFfiOnce<Types, C>,
+    Value<Types>: Clone + PartialEq + Display,
+    KeyValue<Types>: Hash + Eq,
 {
-    let f = move |mut rt: RuntimeView<'_, C>| {
+    let f = move |mut rt: RuntimeView<'_, Types, C>| {
         let chunk_id = rt.chunk_cache().get(script).ok_or(Value::String(format!(
             "chunk with key \"{script:?}\" does not exist"
         )))?;
@@ -298,11 +339,15 @@ where
     f.with_name("rt::ffi::call_precompiled")
 }
 
-pub fn call_file<C>(script: impl AsRef<Path>) -> impl LuaFfi<C>
+pub fn call_file<Types, C>(script: impl AsRef<Path>) -> impl LuaFfi<Types, C>
 where
     C: ChunkCache + KeyedChunkCache<Path>,
+    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types::RustCallable: LuaFfiOnce<Types, C>,
+    Value<Types>: Clone + PartialEq + Display,
+    KeyValue<Types>: Hash + Eq,
 {
-    let f = move |mut rt: RuntimeView<C>| {
+    let f = move |mut rt: RuntimeView<Types, C>| {
         let script = script.as_ref();
         let chunk_id = rt.load_from_file(script)?;
 

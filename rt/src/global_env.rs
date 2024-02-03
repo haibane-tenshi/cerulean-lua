@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::path::Path;
 
 use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
@@ -5,21 +7,32 @@ use repr::literal::Literal;
 
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::runtime::RuntimeView;
-use crate::value::callable::RustClosureRef;
-use crate::value::table::{KeyValue, Table};
-use crate::value::Value;
+use crate::value::callable::{RustCallable, RustClosureRef};
+use crate::value::table::{KeyValue, Table, TableRef};
+use crate::value::{TypeProvider, Value};
 use crate::value_builder::{ChunkRange, Part, ValueBuilder};
 
 use crate::error::RuntimeError;
 
-pub fn empty<C>() -> ValueBuilder<
-    impl for<'rt> FnOnce(RuntimeView<'rt, C>, ChunkId, ()) -> Result<Table<C>, RuntimeError<C>>,
-> {
+pub fn empty<Types, C>() -> ValueBuilder<
+    impl for<'rt> FnOnce(
+        RuntimeView<'rt, Types, C>,
+        ChunkId,
+        (),
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
+>
+where
+    Types: TypeProvider,
+    Value<Types>: Clone + Display,
+{
     use crate::value_builder;
 
     let chunk_part = Part {
         chunk_ext: ChunkExtension::empty(),
-        builder: |mut rt: RuntimeView<C>, _, _| {
+        builder: |mut rt: RuntimeView<'_, Types, C>,
+                  _,
+                  _|
+         -> Result<Table<Types>, RuntimeError<Types>> {
             rt.stack.clear();
 
             let value = Table::default();
@@ -31,18 +44,25 @@ pub fn empty<C>() -> ValueBuilder<
     value_builder::builder().include(chunk_part)
 }
 
-pub fn assert<C>() -> Part<
+pub fn assert<Types, C>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
+    impl FnOnce(
+        RuntimeView<Types, C>,
+        ChunkRange,
+        Table<Types>,
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
 >
 where
     C: ChunkCache,
+    Types: TypeProvider<String = String, RustCallable = RustCallable<Types, C>>,
+    Value<Types>: Clone,
+    KeyValue<Types>: Hash + Eq,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+    let builder = |mut _rt: RuntimeView<Types, C>, _: ChunkRange, mut value: Table<Types>| {
         let fn_assert = RustClosureRef::new(crate::lua_std::impl_::assert());
 
         value.set(
@@ -56,18 +76,29 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn pcall<C>() -> Part<
+pub fn pcall<Types, C>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
+    impl FnOnce(
+        RuntimeView<Types, C>,
+        ChunkRange,
+        Table<Types>,
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
 >
 where
     C: ChunkCache,
+    Types: TypeProvider<
+        String = String,
+        RustCallable = RustCallable<Types, C>,
+        Table = TableRef<Types>,
+    >,
+    Value<Types>: Clone + PartialEq + Display,
+    KeyValue<Types>: Hash + Eq,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+    let builder = |mut _rt: RuntimeView<Types, C>, _: ChunkRange, mut value: Table<Types>| {
         let fn_pcall = RustClosureRef::new(crate::lua_std::impl_::pcall());
 
         value.set(
@@ -81,18 +112,25 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn print<C>() -> Part<
+pub fn print<Types, C>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
+    impl FnOnce(
+        RuntimeView<Types, C>,
+        ChunkRange,
+        Table<Types>,
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
 >
 where
     C: ChunkCache,
+    Types: TypeProvider<String = String, RustCallable = RustCallable<Types, C>>,
+    Value<Types>: Clone + Display,
+    KeyValue<Types>: Hash + Eq,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+    let builder = |mut _rt: RuntimeView<Types, C>, _: ChunkRange, mut value: Table<Types>| {
         let fn_print = RustClosureRef::new(crate::lua_std::impl_::print());
 
         value.set(
@@ -106,18 +144,29 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn load<C>() -> Part<
+pub fn load<Types, C>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
+    impl FnOnce(
+        RuntimeView<Types, C>,
+        ChunkRange,
+        Table<Types>,
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
 >
 where
     C: ChunkCache,
+    Types: TypeProvider<
+        String = String,
+        RustCallable = RustCallable<Types, C>,
+        Table = TableRef<Types>,
+    >,
+    Value<Types>: Clone + PartialEq + Debug + Display,
+    KeyValue<Types>: Hash + Eq,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+    let builder = |mut _rt: RuntimeView<Types, C>, _: ChunkRange, mut value: Table<Types>| {
         let fn_load = RustClosureRef::new(crate::lua_std::impl_::load());
 
         value.set(
@@ -131,18 +180,29 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn loadfile<C>() -> Part<
+pub fn loadfile<Types, C>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
+    impl FnOnce(
+        RuntimeView<Types, C>,
+        ChunkRange,
+        Table<Types>,
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
 >
 where
     C: ChunkCache + KeyedChunkCache<Path>,
+    Types: TypeProvider<
+        String = String,
+        RustCallable = RustCallable<Types, C>,
+        Table = TableRef<Types>,
+    >,
+    Value<Types>: Clone + PartialEq + Debug + Display,
+    KeyValue<Types>: Hash + Eq,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+    let builder = |mut _rt: RuntimeView<Types, C>, _: ChunkRange, mut value: Table<Types>| {
         let fn_loadfile = RustClosureRef::new(crate::lua_std::impl_::loadfile());
 
         value.set(
@@ -156,15 +216,28 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn setmetatable<C>() -> Part<
+pub fn setmetatable<Types, C>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
-> {
+    impl FnOnce(
+        RuntimeView<Types, C>,
+        ChunkRange,
+        Table<Types>,
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
+>
+where
+    Types: TypeProvider<
+        String = String,
+        RustCallable = RustCallable<Types, C>,
+        Table = TableRef<Types>,
+    >,
+    Value<Types>: Clone + Display,
+    KeyValue<Types>: Hash + Eq,
+{
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+    let builder = |mut _rt: RuntimeView<Types, C>, _: ChunkRange, mut value: Table<Types>| {
         let f = RustClosureRef::new(crate::lua_std::impl_::setmetatable());
 
         value.set(
@@ -178,15 +251,28 @@ pub fn setmetatable<C>() -> Part<
     Part { chunk_ext, builder }
 }
 
-pub fn getmetatable<C>() -> Part<
+pub fn getmetatable<Types, C>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<C>, ChunkRange, Table<C>) -> Result<Table<C>, RuntimeError<C>>,
-> {
+    impl FnOnce(
+        RuntimeView<Types, C>,
+        ChunkRange,
+        Table<Types>,
+    ) -> Result<Table<Types>, RuntimeError<Types>>,
+>
+where
+    Types: TypeProvider<
+        String = String,
+        RustCallable = RustCallable<Types, C>,
+        Table = TableRef<Types>,
+    >,
+    Value<Types>: Clone + Debug + Display,
+    KeyValue<Types>: Hash + Eq,
+{
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |mut _rt: RuntimeView<C>, _: ChunkRange, mut value: Table<C>| {
+    let builder = |mut _rt: RuntimeView<Types, C>, _: ChunkRange, mut value: Table<Types>| {
         let f = RustClosureRef::new(crate::lua_std::impl_::getmetatable());
 
         value.set(

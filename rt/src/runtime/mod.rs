@@ -5,7 +5,8 @@ mod rust_backtrace_stack;
 mod stack;
 mod upvalue_stack;
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 
@@ -17,7 +18,8 @@ use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
-use crate::value::{TableRef, TypeWithoutMetatable, Value};
+use crate::value::table::{KeyValue, TableRef};
+use crate::value::{TypeProvider, TypeWithoutMetatable, Value};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
@@ -27,13 +29,18 @@ use upvalue_stack::{UpvalueStack, UpvalueStackView};
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, ClosureRef, FunctionPtr};
 
-pub struct Core<C> {
-    pub global_env: Value<C>,
-    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<TableRef<C>>>,
+pub struct Core<Types: TypeProvider> {
+    pub global_env: Value<Types>,
+    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<Types::Table>>,
     pub dialect: DialectBuilder,
 }
 
-impl<C> Debug for Core<C> {
+impl<Types> Debug for Core<Types>
+where
+    Types: TypeProvider,
+    Types::Table: Debug,
+    Value<Types>: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Core")
             .field("global_env", &self.global_env)
@@ -43,20 +50,20 @@ impl<C> Debug for Core<C> {
     }
 }
 
-pub struct Runtime<C> {
-    pub core: Core<C>,
+pub struct Runtime<Types: TypeProvider, C> {
+    pub core: Core<Types>,
     pub chunk_cache: C,
-    frames: FrameStack<Value<C>>,
-    stack: Stack<Value<C>>,
-    upvalue_stack: UpvalueStack<Value<C>>,
+    frames: FrameStack<Value<Types>>,
+    stack: Stack<Value<Types>>,
+    upvalue_stack: UpvalueStack<Value<Types>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
-impl<C> Runtime<C>
+impl<Types: TypeProvider, C> Runtime<Types, C>
 where
     C: Debug,
 {
-    pub fn new(chunk_cache: C, core: Core<C>) -> Self {
+    pub fn new(chunk_cache: C, core: Core<Types>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         Runtime {
@@ -69,7 +76,7 @@ where
         }
     }
 
-    pub fn view(&mut self) -> RuntimeView<C> {
+    pub fn view(&mut self) -> RuntimeView<Types, C> {
         let Runtime {
             core,
             chunk_cache,
@@ -95,22 +102,40 @@ where
     }
 }
 
-pub struct RuntimeView<'rt, C> {
-    pub core: &'rt mut Core<C>,
+pub struct RuntimeView<'rt, Types: TypeProvider, C> {
+    pub core: &'rt mut Core<Types>,
     pub chunk_cache: &'rt mut C,
-    frames: FrameStackView<'rt, Value<C>>,
-    pub stack: StackView<'rt, Value<C>>,
-    upvalue_stack: UpvalueStackView<'rt, Value<C>>,
+    frames: FrameStackView<'rt, Value<Types>>,
+    pub stack: StackView<'rt, Value<Types>>,
+    upvalue_stack: UpvalueStackView<'rt, Value<Types>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
-impl<'rt, C> RuntimeView<'rt, C> {
-    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<C>, RuntimeError<C>> {
+impl<'rt, Types, C> RuntimeView<'rt, Types, C>
+where
+    Types: TypeProvider,
+    Value<Types>: Display,
+{
+    pub fn view_full(&mut self) -> RuntimeView<'_, Types, C> {
+        let Ok(view) = self.view(StackSlot(0)) else {
+            unreachable!()
+        };
+
+        view
+    }
+
+    pub fn view(
+        &mut self,
+        start: StackSlot,
+    ) -> Result<RuntimeView<'_, Types, C>, RuntimeError<Types>> {
         let start = self.stack.boundary() + start;
         self.view_raw(start)
     }
 
-    fn view_raw(&mut self, start: RawStackSlot) -> Result<RuntimeView<C>, RuntimeError<C>> {
+    fn view_raw(
+        &mut self,
+        start: RawStackSlot,
+    ) -> Result<RuntimeView<'_, Types, C>, RuntimeError<Types>> {
         use crate::error::OutOfBoundsStack;
 
         let RuntimeView {
@@ -139,24 +164,24 @@ impl<'rt, C> RuntimeView<'rt, C> {
         Ok(r)
     }
 
-    pub fn invoke(&mut self, f: impl LuaFfiOnce<C>) -> Result<(), RuntimeError<C>> {
+    pub fn invoke(&mut self, f: impl LuaFfiOnce<Types, C>) -> Result<(), RuntimeError<Types>> {
         self.invoke_at(f, StackSlot(0))
     }
 
     pub fn invoke_at(
         &mut self,
-        f: impl LuaFfiOnce<C>,
+        f: impl LuaFfiOnce<Types, C>,
         start: StackSlot,
-    ) -> Result<(), RuntimeError<C>> {
+    ) -> Result<(), RuntimeError<Types>> {
         let start = self.stack.boundary() + start;
         self.invoke_at_raw(f, start)
     }
 
     fn invoke_at_raw(
         &mut self,
-        f: impl LuaFfiOnce<C>,
+        f: impl LuaFfiOnce<Types, C>,
         start: RawStackSlot,
-    ) -> Result<(), RuntimeError<C>> {
+    ) -> Result<(), RuntimeError<Types>> {
         use crate::backtrace::{BacktraceFrame, FrameSource};
         use rust_backtrace_stack::RustFrame;
 
@@ -177,7 +202,7 @@ impl<'rt, C> RuntimeView<'rt, C> {
             "entering Rust function"
         );
 
-        let r = f.call_once(view.view(StackSlot(0)).unwrap());
+        let r = f.call_once(view.view_full());
 
         // Forcefully clean up.
         // It is possible that Rust function called Lua panic but forgot to reset the runtime.
@@ -188,7 +213,24 @@ impl<'rt, C> RuntimeView<'rt, C> {
 
         r
     }
+}
 
+impl<'rt, Types, C> RuntimeView<'rt, Types, C>
+where
+    Types: TypeProvider,
+{
+    fn soft_reset(&mut self) {
+        self.upvalue_stack.clear();
+        self.frames.clear();
+        self.rust_backtrace_stack.clear();
+    }
+}
+
+impl<'rt, Types, C> RuntimeView<'rt, Types, C>
+where
+    Types: TypeProvider,
+    Value<Types>: Clone,
+{
     /// Return runtime into consistent state.
     ///
     /// This function is useful in case you caught Lua panic
@@ -215,19 +257,21 @@ impl<'rt, C> RuntimeView<'rt, C> {
         self.stack.clear();
         self.soft_reset();
     }
-
-    fn soft_reset(&mut self) {
-        self.upvalue_stack.clear();
-        self.frames.clear();
-        self.rust_backtrace_stack.clear();
-    }
 }
 
-impl<'rt, C> RuntimeView<'rt, C>
+impl<'rt, Types, C> RuntimeView<'rt, Types, C>
 where
     C: ChunkCache,
+    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    KeyValue<Types>: Hash + Eq + From<Event>,
+    Value<Types>: Clone + Display + PartialEq,
+    Types::RustCallable: LuaFfiOnce<Types, C>,
 {
-    pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError<C>> {
+    pub fn enter(
+        &mut self,
+        closure: ClosureRef,
+        start: StackSlot,
+    ) -> Result<(), RuntimeError<Types>> {
         use crate::value::callable::Callable;
 
         let start = self.stack.boundary() + start;
@@ -284,19 +328,19 @@ where
     pub fn construct_closure(
         &mut self,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = Value<C>>,
-    ) -> Result<Closure, RuntimeError<C>> {
+        upvalues: impl IntoIterator<Item = Value<Types>>,
+    ) -> Result<Closure, RuntimeError<Types>> {
         Closure::new(self, fn_ptr, upvalues)
     }
 }
 
-impl<'rt, C> RuntimeView<'rt, C> {
+impl<'rt, Types: TypeProvider, C> RuntimeView<'rt, Types, C> {
     pub fn chunk_cache(&self) -> &C {
         self.chunk_cache
     }
 }
 
-impl<'rt, C> RuntimeView<'rt, C>
+impl<'rt, Types: TypeProvider, C> RuntimeView<'rt, Types, C>
 where
     C: ChunkCache,
 {
@@ -349,8 +393,8 @@ where
     pub fn precompiled_or_load_with<Q>(
         &mut self,
         key: &Q,
-        f: impl FnOnce() -> Result<(String, Option<Location>), RuntimeError<C>>,
-    ) -> Result<ChunkId, RuntimeError<C>>
+        f: impl FnOnce() -> Result<(String, Option<Location>), RuntimeError<Types>>,
+    ) -> Result<ChunkId, RuntimeError<Types>>
     where
         Q: ?Sized,
         C: KeyedChunkCache<Q>,
@@ -364,18 +408,18 @@ where
             .map_err(Into::into)
     }
 
-    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RuntimeError<C>>
+    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RuntimeError<Types>>
     where
         C: KeyedChunkCache<Path>,
+        Types::String: From<String>,
     {
         let path = path.as_ref();
 
         self.precompiled_or_load_with(path, || {
             let source = std::fs::read_to_string(path).map_err(|err| {
-                Value::String(format!(
-                    "failed to load file {}: {err}",
-                    path.to_string_lossy()
-                ))
+                Value::String(
+                    format!("failed to load file {}: {err}", path.to_string_lossy()).into(),
+                )
             })?;
             let location = Location {
                 file: path.to_string_lossy().to_string(),
@@ -388,7 +432,7 @@ where
     }
 }
 
-impl<'rt, C> RuntimeView<'rt, C>
+impl<'rt, Types: TypeProvider, C> RuntimeView<'rt, Types, C>
 where
     C: ChunkCache,
 {
@@ -426,7 +470,11 @@ where
         Backtrace { frames }
     }
 
-    pub fn into_diagnostic(&self, err: RuntimeError<C>) -> Diagnostic {
+    pub fn into_diagnostic(&self, err: RuntimeError<Types>) -> Diagnostic
+    where
+        Types: TypeProvider<String = String>,
+        Value<Types>: Display,
+    {
         use codespan_reporting::files::SimpleFile;
 
         let message = match err {
@@ -506,7 +554,10 @@ impl From<Diagnostic> for LoadError {
     }
 }
 
-impl<C> From<LoadError> for RuntimeError<C> {
+impl<Types> From<LoadError> for RuntimeError<Types>
+where
+    Types: TypeProvider,
+{
     fn from(value: LoadError) -> Self {
         match value {
             LoadError::Immutable(err) => RuntimeError::Immutable(err),

@@ -1,25 +1,28 @@
 use std::cell::RefCell;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::chunk_cache::ChunkCache;
 use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
 
-use super::{TypeMismatchError, Value};
+use super::table::KeyValue;
+use super::{TableRef, TypeMismatchError, TypeProvider, Value};
 
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
-pub struct RustClosureMut<C>(Rc<Inner<RefCell<dyn LuaFfiMut<C> + 'static>>>);
+pub struct RustClosureMut<Types, C>(Rc<Inner<RefCell<dyn LuaFfiMut<Types, C> + 'static>>>);
 
 struct Inner<T: ?Sized> {
     debug_info: DebugInfo,
     callable: T,
 }
 
-impl<C> RustClosureMut<C> {
-    pub fn new(value: impl LuaFfiMut<C> + 'static) -> Self {
+impl<Types, C> RustClosureMut<Types, C>
+where
+    Types: TypeProvider,
+{
+    pub fn new(value: impl LuaFfiMut<Types, C> + 'static) -> Self {
         let debug_info = value.debug_info();
         let inner = Inner {
             debug_info,
@@ -29,41 +32,51 @@ impl<C> RustClosureMut<C> {
         RustClosureMut(rc)
     }
 
-    pub fn with_name(name: impl AsRef<str> + 'static, value: impl LuaFfiMut<C> + 'static) -> Self {
+    pub fn with_name(
+        name: impl AsRef<str> + 'static,
+        value: impl LuaFfiMut<Types, C> + 'static,
+    ) -> Self {
         use crate::ffi::WithName;
 
         Self::new(value.with_name(name))
     }
 }
 
-impl<C> Debug for RustClosureMut<C> {
+impl<Types, C> Debug for RustClosureMut<Types, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RustClosureMut").field(&"<omitted>").finish()
     }
 }
 
-impl<C> Clone for RustClosureMut<C> {
+impl<Types, C> Clone for RustClosureMut<Types, C> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<C> PartialEq for RustClosureMut<C> {
+impl<Types, C> PartialEq for RustClosureMut<Types, C> {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<C> Eq for RustClosureMut<C> {}
+impl<Types, C> Eq for RustClosureMut<Types, C> {}
 
-impl<C> Hash for RustClosureMut<C> {
+impl<Types, C> Hash for RustClosureMut<Types, C> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.0).hash(state);
     }
 }
 
-impl<C> LuaFfiOnce<C> for RustClosureMut<C> {
-    fn call_once(mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+impl<Types, C> LuaFfiOnce<Types, C> for RustClosureMut<Types, C>
+where
+    Types: TypeProvider,
+    Types::String: From<&'static str>,
+{
+    fn call_once(
+        mut self,
+        rt: crate::runtime::RuntimeView<'_, Types, C>,
+    ) -> Result<(), RuntimeError<Types>> {
         self.call_mut(rt)
     }
 
@@ -72,60 +85,79 @@ impl<C> LuaFfiOnce<C> for RustClosureMut<C> {
     }
 }
 
-impl<C> LuaFfiMut<C> for RustClosureMut<C> {
-    fn call_mut(&mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+impl<Types, C> LuaFfiMut<Types, C> for RustClosureMut<Types, C>
+where
+    Types: TypeProvider,
+    Types::String: From<&'static str>,
+{
+    fn call_mut(
+        &mut self,
+        rt: crate::runtime::RuntimeView<'_, Types, C>,
+    ) -> Result<(), RuntimeError<Types>> {
         let mut f = self
             .0
             .callable
             .try_borrow_mut()
-            .map_err(|_| Value::String("failed to mutably borrow closure".to_string()))?;
+            .map_err(|_| Value::String("failed to mutably borrow closure".into()))?;
         f.call_mut(rt)
     }
 }
 
-pub struct RustClosureRef<C>(Rc<dyn LuaFfi<C> + 'static>);
+pub struct RustClosureRef<Types, C>(Rc<dyn LuaFfi<Types, C> + 'static>);
 
-impl<C> RustClosureRef<C> {
-    pub fn new(value: impl LuaFfi<C> + 'static) -> Self {
+impl<Types, C> RustClosureRef<Types, C>
+where
+    Types: TypeProvider,
+{
+    pub fn new(value: impl LuaFfi<Types, C> + 'static) -> Self {
         let rc = Rc::new(value);
         RustClosureRef(rc)
     }
 
-    pub fn with_name(name: impl AsRef<str> + 'static, value: impl LuaFfi<C> + 'static) -> Self {
+    pub fn with_name(
+        name: impl AsRef<str> + 'static,
+        value: impl LuaFfi<Types, C> + 'static,
+    ) -> Self {
         use crate::ffi::WithName;
 
         Self::new(value.with_name(name))
     }
 }
 
-impl<C> Debug for RustClosureRef<C> {
+impl<Types, C> Debug for RustClosureRef<Types, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RustClosureRef").field(&"<omitted>").finish()
     }
 }
 
-impl<C> Clone for RustClosureRef<C> {
+impl<Types, C> Clone for RustClosureRef<Types, C> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<C> PartialEq for RustClosureRef<C> {
+impl<Types, C> PartialEq for RustClosureRef<Types, C> {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<C> Eq for RustClosureRef<C> {}
+impl<Types, C> Eq for RustClosureRef<Types, C> {}
 
-impl<C> Hash for RustClosureRef<C> {
+impl<Types, C> Hash for RustClosureRef<Types, C> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.0).hash(state);
     }
 }
 
-impl<C> LuaFfiOnce<C> for RustClosureRef<C> {
-    fn call_once(self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+impl<Types, C> LuaFfiOnce<Types, C> for RustClosureRef<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn call_once(
+        self,
+        rt: crate::runtime::RuntimeView<'_, Types, C>,
+    ) -> Result<(), RuntimeError<Types>> {
         self.call(rt)
     }
 
@@ -134,24 +166,36 @@ impl<C> LuaFfiOnce<C> for RustClosureRef<C> {
     }
 }
 
-impl<C> LuaFfiMut<C> for RustClosureRef<C> {
-    fn call_mut(&mut self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+impl<Types, C> LuaFfiMut<Types, C> for RustClosureRef<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn call_mut(
+        &mut self,
+        rt: crate::runtime::RuntimeView<'_, Types, C>,
+    ) -> Result<(), RuntimeError<Types>> {
         self.call(rt)
     }
 }
 
-impl<C> LuaFfi<C> for RustClosureRef<C> {
-    fn call(&self, rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+impl<Types, C> LuaFfi<Types, C> for RustClosureRef<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn call(
+        &self,
+        rt: crate::runtime::RuntimeView<'_, Types, C>,
+    ) -> Result<(), RuntimeError<Types>> {
         self.0.call(rt)
     }
 }
 
-pub enum RustCallable<C> {
-    Mut(RustClosureMut<C>),
-    Ref(RustClosureRef<C>),
+pub enum RustCallable<Types, C> {
+    Mut(RustClosureMut<Types, C>),
+    Ref(RustClosureRef<Types, C>),
 }
 
-impl<C> Debug for RustCallable<C> {
+impl<Types, C> Debug for RustCallable<Types, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Mut(arg0) => f.debug_tuple("Mut").field(arg0).finish(),
@@ -160,7 +204,7 @@ impl<C> Debug for RustCallable<C> {
     }
 }
 
-impl<C> Clone for RustCallable<C> {
+impl<Types, C> Clone for RustCallable<Types, C> {
     fn clone(&self) -> Self {
         match self {
             Self::Mut(arg0) => Self::Mut(arg0.clone()),
@@ -169,7 +213,7 @@ impl<C> Clone for RustCallable<C> {
     }
 }
 
-impl<C> PartialEq for RustCallable<C> {
+impl<Types, C> PartialEq for RustCallable<Types, C> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Mut(l0), Self::Mut(r0)) => l0 == r0,
@@ -179,9 +223,9 @@ impl<C> PartialEq for RustCallable<C> {
     }
 }
 
-impl<C> Eq for RustCallable<C> {}
+impl<Types, C> Eq for RustCallable<Types, C> {}
 
-impl<C> Hash for RustCallable<C> {
+impl<Types, C> Hash for RustCallable<Types, C> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
 
@@ -192,8 +236,16 @@ impl<C> Hash for RustCallable<C> {
     }
 }
 
-impl<C> LuaFfiOnce<C> for RustCallable<C> {
-    fn call_once(self, mut rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+impl<Types, C> LuaFfiOnce<Types, C> for RustCallable<Types, C>
+where
+    Types: TypeProvider,
+    Types::String: From<&'static str>,
+    Value<Types>: std::fmt::Display,
+{
+    fn call_once(
+        self,
+        mut rt: crate::runtime::RuntimeView<'_, Types, C>,
+    ) -> Result<(), RuntimeError<Types>> {
         match self {
             Self::Mut(f) => rt.invoke(f),
             Self::Ref(f) => rt.invoke(f),
@@ -207,93 +259,72 @@ impl<C> LuaFfiOnce<C> for RustCallable<C> {
     }
 }
 
-impl<C> From<RustClosureMut<C>> for RustCallable<C> {
-    fn from(value: RustClosureMut<C>) -> Self {
+impl<Types, C> From<RustClosureMut<Types, C>> for RustCallable<Types, C> {
+    fn from(value: RustClosureMut<Types, C>) -> Self {
         Self::Mut(value)
     }
 }
 
-impl<C> From<RustClosureRef<C>> for RustCallable<C> {
-    fn from(value: RustClosureRef<C>) -> Self {
+impl<Types, C> From<RustClosureRef<Types, C>> for RustCallable<Types, C> {
+    fn from(value: RustClosureRef<Types, C>) -> Self {
         Self::Ref(value)
     }
 }
 
-impl<C> From<LuaClosureRef> for Value<C> {
+impl<Types> From<LuaClosureRef> for Value<Types>
+where
+    Types: TypeProvider,
+{
     fn from(value: LuaClosureRef) -> Self {
         Value::Function(value.into())
     }
 }
 
-impl<C> From<RustCallable<C>> for Value<C> {
-    fn from(value: RustCallable<C>) -> Self {
-        Value::Function(value.into())
-    }
-}
-
-impl<C> From<RustClosureRef<C>> for Value<C> {
-    fn from(value: RustClosureRef<C>) -> Self {
-        Value::Function(value.into())
-    }
-}
-
-impl<C> From<RustClosureMut<C>> for Value<C> {
-    fn from(value: RustClosureMut<C>) -> Self {
-        Value::Function(value.into())
-    }
-}
-
-pub enum Callable<C> {
-    Lua(LuaClosureRef),
-    Rust(RustCallable<C>),
-}
-
-impl<C> Debug for Callable<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Lua(arg0) => f.debug_tuple("LuaClosure").field(arg0).finish(),
-            Self::Rust(arg0) => f.debug_tuple("RustCallable").field(arg0).finish(),
-        }
-    }
-}
-
-impl<C> Clone for Callable<C> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Lua(arg0) => Self::Lua(arg0.clone()),
-            Self::Rust(arg0) => Self::Rust(arg0.clone()),
-        }
-    }
-}
-
-impl<C> PartialEq for Callable<C> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Lua(l0), Self::Lua(r0)) => l0 == r0,
-            (Self::Rust(l0), Self::Rust(r0)) => l0 == r0,
-            _ => false,
-        }
-    }
-}
-
-impl<C> Eq for Callable<C> {}
-
-impl<C> Hash for Callable<C> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        core::mem::discriminant(self).hash(state);
-
-        match self {
-            Self::Lua(t) => t.hash(state),
-            Self::Rust(t) => t.hash(state),
-        }
-    }
-}
-
-impl<C> LuaFfiOnce<C> for Callable<C>
+impl<Types, C> From<RustCallable<Types, C>> for Value<Types>
 where
-    C: ChunkCache,
+    Types: TypeProvider<RustCallable = RustCallable<Types, C>>,
 {
-    fn call_once(self, mut rt: crate::runtime::RuntimeView<'_, C>) -> Result<(), RuntimeError<C>> {
+    fn from(value: RustCallable<Types, C>) -> Self {
+        Value::Function(value.into())
+    }
+}
+
+impl<Types, C> From<RustClosureRef<Types, C>> for Value<Types>
+where
+    Types: TypeProvider<RustCallable = RustCallable<Types, C>>,
+{
+    fn from(value: RustClosureRef<Types, C>) -> Self {
+        Value::Function(value.into())
+    }
+}
+
+impl<Types, C> From<RustClosureMut<Types, C>> for Value<Types>
+where
+    Types: TypeProvider<RustCallable = RustCallable<Types, C>>,
+{
+    fn from(value: RustClosureMut<Types, C>) -> Self {
+        Value::Function(value.into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Callable<RustCallable> {
+    Lua(LuaClosureRef),
+    Rust(RustCallable),
+}
+
+impl<RustCallable, Types, C> LuaFfiOnce<Types, C> for Callable<RustCallable>
+where
+    Types: TypeProvider<String = String, Table = TableRef<Types>, RustCallable = RustCallable>,
+    RustCallable: LuaFfiOnce<Types, C>,
+    C: crate::chunk_cache::ChunkCache,
+    Value<Types>: Clone + PartialEq + Display,
+    KeyValue<Types>: Hash + Eq,
+{
+    fn call_once(
+        self,
+        mut rt: crate::runtime::RuntimeView<'_, Types, C>,
+    ) -> Result<(), RuntimeError<Types>> {
         use repr::index::StackSlot;
 
         match self {
@@ -315,28 +346,28 @@ impl<C> From<LuaClosureRef> for Callable<C> {
     }
 }
 
-impl<C> From<RustCallable<C>> for Callable<C> {
-    fn from(value: RustCallable<C>) -> Self {
+impl<Types, C> From<RustCallable<Types, C>> for Callable<RustCallable<Types, C>> {
+    fn from(value: RustCallable<Types, C>) -> Self {
         Self::Rust(value)
     }
 }
 
-impl<C> From<RustClosureMut<C>> for Callable<C> {
-    fn from(value: RustClosureMut<C>) -> Self {
+impl<Types, C> From<RustClosureMut<Types, C>> for Callable<RustCallable<Types, C>> {
+    fn from(value: RustClosureMut<Types, C>) -> Self {
         Self::Rust(value.into())
     }
 }
 
-impl<C> From<RustClosureRef<C>> for Callable<C> {
-    fn from(value: RustClosureRef<C>) -> Self {
+impl<Types, C> From<RustClosureRef<Types, C>> for Callable<RustCallable<Types, C>> {
+    fn from(value: RustClosureRef<Types, C>) -> Self {
         Self::Rust(value.into())
     }
 }
 
-impl<C> TryFrom<Value<C>> for Callable<C> {
+impl<Types: TypeProvider> TryFrom<Value<Types>> for Callable<Types::RustCallable> {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
         use super::Type;
 
         match value {
@@ -353,8 +384,8 @@ impl<C> TryFrom<Value<C>> for Callable<C> {
     }
 }
 
-impl<C> From<Callable<C>> for Value<C> {
-    fn from(value: Callable<C>) -> Self {
+impl<Types: TypeProvider> From<Callable<Types::RustCallable>> for Value<Types> {
+    fn from(value: Callable<Types::RustCallable>) -> Self {
         Value::Function(value)
     }
 }

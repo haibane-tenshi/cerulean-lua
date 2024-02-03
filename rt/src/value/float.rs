@@ -4,7 +4,7 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 
-use super::{Int, Type, TypeMismatchError, Value};
+use super::{Int, Type, TypeMismatchError, TypeProvider, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Float(pub f64);
@@ -168,10 +168,10 @@ impl RemAssign for Float {
     }
 }
 
-impl<C> TryFrom<Value<C>> for Float {
+impl<Types: TypeProvider> TryFrom<Value<Types>> for Float {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<C>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
         match value {
             Value::Float(value) => Ok(Float(value)),
             value => {
@@ -186,7 +186,7 @@ impl<C> TryFrom<Value<C>> for Float {
     }
 }
 
-impl<C> From<Float> for Value<C> {
+impl<Types: TypeProvider> From<Float> for Value<Types> {
     fn from(value: Float) -> Self {
         let Float(value) = value;
         Value::Float(value)

@@ -63,7 +63,7 @@ fn main() -> Result<()> {
             use rt::chunk_cache::ChunkId;
             use rt::runtime::{Core, DialectBuilder, Runtime};
             // use rt::value::table::TableRef;
-            use rt::value::Value;
+            use rt::value::{DefaultTypes, Value};
 
             let (env_chunk, builder) = rt::global_env::empty()
                 .include(rt::global_env::assert())
@@ -84,7 +84,7 @@ fn main() -> Result<()> {
                 primitive_metatables: Default::default(),
             };
 
-            let mut runtime = Runtime::new(chunk_cache, core);
+            let mut runtime = Runtime::<DefaultTypes<_>, _>::new(chunk_cache, core);
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0), ())?;

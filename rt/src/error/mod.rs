@@ -10,7 +10,7 @@ use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::value::Value;
+use crate::value::{TypeProvider, Value};
 
 pub use crate::chunk_cache::Immutable;
 pub use diagnostic::Diagnostic;
@@ -21,8 +21,8 @@ pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use upvalue_count_mismatch::UpvalueCountMismatch;
 pub use value::ValueError;
 
-pub enum RuntimeError<C> {
-    Value(ValueError<C>),
+pub enum RuntimeError<Types: TypeProvider> {
+    Value(ValueError<Types>),
     Immutable(Immutable),
     Diagnostic(Diagnostic),
     MissingChunk(MissingChunk),
@@ -32,49 +32,53 @@ pub enum RuntimeError<C> {
     OpCode(OpCodeError),
 }
 
-impl<C> From<Value<C>> for RuntimeError<C> {
-    fn from(value: Value<C>) -> Self {
+impl<Types: TypeProvider> From<Value<Types>> for RuntimeError<Types> {
+    fn from(value: Value<Types>) -> Self {
         RuntimeError::Value(ValueError(value))
     }
 }
 
-impl<C> From<MissingChunk> for RuntimeError<C> {
+impl<Types: TypeProvider> From<MissingChunk> for RuntimeError<Types> {
     fn from(value: MissingChunk) -> Self {
         RuntimeError::MissingChunk(value)
     }
 }
 
-impl<C> From<MissingFunction> for RuntimeError<C> {
+impl<Types: TypeProvider> From<MissingFunction> for RuntimeError<Types> {
     fn from(value: MissingFunction) -> Self {
         RuntimeError::MissingFunction(value)
     }
 }
 
-impl<C> From<OutOfBoundsStack> for RuntimeError<C> {
+impl<Types: TypeProvider> From<OutOfBoundsStack> for RuntimeError<Types> {
     fn from(value: OutOfBoundsStack) -> Self {
         RuntimeError::OutOfBoundsStack(value)
     }
 }
 
-impl<C> From<UpvalueCountMismatch> for RuntimeError<C> {
+impl<Types: TypeProvider> From<UpvalueCountMismatch> for RuntimeError<Types> {
     fn from(value: UpvalueCountMismatch) -> Self {
         RuntimeError::UpvalueCountMismatch(value)
     }
 }
 
-impl<C> From<ValueError<C>> for RuntimeError<C> {
-    fn from(value: ValueError<C>) -> Self {
+impl<Types: TypeProvider> From<ValueError<Types>> for RuntimeError<Types> {
+    fn from(value: ValueError<Types>) -> Self {
         RuntimeError::Value(value)
     }
 }
 
-impl<C> From<OpCodeError> for RuntimeError<C> {
+impl<Types: TypeProvider> From<OpCodeError> for RuntimeError<Types> {
     fn from(value: OpCodeError) -> Self {
         RuntimeError::OpCode(value)
     }
 }
 
-impl<C> Debug for RuntimeError<C> {
+impl<Types> Debug for RuntimeError<Types>
+where
+    Types: TypeProvider,
+    Value<Types>: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
@@ -91,13 +95,13 @@ impl<C> Debug for RuntimeError<C> {
     }
 }
 
-impl<C> Display for RuntimeError<C> {
+impl<Types: TypeProvider> Display for RuntimeError<Types> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "runtime error")
     }
 }
 
-impl<C> Error for RuntimeError<C> {}
+impl<Types: TypeProvider> Error for RuntimeError<Types> where Self: Debug + Display {}
 
 trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);

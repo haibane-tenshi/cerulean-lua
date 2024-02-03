@@ -1,12 +1,15 @@
 use codespan_reporting::diagnostic::Diagnostic;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
-use crate::value::Value;
+use crate::value::{TypeProvider, Value};
 
-#[derive(Clone)]
-pub struct ValueError<C>(pub Value<C>);
+pub struct ValueError<Types: TypeProvider>(pub Value<Types>);
 
-impl<C> ValueError<C> {
+impl<Types> ValueError<Types>
+where
+    Types: TypeProvider<String = String>,
+    Value<Types>: Display,
+{
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
         use Value::*;
@@ -30,13 +33,20 @@ impl<C> ValueError<C> {
     }
 }
 
-impl<C> From<Value<C>> for ValueError<C> {
-    fn from(value: Value<C>) -> Self {
+impl<Types> From<Value<Types>> for ValueError<Types>
+where
+    Types: TypeProvider,
+{
+    fn from(value: Value<Types>) -> Self {
         ValueError(value)
     }
 }
 
-impl<C> Debug for ValueError<C> {
+impl<Types> Debug for ValueError<Types>
+where
+    Types: TypeProvider,
+    Value<Types>: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Value").field(&self.0).finish()
     }

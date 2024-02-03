@@ -1,4 +1,4 @@
-use crate::value::Value;
+use crate::value::{TypeProvider, Value};
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
 /// Define fine aspects of runtime behavior.
@@ -309,18 +309,22 @@ impl DialectBuilder {
     }
 }
 
-pub trait CoerceArgs: sealed::Sealed {
-    fn coerce_bin_op_ari<C>(&self, op: AriBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
-    fn coerce_bin_op_bit<C>(&self, op: BitBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
-    fn coerce_bin_op_str<C>(&self, op: StrBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
-    fn coerce_una_op_bit<C>(&self, args: [Value<C>; 1]) -> [Value<C>; 1];
-    fn coerce_tab_set<C>(&self, key: Value<C>) -> Value<C>;
-    fn coerce_tab_get<C>(&self, key: Value<C>) -> Value<C>;
+pub trait CoerceArgs<C: TypeProvider>: sealed::Sealed {
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
+    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
+    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
+    fn coerce_una_op_bit(&self, args: [Value<C>; 1]) -> [Value<C>; 1];
+    fn coerce_tab_set(&self, key: Value<C>) -> Value<C>;
+    fn coerce_tab_get(&self, key: Value<C>) -> Value<C>;
     fn cmp_float_and_int(&self) -> bool;
 }
 
-impl CoerceArgs for DialectBuilder {
-    fn coerce_bin_op_ari<C>(&self, op: AriBinOp, args: [Value<C>; 2]) -> [Value<C>; 2] {
+impl<Types> CoerceArgs<Types> for DialectBuilder
+where
+    Types: TypeProvider,
+    Types::String: From<String>,
+{
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Types>; 2]) -> [Value<Types>; 2] {
         use crate::value::{Float, Int};
 
         match (op, args) {
@@ -344,10 +348,10 @@ impl CoerceArgs for DialectBuilder {
         }
     }
 
-    fn coerce_bin_op_bit<C>(&self, _op: BitBinOp, args: [Value<C>; 2]) -> [Value<C>; 2] {
+    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [Value<Types>; 2]) -> [Value<Types>; 2] {
         use crate::value::{Float, Int};
 
-        let try_into = |value: f64| -> Value<C> {
+        let try_into = |value: f64| -> Value<Types> {
             if let Ok(value) = Int::try_from(Float(value)) {
                 value.into()
             } else {
@@ -372,32 +376,39 @@ impl CoerceArgs for DialectBuilder {
         }
     }
 
-    fn coerce_bin_op_str<C>(&self, op: StrBinOp, args: [Value<C>; 2]) -> [Value<C>; 2] {
+    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Types>; 2]) -> [Value<Types>; 2] {
         match op {
             StrBinOp::Concat => {
-                let [lhs, rhs] = &args;
+                use Value::*;
 
-                let lhs = match lhs {
-                    Value::Int(lhs) => Value::String(lhs.to_string()),
-                    Value::Float(lhs) => Value::String(lhs.to_string()),
-                    arg => arg.clone(),
-                };
-
-                let rhs = match rhs {
-                    Value::Int(lhs) => Value::String(lhs.to_string()),
-                    Value::Float(lhs) => Value::String(lhs.to_string()),
-                    arg => arg.clone(),
-                };
-
-                match [lhs, rhs] {
-                    args @ [Value::String(_), Value::String(_)] => args,
-                    _ => args,
+                match args {
+                    [Int(lhs), Int(rhs)] => [
+                        String(lhs.to_string().into()),
+                        String(rhs.to_string().into()),
+                    ],
+                    [Int(lhs), Float(rhs)] => [
+                        String(lhs.to_string().into()),
+                        String(rhs.to_string().into()),
+                    ],
+                    [Int(lhs), String(rhs)] => [String(lhs.to_string().into()), String(rhs)],
+                    [Float(lhs), Int(rhs)] => [
+                        String(lhs.to_string().into()),
+                        String(rhs.to_string().into()),
+                    ],
+                    [Float(lhs), Float(rhs)] => [
+                        String(lhs.to_string().into()),
+                        String(rhs.to_string().into()),
+                    ],
+                    [Float(lhs), String(rhs)] => [String(lhs.to_string().into()), String(rhs)],
+                    [String(lhs), Int(rhs)] => [String(lhs), String(rhs.to_string().into())],
+                    [String(lhs), Float(rhs)] => [String(lhs), String(rhs.to_string().into())],
+                    args => args,
                 }
             }
         }
     }
 
-    fn coerce_una_op_bit<C>(&self, args: [Value<C>; 1]) -> [Value<C>; 1] {
+    fn coerce_una_op_bit(&self, args: [Value<Types>; 1]) -> [Value<Types>; 1] {
         use crate::value::{Float, Int};
 
         match args {
@@ -412,7 +423,7 @@ impl CoerceArgs for DialectBuilder {
         }
     }
 
-    fn coerce_tab_set<C>(&self, key: Value<C>) -> Value<C> {
+    fn coerce_tab_set(&self, key: Value<Types>) -> Value<Types> {
         use crate::value::{Float, Int};
 
         if !self.tab_set_float_to_int {
@@ -431,7 +442,7 @@ impl CoerceArgs for DialectBuilder {
         }
     }
 
-    fn coerce_tab_get<C>(&self, key: Value<C>) -> Value<C> {
+    fn coerce_tab_get(&self, key: Value<Types>) -> Value<Types> {
         use crate::value::{Float, Int};
 
         if !self.tab_get_float_to_int {
