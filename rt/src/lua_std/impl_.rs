@@ -1,8 +1,7 @@
 use repr::index::StackSlot;
 use std::error::Error;
 use std::fmt::{Debug, Display};
-use std::hash::Hash;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::chunk_cache::{ChunkCache, KeyedChunkCache};
 use crate::error::RuntimeError;
@@ -10,14 +9,13 @@ use crate::ffi::{self, LuaFfi, LuaFfiOnce, Maybe, Opts, WithName};
 use crate::runtime::{ClosureRef, RuntimeView};
 use crate::value::table::KeyValue;
 use crate::value::{
-    Callable, NilOr, TableRef, TypeMismatchError, TypeMismatchOrError, TypeProvider, Value,
+    Callable, LuaString, LuaTable, NilOr, TypeMismatchError, TypeMismatchOrError, TypeProvider,
+    Value,
 };
 
 pub fn assert<Types, C>() -> impl LuaFfi<Types, C> + 'static
 where
     Types: TypeProvider,
-    Types::String: From<&'static str>,
-    Value<Types>: Clone,
 {
     (|rt: RuntimeView<'_, Types, C>| {
         let Some(cond) = rt.stack.get(StackSlot(0)) else {
@@ -41,7 +39,7 @@ where
 pub fn print<Types, C>() -> impl LuaFfi<Types, C> + 'static
 where
     Types: TypeProvider,
-    Value<Types>: Clone + Display,
+    Value<Types>: Display,
 {
     (|mut rt: RuntimeView<'_, Types, C>| {
         for value in rt.stack.iter() {
@@ -57,11 +55,11 @@ where
 
 pub fn pcall<Types, C>() -> impl LuaFfi<Types, C> + 'static
 where
-    Types: TypeProvider<String = String>,
-    // Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Clone + Display,
-    Callable<Types::RustCallable>: LuaFfiOnce<Types, C>,
     C: ChunkCache,
+    Types: TypeProvider,
+    Types::String: TryInto<String>,
+    Types::RustCallable: LuaFfiOnce<Types, C>,
+    Value<Types>: Debug + Display,
 {
     (|mut rt: RuntimeView<'_, Types, C>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
@@ -125,7 +123,7 @@ impl Error for ModeError {}
 impl<Types> TryFrom<Value<Types>> for Mode
 where
     Types: TypeProvider,
-    Types::String: AsRef<str>,
+    Types::String: AsRef<[u8]>,
 {
     type Error = TypeMismatchOrError<ModeError>;
 
@@ -145,9 +143,9 @@ where
         };
 
         let r = match s.as_ref() {
-            "t" => Mode::Text,
-            "b" => Mode::Binary,
-            "bt" => Mode::BinaryOrText,
+            b"t" => Mode::Text,
+            b"b" => Mode::Binary,
+            b"bt" => Mode::BinaryOrText,
             _ => return Err(TypeMismatchOrError::Other(ModeError)),
         };
 
@@ -158,10 +156,11 @@ where
 pub fn load<Types, C>() -> impl LuaFfi<Types, C> + 'static
 where
     C: ChunkCache,
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types: TypeProvider,
+    Types::String: TryInto<String> + AsRef<[u8]>,
     Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Clone + PartialEq + Debug + Display,
-    KeyValue<Types>: Hash + Eq,
+    Value<Types>: Debug + Display + TryInto<LuaString<String>>,
+    <Value<Types> as TryInto<LuaString<String>>>::Error: Error,
 {
     use crate::value::Type;
 
@@ -216,7 +215,7 @@ where
             rt,
             |mut rt: RuntimeView<'_, Types, C>,
              source: ChunkSource<Types>,
-             opts: Opts<(String, Mode, Value<Types>)>|
+             opts: Opts<(LuaString<String>, Mode, Value<Types>)>|
              -> Result<_, RuntimeError<Types>> {
                 use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
@@ -234,6 +233,10 @@ where
                         )
                     }
                 };
+
+                let source = source
+                    .try_into()
+                    .map_err(|_| Value::String("string does not contain valid utf8".into()))?;
 
                 match rt.load(source, None) {
                     Ok(chunk_id) => {
@@ -263,16 +266,17 @@ where
 pub fn loadfile<Types, C>() -> impl LuaFfi<Types, C> + 'static
 where
     C: ChunkCache + KeyedChunkCache<Path>,
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types: TypeProvider,
+    Types::String: TryInto<String> + AsRef<[u8]>,
     Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Clone + PartialEq + Debug + Display,
-    KeyValue<Types>: Hash + Eq,
+    Value<Types>: Debug + Display + TryInto<LuaString<PathBuf>>,
+    <Value<Types> as TryInto<LuaString<PathBuf>>>::Error: Error,
 {
     let f = |rt: RuntimeView<'_, Types, C>| {
         ffi::try_invoke_with_rt(
             rt,
             |mut rt: RuntimeView<'_, Types, C>,
-             opts: Opts<(String, Mode, Value<Types>)>|
+             opts: Opts<(LuaString<PathBuf>, Mode, Value<Types>)>|
              -> Result<_, RuntimeError<Types>> {
                 use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
@@ -281,9 +285,9 @@ where
                 let (filename, mode, env) = opts.split();
                 let _mode = mode.unwrap_or_default();
 
-                let Some(filename) = filename else {
+                let Some(LuaString(filename)) = filename else {
                     return Err(Value::String(
-                        "loadfile doesn't yet support loading chunks from stdin".to_string(),
+                        "loadfile doesn't yet support loading chunks from stdin".into(),
                     )
                     .into());
                 };
@@ -315,21 +319,19 @@ where
 
 pub fn getmetatable<Types, C>() -> impl LuaFfi<Types, C> + 'static
 where
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
-    KeyValue<Types>: Hash + Eq,
-    Value<Types>: Clone + Debug + Display,
+    Types: TypeProvider,
+    Value<Types>: Debug + Display,
 {
     let f = |rt: RuntimeView<'_, Types, C>| {
         ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, Types, C>, value: Value<Types>| {
             value
                 .metatable(&rt.core.primitive_metatables)
                 .map(|metatable| {
-                    use crate::value::table::KeyValue;
+                    use crate::value::{Borrow, TableIndex};
 
                     let __metatable = metatable
-                        .borrow()
-                        .unwrap()
-                        .get(&KeyValue::String("__metatable".into()));
+                        .with_ref(|mt| mt.get(&KeyValue::String("__metatable".into())))
+                        .unwrap();
 
                     if let Value::Nil = __metatable {
                         Value::Table(metatable)
@@ -346,36 +348,40 @@ where
 
 pub fn setmetatable<Types, C>() -> impl LuaFfi<Types, C> + 'static
 where
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
-    KeyValue<Types>: Hash + Eq,
-    Value<Types>: Clone,
+    Types: TypeProvider,
 {
     let f = |rt: RuntimeView<'_, Types, C>| {
-        use crate::value::table::{KeyValue, TableRef};
-
         ffi::try_invoke(
             rt,
-            |table: TableRef<Types>, metatable: NilOr<TableRef<Types>>| {
-                let mut t = table.borrow_mut().unwrap();
+            |table: LuaTable<Types::TableRef>, metatable: NilOr<LuaTable<Types::TableRef>>| {
+                use crate::value::{Borrow, Metatable, TableIndex};
 
-                let has_meta = t.metatable().is_some_and(|metatable| {
-                    metatable
-                        .borrow()
-                        .unwrap()
-                        .contains_key(&KeyValue::String("__metatable".to_string()))
-                });
+                let metatable = metatable.into_option().map(|LuaTable(t)| t);
 
-                if has_meta {
-                    return Err(Value::String(
-                        "table already has metatable with '__metatable' field".to_string(),
-                    )
-                    .into());
-                }
+                table
+                    .0
+                    .with_mut(|t| {
+                        let has_meta = t.metatable().is_some_and(|metatable| {
+                            metatable
+                                .with_ref(|mt| {
+                                    mt.contains_key(&KeyValue::String("__metatable".into()))
+                                })
+                                .unwrap()
+                        });
 
-                t.set_metatable(metatable.into());
-                drop(t);
+                        if has_meta {
+                            return Err(Value::String(
+                                "table already has metatable with '__metatable' field".into(),
+                            ));
+                        }
 
-                Ok(Value::Table(table))
+                        t.set_metatable(metatable);
+
+                        Ok(())
+                    })
+                    .unwrap()?;
+
+                Ok(table)
             },
         )
     };

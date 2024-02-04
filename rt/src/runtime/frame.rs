@@ -23,7 +23,7 @@ use crate::error::opcode::{
 use crate::error::RuntimeError;
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
-use crate::value::{TableRef, TypeProvider, Value};
+use crate::value::{Borrow, TableIndex, TypeProvider, Value};
 
 pub(crate) enum ChangeFrame<RsC> {
     Return(StackSlot),
@@ -110,7 +110,6 @@ impl ClosureRef {
     ) -> Result<Frame<Value<Types>>, RuntimeError<Types>>
     where
         C: ChunkCache,
-        Value<Types>: Clone,
     {
         use crate::error::{MissingChunk, MissingFunction, OutOfBoundsStack, UpvalueCountMismatch};
         use repr::chunk::Function;
@@ -219,7 +218,7 @@ impl<Value> Frame<Value> {
 impl<Types> Frame<Value<Types>>
 where
     Types: TypeProvider,
-    Value<Types>: Clone + Display,
+    Value<Types>: Display,
 {
     pub(crate) fn activate<'a, C: ChunkCache>(
         self,
@@ -405,9 +404,8 @@ where
 
 impl<'rt, Types> ActiveFrame<'rt, Types>
 where
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
-    Value<Types>: Clone + Display + PartialEq,
-    KeyValue<Types>: Hash + Eq + From<Event>,
+    Types: TypeProvider,
+    Value<Types>: Debug + Display,
 {
     pub fn step(
         &mut self,
@@ -607,15 +605,19 @@ where
                     args => Break((Event::BitNot, args)),
                 }
             }
-            UnaOp::StrLen => match args {
-                [Value::String(val)] => {
-                    let len = val.len().try_into().unwrap();
+            UnaOp::StrLen => {
+                use crate::value::Len;
 
-                    Continue(Value::Int(len))
+                match args {
+                    [Value::String(val)] => {
+                        let len = val.len().try_into().unwrap();
+
+                        Continue(Value::Int(len))
+                    }
+                    // Table builtin triggers after metamethod attempt.
+                    args => Break((Event::Len, args)),
                 }
-                // Table builtin triggers after metamethod attempt.
-                args => Break((Event::Len, args)),
-            },
+            }
             UnaOp::LogNot => {
                 let [arg] = args;
                 let r = Value::Bool(!arg.to_bool());
@@ -634,7 +636,9 @@ where
                 let [arg] = &args;
                 let metavalue = arg
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(&event.into()));
+                    .map(|mt| mt.with_ref(|mt| mt.get(&event.into())))
+                    .transpose()
+                    .unwrap();
 
                 match metavalue {
                     Some(metavalue) => {
@@ -648,7 +652,7 @@ where
                     None => match (op, args) {
                         // Trigger table len builtin on failed metamethod lookup.
                         (UnaOp::StrLen, [Value::Table(tab)]) => {
-                            let border = tab.borrow().unwrap().border();
+                            let border = tab.with_ref(|tab| tab.border()).unwrap();
                             self.stack.push(Value::Int(border));
 
                             Ok(Continue(()))
@@ -703,7 +707,9 @@ where
                 let metavalue = lhs
                     .metatable(&self.core.primitive_metatables)
                     .or_else(|| rhs.metatable(&self.core.primitive_metatables))
-                    .map(|mt| mt.borrow().unwrap().get(&event.into()));
+                    .map(|mt| mt.with_ref(|mt| mt.get(&event.into())))
+                    .transpose()
+                    .unwrap();
 
                 match metavalue {
                     Some(metavalue) => {
@@ -741,12 +747,16 @@ where
         op: StrBinOp,
     ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
         use super::CoerceArgs;
+        use crate::value::Concat;
 
         let args = self.core.dialect.coerce_bin_op_str(op, args);
 
         match args {
-            [Value::String(lhs), Value::String(rhs)] => match op {
-                StrBinOp::Concat => ControlFlow::Continue(Some(Value::String(lhs + &rhs))),
+            [Value::String(mut lhs), Value::String(rhs)] => match op {
+                StrBinOp::Concat => {
+                    lhs.concat(&rhs);
+                    ControlFlow::Continue(Some(Value::String(lhs)))
+                }
             },
             args => ControlFlow::Break(args),
         }
@@ -900,7 +910,7 @@ where
                 let index = self.core.dialect.coerce_tab_get(index.clone());
 
                 let key = index.try_into().map_err(InvalidKey)?;
-                let value = table.borrow().unwrap().get(&key);
+                let value = table.with_ref(|t| t.get(&key)).unwrap();
 
                 // It succeeds if any non-nil value is produced.
                 if value != Value::Nil {
@@ -913,7 +923,9 @@ where
             loop {
                 let metavalue = table
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(&Event::Index.into()))
+                    .map(|mt| mt.with_ref(|mt| mt.get(&Event::Index.into())))
+                    .transpose()
+                    .unwrap()
                     .unwrap_or_default();
 
                 match metavalue {
@@ -967,12 +979,19 @@ where
                 let index = self.core.dialect.coerce_tab_set(index.clone());
                 let key = index.try_into().map_err(InvalidKey)?;
 
-                let mut table = table.borrow_mut().unwrap();
+                let r = table
+                    .with_ref(|table| {
+                        // It succeeds if key is already populated.
+                        if table.contains_key(&key) {
+                            Break(())
+                        } else {
+                            Continue(())
+                        }
+                    })
+                    .unwrap();
 
-                // It succeeds if key is already populated.
-                if table.contains_key(&key) {
-                    table.set(key, value);
-
+                if matches!(r, Break(())) {
+                    table.with_mut(|table| table.set(key, value)).unwrap();
                     return Ok(Continue(()));
                 }
             };
@@ -981,7 +1000,9 @@ where
             loop {
                 let metavalue = table
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.borrow().unwrap().get(&Event::NewIndex.into()))
+                    .map(|mt| mt.with_ref(|mt| mt.get(&Event::NewIndex.into())))
+                    .transpose()
+                    .unwrap()
                     .unwrap_or_default();
 
                 match metavalue {
@@ -994,7 +1015,7 @@ where
                             let index = self.core.dialect.coerce_tab_set(index);
                             let key = index.try_into().map_err(InvalidKey)?;
 
-                            table.borrow_mut().unwrap().set(key, value);
+                            table.with_mut(|tab| tab.set(key, value)).unwrap();
 
                             return Ok(Continue(()));
                         } else {
@@ -1036,7 +1057,9 @@ where
 
             let new_callable = callable
                 .metatable(&self.core.primitive_metatables)
-                .map(|mt| mt.borrow().unwrap().get(&Event::Call.into()))
+                .map(|mt| mt.with_ref(|mt| mt.get(&Event::Call.into())))
+                .transpose()
+                .unwrap()
                 .unwrap_or_default();
 
             // Keys associated with nil are not considered part of the table.
@@ -1152,7 +1175,7 @@ where
 impl<'rt, Types> Debug for ActiveFrame<'rt, Types>
 where
     Types: TypeProvider,
-    Types::Table: Debug,
+    Types::TableRef: Debug,
     Value<Types>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1297,7 +1320,6 @@ impl From<RelBinOp> for Event {
 impl<Types> From<Event> for crate::value::table::KeyValue<Types>
 where
     Types: TypeProvider,
-    Types::String: From<&'static str>,
 {
     fn from(value: Event) -> Self {
         KeyValue::String(value.to_str().into())

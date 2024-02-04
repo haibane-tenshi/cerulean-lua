@@ -3,7 +3,9 @@ pub mod callable;
 pub mod float;
 pub mod int;
 pub mod nil;
+pub mod string;
 pub mod table;
+pub mod traits;
 pub mod userdata;
 
 use std::error::Error;
@@ -17,7 +19,9 @@ pub use callable::Callable;
 pub use float::Float;
 pub use int::Int;
 pub use nil::{Nil, NilOr};
-pub use table::{Table, TableRef};
+pub use string::LuaString;
+pub use table::{KeyValue, LuaTable, Table, TableRef};
+pub use traits::{Borrow, Concat, Len, Metatable, TableIndex, TypeProvider};
 pub use userdata::UserdataRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -158,20 +162,15 @@ impl Display for TypeWithoutMetatable {
     }
 }
 
-pub trait TypeProvider {
-    type String: Sized;
-    type RustCallable: Sized;
-    type Table: Sized;
-    type FullUserdata: Sized;
-}
-
 pub struct DefaultTypes<C>(std::marker::PhantomData<C>);
 
 impl<C> TypeProvider for DefaultTypes<C> {
     type String = String;
     type RustCallable = callable::RustCallable<Self, C>;
-    type Table = TableRef<Self>;
-    type FullUserdata = UserdataRef<Self, C>;
+    type Table = Table<Self>;
+    type TableRef = TableRef<Self>;
+    type FullUserdata = userdata::FullUserdata<Self, C>;
+    type FullUserdataRef = UserdataRef<Self, C>;
 }
 
 /// Enum representing all possible Lua values.
@@ -195,8 +194,8 @@ pub enum Value<Types: TypeProvider> {
     Float(f64),
     String(Types::String),
     Function(Callable<Types::RustCallable>),
-    Table(Types::Table),
-    Userdata(Types::FullUserdata),
+    Table(Types::TableRef),
+    Userdata(Types::FullUserdataRef),
 }
 
 impl<Types: TypeProvider> Value<Types> {
@@ -223,11 +222,8 @@ impl<Types: TypeProvider> Value<Types> {
 
     pub(crate) fn metatable<'a>(
         &'a self,
-        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<Types::Table>>,
-    ) -> Option<Types::Table>
-    where
-        Types::Table: Clone,
-    {
+        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<Types::TableRef>>,
+    ) -> Option<Types::TableRef> {
         match self {
             Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].clone(),
             Value::Bool(_) => primitive_metatables[TypeWithoutMetatable::Bool].clone(),
@@ -235,8 +231,20 @@ impl<Types: TypeProvider> Value<Types> {
             Value::Float(_) => primitive_metatables[TypeWithoutMetatable::Float].clone(),
             Value::String(_) => primitive_metatables[TypeWithoutMetatable::String].clone(),
             Value::Function(_) => primitive_metatables[TypeWithoutMetatable::Function].clone(),
-            Value::Table(t) => todo!(), //t.borrow().unwrap().metatable(),
-            Value::Userdata(t) => todo!(), //t.metatable(),
+            Value::Table(t) => {
+                let Ok(r) = t.with_ref(|t| t.metatable()) else {
+                    todo!()
+                };
+
+                r
+            }
+            Value::Userdata(t) => {
+                let Ok(r) = t.with_ref(|t| t.metatable()) else {
+                    todo!()
+                };
+
+                r
+            }
         }
     }
 }
@@ -246,8 +254,8 @@ where
     Types: TypeProvider,
     Types::String: Debug,
     Types::RustCallable: Debug,
-    Types::Table: Debug,
-    Types::FullUserdata: Debug,
+    Types::TableRef: Debug,
+    Types::FullUserdataRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -268,8 +276,8 @@ where
     Types: TypeProvider,
     Types::String: Clone,
     Types::RustCallable: Clone,
-    Types::Table: Clone,
-    Types::FullUserdata: Clone,
+    Types::TableRef: Clone,
+    Types::FullUserdataRef: Clone,
 {
     fn clone(&self) -> Self {
         match self {
@@ -290,8 +298,8 @@ where
     Types: TypeProvider,
     Types::String: PartialEq,
     Types::RustCallable: PartialEq,
-    Types::Table: PartialEq,
-    Types::FullUserdata: PartialEq,
+    Types::TableRef: PartialEq,
+    Types::FullUserdataRef: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -323,8 +331,8 @@ where
     Types: TypeProvider,
     Types::String: Debug + Display,
     Types::RustCallable: Debug,
-    Types::Table: Debug,
-    Types::FullUserdata: Debug,
+    Types::TableRef: Debug,
+    Types::FullUserdataRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
@@ -355,7 +363,6 @@ where
 impl<Types> From<Literal> for Value<Types>
 where
     Types: TypeProvider,
-    Types::String: From<String>,
 {
     fn from(value: Literal) -> Self {
         match value {
@@ -371,7 +378,6 @@ where
 impl<Types> From<String> for Value<Types>
 where
     Types: TypeProvider,
-    Types::String: From<String>,
 {
     fn from(value: String) -> Self {
         Value::String(value.into())

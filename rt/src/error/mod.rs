@@ -148,3 +148,82 @@ impl<FileId> ExtraDiagnostic<FileId> for Message<FileId> {
             ]);
     }
 }
+
+#[derive(Debug)]
+pub struct BorrowError;
+
+impl Display for BorrowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "value is already borrowed")
+    }
+}
+
+impl Error for BorrowError {}
+
+impl<Types> From<BorrowError> for RuntimeError<Types>
+where
+    Types: TypeProvider,
+{
+    fn from(value: BorrowError) -> Self {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct AlreadyDroppedError;
+
+impl Display for AlreadyDroppedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "value behind this reference is already dropped")
+    }
+}
+
+impl Error for AlreadyDroppedError {}
+
+impl<Types> From<AlreadyDroppedError> for RuntimeError<Types>
+where
+    Types: TypeProvider,
+{
+    fn from(value: AlreadyDroppedError) -> Self {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub enum AlreadyDroppedOrError<E> {
+    AlreadyDropped(AlreadyDroppedError),
+    Other(E),
+}
+
+impl<E> Display for AlreadyDroppedOrError<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyDropped(err) => write!(f, "{err}"),
+            Self::Other(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl<E> Error for AlreadyDroppedOrError<E> where Self: Debug + Display {}
+
+impl<E> From<AlreadyDroppedError> for AlreadyDroppedOrError<E> {
+    fn from(value: AlreadyDroppedError) -> Self {
+        AlreadyDroppedOrError::AlreadyDropped(value)
+    }
+}
+
+impl<Types, E> From<AlreadyDroppedOrError<E>> for RuntimeError<Types>
+where
+    Types: TypeProvider,
+    E: Into<RuntimeError<Types>>,
+{
+    fn from(value: AlreadyDroppedOrError<E>) -> Self {
+        match value {
+            AlreadyDroppedOrError::AlreadyDropped(err) => err.into(),
+            AlreadyDroppedOrError::Other(err) => err.into(),
+        }
+    }
+}

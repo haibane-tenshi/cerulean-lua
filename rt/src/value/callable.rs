@@ -6,8 +6,7 @@ use std::rc::Rc;
 use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
 
-use super::table::KeyValue;
-use super::{TableRef, TypeMismatchError, TypeProvider, Value};
+use super::{TypeMismatchError, TypeProvider, Value};
 
 pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
 
@@ -239,8 +238,7 @@ impl<Types, C> Hash for RustCallable<Types, C> {
 impl<Types, C> LuaFfiOnce<Types, C> for RustCallable<Types, C>
 where
     Types: TypeProvider,
-    Types::String: From<&'static str>,
-    Value<Types>: std::fmt::Display,
+    Value<Types>: Display,
 {
     fn call_once(
         self,
@@ -313,13 +311,12 @@ pub enum Callable<RustCallable> {
     Rust(RustCallable),
 }
 
-impl<RustCallable, Types, C> LuaFfiOnce<Types, C> for Callable<RustCallable>
+impl<Types, C> LuaFfiOnce<Types, C> for Callable<Types::RustCallable>
 where
-    Types: TypeProvider<String = String, Table = TableRef<Types>, RustCallable = RustCallable>,
-    RustCallable: LuaFfiOnce<Types, C>,
     C: crate::chunk_cache::ChunkCache,
-    Value<Types>: Clone + PartialEq + Display,
-    KeyValue<Types>: Hash + Eq,
+    Types: TypeProvider,
+    Types::RustCallable: LuaFfiOnce<Types, C>,
+    Value<Types>: Debug + Display,
 {
     fn call_once(
         self,

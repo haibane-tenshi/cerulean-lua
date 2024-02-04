@@ -7,7 +7,8 @@ pub struct ValueError<Types: TypeProvider>(pub Value<Types>);
 
 impl<Types> ValueError<Types>
 where
-    Types: TypeProvider<String = String>,
+    Types: TypeProvider,
+    Types::String: TryInto<String>,
     Value<Types>: Display,
 {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
@@ -18,7 +19,13 @@ where
 
         let diag = Diagnostic::error();
         let mut diag = match &value {
-            String(s) => diag.with_message(s),
+            String(s) => {
+                if let Ok(s) = s.clone().try_into() {
+                    diag.with_message(s)
+                } else {
+                    diag.with_message(format!("panicked with value: {value}"))
+                }
+            }
             value => diag.with_message(format!("panicked with value: {value}")),
         };
 

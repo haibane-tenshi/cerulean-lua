@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::error::RuntimeError;
+use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
 use crate::value::{TypeMismatchError, TypeProvider, Value};
@@ -315,13 +315,30 @@ where
     }
 }
 
-struct UserdataValue<T: ?Sized, TableRef> {
+#[doc(hidden)]
+pub struct UserdataValue<T: ?Sized, TableRef> {
     metatable: RefCell<Option<TableRef>>,
     value: T,
 }
 
+pub type FullUserdata<Types, C> =
+    UserdataValue<dyn Userdata<Types, C>, <Types as TypeProvider>::TableRef>;
+
+impl<Types, C> super::Metatable<Types::TableRef> for FullUserdata<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn metatable(&self) -> Option<Types::TableRef> {
+        self.metatable.borrow().clone()
+    }
+
+    fn set_metatable(&mut self, mt: Option<Types::TableRef>) -> Option<Types::TableRef> {
+        self.metatable.replace(mt)
+    }
+}
+
 pub struct UserdataRef<Types: TypeProvider, C>(
-    Rc<UserdataValue<dyn Userdata<Types, C>, Types::Table>>,
+    Rc<UserdataValue<dyn Userdata<Types, C>, Types::TableRef>>,
 );
 
 impl<Types, C> UserdataRef<Types, C>
@@ -353,7 +370,7 @@ where
         UserdataRef(Rc::new(value))
     }
 
-    pub fn set_metatable(&self, metatable: Option<Types::Table>) -> Option<Types::Table> {
+    pub fn set_metatable(&self, metatable: Option<Types::TableRef>) -> Option<Types::TableRef> {
         self.0.metatable.replace(metatable)
     }
 }
@@ -361,9 +378,8 @@ where
 impl<Types, C> UserdataRef<Types, C>
 where
     Types: TypeProvider,
-    Types::Table: Clone,
 {
-    pub fn metatable(&self) -> Option<Types::Table> {
+    pub fn metatable(&self) -> Option<Types::TableRef> {
         self.0.metatable.borrow().clone()
     }
 }
@@ -382,16 +398,34 @@ where
     }
 }
 
+impl<Types, C> super::Borrow<FullUserdata<Types, C>> for UserdataRef<Types, C>
+where
+    Types: TypeProvider,
+{
+    type Error = BorrowError;
+
+    fn with_ref<R>(&self, f: impl FnOnce(&FullUserdata<Types, C>) -> R) -> Result<R, Self::Error> {
+        Ok(f(&self.0))
+    }
+
+    fn with_mut<R>(
+        &self,
+        f: impl FnOnce(&mut FullUserdata<Types, C>) -> R,
+    ) -> Result<R, Self::Error> {
+        Err(crate::error::BorrowError.into())
+    }
+}
+
 impl<Types, C> Debug for UserdataRef<Types, C>
 where
     Types: TypeProvider,
-    Types::Table: Debug,
+    // Types::TableRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UserdataRef")
             .field("addr", &Rc::as_ptr(&self.0))
             .field("value", &"<omitted>")
-            .field("metatable", &self.0.metatable)
+            .field("metatable", &"<omitted>") //&self.0.metatable.borrow())
             .finish()
     }
 }
@@ -427,7 +461,7 @@ where
 
 impl<Types, C> From<UserdataRef<Types, C>> for Value<Types>
 where
-    Types: TypeProvider<FullUserdata = UserdataRef<Types, C>>,
+    Types: TypeProvider<FullUserdataRef = UserdataRef<Types, C>>,
 {
     fn from(value: UserdataRef<Types, C>) -> Self {
         Value::Userdata(value)
@@ -436,7 +470,7 @@ where
 
 impl<Types, C> TryFrom<Value<Types>> for UserdataRef<Types, C>
 where
-    Types: TypeProvider<FullUserdata = Self>,
+    Types: TypeProvider<FullUserdataRef = Self>,
 {
     type Error = TypeMismatchError;
 

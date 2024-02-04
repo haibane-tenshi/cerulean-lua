@@ -386,11 +386,10 @@ where
 impl<'a, Types, T> ExtractArgs<T> for &'a [Value<Types>]
 where
     Types: TypeProvider,
-    Value<Types>: Clone,
-    T: TryFrom<Value<Types>>,
-    <T as TryFrom<Value<Types>>>::Error: Error,
+    Value<Types>: TryInto<T>,
+    <Value<Types> as TryInto<T>>::Error: Error,
 {
-    type Error = MissingArg<<T as TryFrom<Value<Types>>>::Error>;
+    type Error = MissingArg<<Value<Types> as TryInto<T>>::Error>;
 
     fn extract(self) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;

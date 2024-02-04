@@ -9,8 +9,7 @@ use std::path::Path;
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::RuntimeError;
 use crate::runtime::RuntimeView;
-use crate::value::table::KeyValue;
-use crate::value::{NilOr, TableRef, TypeProvider, Value};
+use crate::value::{NilOr, TypeProvider, Value};
 
 use arg_parser::{FormatReturns, ParseArgs};
 use signature::{Signature, SignatureWithFirst};
@@ -85,8 +84,7 @@ pub fn invoke<'rt, Types, C, F, Args>(
     f: F,
 ) -> Result<(), RuntimeError<Types>>
 where
-    Types: TypeProvider<String = String>,
-    Value<Types>: Clone,
+    Types: TypeProvider,
     F: Signature<Args>,
     for<'a> &'a [crate::value::Value<Types>]: ParseArgs<Args>,
     <F as Signature<Args>>::Output: FormatReturns<Types>,
@@ -95,7 +93,7 @@ where
         .stack
         .raw
         .parse()
-        .map_err(|err| Value::String(err.to_string()))?;
+        .map_err(|err| Value::String(err.to_string().into()))?;
 
     rt.stack.clear();
 
@@ -111,8 +109,7 @@ pub fn try_invoke<'rt, Types, C, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Types>>
 where
-    Types: TypeProvider<String = String>,
-    Value<Types>: Clone,
+    Types: TypeProvider,
     F: Signature<Args, Output = Result<R, RuntimeError<Types>>>,
     for<'a> &'a [crate::value::Value<Types>]: ParseArgs<Args>,
     R: FormatReturns<Types>,
@@ -121,7 +118,7 @@ where
         .stack
         .raw
         .parse()
-        .map_err(|err| Value::String(err.to_string()))?;
+        .map_err(|err| Value::String(err.to_string().into()))?;
 
     rt.stack.clear();
 
@@ -137,8 +134,8 @@ pub fn invoke_with_rt<'rt, Types, C, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Types>>
 where
-    Types: TypeProvider<String = String>,
-    Value<Types>: Clone + Display + Debug,
+    Types: TypeProvider,
+    Value<Types>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Types, C>, Args, Output = R>,
     for<'a> &'a [crate::value::Value<Types>]: ParseArgs<Args>,
     R: FormatReturns<Types>,
@@ -149,7 +146,7 @@ where
         .stack
         .raw
         .parse()
-        .map_err(|err| Value::String(err.to_string()))?;
+        .map_err(|err| Value::String(err.to_string().into()))?;
 
     rt.stack.clear();
 
@@ -166,8 +163,8 @@ pub fn try_invoke_with_rt<'rt, Types, C, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Types>>
 where
-    Types: TypeProvider<String = String>,
-    Value<Types>: Clone + Debug + Display,
+    Types: TypeProvider,
+    Value<Types>: Debug + Display,
     for<'a> F: SignatureWithFirst<
         RuntimeView<'a, Types, C>,
         Args,
@@ -182,7 +179,7 @@ where
         .stack
         .raw
         .parse()
-        .map_err(|err| Value::String(err.to_string()))?;
+        .map_err(|err| Value::String(err.to_string().into()))?;
 
     rt.stack.clear();
 
@@ -297,10 +294,9 @@ where
 pub fn call_chunk<Types, C>(chunk_id: ChunkId) -> impl LuaFfi<Types, C> + Copy + Send + Sync
 where
     C: ChunkCache,
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types: TypeProvider,
     Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Clone + PartialEq + Display,
-    KeyValue<Types>: Hash + Eq,
+    Value<Types>: Debug + Display,
 {
     let f = move |mut rt: RuntimeView<'_, Types, C>| {
         use crate::runtime::{ClosureRef, FunctionPtr};
@@ -324,15 +320,14 @@ pub fn call_precompiled<Types, C, Q>(script: &Q) -> impl LuaFfi<Types, C> + Copy
 where
     C: ChunkCache + KeyedChunkCache<Q>,
     Q: ?Sized + Debug,
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types: TypeProvider,
     Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Clone + PartialEq + Display,
-    KeyValue<Types>: Hash + Eq,
+    Value<Types>: Debug + Display,
 {
     let f = move |mut rt: RuntimeView<'_, Types, C>| {
-        let chunk_id = rt.chunk_cache().get(script).ok_or(Value::String(format!(
-            "chunk with key \"{script:?}\" does not exist"
-        )))?;
+        let chunk_id = rt.chunk_cache().get(script).ok_or(Value::String(
+            format!("chunk with key \"{script:?}\" does not exist").into(),
+        ))?;
         rt.invoke(call_chunk(chunk_id))
     };
 
@@ -342,10 +337,9 @@ where
 pub fn call_file<Types, C>(script: impl AsRef<Path>) -> impl LuaFfi<Types, C>
 where
     C: ChunkCache + KeyedChunkCache<Path>,
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
+    Types: TypeProvider,
     Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Clone + PartialEq + Display,
-    KeyValue<Types>: Hash + Eq,
+    Value<Types>: Debug + Display,
 {
     let f = move |mut rt: RuntimeView<Types, C>| {
         let script = script.as_ref();

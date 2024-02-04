@@ -76,16 +76,17 @@ impl<T> From<NilOr<T>> for Option<T> {
     }
 }
 
-impl<T, Types: TypeProvider> TryFrom<Value<Types>> for NilOr<T>
+impl<T, Types> TryInto<NilOr<T>> for Value<Types>
 where
-    T: TryFrom<Value<Types>>,
+    Types: TypeProvider,
+    Value<Types>: TryInto<T>,
 {
-    type Error = <T as TryFrom<Value<Types>>>::Error;
+    type Error = <Value<Types> as TryInto<T>>::Error;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Nil => Ok(Self::Nil),
-            value => Ok(Self::Some(value.try_into()?)),
+    fn try_into(self) -> Result<NilOr<T>, Self::Error> {
+        match self {
+            Value::Nil => Ok(NilOr::Nil),
+            value => Ok(NilOr::Some(value.try_into()?)),
         }
     }
 }

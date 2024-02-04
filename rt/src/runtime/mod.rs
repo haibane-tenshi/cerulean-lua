@@ -6,7 +6,6 @@ mod stack;
 mod upvalue_stack;
 
 use std::fmt::{Debug, Display};
-use std::hash::Hash;
 use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 
@@ -18,7 +17,6 @@ use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
-use crate::value::table::{KeyValue, TableRef};
 use crate::value::{TypeProvider, TypeWithoutMetatable, Value};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
@@ -31,14 +29,14 @@ pub use frame::{Closure, ClosureRef, FunctionPtr};
 
 pub struct Core<Types: TypeProvider> {
     pub global_env: Value<Types>,
-    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<Types::Table>>,
+    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<Types::TableRef>>,
     pub dialect: DialectBuilder,
 }
 
 impl<Types> Debug for Core<Types>
 where
     Types: TypeProvider,
-    Types::Table: Debug,
+    Types::TableRef: Debug,
     Value<Types>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -229,7 +227,6 @@ where
 impl<'rt, Types, C> RuntimeView<'rt, Types, C>
 where
     Types: TypeProvider,
-    Value<Types>: Clone,
 {
     /// Return runtime into consistent state.
     ///
@@ -262,10 +259,9 @@ where
 impl<'rt, Types, C> RuntimeView<'rt, Types, C>
 where
     C: ChunkCache,
-    Types: TypeProvider<String = String, Table = TableRef<Types>>,
-    KeyValue<Types>: Hash + Eq + From<Event>,
-    Value<Types>: Clone + Display + PartialEq,
+    Types: TypeProvider,
     Types::RustCallable: LuaFfiOnce<Types, C>,
+    Value<Types>: Debug + Display,
 {
     pub fn enter(
         &mut self,
@@ -472,7 +468,8 @@ where
 
     pub fn into_diagnostic(&self, err: RuntimeError<Types>) -> Diagnostic
     where
-        Types: TypeProvider<String = String>,
+        Types: TypeProvider,
+        Types::String: TryInto<String>,
         Value<Types>: Display,
     {
         use codespan_reporting::files::SimpleFile;
