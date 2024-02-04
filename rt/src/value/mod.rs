@@ -165,7 +165,7 @@ impl Display for TypeWithoutMetatable {
 pub struct DefaultTypes<C>(std::marker::PhantomData<C>);
 
 impl<C> TypeProvider for DefaultTypes<C> {
-    type String = String;
+    type String = string::PossiblyUtf8Vec;
     type RustCallable = callable::RustCallable<Self, C>;
     type Table = Table<Self>;
     type TableRef = TableRef<Self>;
