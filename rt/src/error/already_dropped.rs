@@ -23,15 +23,6 @@ impl Display for AlreadyDroppedError {
 
 impl Error for AlreadyDroppedError {}
 
-impl<Types> From<AlreadyDroppedError> for RuntimeError<Types>
-where
-    Types: TypeProvider,
-{
-    fn from(value: AlreadyDroppedError) -> Self {
-        Self::AlreadyDropped(value)
-    }
-}
-
 #[derive(Debug)]
 pub enum AlreadyDroppedOrError<E> {
     AlreadyDropped(AlreadyDroppedError),
@@ -55,18 +46,5 @@ impl<E> Error for AlreadyDroppedOrError<E> where Self: Debug + Display {}
 impl<E> From<AlreadyDroppedError> for AlreadyDroppedOrError<E> {
     fn from(value: AlreadyDroppedError) -> Self {
         AlreadyDroppedOrError::AlreadyDropped(value)
-    }
-}
-
-impl<Types, E> From<AlreadyDroppedOrError<E>> for RuntimeError<Types>
-where
-    Types: TypeProvider,
-    E: Into<RuntimeError<Types>>,
-{
-    fn from(value: AlreadyDroppedOrError<E>) -> Self {
-        match value {
-            AlreadyDroppedOrError::AlreadyDropped(err) => err.into(),
-            AlreadyDroppedOrError::Other(err) => err.into(),
-        }
     }
 }

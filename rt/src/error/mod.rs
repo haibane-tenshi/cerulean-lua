@@ -44,6 +44,37 @@ impl<Types: TypeProvider> From<Value<Types>> for RuntimeError<Types> {
     }
 }
 
+impl<Types> From<BorrowError> for RuntimeError<Types>
+where
+    Types: TypeProvider,
+{
+    fn from(value: BorrowError) -> Self {
+        Self::Borrow(value)
+    }
+}
+
+impl<Types> From<AlreadyDroppedError> for RuntimeError<Types>
+where
+    Types: TypeProvider,
+{
+    fn from(value: AlreadyDroppedError) -> Self {
+        Self::AlreadyDropped(value)
+    }
+}
+
+impl<Types, E> From<AlreadyDroppedOrError<E>> for RuntimeError<Types>
+where
+    Types: TypeProvider,
+    E: Into<RuntimeError<Types>>,
+{
+    fn from(value: AlreadyDroppedOrError<E>) -> Self {
+        match value {
+            AlreadyDroppedOrError::AlreadyDropped(err) => err.into(),
+            AlreadyDroppedOrError::Other(err) => err.into(),
+        }
+    }
+}
+
 impl<Types: TypeProvider> From<MissingChunk> for RuntimeError<Types> {
     fn from(value: MissingChunk) -> Self {
         RuntimeError::MissingChunk(value)

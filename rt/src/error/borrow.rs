@@ -39,12 +39,3 @@ impl Display for BorrowError {
 }
 
 impl Error for BorrowError {}
-
-impl<Types> From<BorrowError> for RuntimeError<Types>
-where
-    Types: TypeProvider,
-{
-    fn from(value: BorrowError) -> Self {
-        Self::Borrow(value)
-    }
-}
