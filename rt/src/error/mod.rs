@@ -1,3 +1,5 @@
+pub mod already_dropped;
+pub mod borrow;
 pub mod diagnostic;
 pub mod missing_chunk;
 pub mod missing_function;
@@ -13,6 +15,8 @@ use std::fmt::{Debug, Display};
 use crate::value::{TypeProvider, Value};
 
 pub use crate::chunk_cache::Immutable;
+pub use already_dropped::{AlreadyDroppedError, AlreadyDroppedOrError};
+pub use borrow::BorrowError;
 pub use diagnostic::Diagnostic;
 pub use missing_chunk::MissingChunk;
 pub use missing_function::MissingFunction;
@@ -23,6 +27,8 @@ pub use value::ValueError;
 
 pub enum RuntimeError<Types: TypeProvider> {
     Value(ValueError<Types>),
+    Borrow(BorrowError),
+    AlreadyDropped(AlreadyDroppedError),
     Immutable(Immutable),
     Diagnostic(Diagnostic),
     MissingChunk(MissingChunk),
@@ -82,6 +88,8 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
+            Self::Borrow(arg0) => f.debug_tuple("Borrow").field(arg0).finish(),
+            Self::AlreadyDropped(arg0) => f.debug_tuple("AlreadyDropped").field(arg0).finish(),
             Self::Immutable(arg0) => f.debug_tuple("Immutable").field(arg0).finish(),
             Self::Diagnostic(arg0) => f.debug_tuple("Diagnostic").field(arg0).finish(),
             Self::MissingChunk(arg0) => f.debug_tuple("MissingChunk").field(arg0).finish(),
@@ -146,84 +154,5 @@ impl<FileId> ExtraDiagnostic<FileId> for Message<FileId> {
                 "no debug info is available, it is possible debug info was stripped",
                 "it is also possible that erroneous bytecode was handcrafted\nplease check with where you got it",
             ]);
-    }
-}
-
-#[derive(Debug)]
-pub struct BorrowError;
-
-impl Display for BorrowError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "value is already borrowed")
-    }
-}
-
-impl Error for BorrowError {}
-
-impl<Types> From<BorrowError> for RuntimeError<Types>
-where
-    Types: TypeProvider,
-{
-    fn from(value: BorrowError) -> Self {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-pub struct AlreadyDroppedError;
-
-impl Display for AlreadyDroppedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "value behind this reference is already dropped")
-    }
-}
-
-impl Error for AlreadyDroppedError {}
-
-impl<Types> From<AlreadyDroppedError> for RuntimeError<Types>
-where
-    Types: TypeProvider,
-{
-    fn from(value: AlreadyDroppedError) -> Self {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-pub enum AlreadyDroppedOrError<E> {
-    AlreadyDropped(AlreadyDroppedError),
-    Other(E),
-}
-
-impl<E> Display for AlreadyDroppedOrError<E>
-where
-    E: Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AlreadyDropped(err) => write!(f, "{err}"),
-            Self::Other(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl<E> Error for AlreadyDroppedOrError<E> where Self: Debug + Display {}
-
-impl<E> From<AlreadyDroppedError> for AlreadyDroppedOrError<E> {
-    fn from(value: AlreadyDroppedError) -> Self {
-        AlreadyDroppedOrError::AlreadyDropped(value)
-    }
-}
-
-impl<Types, E> From<AlreadyDroppedOrError<E>> for RuntimeError<Types>
-where
-    Types: TypeProvider,
-    E: Into<RuntimeError<Types>>,
-{
-    fn from(value: AlreadyDroppedOrError<E>) -> Self {
-        match value {
-            AlreadyDroppedOrError::AlreadyDropped(err) => err.into(),
-            AlreadyDroppedOrError::Other(err) => err.into(),
-        }
     }
 }

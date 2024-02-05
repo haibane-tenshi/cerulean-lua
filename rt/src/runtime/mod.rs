@@ -476,6 +476,8 @@ where
 
         let message = match err {
             RuntimeError::Value(err) => err.into_diagnostic(),
+            RuntimeError::Borrow(err) => err.into_diagnostic(),
+            RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
             RuntimeError::Immutable(err) => err.into_diagnostic(),
             RuntimeError::Diagnostic(diag) => return diag,
             RuntimeError::MissingChunk(err) => err.into_diagnostic(),

@@ -23,12 +23,12 @@ impl<T> Borrow<T> for std::cell::RefCell<T> {
     type Error = BorrowError;
 
     fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, Self::Error> {
-        let b = self.try_borrow().map_err(|_| BorrowError)?;
+        let b = self.try_borrow().map_err(|_| BorrowError::Ref)?;
         Ok(f(&b))
     }
 
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
-        let mut b = self.try_borrow_mut().map_err(|_| BorrowError)?;
+        let mut b = self.try_borrow_mut().map_err(|_| BorrowError::Mut)?;
         Ok(f(&mut b))
     }
 }
@@ -77,7 +77,7 @@ impl<'a, T> Borrow<T> for &'a T {
     }
 
     fn with_mut<R>(&self, _: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
-        Err(BorrowError)
+        Err(BorrowError::Mut)
     }
 }
 

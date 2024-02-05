@@ -212,6 +212,7 @@ where
     Types::TableRef: Clone,
     Types::FullUserdataRef: Clone,
 {
+    #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
         match self {
             Self::Bool(arg0) => Self::Bool(arg0.clone()),

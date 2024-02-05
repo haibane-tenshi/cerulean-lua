@@ -279,6 +279,7 @@ where
     Types::TableRef: Clone,
     Types::FullUserdataRef: Clone,
 {
+    #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
         match self {
             Self::Nil => Self::Nil,

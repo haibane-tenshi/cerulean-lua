@@ -410,9 +410,9 @@ where
 
     fn with_mut<R>(
         &self,
-        f: impl FnOnce(&mut FullUserdata<Types, C>) -> R,
+        _f: impl FnOnce(&mut FullUserdata<Types, C>) -> R,
     ) -> Result<R, Self::Error> {
-        Err(crate::error::BorrowError.into())
+        Err(BorrowError::Mut)
     }
 }
 
