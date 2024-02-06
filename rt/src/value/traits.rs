@@ -69,15 +69,19 @@ where
     }
 }
 
-impl<'a, T> Borrow<T> for &'a T {
-    type Error = BorrowError;
+impl<'a, U, T> Borrow<T> for &'a U
+where
+    U: Borrow<T> + ?Sized,
+    T: ?Sized,
+{
+    type Error = <U as Borrow<T>>::Error;
 
     fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, Self::Error> {
-        Ok(f(self))
+        <U as Borrow<T>>::with_ref(self, f)
     }
 
-    fn with_mut<R>(&self, _: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
-        Err(BorrowError::Mut)
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
+        <U as Borrow<T>>::with_mut(self, f)
     }
 }
 

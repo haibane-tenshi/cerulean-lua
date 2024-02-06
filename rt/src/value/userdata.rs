@@ -321,6 +321,15 @@ pub struct UserdataValue<T: ?Sized, TableRef> {
     value: T,
 }
 
+impl<T, TableRef> UserdataValue<T, TableRef> {
+    pub(crate) fn new(value: T) -> Self {
+        UserdataValue {
+            metatable: Default::default(),
+            value,
+        }
+    }
+}
+
 pub type FullUserdata<Types, C> =
     UserdataValue<dyn Userdata<Types, C>, <Types as TypeProvider>::TableRef>;
 
