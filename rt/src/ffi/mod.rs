@@ -8,6 +8,7 @@ use std::path::Path;
 
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::RuntimeError;
+use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
 use crate::value::{NilOr, TypeProvider, Value};
 
@@ -291,7 +292,7 @@ where
 pub fn call_chunk<Gc, C>(chunk_id: ChunkId) -> impl LuaFfi<Gc, C> + Copy + Send + Sync
 where
     C: ChunkCache,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
 {
@@ -317,7 +318,7 @@ pub fn call_precompiled<Gc, C, Q>(script: &Q) -> impl LuaFfi<Gc, C> + Copy + '_
 where
     C: ChunkCache + KeyedChunkCache<Q>,
     Q: ?Sized + Debug,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
 {
@@ -334,7 +335,7 @@ where
 pub fn call_file<Gc, C>(script: impl AsRef<Path>) -> impl LuaFfi<Gc, C>
 where
     C: ChunkCache + KeyedChunkCache<Path>,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
 {

@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
+use crate::gc::Gc as GarbageCollector;
 
 use super::{TypeMismatchError, TypeProvider, Value};
 
@@ -328,7 +329,7 @@ where
 impl<Gc, C> LuaFfiOnce<Gc, C> for Callable<Gc::RustCallable>
 where
     C: crate::chunk_cache::ChunkCache,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
 {

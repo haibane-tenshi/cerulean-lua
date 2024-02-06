@@ -17,6 +17,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
+use crate::gc::Gc as GarbageCollector;
 use crate::value::{TypeProvider, TypeWithoutMetatable, Value};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
@@ -258,7 +259,7 @@ where
 impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
 where
     C: ChunkCache,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
 {

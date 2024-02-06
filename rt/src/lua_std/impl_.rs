@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::chunk_cache::{ChunkCache, KeyedChunkCache};
 use crate::error::RuntimeError;
 use crate::ffi::{self, LuaFfi, LuaFfiOnce, Maybe, Opts, WithName};
+use crate::gc::Gc as GarbageCollector;
 use crate::runtime::{ClosureRef, RuntimeView};
 use crate::value::table::KeyValue;
 use crate::value::{
@@ -56,7 +57,7 @@ where
 pub fn pcall<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::String: TryInto<String>,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
@@ -156,7 +157,7 @@ where
 pub fn load<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
@@ -266,7 +267,7 @@ where
 pub fn loadfile<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache + KeyedChunkCache<Path>,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display + TryInto<LuaString<PathBuf>>,

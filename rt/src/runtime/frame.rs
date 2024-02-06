@@ -21,6 +21,7 @@ use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::RuntimeError;
+use crate::gc::Gc as GarbageCollector;
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
 use crate::value::{Borrow, TableIndex, TypeProvider, Value};
@@ -350,7 +351,7 @@ where
 }
 
 pub struct ActiveFrame<'rt, Gc: TypeProvider> {
-    core: &'rt Core<Gc>,
+    core: &'rt mut Core<Gc>,
     closure: ClosureRef,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
@@ -414,7 +415,7 @@ where
 
 impl<'rt, Gc> ActiveFrame<'rt, Gc>
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
 {
     pub fn step(
@@ -553,7 +554,7 @@ where
                 ControlFlow::Continue(())
             }
             TabCreate => {
-                let value = Default::default();
+                let value = self.core.gc.alloc_table(Default::default());
 
                 self.stack.push(Value::Table(value));
 

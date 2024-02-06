@@ -7,6 +7,7 @@ use repr::literal::Literal;
 
 use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
 use crate::ffi::LuaFfiOnce;
+use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
 use crate::value::callable::RustClosureRef;
 use crate::value::{Callable, KeyValue, LuaString, TableIndex, TypeProvider, Value};
@@ -72,7 +73,7 @@ pub fn pcall<Gc, C>() -> Part<
 >
 where
     C: ChunkCache,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::String: TryInto<String>,
     Gc::RustCallable: From<RustClosureRef<Gc, C>> + crate::ffi::LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
@@ -130,7 +131,7 @@ pub fn load<Gc, C>() -> Part<
 >
 where
     C: ChunkCache,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
     Gc::RustCallable: From<RustClosureRef<Gc, C>> + LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
@@ -160,7 +161,7 @@ pub fn loadfile<Gc, C>() -> Part<
 >
 where
     C: ChunkCache + KeyedChunkCache<Path>,
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
     Gc::RustCallable: From<RustClosureRef<Gc, C>> + LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display + TryInto<LuaString<PathBuf>>,

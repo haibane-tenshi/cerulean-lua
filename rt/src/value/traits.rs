@@ -7,7 +7,7 @@ pub trait TypeProvider: Sized {
     type String: Clone + PartialOrd + From<String> + From<&'static str> + Concat + Len;
     type RustCallable: Clone + PartialEq;
     type Table: Default + TableIndex<Self> + Metatable<Self::TableRef>;
-    type TableRef: Clone + PartialEq + Default + Borrow<Self::Table>;
+    type TableRef: Clone + PartialEq + Borrow<Self::Table>;
     type FullUserdata: ?Sized + Metatable<Self::TableRef>;
     type FullUserdataRef: Clone + PartialEq + Borrow<Self::FullUserdata>;
 }

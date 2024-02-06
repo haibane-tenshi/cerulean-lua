@@ -137,12 +137,6 @@ impl<T> Hash for LeakedTableHandle<T> {
     }
 }
 
-impl<T> Default for &'static LeakedTableHandle<T> {
-    fn default() -> Self {
-        unimplemented!("to be removed, added to smooth transition to gc-based table creation")
-    }
-}
-
 impl<T> Borrow<T> for LeakedTableHandle<T> {
     type Error = crate::error::BorrowError;
 
