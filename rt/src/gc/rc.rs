@@ -194,9 +194,9 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = Weak::as_ptr(&self.0);
         let dropped = if Weak::strong_count(&self.0) == 0 {
-            ""
-        } else {
             "[dropped]"
+        } else {
+            ""
         };
 
         write!(f, "{{table{dropped} <{addr:p}>}}")
@@ -318,9 +318,9 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = Weak::as_ptr(&self.0);
         let dropped = if Weak::strong_count(&self.0) == 0 {
-            ""
-        } else {
             "[dropped]"
+        } else {
+            ""
         };
 
         write!(f, "{{userdata{dropped} <{addr:p}>}}")
