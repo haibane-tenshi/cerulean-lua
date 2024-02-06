@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::error::{BorrowError, RuntimeError};
+use crate::error::{BorrowError, DroppedOrBorrowedError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
 use crate::value::{TypeMismatchError, TypeProvider, Value};
@@ -404,17 +404,18 @@ impl<Gc, C> super::Borrow<FullUserdata<Gc, C>> for UserdataRef<Gc, C>
 where
     Gc: TypeProvider,
 {
-    type Error = BorrowError;
-
-    fn with_ref<R>(&self, f: impl FnOnce(&FullUserdata<Gc, C>) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(
+        &self,
+        f: impl FnOnce(&FullUserdata<Gc, C>) -> R,
+    ) -> Result<R, DroppedOrBorrowedError> {
         Ok(f(&self.0))
     }
 
     fn with_mut<R>(
         &self,
         _f: impl FnOnce(&mut FullUserdata<Gc, C>) -> R,
-    ) -> Result<R, Self::Error> {
-        Err(BorrowError::Mut)
+    ) -> Result<R, DroppedOrBorrowedError> {
+        Err(BorrowError::Mut.into())
     }
 }
 

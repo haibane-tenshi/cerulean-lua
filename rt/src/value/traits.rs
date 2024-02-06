@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use super::{KeyValue, Value};
-use crate::error::{AlreadyDroppedError, AlreadyDroppedOrError, BorrowError};
+use crate::error::{AlreadyDroppedError, BorrowError, DroppedOrBorrowedError};
 
 pub trait TypeProvider: Sized {
     type String: Clone + PartialOrd + From<String> + From<&'static str> + Concat + Len;
@@ -13,21 +13,17 @@ pub trait TypeProvider: Sized {
 }
 
 pub trait Borrow<T: ?Sized> {
-    type Error: Error;
-
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, Self::Error>;
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error>;
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError>;
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError>;
 }
 
 impl<T> Borrow<T> for std::cell::RefCell<T> {
-    type Error = BorrowError;
-
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
         let b = self.try_borrow().map_err(|_| BorrowError::Ref)?;
         Ok(f(&b))
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
         let mut b = self.try_borrow_mut().map_err(|_| BorrowError::Mut)?;
         Ok(f(&mut b))
     }
@@ -37,13 +33,11 @@ impl<T, U> Borrow<T> for std::rc::Rc<U>
 where
     U: Borrow<T>,
 {
-    type Error = <U as Borrow<T>>::Error;
-
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
         self.as_ref().with_ref(f)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
         self.as_ref().with_mut(f)
     }
 }
@@ -52,20 +46,18 @@ impl<T, U> Borrow<T> for std::rc::Weak<U>
 where
     U: Borrow<T>,
 {
-    type Error = AlreadyDroppedOrError<<U as Borrow<T>>::Error>;
-
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
         self.upgrade()
             .ok_or(AlreadyDroppedError)?
             .with_ref(f)
-            .map_err(AlreadyDroppedOrError::Other)
+            .map_err(Into::into)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
         self.upgrade()
             .ok_or(AlreadyDroppedError)?
             .with_mut(f)
-            .map_err(AlreadyDroppedOrError::Other)
+            .map_err(Into::into)
     }
 }
 
@@ -74,13 +66,11 @@ where
     U: Borrow<T> + ?Sized,
     T: ?Sized,
 {
-    type Error = <U as Borrow<T>>::Error;
-
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
         <U as Borrow<T>>::with_ref(self, f)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, Self::Error> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
         <U as Borrow<T>>::with_mut(self, f)
     }
 }

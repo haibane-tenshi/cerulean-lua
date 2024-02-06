@@ -15,7 +15,7 @@ use std::fmt::{Debug, Display};
 use crate::value::{TypeProvider, Value};
 
 pub use crate::chunk_cache::Immutable;
-pub use already_dropped::{AlreadyDroppedError, AlreadyDroppedOrError};
+pub use already_dropped::AlreadyDroppedError;
 pub use borrow::BorrowError;
 pub use diagnostic::Diagnostic;
 pub use missing_chunk::MissingChunk;
@@ -59,19 +59,6 @@ where
 {
     fn from(value: AlreadyDroppedError) -> Self {
         Self::AlreadyDropped(value)
-    }
-}
-
-impl<Gc, E> From<AlreadyDroppedOrError<E>> for RuntimeError<Gc>
-where
-    Gc: TypeProvider,
-    E: Into<RuntimeError<Gc>>,
-{
-    fn from(value: AlreadyDroppedOrError<E>) -> Self {
-        match value {
-            AlreadyDroppedOrError::AlreadyDropped(err) => err.into(),
-            AlreadyDroppedOrError::Other(err) => err.into(),
-        }
     }
 }
 
@@ -141,6 +128,47 @@ impl<Gc: TypeProvider> Display for RuntimeError<Gc> {
 }
 
 impl<Gc: TypeProvider> Error for RuntimeError<Gc> where Self: Debug + Display {}
+
+#[derive(Debug)]
+pub enum DroppedOrBorrowedError {
+    Dropped(AlreadyDroppedError),
+    Borrowed(BorrowError),
+}
+
+impl Display for DroppedOrBorrowedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dropped(err) => write!(f, "{err}"),
+            Self::Borrowed(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl Error for DroppedOrBorrowedError {}
+
+impl From<AlreadyDroppedError> for DroppedOrBorrowedError {
+    fn from(value: AlreadyDroppedError) -> Self {
+        DroppedOrBorrowedError::Dropped(value)
+    }
+}
+
+impl From<BorrowError> for DroppedOrBorrowedError {
+    fn from(value: BorrowError) -> Self {
+        DroppedOrBorrowedError::Borrowed(value)
+    }
+}
+
+impl<Gc> From<DroppedOrBorrowedError> for RuntimeError<Gc>
+where
+    Gc: TypeProvider,
+{
+    fn from(value: DroppedOrBorrowedError) -> Self {
+        match value {
+            DroppedOrBorrowedError::Dropped(err) => err.into(),
+            DroppedOrBorrowedError::Borrowed(err) => err.into(),
+        }
+    }
+}
 
 trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);

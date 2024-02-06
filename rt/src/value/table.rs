@@ -8,7 +8,7 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::{Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, TypeProvider, Value};
-use crate::error::BorrowError;
+use crate::error::DroppedOrBorrowedError;
 
 pub struct Table<Gc: TypeProvider> {
     data: HashMap<KeyValue<Gc>, Value<Gc>>,
@@ -360,13 +360,14 @@ impl<Gc> super::Borrow<Table<Gc>> for TableRef<Gc>
 where
     Gc: TypeProvider<TableRef = Self>,
 {
-    type Error = BorrowError;
-
-    fn with_ref<R>(&self, f: impl FnOnce(&Table<Gc>) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(&self, f: impl FnOnce(&Table<Gc>) -> R) -> Result<R, DroppedOrBorrowedError> {
         self.0.with_ref(f)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut Table<Gc>) -> R) -> Result<R, Self::Error> {
+    fn with_mut<R>(
+        &self,
+        f: impl FnOnce(&mut Table<Gc>) -> R,
+    ) -> Result<R, DroppedOrBorrowedError> {
         self.0.with_mut(f)
     }
 }
