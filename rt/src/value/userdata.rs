@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
-use std::hash::Hash;
-use std::rc::Rc;
 
-use crate::error::{BorrowError, DroppedOrBorrowedError, RuntimeError};
+use super::Metatable;
+use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
-use crate::value::{TypeMismatchError, TypeProvider, Value};
+use crate::value::{TypeProvider, Value};
 
 pub trait Userdata<Gc, C>
 where
@@ -302,18 +301,26 @@ where
     }
 }
 
+pub type FullUserdata<Gc, C> = UserdataValue<dyn Userdata<Gc, C>, <Gc as TypeProvider>::TableRef>;
+
 #[doc(hidden)]
 pub struct UserdataValue<T: ?Sized, TableRef> {
-    metatable: RefCell<Option<TableRef>>,
-    value: T,
+    pub(crate) metatable: RefCell<Option<TableRef>>,
+    pub(crate) value: T,
 }
 
-impl<T, TableRef> UserdataValue<T, TableRef> {
-    pub(crate) fn new(value: T) -> Self {
-        UserdataValue {
-            metatable: Default::default(),
-            value,
-        }
+impl<T, Gc, C> Userdata<Gc, C> for UserdataValue<T, Gc::TableRef>
+where
+    Gc: TypeProvider,
+    T: Userdata<Gc, C> + ?Sized,
+{
+    fn method(
+        &self,
+        scope: &str,
+        name: &str,
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Option<Result<(), RuntimeError<Gc>>> {
+        self.as_ref().method(scope, name, rt)
     }
 }
 
@@ -326,9 +333,7 @@ impl<T: ?Sized, TableRef> Debug for UserdataValue<T, TableRef> {
     }
 }
 
-pub type FullUserdata<Gc, C> = UserdataValue<dyn Userdata<Gc, C>, <Gc as TypeProvider>::TableRef>;
-
-impl<Gc, C> super::Metatable<Gc::TableRef> for FullUserdata<Gc, C>
+impl<Gc, C> Metatable<Gc::TableRef> for FullUserdata<Gc, C>
 where
     Gc: TypeProvider,
 {
@@ -341,155 +346,11 @@ where
     }
 }
 
-pub struct UserdataRef<Gc: TypeProvider, C>(Rc<UserdataValue<dyn Userdata<Gc, C>, Gc::TableRef>>);
-
-impl<Gc, C> UserdataRef<Gc, C>
+impl<T, TableRef> AsRef<T> for UserdataValue<T, TableRef>
 where
-    Gc: TypeProvider,
+    T: ?Sized,
 {
-    pub fn new<U>(userdata: U) -> Self
-    where
-        U: Userdata<Gc, C> + 'static,
-    {
-        let value = UserdataValue {
-            metatable: Default::default(),
-            value: userdata,
-        };
-
-        UserdataRef(Rc::new(value))
-    }
-
-    pub fn with_dispatcher<Traits, T>(value: T) -> Self
-    where
-        Traits: Tuple + 'static,
-        T: DispatchTrait<Traits, Gc, C> + 'static,
-    {
-        let value = UserdataValue {
-            metatable: Default::default(),
-            value: DispatchableStatic::new(value),
-        };
-
-        UserdataRef(Rc::new(value))
-    }
-
-    pub fn set_metatable(&self, metatable: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
-        self.0.metatable.replace(metatable)
-    }
-}
-
-impl<Gc, C> UserdataRef<Gc, C>
-where
-    Gc: TypeProvider,
-{
-    pub fn metatable(&self) -> Option<Gc::TableRef> {
-        self.0.metatable.borrow().clone()
-    }
-}
-
-impl<Gc, C> Userdata<Gc, C> for UserdataRef<Gc, C>
-where
-    Gc: TypeProvider,
-{
-    fn method(
-        &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Gc, C>,
-    ) -> Option<Result<(), RuntimeError<Gc>>> {
-        self.0.value.method(scope, name, rt)
-    }
-}
-
-impl<Gc, C> super::Borrow<FullUserdata<Gc, C>> for UserdataRef<Gc, C>
-where
-    Gc: TypeProvider,
-{
-    fn with_ref<R>(
-        &self,
-        f: impl FnOnce(&FullUserdata<Gc, C>) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
-        Ok(f(&self.0))
-    }
-
-    fn with_mut<R>(
-        &self,
-        _f: impl FnOnce(&mut FullUserdata<Gc, C>) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
-        Err(BorrowError::Mut.into())
-    }
-}
-
-impl<Gc, C> Debug for UserdataRef<Gc, C>
-where
-    Gc: TypeProvider,
-    // Gc::TableRef: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UserdataRef")
-            .field("addr", &Rc::as_ptr(&self.0))
-            .field("value", &"<omitted>")
-            .field("metatable", &"<omitted>") //&self.0.metatable.borrow())
-            .finish()
-    }
-}
-
-impl<Gc, C> Clone for UserdataRef<Gc, C>
-where
-    Gc: TypeProvider,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<Gc, C> PartialEq for UserdataRef<Gc, C>
-where
-    Gc: TypeProvider,
-{
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl<Gc, C> Eq for UserdataRef<Gc, C> where Gc: TypeProvider {}
-
-impl<Gc, C> Hash for UserdataRef<Gc, C>
-where
-    Gc: TypeProvider,
-{
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Rc::as_ptr(&self.0).hash(state);
-    }
-}
-
-impl<Gc, C> From<UserdataRef<Gc, C>> for Value<Gc>
-where
-    Gc: TypeProvider<FullUserdataRef = UserdataRef<Gc, C>>,
-{
-    fn from(value: UserdataRef<Gc, C>) -> Self {
-        Value::Userdata(value)
-    }
-}
-
-impl<Gc, C> TryFrom<Value<Gc>> for UserdataRef<Gc, C>
-where
-    Gc: TypeProvider<FullUserdataRef = Self>,
-{
-    type Error = TypeMismatchError;
-
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
-        use super::Type;
-
-        match value {
-            Value::Userdata(t) => Ok(t),
-            value => {
-                let err = TypeMismatchError {
-                    expected: Type::Userdata,
-                    found: value.type_(),
-                };
-
-                Err(err)
-            }
-        }
+    fn as_ref(&self) -> &T {
+        &self.value
     }
 }

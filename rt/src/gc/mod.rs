@@ -1,21 +1,32 @@
 pub mod leaking;
+pub mod rc;
 
 use crate::value::traits::TypeProvider;
 use std::ops::ControlFlow;
 
 pub use leaking::LeakingGc;
+pub use rc::RcGc;
 
 pub trait Gc: TypeProvider {
-    type Sweeper: Sweeper<Self>;
+    type Sweeper<'this>: Sweeper<Self>
+    where
+        Self: 'this;
 
-    fn sweeper(&mut self) -> Self::Sweeper;
+    fn sweeper(&mut self) -> Self::Sweeper<'_>;
 
     fn alloc_string(&mut self, value: Self::String) -> Self::StringRef;
     fn alloc_table(&mut self, value: Self::Table) -> Self::TableRef;
 }
 
 pub trait GcUserdata<T>: Gc {
-    fn alloc_userdata(&mut self, value: T) -> Self::FullUserdataRef;
+    fn alloc_userdata_with_meta(
+        &mut self,
+        value: T,
+        metatable: Option<Self::TableRef>,
+    ) -> Self::FullUserdataRef;
+    fn alloc_userdata(&mut self, value: T) -> Self::FullUserdataRef {
+        self.alloc_userdata_with_meta(value, None)
+    }
 }
 
 pub trait Sweeper<Ty: TypeProvider>: Sized {

@@ -1,14 +1,11 @@
-use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::rc::Rc;
 
 use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::{Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, TypeProvider, Value};
-use crate::error::DroppedOrBorrowedError;
 
 pub struct Table<Gc: TypeProvider> {
     data: HashMap<KeyValue<Gc>, Value<Gc>>,
@@ -337,137 +334,6 @@ where
             KeyValue::Table(t) => Value::Table(t),
             KeyValue::Userdata(t) => Value::Userdata(t),
         }
-    }
-}
-
-pub struct TableRef<Gc: TypeProvider<TableRef = Self>>(Rc<RefCell<Table<Gc>>>);
-
-impl<Gc: TypeProvider<TableRef = Self>> TableRef<Gc> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn borrow(&self) -> Result<Ref<Table<Gc>>, std::cell::BorrowError> {
-        self.0.try_borrow()
-    }
-
-    pub fn borrow_mut(&self) -> Result<RefMut<Table<Gc>>, std::cell::BorrowMutError> {
-        self.0.try_borrow_mut()
-    }
-}
-
-impl<Gc> super::Borrow<Table<Gc>> for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-{
-    fn with_ref<R>(&self, f: impl FnOnce(&Table<Gc>) -> R) -> Result<R, DroppedOrBorrowedError> {
-        self.0.with_ref(f)
-    }
-
-    fn with_mut<R>(
-        &self,
-        f: impl FnOnce(&mut Table<Gc>) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
-        self.0.with_mut(f)
-    }
-}
-
-impl<Gc> Debug for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-    Gc::StringRef: Debug,
-    Gc::RustCallable: Debug,
-    Gc::FullUserdataRef: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = f.debug_struct("TableRef");
-        debug.field("addr", &Rc::as_ptr(&self.0));
-
-        match self.0.try_borrow() {
-            Ok(table) => debug.field("table", &table),
-            Err(_) => debug.field("table", &"<borrowed>"),
-        };
-
-        debug.finish()
-    }
-}
-
-impl<Gc> Clone for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<Gc> Default for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-{
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-impl<Gc> PartialEq for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-{
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl<Gc> Eq for TableRef<Gc> where Gc: TypeProvider<TableRef = Self> {}
-
-impl<Gc> Hash for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-{
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Rc::as_ptr(&self.0).hash(state)
-    }
-}
-
-impl<Gc> From<Table<Gc>> for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-{
-    fn from(value: Table<Gc>) -> Self {
-        TableRef(Rc::new(RefCell::new(value)))
-    }
-}
-
-impl<Gc> TryFrom<Value<Gc>> for TableRef<Gc>
-where
-    Gc: TypeProvider<TableRef = Self>,
-{
-    type Error = TypeMismatchError;
-
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
-        use super::Type;
-
-        match value {
-            Value::Table(value) => Ok(value),
-            value => {
-                let err = TypeMismatchError {
-                    expected: Type::Table,
-                    found: value.type_(),
-                };
-
-                Err(err)
-            }
-        }
-    }
-}
-
-impl<Gc> From<TableRef<Gc>> for Value<Gc>
-where
-    Gc: TypeProvider<TableRef = TableRef<Gc>>,
-{
-    fn from(value: TableRef<Gc>) -> Self {
-        Value::Table(value)
     }
 }
 

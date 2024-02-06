@@ -49,9 +49,9 @@ impl<C> Gc for LeakingGc<C>
 where
     C: 'static,
 {
-    type Sweeper = LeakingGcSweeper<C>;
+    type Sweeper<'this> = LeakingGcSweeper<C>;
 
-    fn sweeper(&mut self) -> Self::Sweeper {
+    fn sweeper(&mut self) -> Self::Sweeper<'_> {
         LeakingGcSweeper(PhantomData)
     }
 
@@ -69,10 +69,17 @@ where
     C: 'static,
     T: Userdata<Self, C> + 'static,
 {
-    fn alloc_userdata(&mut self, value: T) -> Self::FullUserdataRef {
+    fn alloc_userdata_with_meta(
+        &mut self,
+        value: T,
+        metatable: Option<Self::TableRef>,
+    ) -> Self::FullUserdataRef {
         use crate::value::userdata::UserdataValue;
 
-        let value = LeakedUserdataHandle(UserdataValue::new(value));
+        let value = LeakedUserdataHandle(UserdataValue {
+            value,
+            metatable: RefCell::new(metatable),
+        });
 
         Box::leak(Box::new(value))
     }

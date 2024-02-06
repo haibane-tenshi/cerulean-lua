@@ -21,9 +21,8 @@ pub use float::Float;
 pub use int::Int;
 pub use nil::{Nil, NilOr};
 pub use string::LuaString;
-pub use table::{KeyValue, LuaTable, Table, TableRef};
+pub use table::{KeyValue, LuaTable, Table};
 pub use traits::{Borrow, Concat, Len, Metatable, TableIndex, TypeProvider};
-pub use userdata::UserdataRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
