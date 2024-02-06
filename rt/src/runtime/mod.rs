@@ -404,23 +404,28 @@ where
     where
         C: KeyedChunkCache<Path>,
         Gc::String: From<String>,
+        Gc: GarbageCollector,
     {
         let path = path.as_ref();
 
-        self.precompiled_or_load_with(path, || {
-            let source = std::fs::read_to_string(path).map_err(|err| {
-                Value::String(
-                    format!("failed to load file {}: {err}", path.to_string_lossy()).into(),
-                )
-            })?;
-            let location = Location {
-                file: path.to_string_lossy().to_string(),
-                line: 0,
-                column: 0,
-            };
+        if let Some(chunk_id) = self.chunk_cache.get(path) {
+            return Ok(chunk_id);
+        }
 
-            Ok((source, Some(location)))
-        })
+        let source = std::fs::read_to_string(path).map_err(|err| {
+            let msg = self.core.gc.alloc_string(
+                format!("failed to load file {}: {err}", path.to_string_lossy()).into(),
+            );
+            Value::String(msg)
+        })?;
+        let location = Location {
+            file: path.to_string_lossy().to_string(),
+            line: 0,
+            column: 0,
+        };
+
+        self.load_with_key(path, source, Some(location))
+            .map_err(Into::into)
     }
 }
 
@@ -465,7 +470,7 @@ where
     pub fn into_diagnostic(&self, err: RuntimeError<Gc>) -> Diagnostic
     where
         Gc: TypeProvider,
-        Gc::String: TryInto<String>,
+        Gc::String: AsRef<[u8]>,
         Value<Gc>: Display,
     {
         use codespan_reporting::files::SimpleFile;

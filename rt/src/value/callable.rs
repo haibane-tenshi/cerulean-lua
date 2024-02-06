@@ -88,17 +88,18 @@ where
 impl<Gc, C> LuaFfiMut<Gc, C> for RustClosureMut<Gc, C>
 where
     Gc: TypeProvider,
-    Gc::String: From<&'static str>,
 {
     fn call_mut(
         &mut self,
         rt: crate::runtime::RuntimeView<'_, Gc, C>,
     ) -> Result<(), RuntimeError<Gc>> {
+        use crate::error::BorrowError;
+
         let mut f = self
             .0
             .callable
             .try_borrow_mut()
-            .map_err(|_| Value::String("failed to mutably borrow closure".into()))?;
+            .map_err(|_| BorrowError::Mut)?;
         f.call_mut(rt)
     }
 }

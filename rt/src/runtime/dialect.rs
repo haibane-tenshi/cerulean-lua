@@ -1,3 +1,4 @@
+use crate::gc::Gc as GarbageCollector;
 use crate::value::{TypeProvider, Value};
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
@@ -309,19 +310,19 @@ impl DialectBuilder {
     }
 }
 
-pub trait CoerceArgs<C: TypeProvider>: sealed::Sealed {
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
-    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
-    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<C>; 2]) -> [Value<C>; 2];
-    fn coerce_una_op_bit(&self, args: [Value<C>; 1]) -> [Value<C>; 1];
-    fn coerce_tab_set(&self, key: Value<C>) -> Value<C>;
-    fn coerce_tab_get(&self, key: Value<C>) -> Value<C>;
+pub trait CoerceArgs<Gc: TypeProvider>: sealed::Sealed {
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2];
+    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2];
+    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Gc>; 2], gc: &mut Gc) -> [Value<Gc>; 2];
+    fn coerce_una_op_bit(&self, args: [Value<Gc>; 1]) -> [Value<Gc>; 1];
+    fn coerce_tab_set(&self, key: Value<Gc>) -> Value<Gc>;
+    fn coerce_tab_get(&self, key: Value<Gc>) -> Value<Gc>;
     fn cmp_float_and_int(&self) -> bool;
 }
 
 impl<Gc> CoerceArgs<Gc> for DialectBuilder
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Gc::String: From<String>,
 {
     fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2] {
@@ -376,32 +377,30 @@ where
         }
     }
 
-    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2] {
+    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Gc>; 2], gc: &mut Gc) -> [Value<Gc>; 2] {
         match op {
             StrBinOp::Concat => {
                 use Value::*;
 
+                let flt_to_string = |x: f64, gc: &mut Gc| {
+                    let value = gc.alloc_string(x.to_string().into());
+                    Value::String(value)
+                };
+
+                let int_to_string = |x: i64, gc: &mut Gc| {
+                    let value = gc.alloc_string(x.to_string().into());
+                    Value::String(value)
+                };
+
                 match args {
-                    [Int(lhs), Int(rhs)] => [
-                        String(lhs.to_string().into()),
-                        String(rhs.to_string().into()),
-                    ],
-                    [Int(lhs), Float(rhs)] => [
-                        String(lhs.to_string().into()),
-                        String(rhs.to_string().into()),
-                    ],
-                    [Int(lhs), String(rhs)] => [String(lhs.to_string().into()), String(rhs)],
-                    [Float(lhs), Int(rhs)] => [
-                        String(lhs.to_string().into()),
-                        String(rhs.to_string().into()),
-                    ],
-                    [Float(lhs), Float(rhs)] => [
-                        String(lhs.to_string().into()),
-                        String(rhs.to_string().into()),
-                    ],
-                    [Float(lhs), String(rhs)] => [String(lhs.to_string().into()), String(rhs)],
-                    [String(lhs), Int(rhs)] => [String(lhs), String(rhs.to_string().into())],
-                    [String(lhs), Float(rhs)] => [String(lhs), String(rhs.to_string().into())],
+                    [Int(lhs), Int(rhs)] => [int_to_string(lhs, gc), int_to_string(rhs, gc)],
+                    [Int(lhs), Float(rhs)] => [int_to_string(lhs, gc), flt_to_string(rhs, gc)],
+                    [Int(lhs), String(rhs)] => [int_to_string(lhs, gc), String(rhs)],
+                    [Float(lhs), Int(rhs)] => [flt_to_string(lhs, gc), int_to_string(rhs, gc)],
+                    [Float(lhs), Float(rhs)] => [flt_to_string(lhs, gc), flt_to_string(rhs, gc)],
+                    [Float(lhs), String(rhs)] => [flt_to_string(lhs, gc), String(rhs)],
+                    [String(lhs), Int(rhs)] => [String(lhs), int_to_string(rhs, gc)],
+                    [String(lhs), Float(rhs)] => [String(lhs), flt_to_string(rhs, gc)],
                     args => args,
                 }
             }

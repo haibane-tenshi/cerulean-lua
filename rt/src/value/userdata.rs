@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use crate::error::{BorrowError, DroppedOrBorrowedError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
+use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
 use crate::value::{TypeMismatchError, TypeProvider, Value};
 
@@ -54,7 +55,6 @@ where
 impl<Marker, Gc, C, T> DispatchMethod<Marker, Gc, C> for RefCell<T>
 where
     Gc: TypeProvider,
-    Gc::String: From<&'static str>,
     T: DispatchMethod<Marker, Gc, C>,
 {
     const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc, C>>::SCOPE_NAME;
@@ -79,13 +79,10 @@ where
 
     fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>> {
         match method {
-            Method::Ref(m) => self
-                .try_borrow()
-                .map_err(|_| Value::String("value is already mutably borrowed".into()))?
-                .call(m, rt),
+            Method::Ref(m) => self.try_borrow().map_err(|_| BorrowError::Ref)?.call(m, rt),
             Method::Mut(m) => self
                 .try_borrow_mut()
-                .map_err(|_| Value::String("value is already borrowed".into()))?
+                .map_err(|_| BorrowError::Mut)?
                 .call_mut(m, rt),
             Method::Val(m) => match m {},
         }
@@ -135,8 +132,10 @@ where
     }
 
     fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>> {
+        use crate::error::AlreadyDroppedError;
+
         let Some(value) = self else {
-            return Err(Value::String("value is already moved out".into()).into());
+            return Err(AlreadyDroppedError.into());
         };
 
         value.call(method, rt)
@@ -147,18 +146,20 @@ where
         method: Self::Mut,
         rt: RuntimeView<'_, Gc, C>,
     ) -> Result<(), RuntimeError<Gc>> {
+        use crate::error::AlreadyDroppedError;
+
         match method {
             Method::Ref(m) => match m {},
             Method::Mut(m) => {
                 let Some(value) = self else {
-                    return Err(Value::String("value is already moved out".into()).into());
+                    return Err(AlreadyDroppedError.into());
                 };
 
                 value.call_mut(m, rt)
             }
             Method::Val(m) => {
                 let Some(value) = self.take() else {
-                    return Err(Value::String("value is already moved out".into()).into());
+                    return Err(AlreadyDroppedError.into());
                 };
 
                 value.call_once(m, rt)
@@ -203,8 +204,7 @@ where
 
 impl<T, Tup, Gc, Cache> DispatchTrait<Tup, Gc, Cache> for T
 where
-    Gc: TypeProvider,
-    Gc::String: From<&'static str>,
+    Gc: GarbageCollector,
     Tup: NonEmptyTuple,
     T: DispatchMethod<TupleHead<Tup>, Gc, Cache>,
     T: DispatchTrait<TupleTail<Tup>, Gc, Cache>,
@@ -220,10 +220,10 @@ where
                 let r = if let Method::Ref(f) = method {
                     T::call(self, f, rt)
                 } else {
-                    Err(Value::String(
+                    let msg = rt.core.gc.alloc_string(
                         "userdata can only dispatch on methods with `&self` receiver".into(),
-                    )
-                    .into())
+                    );
+                    Err(Value::String(msg).into())
                 };
 
                 return Some(r);

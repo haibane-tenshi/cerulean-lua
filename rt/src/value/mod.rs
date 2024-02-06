@@ -11,6 +11,7 @@ pub mod userdata;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
+use crate::gc::Gc as GarbageCollector;
 use enumoid::{EnumMap, Enumoid};
 use repr::literal::Literal;
 
@@ -162,17 +163,6 @@ impl Display for TypeWithoutMetatable {
     }
 }
 
-pub struct DefaultGc<C>(std::marker::PhantomData<C>);
-
-impl<C> TypeProvider for DefaultGc<C> {
-    type String = string::PossiblyUtf8Vec;
-    type RustCallable = callable::RustCallable<Self, C>;
-    type Table = Table<Self>;
-    type TableRef = TableRef<Self>;
-    type FullUserdata = userdata::FullUserdata<Self, C>;
-    type FullUserdataRef = UserdataRef<Self, C>;
-}
-
 /// Enum representing all possible Lua values.
 ///
 /// Value supports normal and alternate rendering for `Display` impl:
@@ -192,7 +182,7 @@ pub enum Value<Gc: TypeProvider> {
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(Gc::String),
+    String(Gc::StringRef),
     Function(Callable<Gc::RustCallable>),
     Table(Gc::TableRef),
     Userdata(Gc::FullUserdataRef),
@@ -249,10 +239,28 @@ impl<Gc: TypeProvider> Value<Gc> {
     }
 }
 
+impl<Gc> Value<Gc>
+where
+    Gc: GarbageCollector,
+{
+    pub fn from_literal(literal: Literal, gc: &mut Gc) -> Self {
+        match literal {
+            Literal::Nil => Value::Nil,
+            Literal::Bool(value) => Value::Bool(value),
+            Literal::Int(value) => Value::Int(value),
+            Literal::Float(value) => Value::Float(value.into_inner()),
+            Literal::String(value) => {
+                let value = gc.alloc_string(value.into());
+                Value::String(value)
+            }
+        }
+    }
+}
+
 impl<Gc> Debug for Value<Gc>
 where
     Gc: TypeProvider,
-    Gc::String: Debug,
+    Gc::StringRef: Debug,
     Gc::RustCallable: Debug,
     Gc::TableRef: Debug,
     Gc::FullUserdataRef: Debug,
@@ -330,7 +338,7 @@ where
 impl<Gc> Display for Value<Gc>
 where
     Gc: TypeProvider,
-    Gc::String: Display,
+    Gc::StringRef: Display,
     Gc::RustCallable: Display,
     Gc::TableRef: Display,
     Gc::FullUserdataRef: Display,
@@ -353,52 +361,6 @@ where
             Function(v) => write!(f, "{v}"),
             Table(v) => write!(f, "{v}"),
             Userdata(v) => write!(f, "{v}"),
-        }
-    }
-}
-
-impl<Gc> From<Literal> for Value<Gc>
-where
-    Gc: TypeProvider,
-{
-    fn from(value: Literal) -> Self {
-        match value {
-            Literal::Nil => Value::Nil,
-            Literal::Bool(value) => Value::Bool(value),
-            Literal::Int(value) => Value::Int(value),
-            Literal::Float(value) => Value::Float(value.into_inner()),
-            Literal::String(value) => Value::String(value.into()),
-        }
-    }
-}
-
-impl<Gc> From<String> for Value<Gc>
-where
-    Gc: TypeProvider,
-{
-    fn from(value: String) -> Self {
-        Value::String(value.into())
-    }
-}
-
-impl<Gc> TryFrom<Value<Gc>> for String
-where
-    Gc: TypeProvider,
-    String: From<Gc::String>,
-{
-    type Error = TypeMismatchError;
-
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(value) => Ok(value.into()),
-            value => {
-                let err = TypeMismatchError {
-                    expected: Type::String,
-                    found: value.type_(),
-                };
-
-                Err(err)
-            }
         }
     }
 }

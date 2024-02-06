@@ -1,10 +1,10 @@
-use std::error::Error;
-
+use super::string::PossiblyUtf8Vec;
 use super::{KeyValue, Value};
 use crate::error::{AlreadyDroppedError, BorrowError, DroppedOrBorrowedError};
 
 pub trait TypeProvider: Sized {
     type String: Clone + PartialOrd + From<String> + From<&'static str> + Concat + Len;
+    type StringRef: Clone + PartialEq + Borrow<Self::String>;
     type RustCallable: Clone + PartialEq;
     type Table: Default + TableIndex<Self> + Metatable<Self::TableRef>;
     type TableRef: Clone + PartialEq + Borrow<Self::Table>;
@@ -72,6 +72,22 @@ where
 
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
         <U as Borrow<T>>::with_mut(self, f)
+    }
+}
+
+impl Borrow<PossiblyUtf8Vec> for PossiblyUtf8Vec {
+    fn with_ref<R>(
+        &self,
+        f: impl FnOnce(&PossiblyUtf8Vec) -> R,
+    ) -> Result<R, DroppedOrBorrowedError> {
+        Ok(f(self))
+    }
+
+    fn with_mut<R>(
+        &self,
+        _: impl FnOnce(&mut PossiblyUtf8Vec) -> R,
+    ) -> Result<R, DroppedOrBorrowedError> {
+        Err(BorrowError::Mut.into())
     }
 }
 

@@ -177,7 +177,7 @@ pub enum KeyValue<Gc: TypeProvider> {
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
-    String(Gc::String),
+    String(Gc::StringRef),
     Function(Callable<Gc::RustCallable>),
     Table(Gc::TableRef),
     Userdata(Gc::FullUserdataRef),
@@ -186,7 +186,7 @@ pub enum KeyValue<Gc: TypeProvider> {
 impl<Gc> Debug for KeyValue<Gc>
 where
     Gc: TypeProvider,
-    Gc::String: Debug,
+    Gc::StringRef: Debug,
     Gc::RustCallable: Debug,
     Gc::TableRef: Debug,
     Gc::FullUserdataRef: Debug,
@@ -261,7 +261,7 @@ where
 impl<Gc> Hash for KeyValue<Gc>
 where
     Gc: TypeProvider,
-    Gc::String: Hash,
+    Gc::StringRef: Hash,
     Gc::RustCallable: Hash,
     Gc::TableRef: Hash,
     Gc::FullUserdataRef: Hash,
@@ -375,21 +375,20 @@ where
 impl<Gc> Debug for TableRef<Gc>
 where
     Gc: TypeProvider<TableRef = Self>,
-    Gc::String: Debug,
+    Gc::StringRef: Debug,
     Gc::RustCallable: Debug,
     Gc::FullUserdataRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut printer = f.debug_struct("TableRef");
-        printer.field("addr", &Rc::as_ptr(&self.0));
+        let mut debug = f.debug_struct("TableRef");
+        debug.field("addr", &Rc::as_ptr(&self.0));
 
-        let inner = self.0.try_borrow();
-        let value: &dyn Debug = match &inner {
-            Ok(table) => table,
-            Err(_) => &"<borrowed>",
+        match self.0.try_borrow() {
+            Ok(table) => debug.field("table", &table),
+            Err(_) => debug.field("table", &"<borrowed>"),
         };
 
-        printer.field("table", value).finish()
+        debug.finish()
     }
 }
 

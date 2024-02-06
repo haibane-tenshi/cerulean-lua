@@ -85,16 +85,15 @@ pub fn invoke<'rt, Gc, C, F, Args>(
     f: F,
 ) -> Result<(), RuntimeError<Gc>>
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     F: Signature<Args>,
     for<'a> &'a [crate::value::Value<Gc>]: ParseArgs<Args>,
     <F as Signature<Args>>::Output: FormatReturns<Gc>,
 {
-    let args = rt
-        .stack
-        .raw
-        .parse()
-        .map_err(|err| Value::String(err.to_string().into()))?;
+    let args = rt.stack.raw.parse().map_err(|err| {
+        let msg = rt.core.gc.alloc_string(err.to_string().into());
+        Value::String(msg)
+    })?;
 
     rt.stack.clear();
 
@@ -110,16 +109,15 @@ pub fn try_invoke<'rt, Gc, C, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Gc>>
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     F: Signature<Args, Output = Result<R, RuntimeError<Gc>>>,
     for<'a> &'a [crate::value::Value<Gc>]: ParseArgs<Args>,
     R: FormatReturns<Gc>,
 {
-    let args = rt
-        .stack
-        .raw
-        .parse()
-        .map_err(|err| Value::String(err.to_string().into()))?;
+    let args = rt.stack.raw.parse().map_err(|err| {
+        let msg = rt.core.gc.alloc_string(err.to_string().into());
+        Value::String(msg)
+    })?;
 
     rt.stack.clear();
 
@@ -135,7 +133,7 @@ pub fn invoke_with_rt<'rt, Gc, C, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Gc>>
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Value<Gc>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Gc, C>, Args, Output = R>,
     for<'a> &'a [crate::value::Value<Gc>]: ParseArgs<Args>,
@@ -143,11 +141,10 @@ where
 {
     use repr::index::StackSlot;
 
-    let args = rt
-        .stack
-        .raw
-        .parse()
-        .map_err(|err| Value::String(err.to_string().into()))?;
+    let args = rt.stack.raw.parse().map_err(|err| {
+        let msg = rt.core.gc.alloc_string(err.to_string().into());
+        Value::String(msg)
+    })?;
 
     rt.stack.clear();
 
@@ -164,7 +161,7 @@ pub fn try_invoke_with_rt<'rt, Gc, C, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Gc>>
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
     for<'a> F:
         SignatureWithFirst<RuntimeView<'a, Gc, C>, Args, Output = Result<R, RuntimeError<Gc>>>,
@@ -173,11 +170,10 @@ where
 {
     use repr::index::StackSlot;
 
-    let args = rt
-        .stack
-        .raw
-        .parse()
-        .map_err(|err| Value::String(err.to_string().into()))?;
+    let args = rt.stack.raw.parse().map_err(|err| {
+        let msg = rt.core.gc.alloc_string(err.to_string().into());
+        Value::String(msg)
+    })?;
 
     rt.stack.clear();
 
@@ -323,9 +319,13 @@ where
     Value<Gc>: Debug + Display,
 {
     let f = move |mut rt: RuntimeView<'_, Gc, C>| {
-        let chunk_id = rt.chunk_cache().get(script).ok_or(Value::String(
-            format!("chunk with key \"{script:?}\" does not exist").into(),
-        ))?;
+        let chunk_id = rt.chunk_cache().get(script).ok_or_else(|| {
+            let msg = rt
+                .core
+                .gc
+                .alloc_string(format!("chunk with key \"{script:?}\" does not exist").into());
+            Value::String(msg)
+        })?;
         rt.invoke(call_chunk(chunk_id))
     };
 

@@ -4,33 +4,33 @@ use std::fmt::{Debug, Display};
 use std::path::{Path, PathBuf};
 
 use crate::chunk_cache::{ChunkCache, KeyedChunkCache};
-use crate::error::RuntimeError;
+use crate::error::{DroppedOrBorrowedError, RuntimeError};
 use crate::ffi::{self, LuaFfi, LuaFfiOnce, Maybe, Opts, WithName};
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::{ClosureRef, RuntimeView};
 use crate::value::table::KeyValue;
-use crate::value::{
-    Callable, LuaString, LuaTable, NilOr, TypeMismatchError, TypeMismatchOrError, TypeProvider,
-    Value,
-};
+use crate::value::{Callable, LuaString, LuaTable, NilOr, TypeMismatchError, TypeProvider, Value};
 
 pub fn assert<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
 {
     (|rt: RuntimeView<'_, Gc, C>| {
         let Some(cond) = rt.stack.get(StackSlot(0)) else {
-            return Err(Value::String("assert expects at least one argument".into()).into());
+            let msg = rt
+                .core
+                .gc
+                .alloc_string("assert expects at least one argument".into());
+            return Err(Value::String(msg).into());
         };
 
         if cond.to_bool() {
             Ok(())
         } else {
-            let err = rt
-                .stack
-                .get(StackSlot(1))
-                .cloned()
-                .unwrap_or_else(|| Value::String("assertion failed!".into()));
+            let err = rt.stack.get(StackSlot(1)).cloned().unwrap_or_else(|| {
+                let msg = rt.core.gc.alloc_string("assertion failed!".into());
+                Value::String(msg)
+            });
             Err(err.into())
         }
     })
@@ -58,19 +58,25 @@ pub fn pcall<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache,
     Gc: GarbageCollector,
-    Gc::String: TryInto<String>,
+    Gc::String: AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,
 {
     (|mut rt: RuntimeView<'_, Gc, C>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
-            return Err(Value::String("pcall expects at least one argument".into()).into());
+            let msg = rt
+                .core
+                .gc
+                .alloc_string("pcall expects at least one argument".into());
+            return Err(Value::String(msg).into());
         };
 
         let Value::Function(func) = value.take() else {
-            return Err(
-                Value::String("pcall expects the first argument to be a function".into()).into(),
-            );
+            let msg = rt
+                .core
+                .gc
+                .alloc_string("pcall expects the first argument to be a function".into());
+            return Err(Value::String(msg).into());
         };
 
         match rt.invoke_at(func, StackSlot(1)) {
@@ -90,10 +96,11 @@ where
                     .into_diagnostic(err)
                     .emit(&mut NoColor::new(&mut s), &Default::default());
                 let string = String::from_utf8_lossy(&s).to_string();
+                let msg = rt.core.gc.alloc_string(string.into());
 
                 rt.reset();
                 rt.stack.push(Value::Bool(false));
-                rt.stack.push(Value::String(string.into()))
+                rt.stack.push(Value::String(msg));
             }
         }
 
@@ -111,25 +118,25 @@ enum Mode {
 }
 
 #[derive(Debug)]
-struct ModeError;
+struct InvalidModeError;
 
-impl Display for ModeError {
+impl Display for InvalidModeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "unknown loading mode, expected 't', 'b' or 'bt'")
     }
 }
 
-impl Error for ModeError {}
+impl Error for InvalidModeError {}
 
 impl<Gc> TryFrom<Value<Gc>> for Mode
 where
     Gc: TypeProvider,
     Gc::String: AsRef<[u8]>,
 {
-    type Error = TypeMismatchOrError<ModeError>;
+    type Error = ModeError;
 
     fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
-        use crate::value::Type;
+        use crate::value::{Borrow, Type};
 
         let s = match value {
             Value::String(s) => s,
@@ -139,18 +146,55 @@ where
                     found: value.type_(),
                 };
 
-                return Err(TypeMismatchOrError::TypeMismatch(err));
+                return Err(err.into());
             }
         };
 
-        let r = match s.as_ref() {
-            b"t" => Mode::Text,
-            b"b" => Mode::Binary,
-            b"bt" => Mode::BinaryOrText,
-            _ => return Err(TypeMismatchOrError::Other(ModeError)),
-        };
+        let r = s.with_ref(|s| match s.as_ref() {
+            b"t" => Ok(Mode::Text),
+            b"b" => Ok(Mode::Binary),
+            b"bt" => Ok(Mode::BinaryOrText),
+            _ => Err(InvalidModeError),
+        })??;
 
         Ok(r)
+    }
+}
+
+#[derive(Debug)]
+enum ModeError {
+    Invalid(InvalidModeError),
+    DroppedOrBorrowed(DroppedOrBorrowedError),
+    TypeMismatch(TypeMismatchError),
+}
+
+impl Display for ModeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(err) => write!(f, "{err}"),
+            Self::DroppedOrBorrowed(err) => write!(f, "{err}"),
+            Self::TypeMismatch(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl Error for ModeError {}
+
+impl From<InvalidModeError> for ModeError {
+    fn from(value: InvalidModeError) -> Self {
+        ModeError::Invalid(value)
+    }
+}
+
+impl From<DroppedOrBorrowedError> for ModeError {
+    fn from(value: DroppedOrBorrowedError) -> Self {
+        ModeError::DroppedOrBorrowed(value)
+    }
+}
+
+impl From<TypeMismatchError> for ModeError {
+    fn from(value: TypeMismatchError) -> Self {
+        ModeError::TypeMismatch(value)
     }
 }
 
@@ -158,7 +202,7 @@ pub fn load<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache,
     Gc: GarbageCollector,
-    Gc::String: TryInto<String> + AsRef<[u8]>,
+    Gc::String: AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
     <Value<Gc> as TryInto<LuaString<String>>>::Error: Error,
@@ -166,7 +210,7 @@ where
     use crate::value::Type;
 
     enum ChunkSource<Gc: TypeProvider> {
-        String(Gc::String),
+        String(Gc::StringRef),
         Function(Callable<Gc::RustCallable>),
     }
 
@@ -220,6 +264,7 @@ where
              -> Result<_, RuntimeError<Gc>> {
                 use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
+                use crate::value::Borrow;
                 use repr::index::FunctionId;
 
                 let (_name, mode, env) = opts.split();
@@ -229,34 +274,43 @@ where
                 let source = match source {
                     ChunkSource::String(s) => s,
                     ChunkSource::Function(_) => {
-                        return Err(
-                            Value::String("source functions are not yet supported".into()).into(),
-                        )
+                        let msg = rt
+                            .core
+                            .gc
+                            .alloc_string("source functions are not yet supported".into());
+                        return Err(Value::String(msg).into());
                     }
                 };
 
-                let source = source
-                    .try_into()
-                    .map_err(|_| Value::String("string does not contain valid utf8".into()))?;
+                source.with_ref(|source| {
+                    let source = std::str::from_utf8(source.as_ref()).map_err(|_| {
+                        let msg = rt
+                            .core
+                            .gc
+                            .alloc_string("string does not contain valid utf8".into());
+                        Value::String(msg)
+                    })?;
 
-                match rt.load(source, None) {
-                    Ok(chunk_id) => {
-                        let ptr = FunctionPtr {
-                            chunk_id,
-                            function_id: FunctionId(0),
-                        };
-                        let env = env.unwrap_or_else(|| rt.core.global_env.clone());
-                        let closure = rt.construct_closure(ptr, [env])?;
-                        let closure_ref = ClosureRef::new(closure);
+                    match rt.load(source.to_string(), None) {
+                        Ok(chunk_id) => {
+                            let ptr = FunctionPtr {
+                                chunk_id,
+                                function_id: FunctionId(0),
+                            };
+                            let env = env.unwrap_or_else(|| rt.core.global_env.clone());
+                            let closure = rt.construct_closure(ptr, [env])?;
+                            let closure_ref = ClosureRef::new(closure);
 
-                        Ok((NilOr::Some(closure_ref), Maybe::None))
+                            Ok((NilOr::Some(closure_ref), Maybe::None))
+                        }
+                        Err(err) => {
+                            let msg = rt.into_diagnostic(err.into()).emit_to_string();
+                            let msg = rt.core.gc.alloc_string(msg.into());
+
+                            Ok((NilOr::Nil, Maybe::Some(LuaString(msg))))
+                        }
                     }
-                    Err(err) => {
-                        let message = rt.into_diagnostic(err.into()).emit_to_string();
-
-                        Ok((NilOr::Nil, Maybe::Some(message)))
-                    }
-                }
+                })?
             },
         )
     };
@@ -287,10 +341,10 @@ where
                 let _mode = mode.unwrap_or_default();
 
                 let Some(LuaString(filename)) = filename else {
-                    return Err(Value::String(
+                    let msg = rt.core.gc.alloc_string(
                         "loadfile doesn't yet support loading chunks from stdin".into(),
-                    )
-                    .into());
+                    );
+                    return Err(Value::String(msg).into());
                 };
 
                 match rt.load_from_file(&filename) {
@@ -306,9 +360,10 @@ where
                         Ok((NilOr::Some(closure_ref), Maybe::None))
                     }
                     Err(err) => {
-                        let message = rt.into_diagnostic(err).emit_to_string();
+                        let msg = rt.into_diagnostic(err).emit_to_string();
+                        let msg = rt.core.gc.alloc_string(msg.into());
 
-                        Ok((NilOr::Nil, Maybe::Some(message)))
+                        Ok((NilOr::Nil, Maybe::Some(LuaString(msg))))
                     }
                 }
             },
@@ -320,7 +375,7 @@ where
 
 pub fn getmetatable<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
 {
     let f = |rt: RuntimeView<'_, Gc, C>| {
@@ -331,7 +386,10 @@ where
                     use crate::value::{Borrow, TableIndex};
 
                     let __metatable = metatable
-                        .with_ref(|mt| mt.get(&KeyValue::String("__metatable".into())))
+                        .with_ref(|mt| {
+                            let key = rt.core.gc.alloc_string("__metatable".into());
+                            mt.get(&KeyValue::String(key))
+                        })
                         .unwrap();
 
                     if let Value::Nil = __metatable {
@@ -349,12 +407,15 @@ where
 
 pub fn setmetatable<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    Gc: TypeProvider,
+    Gc: GarbageCollector,
+    Value<Gc>: Debug + Display,
 {
     let f = |rt: RuntimeView<'_, Gc, C>| {
-        ffi::try_invoke(
+        ffi::try_invoke_with_rt(
             rt,
-            |table: LuaTable<Gc::TableRef>, metatable: NilOr<LuaTable<Gc::TableRef>>| {
+            |rt: RuntimeView<'_, Gc, C>,
+             table: LuaTable<Gc::TableRef>,
+             metatable: NilOr<LuaTable<Gc::TableRef>>| {
                 use crate::value::{Borrow, Metatable, TableIndex};
 
                 let metatable = metatable.into_option().map(|LuaTable(t)| t);
@@ -365,15 +426,17 @@ where
                         let has_meta = t.metatable().is_some_and(|metatable| {
                             metatable
                                 .with_ref(|mt| {
-                                    mt.contains_key(&KeyValue::String("__metatable".into()))
+                                    let key = rt.core.gc.alloc_string("__metatable".into());
+                                    mt.contains_key(&KeyValue::String(key))
                                 })
                                 .unwrap()
                         });
 
                         if has_meta {
-                            return Err(Value::String(
+                            let msg = rt.core.gc.alloc_string(
                                 "table already has metatable with '__metatable' field".into(),
-                            ));
+                            );
+                            return Err(Value::String(msg));
                         }
 
                         t.set_metatable(metatable);

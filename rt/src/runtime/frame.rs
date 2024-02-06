@@ -473,7 +473,8 @@ where
             }
             LoadConstant(index) => {
                 let constant = self.get_constant(index)?.clone();
-                self.stack.push(constant.into());
+                let value = Value::from_literal(constant, &mut self.core.gc);
+                self.stack.push(value);
 
                 ControlFlow::Continue(())
             }
@@ -619,7 +620,7 @@ where
 
                 match args {
                     [Value::String(val)] => {
-                        let len = val.len().try_into().unwrap();
+                        let len = val.with_ref(|s| s.len()).unwrap().try_into().unwrap();
 
                         Continue(Value::Int(len))
                     }
@@ -645,7 +646,7 @@ where
                 let [arg] = &args;
                 let metavalue = arg
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.with_ref(|mt| mt.get(&event.into())))
+                    .map(|mt| mt.with_ref(|mt| mt.get(&event.into_key(&mut self.core.gc))))
                     .transpose()
                     .unwrap();
 
@@ -716,7 +717,7 @@ where
                 let metavalue = lhs
                     .metatable(&self.core.primitive_metatables)
                     .or_else(|| rhs.metatable(&self.core.primitive_metatables))
-                    .map(|mt| mt.with_ref(|mt| mt.get(&event.into())))
+                    .map(|mt| mt.with_ref(|mt| mt.get(&event.into_key(&mut self.core.gc))))
                     .transpose()
                     .unwrap();
 
@@ -758,13 +759,27 @@ where
         use super::CoerceArgs;
         use crate::value::Concat;
 
-        let args = self.core.dialect.coerce_bin_op_str(op, args);
+        let args = self
+            .core
+            .dialect
+            .coerce_bin_op_str(op, args, &mut self.core.gc);
 
         match args {
-            [Value::String(mut lhs), Value::String(rhs)] => match op {
+            [Value::String(lhs), Value::String(rhs)] => match op {
                 StrBinOp::Concat => {
-                    lhs.concat(&rhs);
-                    ControlFlow::Continue(Some(Value::String(lhs)))
+                    let r = lhs
+                        .with_ref(|lhs| {
+                            rhs.with_ref(|rhs| {
+                                let mut r = lhs.clone();
+                                r.concat(rhs);
+                                r
+                            })
+                        })
+                        .unwrap()
+                        .unwrap();
+                    let s = self.core.gc.alloc_string(r);
+
+                    ControlFlow::Continue(Some(Value::String(s)))
                 }
             },
             args => ControlFlow::Break(args),
@@ -817,7 +832,10 @@ where
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
             [Float(lhs), Float(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
-            [String(lhs), String(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
+            [String(lhs), String(rhs)] => lhs
+                .with_ref(|lhs| rhs.with_ref(|rhs| PartialOrd::partial_cmp(lhs, rhs)))
+                .unwrap()
+                .unwrap(),
             [Int(lhs), Float(rhs)] if cmp => {
                 PartialOrd::partial_cmp(&value::Int(*lhs), &value::Float(*rhs))
             }
@@ -932,7 +950,7 @@ where
             loop {
                 let metavalue = table
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.with_ref(|mt| mt.get(&Event::Index.into())))
+                    .map(|mt| mt.with_ref(|mt| mt.get(&Event::Index.into_key(&mut self.core.gc))))
                     .transpose()
                     .unwrap()
                     .unwrap_or_default();
@@ -1009,7 +1027,9 @@ where
             loop {
                 let metavalue = table
                     .metatable(&self.core.primitive_metatables)
-                    .map(|mt| mt.with_ref(|mt| mt.get(&Event::NewIndex.into())))
+                    .map(|mt| {
+                        mt.with_ref(|mt| mt.get(&Event::NewIndex.into_key(&mut self.core.gc)))
+                    })
                     .transpose()
                     .unwrap()
                     .unwrap_or_default();
@@ -1066,7 +1086,7 @@ where
 
             let new_callable = callable
                 .metatable(&self.core.primitive_metatables)
-                .map(|mt| mt.with_ref(|mt| mt.get(&Event::Call.into())))
+                .map(|mt| mt.with_ref(|mt| mt.get(&Event::Call.into_key(&mut self.core.gc))))
                 .transpose()
                 .unwrap()
                 .unwrap_or_default();
@@ -1260,6 +1280,14 @@ impl Event {
             Call => "__call",
         }
     }
+
+    pub fn into_key<Gc>(self, gc: &mut Gc) -> KeyValue<Gc>
+    where
+        Gc: GarbageCollector,
+    {
+        let value = gc.alloc_string(self.to_str().into());
+        KeyValue::String(value)
+    }
 }
 
 impl From<BinOp> for Event {
@@ -1323,14 +1351,5 @@ impl From<RelBinOp> for Event {
             RelBinOp::Gt | RelBinOp::Lt => Event::Lt,
             RelBinOp::GtEq | RelBinOp::LtEq => Event::LtEq,
         }
-    }
-}
-
-impl<Gc> From<Event> for crate::value::table::KeyValue<Gc>
-where
-    Gc: TypeProvider,
-{
-    fn from(value: Event) -> Self {
-        KeyValue::String(value.to_str().into())
     }
 }

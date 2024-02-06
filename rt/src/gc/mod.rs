@@ -10,7 +10,7 @@ pub trait Gc: TypeProvider {
 
     fn sweeper(&mut self) -> Self::Sweeper;
 
-    fn alloc_string(&mut self, value: Self::String) -> Self::String;
+    fn alloc_string(&mut self, value: Self::String) -> Self::StringRef;
     fn alloc_table(&mut self, value: Self::Table) -> Self::TableRef;
 }
 
@@ -19,7 +19,7 @@ pub trait GcUserdata<T>: Gc {
 }
 
 pub trait Sweeper<Ty: TypeProvider>: Sized {
-    fn mark_string(&mut self, rf: &<Ty as TypeProvider>::String);
+    fn mark_string(&mut self, rf: &<Ty as TypeProvider>::StringRef);
     fn mark_table(&mut self, rf: &<Ty as TypeProvider>::TableRef) -> ControlFlow<()>;
     fn mark_userdata(&mut self, rf: &<Ty as TypeProvider>::FullUserdataRef);
 

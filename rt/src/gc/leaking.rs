@@ -37,6 +37,7 @@ where
     C: 'static,
 {
     type String = PossiblyUtf8Vec;
+    type StringRef = &'static PossiblyUtf8Vec;
     type RustCallable = RustCallable<Self, C>;
     type Table = Table<Self>;
     type TableRef = &'static LeakedTableHandle<Self::Table>;
@@ -54,8 +55,8 @@ where
         LeakingGcSweeper(PhantomData)
     }
 
-    fn alloc_string(&mut self, value: Self::String) -> Self::String {
-        value
+    fn alloc_string(&mut self, value: Self::String) -> Self::StringRef {
+        Box::leak(Box::new(value))
     }
 
     fn alloc_table(&mut self, value: Self::Table) -> Self::TableRef {
@@ -83,7 +84,7 @@ impl<C> Sweeper<LeakingGc<C>> for LeakingGcSweeper<C>
 where
     C: 'static,
 {
-    fn mark_string(&mut self, _: &<LeakingGc<C> as TypeProvider>::String) {}
+    fn mark_string(&mut self, _: &<LeakingGc<C> as TypeProvider>::StringRef) {}
 
     fn mark_table(&mut self, _: &<LeakingGc<C> as TypeProvider>::TableRef) -> ControlFlow<()> {
         ControlFlow::Break(())
@@ -99,7 +100,7 @@ pub struct LeakedTableHandle<T>(RefCell<T>);
 impl<Ty> Debug for LeakedTableHandle<Table<Ty>>
 where
     Ty: TypeProvider<TableRef = &'static Self> + 'static,
-    Ty::String: Debug,
+    Ty::StringRef: Debug,
     Ty::RustCallable: Debug,
     Ty::FullUserdataRef: Debug,
 {

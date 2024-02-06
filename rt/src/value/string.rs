@@ -10,9 +10,9 @@ pub struct LuaString<T>(pub T);
 impl<T, Gc> TryFrom<Value<Gc>> for LuaString<T>
 where
     Gc: TypeProvider,
-    Gc::String: TryInto<T>,
+    Gc::StringRef: TryInto<T>,
 {
-    type Error = TypeMismatchOrError<<Gc::String as TryInto<T>>::Error>;
+    type Error = TypeMismatchOrError<<Gc::StringRef as TryInto<T>>::Error>;
 
     fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         match value {
@@ -37,7 +37,7 @@ where
 impl<T, Gc> From<LuaString<T>> for Value<Gc>
 where
     Gc: TypeProvider,
-    T: Into<Gc::String>,
+    T: Into<Gc::StringRef>,
 {
     fn from(value: LuaString<T>) -> Self {
         let LuaString(value) = value;
@@ -131,6 +131,38 @@ impl TryFrom<PossiblyUtf8Vec> for PathBuf {
     type Error = <String as TryFrom<PossiblyUtf8Vec>>::Error;
 
     fn try_from(value: PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        let s: String = value.try_into()?;
+        Ok(s.into())
+    }
+}
+
+impl<'a> From<&'a PossiblyUtf8Vec> for Vec<u8> {
+    fn from(value: &'a PossiblyUtf8Vec) -> Self {
+        value.0.clone()
+    }
+}
+
+impl<'a> TryFrom<&'a PossiblyUtf8Vec> for String {
+    type Error = std::string::FromUtf8Error;
+
+    fn try_from(value: &'a PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        String::from_utf8(value.0.clone())
+    }
+}
+
+impl<'a> TryFrom<&'a PossiblyUtf8Vec> for OsString {
+    type Error = <String as TryFrom<PossiblyUtf8Vec>>::Error;
+
+    fn try_from(value: &'a PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        let s: String = value.try_into()?;
+        Ok(s.into())
+    }
+}
+
+impl<'a> TryFrom<&'a PossiblyUtf8Vec> for PathBuf {
+    type Error = <String as TryFrom<PossiblyUtf8Vec>>::Error;
+
+    fn try_from(value: &'a PossiblyUtf8Vec) -> Result<Self, Self::Error> {
         let s: String = value.try_into()?;
         Ok(s.into())
     }

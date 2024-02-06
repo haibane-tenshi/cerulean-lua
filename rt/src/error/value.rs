@@ -8,26 +8,34 @@ pub struct ValueError<Gc: TypeProvider>(pub Value<Gc>);
 impl<Gc> ValueError<Gc>
 where
     Gc: TypeProvider,
-    Gc::String: TryInto<String>,
+    Gc::String: AsRef<[u8]>,
     Value<Gc>: Display,
 {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
+        use crate::value::Borrow;
         use Value::*;
 
         let ValueError(value) = self;
 
-        let diag = Diagnostic::error();
-        let mut diag = match &value {
-            String(s) => {
-                if let Ok(s) = s.clone().try_into() {
-                    diag.with_message(s)
-                } else {
-                    diag.with_message(format!("panicked with value: {value}"))
-                }
-            }
-            value => diag.with_message(format!("panicked with value: {value}")),
+        let mut diag = Diagnostic::error();
+        let valid_utf8 = match &value {
+            String(s) => s
+                .with_ref(|s| {
+                    if let Ok(s) = std::str::from_utf8(s.as_ref()) {
+                        diag.message = s.into();
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or_default(),
+            _ => false,
         };
+
+        if !valid_utf8 {
+            diag = diag.with_message(format!("panicked with value: {value}"));
+        }
 
         if let Table(_) = value {
             diag.with_note([
