@@ -10,21 +10,21 @@ use super::callable::Callable;
 use super::{Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, TypeProvider, Value};
 use crate::error::BorrowError;
 
-pub struct Table<Types: TypeProvider> {
-    data: HashMap<KeyValue<Types>, Value<Types>>,
-    metatable: Option<Types::TableRef>,
+pub struct Table<Gc: TypeProvider> {
+    data: HashMap<KeyValue<Gc>, Value<Gc>>,
+    metatable: Option<Gc::TableRef>,
 }
 
-impl<Types> TableIndex<Types> for Table<Types>
+impl<Gc> TableIndex<Gc> for Table<Gc>
 where
-    Types: TypeProvider,
-    KeyValue<Types>: Hash + Eq,
+    Gc: TypeProvider,
+    KeyValue<Gc>: Hash + Eq,
 {
-    fn get(&self, key: &KeyValue<Types>) -> Value<Types> {
+    fn get(&self, key: &KeyValue<Gc>) -> Value<Gc> {
         self.data.get(key).cloned().unwrap_or_default()
     }
 
-    fn set(&mut self, key: KeyValue<Types>, value: Value<Types>) {
+    fn set(&mut self, key: KeyValue<Gc>, value: Value<Gc>) {
         match value {
             Value::Nil => {
                 self.data.remove(&key);
@@ -39,32 +39,32 @@ where
         Table::border(self)
     }
 
-    fn contains_key(&self, key: &KeyValue<Types>) -> bool {
+    fn contains_key(&self, key: &KeyValue<Gc>) -> bool {
         self.data.contains_key(key)
     }
 }
 
-impl<Types> Table<Types>
+impl<Gc> Table<Gc>
 where
-    Types: TypeProvider,
-    KeyValue<Types>: Hash + Eq,
-    Value<Types>: Clone,
+    Gc: TypeProvider,
+    KeyValue<Gc>: Hash + Eq,
+    Value<Gc>: Clone,
 {
-    pub fn get(&self, key: &KeyValue<Types>) -> Value<Types> {
+    pub fn get(&self, key: &KeyValue<Gc>) -> Value<Gc> {
         self.data.get(key).cloned().unwrap_or_default()
     }
 }
 
-impl<Types> Table<Types>
+impl<Gc> Table<Gc>
 where
-    Types: TypeProvider,
-    KeyValue<Types>: Hash + Eq,
+    Gc: TypeProvider,
+    KeyValue<Gc>: Hash + Eq,
 {
-    pub fn get_ref<'s>(&'s self, key: &KeyValue<Types>) -> Option<&'s Value<Types>> {
+    pub fn get_ref<'s>(&'s self, key: &KeyValue<Gc>) -> Option<&'s Value<Gc>> {
         self.data.get(key)
     }
 
-    pub fn set(&mut self, key: KeyValue<Types>, value: Value<Types>) {
+    pub fn set(&mut self, key: KeyValue<Gc>, value: Value<Gc>) {
         match value {
             Value::Nil => {
                 self.data.remove(&key);
@@ -75,7 +75,7 @@ where
         }
     }
 
-    pub fn contains_key(&self, key: &KeyValue<Types>) -> bool {
+    pub fn contains_key(&self, key: &KeyValue<Gc>) -> bool {
         self.data.contains_key(key)
     }
 
@@ -86,45 +86,45 @@ where
             .unwrap_or(i64::MAX)
     }
 }
-impl<Types> Table<Types>
+impl<Gc> Table<Gc>
 where
-    Types: TypeProvider,
-    Types::TableRef: Clone,
+    Gc: TypeProvider,
+    Gc::TableRef: Clone,
 {
-    pub fn metatable(&self) -> Option<Types::TableRef> {
+    pub fn metatable(&self) -> Option<Gc::TableRef> {
         self.metatable.clone()
     }
 }
 
-impl<Types> Table<Types>
+impl<Gc> Table<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    pub fn set_metatable(&mut self, metatable: Option<Types::TableRef>) -> Option<Types::TableRef> {
+    pub fn set_metatable(&mut self, metatable: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
         std::mem::replace(&mut self.metatable, metatable)
     }
 }
 
-impl<Types> Metatable<Types::TableRef> for Table<Types>
+impl<Gc> Metatable<Gc::TableRef> for Table<Gc>
 where
-    Types: TypeProvider,
-    Types::TableRef: Clone,
+    Gc: TypeProvider,
+    Gc::TableRef: Clone,
 {
-    fn metatable(&self) -> Option<Types::TableRef> {
+    fn metatable(&self) -> Option<Gc::TableRef> {
         Table::metatable(self)
     }
 
-    fn set_metatable(&mut self, mt: Option<Types::TableRef>) -> Option<Types::TableRef> {
+    fn set_metatable(&mut self, mt: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
         Table::set_metatable(self, mt)
     }
 }
 
-impl<Types> Debug for Table<Types>
+impl<Gc> Debug for Table<Gc>
 where
-    Types: TypeProvider,
-    KeyValue<Types>: Debug,
-    Value<Types>: Debug,
-    Types::TableRef: Debug,
+    Gc: TypeProvider,
+    KeyValue<Gc>: Debug,
+    Value<Gc>: Debug,
+    Gc::TableRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Table")
@@ -134,12 +134,12 @@ where
     }
 }
 
-impl<Types> Clone for Table<Types>
+impl<Gc> Clone for Table<Gc>
 where
-    Types: TypeProvider,
-    KeyValue<Types>: Clone,
-    Value<Types>: Clone,
-    Types::TableRef: Clone,
+    Gc: TypeProvider,
+    KeyValue<Gc>: Clone,
+    Value<Gc>: Clone,
+    Gc::TableRef: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -149,21 +149,21 @@ where
     }
 }
 
-impl<Types> PartialEq for Table<Types>
+impl<Gc> PartialEq for Table<Gc>
 where
-    Types: TypeProvider,
-    KeyValue<Types>: Hash + Eq,
-    Value<Types>: PartialEq,
-    Types::TableRef: PartialEq,
+    Gc: TypeProvider,
+    KeyValue<Gc>: Hash + Eq,
+    Value<Gc>: PartialEq,
+    Gc::TableRef: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.data == other.data && self.metatable == other.metatable
     }
 }
 
-impl<Types> Default for Table<Types>
+impl<Gc> Default for Table<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn default() -> Self {
         Self {
@@ -173,23 +173,23 @@ where
     }
 }
 
-pub enum KeyValue<Types: TypeProvider> {
+pub enum KeyValue<Gc: TypeProvider> {
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
-    String(Types::String),
-    Function(Callable<Types::RustCallable>),
-    Table(Types::TableRef),
-    Userdata(Types::FullUserdataRef),
+    String(Gc::String),
+    Function(Callable<Gc::RustCallable>),
+    Table(Gc::TableRef),
+    Userdata(Gc::FullUserdataRef),
 }
 
-impl<Types> Debug for KeyValue<Types>
+impl<Gc> Debug for KeyValue<Gc>
 where
-    Types: TypeProvider,
-    Types::String: Debug,
-    Types::RustCallable: Debug,
-    Types::TableRef: Debug,
-    Types::FullUserdataRef: Debug,
+    Gc: TypeProvider,
+    Gc::String: Debug,
+    Gc::RustCallable: Debug,
+    Gc::TableRef: Debug,
+    Gc::FullUserdataRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -204,13 +204,13 @@ where
     }
 }
 
-impl<Types> Clone for KeyValue<Types>
+impl<Gc> Clone for KeyValue<Gc>
 where
-    Types: TypeProvider,
-    Types::String: Clone,
-    Types::RustCallable: Clone,
-    Types::TableRef: Clone,
-    Types::FullUserdataRef: Clone,
+    Gc: TypeProvider,
+    Gc::String: Clone,
+    Gc::RustCallable: Clone,
+    Gc::TableRef: Clone,
+    Gc::FullUserdataRef: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -226,13 +226,13 @@ where
     }
 }
 
-impl<Types> PartialEq for KeyValue<Types>
+impl<Gc> PartialEq for KeyValue<Gc>
 where
-    Types: TypeProvider,
-    Types::String: PartialEq,
-    Types::RustCallable: PartialEq,
-    Types::TableRef: PartialEq,
-    Types::FullUserdataRef: PartialEq,
+    Gc: TypeProvider,
+    Gc::String: PartialEq,
+    Gc::RustCallable: PartialEq,
+    Gc::TableRef: PartialEq,
+    Gc::FullUserdataRef: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -248,23 +248,23 @@ where
     }
 }
 
-impl<Types> Eq for KeyValue<Types>
+impl<Gc> Eq for KeyValue<Gc>
 where
-    Types: TypeProvider,
-    Types::String: Eq,
-    Types::RustCallable: Eq,
-    Types::TableRef: Eq,
-    Types::FullUserdataRef: Eq,
+    Gc: TypeProvider,
+    Gc::String: Eq,
+    Gc::RustCallable: Eq,
+    Gc::TableRef: Eq,
+    Gc::FullUserdataRef: Eq,
 {
 }
 
-impl<Types> Hash for KeyValue<Types>
+impl<Gc> Hash for KeyValue<Gc>
 where
-    Types: TypeProvider,
-    Types::String: Hash,
-    Types::RustCallable: Hash,
-    Types::TableRef: Hash,
-    Types::FullUserdataRef: Hash,
+    Gc: TypeProvider,
+    Gc::String: Hash,
+    Gc::RustCallable: Hash,
+    Gc::TableRef: Hash,
+    Gc::FullUserdataRef: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         use KeyValue::*;
@@ -298,13 +298,13 @@ impl InvalidTableKeyError {
     }
 }
 
-impl<Types> TryFrom<Value<Types>> for KeyValue<Types>
+impl<Gc> TryFrom<Value<Gc>> for KeyValue<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     type Error = InvalidTableKeyError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         let r = match value {
             Value::Bool(t) => KeyValue::Bool(t),
             Value::Int(t) => KeyValue::Int(t),
@@ -323,11 +323,11 @@ where
     }
 }
 
-impl<Types> From<KeyValue<Types>> for Value<Types>
+impl<Gc> From<KeyValue<Gc>> for Value<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    fn from(value: KeyValue<Types>) -> Self {
+    fn from(value: KeyValue<Gc>) -> Self {
         match value {
             KeyValue::Bool(t) => Value::Bool(t),
             KeyValue::Int(t) => Value::Int(t),
@@ -340,43 +340,43 @@ where
     }
 }
 
-pub struct TableRef<Types: TypeProvider<TableRef = Self>>(Rc<RefCell<Table<Types>>>);
+pub struct TableRef<Gc: TypeProvider<TableRef = Self>>(Rc<RefCell<Table<Gc>>>);
 
-impl<Types: TypeProvider<TableRef = Self>> TableRef<Types> {
+impl<Gc: TypeProvider<TableRef = Self>> TableRef<Gc> {
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn borrow(&self) -> Result<Ref<Table<Types>>, std::cell::BorrowError> {
+    pub fn borrow(&self) -> Result<Ref<Table<Gc>>, std::cell::BorrowError> {
         self.0.try_borrow()
     }
 
-    pub fn borrow_mut(&self) -> Result<RefMut<Table<Types>>, std::cell::BorrowMutError> {
+    pub fn borrow_mut(&self) -> Result<RefMut<Table<Gc>>, std::cell::BorrowMutError> {
         self.0.try_borrow_mut()
     }
 }
 
-impl<Types> super::Borrow<Table<Types>> for TableRef<Types>
+impl<Gc> super::Borrow<Table<Gc>> for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<TableRef = Self>,
 {
     type Error = BorrowError;
 
-    fn with_ref<R>(&self, f: impl FnOnce(&Table<Types>) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(&self, f: impl FnOnce(&Table<Gc>) -> R) -> Result<R, Self::Error> {
         self.0.with_ref(f)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut Table<Types>) -> R) -> Result<R, Self::Error> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut Table<Gc>) -> R) -> Result<R, Self::Error> {
         self.0.with_mut(f)
     }
 }
 
-impl<Types> Debug for TableRef<Types>
+impl<Gc> Debug for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
-    Types::String: Debug,
-    Types::RustCallable: Debug,
-    Types::FullUserdataRef: Debug,
+    Gc: TypeProvider<TableRef = Self>,
+    Gc::String: Debug,
+    Gc::RustCallable: Debug,
+    Gc::FullUserdataRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut printer = f.debug_struct("TableRef");
@@ -392,60 +392,60 @@ where
     }
 }
 
-impl<Types> Clone for TableRef<Types>
+impl<Gc> Clone for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<TableRef = Self>,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<Types> Default for TableRef<Types>
+impl<Gc> Default for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<TableRef = Self>,
 {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<Types> PartialEq for TableRef<Types>
+impl<Gc> PartialEq for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<TableRef = Self>,
 {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<Types> Eq for TableRef<Types> where Types: TypeProvider<TableRef = Self> {}
+impl<Gc> Eq for TableRef<Gc> where Gc: TypeProvider<TableRef = Self> {}
 
-impl<Types> Hash for TableRef<Types>
+impl<Gc> Hash for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<TableRef = Self>,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.0).hash(state)
     }
 }
 
-impl<Types> From<Table<Types>> for TableRef<Types>
+impl<Gc> From<Table<Gc>> for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<TableRef = Self>,
 {
-    fn from(value: Table<Types>) -> Self {
+    fn from(value: Table<Gc>) -> Self {
         TableRef(Rc::new(RefCell::new(value)))
     }
 }
 
-impl<Types> TryFrom<Value<Types>> for TableRef<Types>
+impl<Gc> TryFrom<Value<Gc>> for TableRef<Gc>
 where
-    Types: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<TableRef = Self>,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         use super::Type;
 
         match value {
@@ -462,23 +462,23 @@ where
     }
 }
 
-impl<Types> From<TableRef<Types>> for Value<Types>
+impl<Gc> From<TableRef<Gc>> for Value<Gc>
 where
-    Types: TypeProvider<TableRef = TableRef<Types>>,
+    Gc: TypeProvider<TableRef = TableRef<Gc>>,
 {
-    fn from(value: TableRef<Types>) -> Self {
+    fn from(value: TableRef<Gc>) -> Self {
         Value::Table(value)
     }
 }
 
 pub struct LuaTable<T>(pub T);
 
-impl<Types, T> TryInto<LuaTable<T>> for Value<Types>
+impl<Gc, T> TryInto<LuaTable<T>> for Value<Gc>
 where
-    Types: TypeProvider,
-    Types::TableRef: TryInto<T>,
+    Gc: TypeProvider,
+    Gc::TableRef: TryInto<T>,
 {
-    type Error = TypeMismatchOrError<<Types::TableRef as TryInto<T>>::Error>;
+    type Error = TypeMismatchOrError<<Gc::TableRef as TryInto<T>>::Error>;
 
     fn try_into(self) -> Result<LuaTable<T>, Self::Error> {
         match self {
@@ -500,10 +500,10 @@ where
     }
 }
 
-impl<Types, T> From<LuaTable<T>> for Value<Types>
+impl<Gc, T> From<LuaTable<T>> for Value<Gc>
 where
-    Types: TypeProvider,
-    Types::TableRef: From<T>,
+    Gc: TypeProvider,
+    Gc::TableRef: From<T>,
 {
     fn from(value: LuaTable<T>) -> Self {
         let LuaTable(value) = value;

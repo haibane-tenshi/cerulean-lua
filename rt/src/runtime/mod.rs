@@ -27,41 +27,43 @@ use upvalue_stack::{UpvalueStack, UpvalueStackView};
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, ClosureRef, FunctionPtr};
 
-pub struct Core<Types: TypeProvider> {
-    pub global_env: Value<Types>,
-    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<Types::TableRef>>,
+pub struct Core<Gc: TypeProvider> {
+    pub global_env: Value<Gc>,
+    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<Gc::TableRef>>,
     pub dialect: DialectBuilder,
+    pub gc: Gc,
 }
 
-impl<Types> Debug for Core<Types>
+impl<Gc> Debug for Core<Gc>
 where
-    Types: TypeProvider,
-    Types::TableRef: Debug,
-    Value<Types>: Debug,
+    Gc: Debug + TypeProvider,
+    Gc::TableRef: Debug,
+    Value<Gc>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Core")
             .field("global_env", &self.global_env)
             .field("primitive_metatables", &self.primitive_metatables)
             .field("dialect", &self.dialect)
+            .field("gc", &self.gc)
             .finish()
     }
 }
 
-pub struct Runtime<Types: TypeProvider, C> {
-    pub core: Core<Types>,
+pub struct Runtime<Gc: TypeProvider, C> {
+    pub core: Core<Gc>,
     pub chunk_cache: C,
-    frames: FrameStack<Value<Types>>,
-    stack: Stack<Value<Types>>,
-    upvalue_stack: UpvalueStack<Value<Types>>,
+    frames: FrameStack<Value<Gc>>,
+    stack: Stack<Value<Gc>>,
+    upvalue_stack: UpvalueStack<Value<Gc>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
-impl<Types: TypeProvider, C> Runtime<Types, C>
+impl<Gc: TypeProvider, C> Runtime<Gc, C>
 where
     C: Debug,
 {
-    pub fn new(chunk_cache: C, core: Core<Types>) -> Self {
+    pub fn new(chunk_cache: C, core: Core<Gc>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         Runtime {
@@ -74,7 +76,7 @@ where
         }
     }
 
-    pub fn view(&mut self) -> RuntimeView<Types, C> {
+    pub fn view(&mut self) -> RuntimeView<Gc, C> {
         let Runtime {
             core,
             chunk_cache,
@@ -100,21 +102,21 @@ where
     }
 }
 
-pub struct RuntimeView<'rt, Types: TypeProvider, C> {
-    pub core: &'rt mut Core<Types>,
+pub struct RuntimeView<'rt, Gc: TypeProvider, C> {
+    pub core: &'rt mut Core<Gc>,
     pub chunk_cache: &'rt mut C,
-    frames: FrameStackView<'rt, Value<Types>>,
-    pub stack: StackView<'rt, Value<Types>>,
-    upvalue_stack: UpvalueStackView<'rt, Value<Types>>,
+    frames: FrameStackView<'rt, Value<Gc>>,
+    pub stack: StackView<'rt, Value<Gc>>,
+    upvalue_stack: UpvalueStackView<'rt, Value<Gc>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
-impl<'rt, Types, C> RuntimeView<'rt, Types, C>
+impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
 where
-    Types: TypeProvider,
-    Value<Types>: Display,
+    Gc: TypeProvider,
+    Value<Gc>: Display,
 {
-    pub fn view_full(&mut self) -> RuntimeView<'_, Types, C> {
+    pub fn view_full(&mut self) -> RuntimeView<'_, Gc, C> {
         let Ok(view) = self.view(StackSlot(0)) else {
             unreachable!()
         };
@@ -122,10 +124,7 @@ where
         view
     }
 
-    pub fn view(
-        &mut self,
-        start: StackSlot,
-    ) -> Result<RuntimeView<'_, Types, C>, RuntimeError<Types>> {
+    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<'_, Gc, C>, RuntimeError<Gc>> {
         let start = self.stack.boundary() + start;
         self.view_raw(start)
     }
@@ -133,7 +132,7 @@ where
     fn view_raw(
         &mut self,
         start: RawStackSlot,
-    ) -> Result<RuntimeView<'_, Types, C>, RuntimeError<Types>> {
+    ) -> Result<RuntimeView<'_, Gc, C>, RuntimeError<Gc>> {
         use crate::error::OutOfBoundsStack;
 
         let RuntimeView {
@@ -162,24 +161,24 @@ where
         Ok(r)
     }
 
-    pub fn invoke(&mut self, f: impl LuaFfiOnce<Types, C>) -> Result<(), RuntimeError<Types>> {
+    pub fn invoke(&mut self, f: impl LuaFfiOnce<Gc, C>) -> Result<(), RuntimeError<Gc>> {
         self.invoke_at(f, StackSlot(0))
     }
 
     pub fn invoke_at(
         &mut self,
-        f: impl LuaFfiOnce<Types, C>,
+        f: impl LuaFfiOnce<Gc, C>,
         start: StackSlot,
-    ) -> Result<(), RuntimeError<Types>> {
+    ) -> Result<(), RuntimeError<Gc>> {
         let start = self.stack.boundary() + start;
         self.invoke_at_raw(f, start)
     }
 
     fn invoke_at_raw(
         &mut self,
-        f: impl LuaFfiOnce<Types, C>,
+        f: impl LuaFfiOnce<Gc, C>,
         start: RawStackSlot,
-    ) -> Result<(), RuntimeError<Types>> {
+    ) -> Result<(), RuntimeError<Gc>> {
         use crate::backtrace::{BacktraceFrame, FrameSource};
         use rust_backtrace_stack::RustFrame;
 
@@ -213,9 +212,9 @@ where
     }
 }
 
-impl<'rt, Types, C> RuntimeView<'rt, Types, C>
+impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn soft_reset(&mut self) {
         self.upvalue_stack.clear();
@@ -224,9 +223,9 @@ where
     }
 }
 
-impl<'rt, Types, C> RuntimeView<'rt, Types, C>
+impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     /// Return runtime into consistent state.
     ///
@@ -256,18 +255,14 @@ where
     }
 }
 
-impl<'rt, Types, C> RuntimeView<'rt, Types, C>
+impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
 where
     C: ChunkCache,
-    Types: TypeProvider,
-    Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Debug + Display,
+    Gc: TypeProvider,
+    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Value<Gc>: Debug + Display,
 {
-    pub fn enter(
-        &mut self,
-        closure: ClosureRef,
-        start: StackSlot,
-    ) -> Result<(), RuntimeError<Types>> {
+    pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError<Gc>> {
         use crate::value::callable::Callable;
 
         let start = self.stack.boundary() + start;
@@ -324,19 +319,19 @@ where
     pub fn construct_closure(
         &mut self,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = Value<Types>>,
-    ) -> Result<Closure, RuntimeError<Types>> {
+        upvalues: impl IntoIterator<Item = Value<Gc>>,
+    ) -> Result<Closure, RuntimeError<Gc>> {
         Closure::new(self, fn_ptr, upvalues)
     }
 }
 
-impl<'rt, Types: TypeProvider, C> RuntimeView<'rt, Types, C> {
+impl<'rt, Gc: TypeProvider, C> RuntimeView<'rt, Gc, C> {
     pub fn chunk_cache(&self) -> &C {
         self.chunk_cache
     }
 }
 
-impl<'rt, Types: TypeProvider, C> RuntimeView<'rt, Types, C>
+impl<'rt, Gc: TypeProvider, C> RuntimeView<'rt, Gc, C>
 where
     C: ChunkCache,
 {
@@ -389,8 +384,8 @@ where
     pub fn precompiled_or_load_with<Q>(
         &mut self,
         key: &Q,
-        f: impl FnOnce() -> Result<(String, Option<Location>), RuntimeError<Types>>,
-    ) -> Result<ChunkId, RuntimeError<Types>>
+        f: impl FnOnce() -> Result<(String, Option<Location>), RuntimeError<Gc>>,
+    ) -> Result<ChunkId, RuntimeError<Gc>>
     where
         Q: ?Sized,
         C: KeyedChunkCache<Q>,
@@ -404,10 +399,10 @@ where
             .map_err(Into::into)
     }
 
-    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RuntimeError<Types>>
+    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RuntimeError<Gc>>
     where
         C: KeyedChunkCache<Path>,
-        Types::String: From<String>,
+        Gc::String: From<String>,
     {
         let path = path.as_ref();
 
@@ -428,7 +423,7 @@ where
     }
 }
 
-impl<'rt, Types: TypeProvider, C> RuntimeView<'rt, Types, C>
+impl<'rt, Gc: TypeProvider, C> RuntimeView<'rt, Gc, C>
 where
     C: ChunkCache,
 {
@@ -466,11 +461,11 @@ where
         Backtrace { frames }
     }
 
-    pub fn into_diagnostic(&self, err: RuntimeError<Types>) -> Diagnostic
+    pub fn into_diagnostic(&self, err: RuntimeError<Gc>) -> Diagnostic
     where
-        Types: TypeProvider,
-        Types::String: TryInto<String>,
-        Value<Types>: Display,
+        Gc: TypeProvider,
+        Gc::String: TryInto<String>,
+        Value<Gc>: Display,
     {
         use codespan_reporting::files::SimpleFile;
 
@@ -553,9 +548,9 @@ impl From<Diagnostic> for LoadError {
     }
 }
 
-impl<Types> From<LoadError> for RuntimeError<Types>
+impl<Gc> From<LoadError> for RuntimeError<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn from(value: LoadError) -> Self {
         match value {

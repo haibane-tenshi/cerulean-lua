@@ -383,13 +383,13 @@ where
     }
 }
 
-impl<'a, Types, T> ExtractArgs<T> for &'a [Value<Types>]
+impl<'a, Gc, T> ExtractArgs<T> for &'a [Value<Gc>]
 where
-    Types: TypeProvider,
-    Value<Types>: TryInto<T>,
-    <Value<Types> as TryInto<T>>::Error: Error,
+    Gc: TypeProvider,
+    Value<Gc>: TryInto<T>,
+    <Value<Gc> as TryInto<T>>::Error: Error,
 {
-    type Error = MissingArg<<Value<Types> as TryInto<T>>::Error>;
+    type Error = MissingArg<<Value<Gc> as TryInto<T>>::Error>;
 
     fn extract(self) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;
@@ -475,32 +475,32 @@ impl<E> MissingArg<E> {
 /// Render type into iterator of Lua [`Value`]s.
 ///
 /// See module-level [documentation](self#formatting-returns) for usage explanation.
-pub trait FormatReturns<Types>
+pub trait FormatReturns<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    type Iter: Iterator<Item = Value<Types>>;
+    type Iter: Iterator<Item = Value<Gc>>;
 
     fn format(self) -> Self::Iter;
 }
 
-impl<Types> FormatReturns<Types> for ()
+impl<Gc> FormatReturns<Gc> for ()
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    type Iter = std::iter::Empty<Value<Types>>;
+    type Iter = std::iter::Empty<Value<Gc>>;
 
     fn format(self) -> Self::Iter {
         std::iter::empty()
     }
 }
 
-impl<Types, A> FormatReturns<Types> for (A,)
+impl<Gc, A> FormatReturns<Gc> for (A,)
 where
-    Types: TypeProvider,
-    A: FormatReturns<Types>,
+    Gc: TypeProvider,
+    A: FormatReturns<Gc>,
 {
-    type Iter = <A as FormatReturns<Types>>::Iter;
+    type Iter = <A as FormatReturns<Gc>>::Iter;
 
     fn format(self) -> Self::Iter {
         let (a,) = self;
@@ -510,13 +510,13 @@ where
 
 macro_rules! format_tuple {
     ($first:ident, $($t:ident),*) => {
-        impl<Types, $first, $($t),*> FormatReturns<Types> for ($first, $($t),*)
+        impl<Gc, $first, $($t),*> FormatReturns<Gc> for ($first, $($t),*)
         where
-        Types: TypeProvider,
-            $first: FormatReturns<Types>,
-            $($t: FormatReturns<Types>,)*
+        Gc: TypeProvider,
+            $first: FormatReturns<Gc>,
+            $($t: FormatReturns<Gc>,)*
         {
-            type Iter = std::iter::Chain<<$first as FormatReturns<Types>>::Iter, <($($t,)*) as FormatReturns<Types>>::Iter>;
+            type Iter = std::iter::Chain<<$first as FormatReturns<Gc>>::Iter, <($($t,)*) as FormatReturns<Gc>>::Iter>;
 
             fn format(self) -> Self::Iter {
                 #[allow(non_snake_case)]
@@ -539,12 +539,12 @@ format_tuple!(A, B, C, D, E, F, G, H, I, J);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
-impl<Types, T> FormatReturns<Types> for Maybe<T>
+impl<Gc, T> FormatReturns<Gc> for Maybe<T>
 where
-    Types: TypeProvider,
-    T: FormatReturns<Types>,
+    Gc: TypeProvider,
+    T: FormatReturns<Gc>,
 {
-    type Iter = std::iter::Flatten<std::option::IntoIter<<T as FormatReturns<Types>>::Iter>>;
+    type Iter = std::iter::Flatten<std::option::IntoIter<<T as FormatReturns<Gc>>::Iter>>;
 
     fn format(self) -> Self::Iter {
         self.into_option()
@@ -554,27 +554,27 @@ where
     }
 }
 
-impl<Types, T, const N: usize> FormatReturns<Types> for [T; N]
+impl<Gc, T, const N: usize> FormatReturns<Gc> for [T; N]
 where
-    Types: TypeProvider,
-    T: FormatReturns<Types>,
+    Gc: TypeProvider,
+    T: FormatReturns<Gc>,
 {
-    type Iter = std::iter::Flatten<std::array::IntoIter<<T as FormatReturns<Types>>::Iter, N>>;
+    type Iter = std::iter::Flatten<std::array::IntoIter<<T as FormatReturns<Gc>>::Iter, N>>;
 
     fn format(self) -> Self::Iter {
         self.map(FormatReturns::format).into_iter().flatten()
     }
 }
 
-impl<Types, T> FormatReturns<Types> for Vec<T>
+impl<Gc, T> FormatReturns<Gc> for Vec<T>
 where
-    Types: TypeProvider,
-    T: FormatReturns<Types>,
+    Gc: TypeProvider,
+    T: FormatReturns<Gc>,
 {
     type Iter = std::iter::FlatMap<
         std::vec::IntoIter<T>,
-        <T as FormatReturns<Types>>::Iter,
-        fn(T) -> <T as FormatReturns<Types>>::Iter,
+        <T as FormatReturns<Gc>>::Iter,
+        fn(T) -> <T as FormatReturns<Gc>>::Iter,
     >;
 
     fn format(self) -> Self::Iter {
@@ -583,12 +583,12 @@ where
     }
 }
 
-impl<Types, T> FormatReturns<Types> for T
+impl<Gc, T> FormatReturns<Gc> for T
 where
-    Types: TypeProvider,
-    T: Into<Value<Types>>,
+    Gc: TypeProvider,
+    T: Into<Value<Gc>>,
 {
-    type Iter = std::iter::Once<Value<Types>>;
+    type Iter = std::iter::Once<Value<Gc>>;
 
     fn format(self) -> Self::Iter {
         std::iter::once(self.into())

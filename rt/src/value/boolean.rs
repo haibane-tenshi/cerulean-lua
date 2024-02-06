@@ -72,10 +72,10 @@ impl BitXorAssign for Boolean {
     }
 }
 
-impl<Types: TypeProvider> TryFrom<Value<Types>> for Boolean {
+impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Boolean {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         match value {
             Value::Bool(t) => Ok(Boolean(t)),
             value => {
@@ -89,7 +89,7 @@ impl<Types: TypeProvider> TryFrom<Value<Types>> for Boolean {
         }
     }
 }
-impl<Types: TypeProvider> From<Boolean> for Value<Types> {
+impl<Gc: TypeProvider> From<Boolean> for Value<Gc> {
     fn from(value: Boolean) -> Self {
         let Boolean(value) = value;
 

@@ -63,11 +63,11 @@ pub struct Closure {
 }
 
 impl Closure {
-    pub(crate) fn new<Types: TypeProvider, C>(
-        rt: &mut RuntimeView<Types, C>,
+    pub(crate) fn new<Gc: TypeProvider, C>(
+        rt: &mut RuntimeView<Gc, C>,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = Value<Types>>,
-    ) -> Result<Self, RuntimeError<Types>>
+        upvalues: impl IntoIterator<Item = Value<Gc>>,
+    ) -> Result<Self, RuntimeError<Gc>>
     where
         C: ChunkCache,
     {
@@ -102,12 +102,12 @@ impl ClosureRef {
         ClosureRef(Rc::new(closure))
     }
 
-    pub(crate) fn construct_frame<Types: TypeProvider, C>(
+    pub(crate) fn construct_frame<Gc: TypeProvider, C>(
         self,
-        rt: &mut RuntimeView<Types, C>,
+        rt: &mut RuntimeView<Gc, C>,
         start: RawStackSlot,
         event: Option<Event>,
-    ) -> Result<Frame<Value<Types>>, RuntimeError<Types>>
+    ) -> Result<Frame<Value<Gc>>, RuntimeError<Gc>>
     where
         C: ChunkCache,
     {
@@ -225,15 +225,15 @@ impl<Value> Frame<Value> {
     }
 }
 
-impl<Types> Frame<Value<Types>>
+impl<Gc> Frame<Value<Gc>>
 where
-    Types: TypeProvider,
-    Value<Types>: Display,
+    Gc: TypeProvider,
+    Value<Gc>: Display,
 {
     pub(crate) fn activate<'a, C: ChunkCache>(
         self,
-        rt: &'a mut RuntimeView<Types, C>,
-    ) -> Result<ActiveFrame<'a, Types>, RuntimeError<Types>> {
+        rt: &'a mut RuntimeView<Gc, C>,
+    ) -> Result<ActiveFrame<'a, Gc>, RuntimeError<Gc>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let RuntimeView {
@@ -291,9 +291,9 @@ where
     }
 }
 
-impl<Types> Frame<Value<Types>>
+impl<Gc> Frame<Value<Gc>>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     pub(crate) fn backtrace<C>(&self, chunk_cache: &C) -> BacktraceFrame
     where
@@ -349,16 +349,16 @@ where
     }
 }
 
-pub struct ActiveFrame<'rt, Types: TypeProvider> {
-    core: &'rt Core<Types>,
+pub struct ActiveFrame<'rt, Gc: TypeProvider> {
+    core: &'rt Core<Gc>,
     closure: ClosureRef,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt, Value<Types>>,
-    upvalue_stack: UpvalueStackView<'rt, Value<Types>>,
-    register_variadic: Vec<Value<Types>>,
+    stack: StackView<'rt, Value<Gc>>,
+    upvalue_stack: UpvalueStackView<'rt, Value<Gc>>,
+    register_variadic: Vec<Value<Gc>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -366,29 +366,29 @@ pub struct ActiveFrame<'rt, Types: TypeProvider> {
     event: Option<Event>,
 }
 
-impl<'rt, Types> ActiveFrame<'rt, Types>
+impl<'rt, Gc> ActiveFrame<'rt, Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     pub fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
-    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&Value<Types>, MissingUpvalue> {
+    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&Value<Gc>, MissingUpvalue> {
         self.upvalue_stack.get(index).ok_or(MissingUpvalue(index))
     }
 
-    fn get_upvalue_mut(&mut self, index: UpvalueSlot) -> Result<&mut Value<Types>, MissingUpvalue> {
+    fn get_upvalue_mut(&mut self, index: UpvalueSlot) -> Result<&mut Value<Gc>, MissingUpvalue> {
         self.upvalue_stack
             .get_mut(index)
             .ok_or(MissingUpvalue(index))
     }
 
-    fn get_stack(&self, index: StackSlot) -> Result<&Value<Types>, MissingStackSlot> {
+    fn get_stack(&self, index: StackSlot) -> Result<&Value<Gc>, MissingStackSlot> {
         self.stack.get(index).ok_or(MissingStackSlot(index))
     }
 
-    fn get_stack_mut(&mut self, index: StackSlot) -> Result<&mut Value<Types>, MissingStackSlot> {
+    fn get_stack_mut(&mut self, index: StackSlot) -> Result<&mut Value<Gc>, MissingStackSlot> {
         self.stack.get_mut(index).ok_or(MissingStackSlot(index))
     }
 
@@ -412,14 +412,14 @@ where
     }
 }
 
-impl<'rt, Types> ActiveFrame<'rt, Types>
+impl<'rt, Gc> ActiveFrame<'rt, Gc>
 where
-    Types: TypeProvider,
-    Value<Types>: Debug + Display,
+    Gc: TypeProvider,
+    Value<Gc>: Debug + Display,
 {
     pub fn step(
         &mut self,
-    ) -> Result<ControlFlow<ChangeFrame<Types::RustCallable>>, opcode_err::Error> {
+    ) -> Result<ControlFlow<ChangeFrame<Gc::RustCallable>>, opcode_err::Error> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
                 self.stack.next_slot(),
@@ -436,7 +436,7 @@ where
     fn exec(
         &mut self,
         opcode: OpCode,
-    ) -> Result<ControlFlow<ChangeFrame<Types::RustCallable>>, opcode_err::Cause> {
+    ) -> Result<ControlFlow<ChangeFrame<Gc::RustCallable>>, opcode_err::Cause> {
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -586,12 +586,10 @@ where
 
     fn exec_una_op(
         &mut self,
-        args: [Value<Types>; 1],
+        args: [Value<Gc>; 1],
         op: UnaOp,
-    ) -> Result<
-        ControlFlow<(Event, Callable<Types::RustCallable>, StackSlot)>,
-        opcode_err::UnaOpCause,
-    > {
+    ) -> Result<ControlFlow<(Event, Callable<Gc::RustCallable>, StackSlot)>, opcode_err::UnaOpCause>
+    {
         use crate::value::{Float, Int};
         use ControlFlow::*;
 
@@ -676,10 +674,10 @@ where
 
     fn exec_bin_op(
         &mut self,
-        args: [Value<Types>; 2],
+        args: [Value<Gc>; 2],
         op: BinOp,
     ) -> Result<
-        std::ops::ControlFlow<(Event, Callable<Types::RustCallable>, StackSlot)>,
+        std::ops::ControlFlow<(Event, Callable<Gc::RustCallable>, StackSlot)>,
         opcode_err::BinOpCause,
     > {
         let err = opcode_err::BinOpCause {
@@ -753,9 +751,9 @@ where
 
     fn exec_bin_op_str(
         &mut self,
-        args: [Value<Types>; 2],
+        args: [Value<Gc>; 2],
         op: StrBinOp,
-    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
+    ) -> ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>> {
         use super::CoerceArgs;
         use crate::value::Concat;
 
@@ -774,14 +772,14 @@ where
 
     fn exec_bin_op_eq(
         &mut self,
-        args: [Value<Types>; 2],
+        args: [Value<Gc>; 2],
         op: EqBinOp,
-    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
+    ) -> ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
-        let cmp = <_ as CoerceArgs<Types>>::cmp_float_and_int(&self.core.dialect);
+        let cmp = <_ as CoerceArgs<Gc>>::cmp_float_and_int(&self.core.dialect);
 
         let equal = match args {
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
@@ -805,15 +803,15 @@ where
 
     fn exec_bin_op_rel(
         &mut self,
-        args: [Value<Types>; 2],
+        args: [Value<Gc>; 2],
         op: RelBinOp,
-    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
+    ) -> ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>> {
         use super::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
         use Value::*;
 
-        let cmp = <_ as CoerceArgs<Types>>::cmp_float_and_int(&self.core.dialect);
+        let cmp = <_ as CoerceArgs<Gc>>::cmp_float_and_int(&self.core.dialect);
 
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
@@ -844,9 +842,9 @@ where
 
     fn exec_bin_op_bit(
         &mut self,
-        args: [Value<Types>; 2],
+        args: [Value<Gc>; 2],
         op: BitBinOp,
-    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
+    ) -> ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>> {
         use super::CoerceArgs;
         use crate::value::Int;
 
@@ -868,9 +866,9 @@ where
 
     fn exec_bin_op_ari(
         &mut self,
-        args: [Value<Types>; 2],
+        args: [Value<Gc>; 2],
         op: AriBinOp,
-    ) -> ControlFlow<[Value<Types>; 2], Option<Value<Types>>> {
+    ) -> ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
@@ -906,8 +904,8 @@ where
 
     fn exec_tab_get(
         &mut self,
-        args: [Value<Types>; 2],
-    ) -> Result<ControlFlow<(Callable<Types::RustCallable>, StackSlot)>, opcode_err::TabCause> {
+        args: [Value<Gc>; 2],
+    ) -> Result<ControlFlow<(Callable<Gc::RustCallable>, StackSlot)>, opcode_err::TabCause> {
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -975,8 +973,8 @@ where
 
     fn exec_tab_set(
         &mut self,
-        args: [Value<Types>; 3],
-    ) -> Result<ControlFlow<(Callable<Types::RustCallable>, StackSlot)>, opcode_err::TabCause> {
+        args: [Value<Gc>; 3],
+    ) -> Result<ControlFlow<(Callable<Gc::RustCallable>, StackSlot)>, opcode_err::TabCause> {
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -1056,9 +1054,9 @@ where
 
     fn prepare_invoke(
         &mut self,
-        mut callable: Value<Types>,
+        mut callable: Value<Gc>,
         start: StackSlot,
-    ) -> Option<(Callable<Types::RustCallable>, StackSlot)> {
+    ) -> Option<(Callable<Gc::RustCallable>, StackSlot)> {
         loop {
             callable = match callable {
                 Value::Function(r) => return Some((r, start)),
@@ -1142,7 +1140,7 @@ where
         Ok(r)
     }
 
-    pub fn suspend(self) -> Frame<Value<Types>> {
+    pub fn suspend(self) -> Frame<Value<Gc>> {
         let ActiveFrame {
             closure,
             ip,
@@ -1170,7 +1168,7 @@ where
         }
     }
 
-    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Types>> {
+    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Gc>> {
         self.stack.remove_range(StackSlot(0)..drop_under);
         self.upvalue_stack.clear();
 
@@ -1182,11 +1180,11 @@ where
     }
 }
 
-impl<'rt, Types> Debug for ActiveFrame<'rt, Types>
+impl<'rt, Gc> Debug for ActiveFrame<'rt, Gc>
 where
-    Types: TypeProvider,
-    Types::TableRef: Debug,
-    Value<Types>: Debug,
+    Gc: Debug + TypeProvider,
+    Gc::TableRef: Debug,
+    Value<Gc>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ActiveFrame")
@@ -1327,9 +1325,9 @@ impl From<RelBinOp> for Event {
     }
 }
 
-impl<Types> From<Event> for crate::value::table::KeyValue<Types>
+impl<Gc> From<Event> for crate::value::table::KeyValue<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn from(value: Event) -> Self {
         KeyValue::String(value.to_str().into())

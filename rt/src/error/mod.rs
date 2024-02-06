@@ -25,8 +25,8 @@ pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use upvalue_count_mismatch::UpvalueCountMismatch;
 pub use value::ValueError;
 
-pub enum RuntimeError<Types: TypeProvider> {
-    Value(ValueError<Types>),
+pub enum RuntimeError<Gc: TypeProvider> {
+    Value(ValueError<Gc>),
     Borrow(BorrowError),
     AlreadyDropped(AlreadyDroppedError),
     Immutable(Immutable),
@@ -38,34 +38,34 @@ pub enum RuntimeError<Types: TypeProvider> {
     OpCode(OpCodeError),
 }
 
-impl<Types: TypeProvider> From<Value<Types>> for RuntimeError<Types> {
-    fn from(value: Value<Types>) -> Self {
+impl<Gc: TypeProvider> From<Value<Gc>> for RuntimeError<Gc> {
+    fn from(value: Value<Gc>) -> Self {
         RuntimeError::Value(ValueError(value))
     }
 }
 
-impl<Types> From<BorrowError> for RuntimeError<Types>
+impl<Gc> From<BorrowError> for RuntimeError<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn from(value: BorrowError) -> Self {
         Self::Borrow(value)
     }
 }
 
-impl<Types> From<AlreadyDroppedError> for RuntimeError<Types>
+impl<Gc> From<AlreadyDroppedError> for RuntimeError<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn from(value: AlreadyDroppedError) -> Self {
         Self::AlreadyDropped(value)
     }
 }
 
-impl<Types, E> From<AlreadyDroppedOrError<E>> for RuntimeError<Types>
+impl<Gc, E> From<AlreadyDroppedOrError<E>> for RuntimeError<Gc>
 where
-    Types: TypeProvider,
-    E: Into<RuntimeError<Types>>,
+    Gc: TypeProvider,
+    E: Into<RuntimeError<Gc>>,
 {
     fn from(value: AlreadyDroppedOrError<E>) -> Self {
         match value {
@@ -75,46 +75,46 @@ where
     }
 }
 
-impl<Types: TypeProvider> From<MissingChunk> for RuntimeError<Types> {
+impl<Gc: TypeProvider> From<MissingChunk> for RuntimeError<Gc> {
     fn from(value: MissingChunk) -> Self {
         RuntimeError::MissingChunk(value)
     }
 }
 
-impl<Types: TypeProvider> From<MissingFunction> for RuntimeError<Types> {
+impl<Gc: TypeProvider> From<MissingFunction> for RuntimeError<Gc> {
     fn from(value: MissingFunction) -> Self {
         RuntimeError::MissingFunction(value)
     }
 }
 
-impl<Types: TypeProvider> From<OutOfBoundsStack> for RuntimeError<Types> {
+impl<Gc: TypeProvider> From<OutOfBoundsStack> for RuntimeError<Gc> {
     fn from(value: OutOfBoundsStack) -> Self {
         RuntimeError::OutOfBoundsStack(value)
     }
 }
 
-impl<Types: TypeProvider> From<UpvalueCountMismatch> for RuntimeError<Types> {
+impl<Gc: TypeProvider> From<UpvalueCountMismatch> for RuntimeError<Gc> {
     fn from(value: UpvalueCountMismatch) -> Self {
         RuntimeError::UpvalueCountMismatch(value)
     }
 }
 
-impl<Types: TypeProvider> From<ValueError<Types>> for RuntimeError<Types> {
-    fn from(value: ValueError<Types>) -> Self {
+impl<Gc: TypeProvider> From<ValueError<Gc>> for RuntimeError<Gc> {
+    fn from(value: ValueError<Gc>) -> Self {
         RuntimeError::Value(value)
     }
 }
 
-impl<Types: TypeProvider> From<OpCodeError> for RuntimeError<Types> {
+impl<Gc: TypeProvider> From<OpCodeError> for RuntimeError<Gc> {
     fn from(value: OpCodeError) -> Self {
         RuntimeError::OpCode(value)
     }
 }
 
-impl<Types> Debug for RuntimeError<Types>
+impl<Gc> Debug for RuntimeError<Gc>
 where
-    Types: TypeProvider,
-    Value<Types>: Debug,
+    Gc: TypeProvider,
+    Value<Gc>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -134,13 +134,13 @@ where
     }
 }
 
-impl<Types: TypeProvider> Display for RuntimeError<Types> {
+impl<Gc: TypeProvider> Display for RuntimeError<Gc> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "runtime error")
     }
 }
 
-impl<Types: TypeProvider> Error for RuntimeError<Types> where Self: Debug + Display {}
+impl<Gc: TypeProvider> Error for RuntimeError<Gc> where Self: Debug + Display {}
 
 trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);

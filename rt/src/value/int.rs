@@ -294,10 +294,10 @@ impl ShrAssign for Int {
     }
 }
 
-impl<Types: TypeProvider> TryFrom<Value<Types>> for Int {
+impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Int {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         match value {
             Value::Int(value) => Ok(Int(value)),
             value => {
@@ -312,7 +312,7 @@ impl<Types: TypeProvider> TryFrom<Value<Types>> for Int {
     }
 }
 
-impl<Types: TypeProvider> From<Int> for Value<Types> {
+impl<Gc: TypeProvider> From<Int> for Value<Gc> {
     fn from(value: Int) -> Self {
         let Int(value) = value;
         Value::Int(value)

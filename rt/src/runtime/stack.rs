@@ -471,10 +471,10 @@ where
     }
 }
 
-impl<'a, Types> StackView<'a, Value<Types>>
+impl<'a, Gc> StackView<'a, Value<Gc>>
 where
-    Types: TypeProvider,
-    Value<Types>: Clone,
+    Gc: TypeProvider,
+    Value<Gc>: Clone,
 {
     pub(crate) fn adjust_event_returns(&mut self, event: Event) {
         use Event::*;

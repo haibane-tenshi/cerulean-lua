@@ -63,7 +63,8 @@ fn main() -> Result<()> {
             use rt::chunk_cache::ChunkId;
             use rt::runtime::{Core, DialectBuilder, Runtime};
             // use rt::value::table::TableRef;
-            use rt::value::{DefaultTypes, Value};
+            use rt::gc::{Gc, LeakingGc};
+            use rt::value::Value;
 
             let (env_chunk, builder) = rt::global_env::empty()
                 .include(rt::global_env::assert())
@@ -80,15 +81,16 @@ fn main() -> Result<()> {
 
             let core = Core {
                 global_env: Value::Nil,
-                dialect: DialectBuilder::lua_5_4(),
                 primitive_metatables: Default::default(),
+                dialect: DialectBuilder::lua_5_4(),
+                gc: LeakingGc::new(),
             };
 
-            let mut runtime = Runtime::<DefaultTypes<_>, _>::new(chunk_cache, core);
+            let mut runtime = Runtime::new(chunk_cache, core);
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0), ())?;
-                runtime.core.global_env = Value::Table(global_env.into());
+                runtime.core.global_env = Value::Table(runtime.core.gc.alloc_table(global_env));
 
                 runtime.view().invoke(rt::ffi::call_file(&path))
             };

@@ -168,10 +168,10 @@ impl RemAssign for Float {
     }
 }
 
-impl<Types: TypeProvider> TryFrom<Value<Types>> for Float {
+impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Float {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         match value {
             Value::Float(value) => Ok(Float(value)),
             value => {
@@ -186,7 +186,7 @@ impl<Types: TypeProvider> TryFrom<Value<Types>> for Float {
     }
 }
 
-impl<Types: TypeProvider> From<Float> for Value<Types> {
+impl<Gc: TypeProvider> From<Float> for Value<Gc> {
     fn from(value: Float) -> Self {
         let Float(value) = value;
         Value::Float(value)

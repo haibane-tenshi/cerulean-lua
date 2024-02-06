@@ -8,16 +8,16 @@ use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
 use crate::value::{TypeMismatchError, TypeProvider, Value};
 
-pub trait Userdata<Types, C>
+pub trait Userdata<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Option<Result<(), RuntimeError<Types>>>;
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Option<Result<(), RuntimeError<Gc>>>;
 }
 
 pub enum Method<Ref, Mut, Val> {
@@ -26,9 +26,9 @@ pub enum Method<Ref, Mut, Val> {
     Val(Val),
 }
 
-pub trait DispatchMethod<Marker, Types, C>: Sized
+pub trait DispatchMethod<Marker, Gc, C>: Sized
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     const SCOPE_NAME: &'static str;
 
@@ -38,38 +38,34 @@ where
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>>;
 
-    fn call(
-        &self,
-        method: Self::Ref,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>>;
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>>;
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>>;
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Result<(), RuntimeError<Gc>>;
     fn call_once(
         self,
         method: Self::Val,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>>;
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Result<(), RuntimeError<Gc>>;
 }
 
-impl<Marker, Types, C, T> DispatchMethod<Marker, Types, C> for RefCell<T>
+impl<Marker, Gc, C, T> DispatchMethod<Marker, Gc, C> for RefCell<T>
 where
-    Types: TypeProvider,
-    Types::String: From<&'static str>,
-    T: DispatchMethod<Marker, Types, C>,
+    Gc: TypeProvider,
+    Gc::String: From<&'static str>,
+    T: DispatchMethod<Marker, Gc, C>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Types, C>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc, C>>::SCOPE_NAME;
 
     type Ref = Method<
-        <T as DispatchMethod<Marker, Types, C>>::Ref,
-        <T as DispatchMethod<Marker, Types, C>>::Mut,
+        <T as DispatchMethod<Marker, Gc, C>>::Ref,
+        <T as DispatchMethod<Marker, Gc, C>>::Mut,
         std::convert::Infallible,
     >;
     type Mut = std::convert::Infallible;
-    type Val = <T as DispatchMethod<Marker, Types, C>>::Val;
+    type Val = <T as DispatchMethod<Marker, Gc, C>>::Val;
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>> {
         let r = match T::dispatch_method(name)? {
@@ -81,11 +77,7 @@ where
         Some(r)
     }
 
-    fn call(
-        &self,
-        method: Self::Ref,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>> {
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>> {
         match method {
             Method::Ref(m) => self
                 .try_borrow()
@@ -102,33 +94,33 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        _rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>> {
+        _rt: RuntimeView<'_, Gc, C>,
+    ) -> Result<(), RuntimeError<Gc>> {
         match method {}
     }
 
     fn call_once(
         self,
         method: Self::Val,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>> {
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Result<(), RuntimeError<Gc>> {
         self.into_inner().call_once(method, rt)
     }
 }
 
-impl<Marker, Types, C, T> DispatchMethod<Marker, Types, C> for Option<T>
+impl<Marker, Gc, C, T> DispatchMethod<Marker, Gc, C> for Option<T>
 where
-    Types: TypeProvider,
-    Types::String: From<&'static str>,
-    T: DispatchMethod<Marker, Types, C>,
+    Gc: TypeProvider,
+    Gc::String: From<&'static str>,
+    T: DispatchMethod<Marker, Gc, C>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Types, C>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc, C>>::SCOPE_NAME;
 
-    type Ref = <T as DispatchMethod<Marker, Types, C>>::Ref;
+    type Ref = <T as DispatchMethod<Marker, Gc, C>>::Ref;
     type Mut = Method<
         std::convert::Infallible,
-        <T as DispatchMethod<Marker, Types, C>>::Mut,
-        <T as DispatchMethod<Marker, Types, C>>::Val,
+        <T as DispatchMethod<Marker, Gc, C>>::Mut,
+        <T as DispatchMethod<Marker, Gc, C>>::Val,
     >;
     type Val = std::convert::Infallible;
 
@@ -142,11 +134,7 @@ where
         Some(r)
     }
 
-    fn call(
-        &self,
-        method: Self::Ref,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>> {
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>> {
         let Some(value) = self else {
             return Err(Value::String("value is already moved out".into()).into());
         };
@@ -157,8 +145,8 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>> {
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Result<(), RuntimeError<Gc>> {
         match method {
             Method::Ref(m) => match m {},
             Method::Mut(m) => {
@@ -181,52 +169,52 @@ where
     fn call_once(
         self,
         method: Self::Val,
-        _rt: RuntimeView<'_, Types, C>,
-    ) -> Result<(), RuntimeError<Types>> {
+        _rt: RuntimeView<'_, Gc, C>,
+    ) -> Result<(), RuntimeError<Gc>> {
         match method {}
     }
 }
 
-pub trait DispatchTrait<Traits: Tuple, Types, C>: Sized
+pub trait DispatchTrait<Traits: Tuple, Gc, C>: Sized
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn dispatch_trait(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Option<Result<(), RuntimeError<Types>>>;
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Option<Result<(), RuntimeError<Gc>>>;
 }
 
-impl<Types, Cache, T> DispatchTrait<(), Types, Cache> for T
+impl<Gc, Cache, T> DispatchTrait<(), Gc, Cache> for T
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn dispatch_trait(
         &self,
         _scope: &str,
         _name: &str,
-        _rt: RuntimeView<'_, Types, Cache>,
-    ) -> Option<Result<(), RuntimeError<Types>>> {
+        _rt: RuntimeView<'_, Gc, Cache>,
+    ) -> Option<Result<(), RuntimeError<Gc>>> {
         None
     }
 }
 
-impl<T, Tup, Types, Cache> DispatchTrait<Tup, Types, Cache> for T
+impl<T, Tup, Gc, Cache> DispatchTrait<Tup, Gc, Cache> for T
 where
-    Types: TypeProvider,
-    Types::String: From<&'static str>,
+    Gc: TypeProvider,
+    Gc::String: From<&'static str>,
     Tup: NonEmptyTuple,
-    T: DispatchMethod<TupleHead<Tup>, Types, Cache>,
-    T: DispatchTrait<TupleTail<Tup>, Types, Cache>,
+    T: DispatchMethod<TupleHead<Tup>, Gc, Cache>,
+    T: DispatchTrait<TupleTail<Tup>, Gc, Cache>,
 {
     fn dispatch_trait(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Types, Cache>,
-    ) -> Option<Result<(), RuntimeError<Types>>> {
+        rt: RuntimeView<'_, Gc, Cache>,
+    ) -> Option<Result<(), RuntimeError<Gc>>> {
         if scope == T::SCOPE_NAME {
             if let Some(method) = T::dispatch_method(name) {
                 let r = if let Method::Ref(f) = method {
@@ -242,45 +230,44 @@ where
             }
         }
 
-        <T as DispatchTrait<TupleTail<Tup>, Types, Cache>>::dispatch_trait(self, scope, name, rt)
+        <T as DispatchTrait<TupleTail<Tup>, Gc, Cache>>::dispatch_trait(self, scope, name, rt)
     }
 }
 
 // Self: 'static requires C: 'static
 // see https://github.com/rust-lang/rust/issues/57325
 // https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
-pub struct Dispatchable<T, Types: TypeProvider, C> {
+pub struct Dispatchable<T, Gc: TypeProvider, C> {
     value: T,
-    dispatcher:
-        fn(&T, &str, &str, RuntimeView<'_, Types, C>) -> Option<Result<(), RuntimeError<Types>>>,
+    dispatcher: fn(&T, &str, &str, RuntimeView<'_, Gc, C>) -> Option<Result<(), RuntimeError<Gc>>>,
 }
 
-impl<T, Types, C> Dispatchable<T, Types, C>
+impl<T, Gc, C> Dispatchable<T, Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     pub fn new<Traits>(value: T) -> Self
     where
         Traits: Tuple,
-        T: DispatchTrait<Traits, Types, C>,
+        T: DispatchTrait<Traits, Gc, C>,
     {
         Dispatchable {
             value,
-            dispatcher: <T as DispatchTrait<Traits, Types, C>>::dispatch_trait,
+            dispatcher: <T as DispatchTrait<Traits, Gc, C>>::dispatch_trait,
         }
     }
 }
 
-impl<T, Types, C> Userdata<Types, C> for Dispatchable<T, Types, C>
+impl<T, Gc, C> Userdata<Gc, C> for Dispatchable<T, Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Option<Result<(), RuntimeError<Types>>> {
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Option<Result<(), RuntimeError<Gc>>> {
         (self.dispatcher)(&self.value, scope, name, rt)
     }
 }
@@ -299,18 +286,18 @@ impl<T, Traits> DispatchableStatic<T, Traits> {
     }
 }
 
-impl<T, Traits, Types, C> Userdata<Types, C> for DispatchableStatic<T, Traits>
+impl<T, Traits, Gc, C> Userdata<Gc, C> for DispatchableStatic<T, Traits>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
     Traits: Tuple,
-    T: DispatchTrait<Traits, Types, C>,
+    T: DispatchTrait<Traits, Gc, C>,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Option<Result<(), RuntimeError<Types>>> {
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Option<Result<(), RuntimeError<Gc>>> {
         self.value.dispatch_trait(scope, name, rt)
     }
 }
@@ -339,33 +326,30 @@ impl<T: ?Sized, TableRef> Debug for UserdataValue<T, TableRef> {
     }
 }
 
-pub type FullUserdata<Types, C> =
-    UserdataValue<dyn Userdata<Types, C>, <Types as TypeProvider>::TableRef>;
+pub type FullUserdata<Gc, C> = UserdataValue<dyn Userdata<Gc, C>, <Gc as TypeProvider>::TableRef>;
 
-impl<Types, C> super::Metatable<Types::TableRef> for FullUserdata<Types, C>
+impl<Gc, C> super::Metatable<Gc::TableRef> for FullUserdata<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    fn metatable(&self) -> Option<Types::TableRef> {
+    fn metatable(&self) -> Option<Gc::TableRef> {
         self.metatable.borrow().clone()
     }
 
-    fn set_metatable(&mut self, mt: Option<Types::TableRef>) -> Option<Types::TableRef> {
+    fn set_metatable(&mut self, mt: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
         self.metatable.replace(mt)
     }
 }
 
-pub struct UserdataRef<Types: TypeProvider, C>(
-    Rc<UserdataValue<dyn Userdata<Types, C>, Types::TableRef>>,
-);
+pub struct UserdataRef<Gc: TypeProvider, C>(Rc<UserdataValue<dyn Userdata<Gc, C>, Gc::TableRef>>);
 
-impl<Types, C> UserdataRef<Types, C>
+impl<Gc, C> UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     pub fn new<U>(userdata: U) -> Self
     where
-        U: Userdata<Types, C> + 'static,
+        U: Userdata<Gc, C> + 'static,
     {
         let value = UserdataValue {
             metatable: Default::default(),
@@ -378,7 +362,7 @@ where
     pub fn with_dispatcher<Traits, T>(value: T) -> Self
     where
         Traits: Tuple + 'static,
-        T: DispatchTrait<Traits, Types, C> + 'static,
+        T: DispatchTrait<Traits, Gc, C> + 'static,
     {
         let value = UserdataValue {
             metatable: Default::default(),
@@ -388,56 +372,56 @@ where
         UserdataRef(Rc::new(value))
     }
 
-    pub fn set_metatable(&self, metatable: Option<Types::TableRef>) -> Option<Types::TableRef> {
+    pub fn set_metatable(&self, metatable: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
         self.0.metatable.replace(metatable)
     }
 }
 
-impl<Types, C> UserdataRef<Types, C>
+impl<Gc, C> UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    pub fn metatable(&self) -> Option<Types::TableRef> {
+    pub fn metatable(&self) -> Option<Gc::TableRef> {
         self.0.metatable.borrow().clone()
     }
 }
 
-impl<Types, C> Userdata<Types, C> for UserdataRef<Types, C>
+impl<Gc, C> Userdata<Gc, C> for UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Types, C>,
-    ) -> Option<Result<(), RuntimeError<Types>>> {
+        rt: RuntimeView<'_, Gc, C>,
+    ) -> Option<Result<(), RuntimeError<Gc>>> {
         self.0.value.method(scope, name, rt)
     }
 }
 
-impl<Types, C> super::Borrow<FullUserdata<Types, C>> for UserdataRef<Types, C>
+impl<Gc, C> super::Borrow<FullUserdata<Gc, C>> for UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     type Error = BorrowError;
 
-    fn with_ref<R>(&self, f: impl FnOnce(&FullUserdata<Types, C>) -> R) -> Result<R, Self::Error> {
+    fn with_ref<R>(&self, f: impl FnOnce(&FullUserdata<Gc, C>) -> R) -> Result<R, Self::Error> {
         Ok(f(&self.0))
     }
 
     fn with_mut<R>(
         &self,
-        _f: impl FnOnce(&mut FullUserdata<Types, C>) -> R,
+        _f: impl FnOnce(&mut FullUserdata<Gc, C>) -> R,
     ) -> Result<R, Self::Error> {
         Err(BorrowError::Mut)
     }
 }
 
-impl<Types, C> Debug for UserdataRef<Types, C>
+impl<Gc, C> Debug for UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
-    // Types::TableRef: Debug,
+    Gc: TypeProvider,
+    // Gc::TableRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UserdataRef")
@@ -448,51 +432,51 @@ where
     }
 }
 
-impl<Types, C> Clone for UserdataRef<Types, C>
+impl<Gc, C> Clone for UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<Types, C> PartialEq for UserdataRef<Types, C>
+impl<Gc, C> PartialEq for UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<Types, C> Eq for UserdataRef<Types, C> where Types: TypeProvider {}
+impl<Gc, C> Eq for UserdataRef<Gc, C> where Gc: TypeProvider {}
 
-impl<Types, C> Hash for UserdataRef<Types, C>
+impl<Gc, C> Hash for UserdataRef<Gc, C>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.0).hash(state);
     }
 }
 
-impl<Types, C> From<UserdataRef<Types, C>> for Value<Types>
+impl<Gc, C> From<UserdataRef<Gc, C>> for Value<Gc>
 where
-    Types: TypeProvider<FullUserdataRef = UserdataRef<Types, C>>,
+    Gc: TypeProvider<FullUserdataRef = UserdataRef<Gc, C>>,
 {
-    fn from(value: UserdataRef<Types, C>) -> Self {
+    fn from(value: UserdataRef<Gc, C>) -> Self {
         Value::Userdata(value)
     }
 }
 
-impl<Types, C> TryFrom<Value<Types>> for UserdataRef<Types, C>
+impl<Gc, C> TryFrom<Value<Gc>> for UserdataRef<Gc, C>
 where
-    Types: TypeProvider<FullUserdataRef = Self>,
+    Gc: TypeProvider<FullUserdataRef = Self>,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         use super::Type;
 
         match value {

@@ -7,14 +7,14 @@ use super::{Concat, Len, TypeMismatchOrError, TypeProvider, Value};
 
 pub struct LuaString<T>(pub T);
 
-impl<T, Types> TryFrom<Value<Types>> for LuaString<T>
+impl<T, Gc> TryFrom<Value<Gc>> for LuaString<T>
 where
-    Types: TypeProvider,
-    Types::String: TryInto<T>,
+    Gc: TypeProvider,
+    Gc::String: TryInto<T>,
 {
-    type Error = TypeMismatchOrError<<Types::String as TryInto<T>>::Error>;
+    type Error = TypeMismatchOrError<<Gc::String as TryInto<T>>::Error>;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         match value {
             Value::String(t) => {
                 let r = t.try_into().map_err(TypeMismatchOrError::Other)?;
@@ -34,10 +34,10 @@ where
     }
 }
 
-impl<T, Types> From<LuaString<T>> for Value<Types>
+impl<T, Gc> From<LuaString<T>> for Value<Gc>
 where
-    Types: TypeProvider,
-    T: Into<Types::String>,
+    Gc: TypeProvider,
+    T: Into<Gc::String>,
 {
     fn from(value: LuaString<T>) -> Self {
         let LuaString(value) = value;

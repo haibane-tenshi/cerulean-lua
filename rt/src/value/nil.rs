@@ -21,10 +21,10 @@ impl Display for Nil {
     }
 }
 
-impl<Types: TypeProvider> TryFrom<Value<Types>> for Nil {
+impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Nil {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         match value {
             Value::Nil => Ok(Nil),
             value => {
@@ -39,7 +39,7 @@ impl<Types: TypeProvider> TryFrom<Value<Types>> for Nil {
     }
 }
 
-impl<Types: TypeProvider> From<Nil> for Value<Types> {
+impl<Gc: TypeProvider> From<Nil> for Value<Gc> {
     fn from(Nil: Nil) -> Self {
         Value::Nil
     }
@@ -76,12 +76,12 @@ impl<T> From<NilOr<T>> for Option<T> {
     }
 }
 
-impl<T, Types> TryInto<NilOr<T>> for Value<Types>
+impl<T, Gc> TryInto<NilOr<T>> for Value<Gc>
 where
-    Types: TypeProvider,
-    Value<Types>: TryInto<T>,
+    Gc: TypeProvider,
+    Value<Gc>: TryInto<T>,
 {
-    type Error = <Value<Types> as TryInto<T>>::Error;
+    type Error = <Value<Gc> as TryInto<T>>::Error;
 
     fn try_into(self) -> Result<NilOr<T>, Self::Error> {
         match self {
@@ -97,9 +97,9 @@ impl<T> From<Nil> for NilOr<T> {
     }
 }
 
-impl<T, Types: TypeProvider> From<NilOr<T>> for Value<Types>
+impl<T, Gc: TypeProvider> From<NilOr<T>> for Value<Gc>
 where
-    T: Into<Value<Types>>,
+    T: Into<Value<Gc>>,
 {
     fn from(value: NilOr<T>) -> Self {
         match value {

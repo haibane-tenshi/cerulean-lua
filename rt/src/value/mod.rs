@@ -162,9 +162,9 @@ impl Display for TypeWithoutMetatable {
     }
 }
 
-pub struct DefaultTypes<C>(std::marker::PhantomData<C>);
+pub struct DefaultGc<C>(std::marker::PhantomData<C>);
 
-impl<C> TypeProvider for DefaultTypes<C> {
+impl<C> TypeProvider for DefaultGc<C> {
     type String = string::PossiblyUtf8Vec;
     type RustCallable = callable::RustCallable<Self, C>;
     type Table = Table<Self>;
@@ -187,18 +187,18 @@ impl<C> TypeProvider for DefaultTypes<C> {
 /// Default rendering will only include the contents.
 /// Alternate rendering will include type information as well,
 /// but looks a little bit nicer compared to `Debug` output.
-pub enum Value<Types: TypeProvider> {
+pub enum Value<Gc: TypeProvider> {
     Nil,
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(Types::String),
-    Function(Callable<Types::RustCallable>),
-    Table(Types::TableRef),
-    Userdata(Types::FullUserdataRef),
+    String(Gc::String),
+    Function(Callable<Gc::RustCallable>),
+    Table(Gc::TableRef),
+    Userdata(Gc::FullUserdataRef),
 }
 
-impl<Types: TypeProvider> Value<Types> {
+impl<Gc: TypeProvider> Value<Gc> {
     pub fn to_bool(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
     }
@@ -222,8 +222,8 @@ impl<Types: TypeProvider> Value<Types> {
 
     pub(crate) fn metatable<'a>(
         &'a self,
-        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<Types::TableRef>>,
-    ) -> Option<Types::TableRef> {
+        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<Gc::TableRef>>,
+    ) -> Option<Gc::TableRef> {
         match self {
             Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].clone(),
             Value::Bool(_) => primitive_metatables[TypeWithoutMetatable::Bool].clone(),
@@ -249,13 +249,13 @@ impl<Types: TypeProvider> Value<Types> {
     }
 }
 
-impl<Types> Debug for Value<Types>
+impl<Gc> Debug for Value<Gc>
 where
-    Types: TypeProvider,
-    Types::String: Debug,
-    Types::RustCallable: Debug,
-    Types::TableRef: Debug,
-    Types::FullUserdataRef: Debug,
+    Gc: TypeProvider,
+    Gc::String: Debug,
+    Gc::RustCallable: Debug,
+    Gc::TableRef: Debug,
+    Gc::FullUserdataRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -271,13 +271,13 @@ where
     }
 }
 
-impl<Types> Clone for Value<Types>
+impl<Gc> Clone for Value<Gc>
 where
-    Types: TypeProvider,
-    Types::String: Clone,
-    Types::RustCallable: Clone,
-    Types::TableRef: Clone,
-    Types::FullUserdataRef: Clone,
+    Gc: TypeProvider,
+    Gc::String: Clone,
+    Gc::RustCallable: Clone,
+    Gc::TableRef: Clone,
+    Gc::FullUserdataRef: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -294,13 +294,13 @@ where
     }
 }
 
-impl<Types> PartialEq for Value<Types>
+impl<Gc> PartialEq for Value<Gc>
 where
-    Types: TypeProvider,
-    Types::String: PartialEq,
-    Types::RustCallable: PartialEq,
-    Types::TableRef: PartialEq,
-    Types::FullUserdataRef: PartialEq,
+    Gc: TypeProvider,
+    Gc::String: PartialEq,
+    Gc::RustCallable: PartialEq,
+    Gc::TableRef: PartialEq,
+    Gc::FullUserdataRef: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -318,22 +318,22 @@ where
 
 // No, clippy, you cannot.
 #[allow(clippy::derivable_impls)]
-impl<Types> Default for Value<Types>
+impl<Gc> Default for Value<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn default() -> Self {
         Value::Nil
     }
 }
 
-impl<Types> Display for Value<Types>
+impl<Gc> Display for Value<Gc>
 where
-    Types: TypeProvider,
-    Types::String: Display,
-    Types::RustCallable: Display,
-    Types::TableRef: Display,
-    Types::FullUserdataRef: Display,
+    Gc: TypeProvider,
+    Gc::String: Display,
+    Gc::RustCallable: Display,
+    Gc::TableRef: Display,
+    Gc::FullUserdataRef: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
@@ -357,9 +357,9 @@ where
     }
 }
 
-impl<Types> From<Literal> for Value<Types>
+impl<Gc> From<Literal> for Value<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn from(value: Literal) -> Self {
         match value {
@@ -372,23 +372,23 @@ where
     }
 }
 
-impl<Types> From<String> for Value<Types>
+impl<Gc> From<String> for Value<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
     fn from(value: String) -> Self {
         Value::String(value.into())
     }
 }
 
-impl<Types> TryFrom<Value<Types>> for String
+impl<Gc> TryFrom<Value<Gc>> for String
 where
-    Types: TypeProvider,
-    String: From<Types::String>,
+    Gc: TypeProvider,
+    String: From<Gc::String>,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         match value {
             Value::String(value) => Ok(value.into()),
             value => {

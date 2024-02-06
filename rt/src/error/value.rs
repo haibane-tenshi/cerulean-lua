@@ -3,13 +3,13 @@ use std::fmt::{Debug, Display};
 
 use crate::value::{TypeProvider, Value};
 
-pub struct ValueError<Types: TypeProvider>(pub Value<Types>);
+pub struct ValueError<Gc: TypeProvider>(pub Value<Gc>);
 
-impl<Types> ValueError<Types>
+impl<Gc> ValueError<Gc>
 where
-    Types: TypeProvider,
-    Types::String: TryInto<String>,
-    Value<Types>: Display,
+    Gc: TypeProvider,
+    Gc::String: TryInto<String>,
+    Value<Gc>: Display,
 {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
@@ -40,19 +40,19 @@ where
     }
 }
 
-impl<Types> From<Value<Types>> for ValueError<Types>
+impl<Gc> From<Value<Gc>> for ValueError<Gc>
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    fn from(value: Value<Types>) -> Self {
+    fn from(value: Value<Gc>) -> Self {
         ValueError(value)
     }
 }
 
-impl<Types> Debug for ValueError<Types>
+impl<Gc> Debug for ValueError<Gc>
 where
-    Types: TypeProvider,
-    Value<Types>: Debug,
+    Gc: TypeProvider,
+    Value<Gc>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Value").field(&self.0).finish()

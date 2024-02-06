@@ -90,11 +90,11 @@ pub trait Metatable<TableRef> {
     fn set_metatable(&mut self, mt: Option<TableRef>) -> Option<TableRef>;
 }
 
-pub trait TableIndex<Types: TypeProvider> {
-    fn get(&self, key: &KeyValue<Types>) -> Value<Types>;
-    fn set(&mut self, key: KeyValue<Types>, value: Value<Types>);
+pub trait TableIndex<Gc: TypeProvider> {
+    fn get(&self, key: &KeyValue<Gc>) -> Value<Gc>;
+    fn set(&mut self, key: KeyValue<Gc>, value: Value<Gc>);
     fn border(&self) -> i64;
-    fn contains_key(&self, key: &KeyValue<Types>) -> bool {
+    fn contains_key(&self, key: &KeyValue<Gc>) -> bool {
         !matches!(self.get(key), Value::Nil)
     }
 }

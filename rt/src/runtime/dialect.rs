@@ -319,12 +319,12 @@ pub trait CoerceArgs<C: TypeProvider>: sealed::Sealed {
     fn cmp_float_and_int(&self) -> bool;
 }
 
-impl<Types> CoerceArgs<Types> for DialectBuilder
+impl<Gc> CoerceArgs<Gc> for DialectBuilder
 where
-    Types: TypeProvider,
-    Types::String: From<String>,
+    Gc: TypeProvider,
+    Gc::String: From<String>,
 {
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Types>; 2]) -> [Value<Types>; 2] {
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2] {
         use crate::value::{Float, Int};
 
         match (op, args) {
@@ -348,10 +348,10 @@ where
         }
     }
 
-    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [Value<Types>; 2]) -> [Value<Types>; 2] {
+    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2] {
         use crate::value::{Float, Int};
 
-        let try_into = |value: f64| -> Value<Types> {
+        let try_into = |value: f64| -> Value<Gc> {
             if let Ok(value) = Int::try_from(Float(value)) {
                 value.into()
             } else {
@@ -376,7 +376,7 @@ where
         }
     }
 
-    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Types>; 2]) -> [Value<Types>; 2] {
+    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2] {
         match op {
             StrBinOp::Concat => {
                 use Value::*;
@@ -408,7 +408,7 @@ where
         }
     }
 
-    fn coerce_una_op_bit(&self, args: [Value<Types>; 1]) -> [Value<Types>; 1] {
+    fn coerce_una_op_bit(&self, args: [Value<Gc>; 1]) -> [Value<Gc>; 1] {
         use crate::value::{Float, Int};
 
         match args {
@@ -423,7 +423,7 @@ where
         }
     }
 
-    fn coerce_tab_set(&self, key: Value<Types>) -> Value<Types> {
+    fn coerce_tab_set(&self, key: Value<Gc>) -> Value<Gc> {
         use crate::value::{Float, Int};
 
         if !self.tab_set_float_to_int {
@@ -442,7 +442,7 @@ where
         }
     }
 
-    fn coerce_tab_get(&self, key: Value<Types>) -> Value<Types> {
+    fn coerce_tab_get(&self, key: Value<Gc>) -> Value<Gc> {
         use crate::value::{Float, Int};
 
         if !self.tab_get_float_to_int {

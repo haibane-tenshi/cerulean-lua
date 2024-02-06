@@ -13,11 +13,11 @@ use crate::value::{
     Value,
 };
 
-pub fn assert<Types, C>() -> impl LuaFfi<Types, C> + 'static
+pub fn assert<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    (|rt: RuntimeView<'_, Types, C>| {
+    (|rt: RuntimeView<'_, Gc, C>| {
         let Some(cond) = rt.stack.get(StackSlot(0)) else {
             return Err(Value::String("assert expects at least one argument".into()).into());
         };
@@ -36,12 +36,12 @@ where
     .with_name("lua_std::assert")
 }
 
-pub fn print<Types, C>() -> impl LuaFfi<Types, C> + 'static
+pub fn print<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    Types: TypeProvider,
-    Value<Types>: Display,
+    Gc: TypeProvider,
+    Value<Gc>: Display,
 {
-    (|mut rt: RuntimeView<'_, Types, C>| {
+    (|mut rt: RuntimeView<'_, Gc, C>| {
         for value in rt.stack.iter() {
             print!("{value}");
         }
@@ -53,15 +53,15 @@ where
     .with_name("lua_std::print")
 }
 
-pub fn pcall<Types, C>() -> impl LuaFfi<Types, C> + 'static
+pub fn pcall<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache,
-    Types: TypeProvider,
-    Types::String: TryInto<String>,
-    Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Debug + Display,
+    Gc: TypeProvider,
+    Gc::String: TryInto<String>,
+    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Value<Gc>: Debug + Display,
 {
-    (|mut rt: RuntimeView<'_, Types, C>| {
+    (|mut rt: RuntimeView<'_, Gc, C>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
             return Err(Value::String("pcall expects at least one argument".into()).into());
         };
@@ -120,14 +120,14 @@ impl Display for ModeError {
 
 impl Error for ModeError {}
 
-impl<Types> TryFrom<Value<Types>> for Mode
+impl<Gc> TryFrom<Value<Gc>> for Mode
 where
-    Types: TypeProvider,
-    Types::String: AsRef<[u8]>,
+    Gc: TypeProvider,
+    Gc::String: AsRef<[u8]>,
 {
     type Error = TypeMismatchOrError<ModeError>;
 
-    fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
         use crate::value::Type;
 
         let s = match value {
@@ -153,20 +153,20 @@ where
     }
 }
 
-pub fn load<Types, C>() -> impl LuaFfi<Types, C> + 'static
+pub fn load<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache,
-    Types: TypeProvider,
-    Types::String: TryInto<String> + AsRef<[u8]>,
-    Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Debug + Display + TryInto<LuaString<String>>,
-    <Value<Types> as TryInto<LuaString<String>>>::Error: Error,
+    Gc: TypeProvider,
+    Gc::String: TryInto<String> + AsRef<[u8]>,
+    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
+    <Value<Gc> as TryInto<LuaString<String>>>::Error: Error,
 {
     use crate::value::Type;
 
-    enum ChunkSource<Types: TypeProvider> {
-        String(Types::String),
-        Function(Callable<Types::RustCallable>),
+    enum ChunkSource<Gc: TypeProvider> {
+        String(Gc::String),
+        Function(Callable<Gc::RustCallable>),
     }
 
     #[derive(Debug)]
@@ -189,13 +189,13 @@ where
 
     impl Error for ChunkSourceError {}
 
-    impl<Types> TryFrom<Value<Types>> for ChunkSource<Types>
+    impl<Gc> TryFrom<Value<Gc>> for ChunkSource<Gc>
     where
-        Types: TypeProvider,
+        Gc: TypeProvider,
     {
         type Error = ChunkSourceError;
 
-        fn try_from(value: Value<Types>) -> Result<Self, Self::Error> {
+        fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
             match value {
                 Value::Function(t) => Ok(ChunkSource::Function(t)),
                 Value::String(t) => Ok(ChunkSource::String(t)),
@@ -210,13 +210,13 @@ where
         }
     }
 
-    let f = |rt: RuntimeView<'_, Types, C>| {
+    let f = |rt: RuntimeView<'_, Gc, C>| {
         ffi::try_invoke_with_rt(
             rt,
-            |mut rt: RuntimeView<'_, Types, C>,
-             source: ChunkSource<Types>,
-             opts: Opts<(LuaString<String>, Mode, Value<Types>)>|
-             -> Result<_, RuntimeError<Types>> {
+            |mut rt: RuntimeView<'_, Gc, C>,
+             source: ChunkSource<Gc>,
+             opts: Opts<(LuaString<String>, Mode, Value<Gc>)>|
+             -> Result<_, RuntimeError<Gc>> {
                 use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
                 use repr::index::FunctionId;
@@ -263,21 +263,21 @@ where
     f.with_name("lua_std::load")
 }
 
-pub fn loadfile<Types, C>() -> impl LuaFfi<Types, C> + 'static
+pub fn loadfile<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
     C: ChunkCache + KeyedChunkCache<Path>,
-    Types: TypeProvider,
-    Types::String: TryInto<String> + AsRef<[u8]>,
-    Types::RustCallable: LuaFfiOnce<Types, C>,
-    Value<Types>: Debug + Display + TryInto<LuaString<PathBuf>>,
-    <Value<Types> as TryInto<LuaString<PathBuf>>>::Error: Error,
+    Gc: TypeProvider,
+    Gc::String: TryInto<String> + AsRef<[u8]>,
+    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Value<Gc>: Debug + Display + TryInto<LuaString<PathBuf>>,
+    <Value<Gc> as TryInto<LuaString<PathBuf>>>::Error: Error,
 {
-    let f = |rt: RuntimeView<'_, Types, C>| {
+    let f = |rt: RuntimeView<'_, Gc, C>| {
         ffi::try_invoke_with_rt(
             rt,
-            |mut rt: RuntimeView<'_, Types, C>,
-             opts: Opts<(LuaString<PathBuf>, Mode, Value<Types>)>|
-             -> Result<_, RuntimeError<Types>> {
+            |mut rt: RuntimeView<'_, Gc, C>,
+             opts: Opts<(LuaString<PathBuf>, Mode, Value<Gc>)>|
+             -> Result<_, RuntimeError<Gc>> {
                 use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
                 use repr::index::FunctionId;
@@ -317,13 +317,13 @@ where
     f.with_name("lua_std::loadfile")
 }
 
-pub fn getmetatable<Types, C>() -> impl LuaFfi<Types, C> + 'static
+pub fn getmetatable<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    Types: TypeProvider,
-    Value<Types>: Debug + Display,
+    Gc: TypeProvider,
+    Value<Gc>: Debug + Display,
 {
-    let f = |rt: RuntimeView<'_, Types, C>| {
-        ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, Types, C>, value: Value<Types>| {
+    let f = |rt: RuntimeView<'_, Gc, C>| {
+        ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, Gc, C>, value: Value<Gc>| {
             value
                 .metatable(&rt.core.primitive_metatables)
                 .map(|metatable| {
@@ -346,14 +346,14 @@ where
     f.with_name("lua_std::getmetatable")
 }
 
-pub fn setmetatable<Types, C>() -> impl LuaFfi<Types, C> + 'static
+pub fn setmetatable<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    Types: TypeProvider,
+    Gc: TypeProvider,
 {
-    let f = |rt: RuntimeView<'_, Types, C>| {
+    let f = |rt: RuntimeView<'_, Gc, C>| {
         ffi::try_invoke(
             rt,
-            |table: LuaTable<Types::TableRef>, metatable: NilOr<LuaTable<Types::TableRef>>| {
+            |table: LuaTable<Gc::TableRef>, metatable: NilOr<LuaTable<Gc::TableRef>>| {
                 use crate::value::{Borrow, Metatable, TableIndex};
 
                 let metatable = metatable.into_option().map(|LuaTable(t)| t);
