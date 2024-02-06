@@ -330,6 +330,15 @@ impl<T, TableRef> UserdataValue<T, TableRef> {
     }
 }
 
+impl<T: ?Sized, TableRef> Debug for UserdataValue<T, TableRef> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserdataValue")
+            .field("metatable", &"<omitted>")
+            .field("value", &"<omitted>")
+            .finish()
+    }
+}
+
 pub type FullUserdata<Types, C> =
     UserdataValue<dyn Userdata<Types, C>, <Types as TypeProvider>::TableRef>;
 

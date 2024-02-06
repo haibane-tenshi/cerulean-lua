@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
@@ -95,9 +95,12 @@ where
 
 pub struct LeakedTableHandle<T>(RefCell<T>);
 
-impl<T> Debug for LeakedTableHandle<T>
+impl<Ty> Debug for LeakedTableHandle<Table<Ty>>
 where
-    T: Debug,
+    Ty: TypeProvider<TableRef = &'static Self> + 'static,
+    Ty::String: Debug,
+    Ty::RustCallable: Debug,
+    Ty::FullUserdataRef: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_struct("LeakedTableHandle");
@@ -109,6 +112,14 @@ where
         };
 
         debug.finish()
+    }
+}
+
+impl<T> Display for LeakedTableHandle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let addr = self as *const _;
+
+        write!(f, "{{table <{addr:p}>}}")
     }
 }
 
@@ -155,6 +166,17 @@ where
             .field("addr", &(self as *const _))
             .field("userdata", &&self.0)
             .finish()
+    }
+}
+
+impl<T> Display for LeakedUserdataHandle<T>
+where
+    T: ?Sized,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let addr = self as *const _;
+
+        write!(f, "{{userdata <{addr:p}>}}")
     }
 }
 

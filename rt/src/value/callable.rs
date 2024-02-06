@@ -203,6 +203,17 @@ impl<Types, C> Debug for RustCallable<Types, C> {
     }
 }
 
+impl<Types, C> Display for RustCallable<Types, C>
+where
+    Types: TypeProvider,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // let name = self.debug_info().name;
+
+        write!(f, "{{[rust] closure <name omitted>}}")
+    }
+}
+
 impl<Types, C> Clone for RustCallable<Types, C> {
     fn clone(&self) -> Self {
         match self {
@@ -309,6 +320,18 @@ where
 pub enum Callable<RustCallable> {
     Lua(LuaClosureRef),
     Rust(RustCallable),
+}
+
+impl<RustCallable> Display for Callable<RustCallable>
+where
+    RustCallable: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lua(t) => write!(f, "{t}"),
+            Self::Rust(t) => write!(f, "{t}"),
+        }
+    }
 }
 
 impl<Types, C> LuaFfiOnce<Types, C> for Callable<Types::RustCallable>

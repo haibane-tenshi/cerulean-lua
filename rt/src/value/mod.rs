@@ -330,10 +330,10 @@ where
 impl<Types> Display for Value<Types>
 where
     Types: TypeProvider,
-    Types::String: Debug + Display,
-    Types::RustCallable: Debug,
-    Types::TableRef: Debug,
-    Types::FullUserdataRef: Debug,
+    Types::String: Display,
+    Types::RustCallable: Display,
+    Types::TableRef: Display,
+    Types::FullUserdataRef: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
@@ -348,15 +348,11 @@ where
                 write!(f, "{}", float::Float(*v))
             }
             String(v) => {
-                if f.alternate() {
-                    write!(f, "{v:?}")
-                } else {
-                    write!(f, "{v}")
-                }
+                write!(f, "{v}")
             }
-            Function(v) => write!(f, "{v:?}"),
-            Table(v) => write!(f, "{{table <{v:?}>}}"),
-            Userdata(v) => write!(f, "{{userdata <{v:?}>}}"),
+            Function(v) => write!(f, "{v}"),
+            Table(v) => write!(f, "{v}"),
+            Userdata(v) => write!(f, "{v}"),
         }
     }
 }

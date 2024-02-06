@@ -195,6 +195,16 @@ impl From<Closure> for ClosureRef {
     }
 }
 
+impl Display for ClosureRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{[lua] closure <{}:{}>}}",
+            self.fn_ptr.chunk_id, self.fn_ptr.function_id
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct Frame<Value> {
     closure: ClosureRef,
