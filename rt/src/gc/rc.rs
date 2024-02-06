@@ -1,9 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 use super::{Gc, GcUserdata, Sweeper};
@@ -40,7 +42,7 @@ impl<C> Default for RcGc<C> {
 
 impl<C> TypeProvider for RcGc<C> {
     type String = PossiblyUtf8Vec;
-    type StringRef = Rc<PossiblyUtf8Vec>;
+    type StringRef = StringRef;
     type RustCallable = RustCallable<Self, C>;
     type Table = Table<Self>;
     type TableRef = TableRef<Self>;
@@ -58,7 +60,7 @@ impl<C> Gc for RcGc<C> {
     }
 
     fn alloc_string(&mut self, value: Self::String) -> Self::StringRef {
-        Rc::new(value)
+        StringRef(Rc::new(value))
     }
 
     fn alloc_table(&mut self, value: Self::Table) -> Self::TableRef {
@@ -360,5 +362,66 @@ where
 {
     fn from(value: UserdataRef<Gc, C>) -> Self {
         Value::Userdata(value)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StringRef(pub Rc<PossiblyUtf8Vec>);
+
+impl Borrow<PossiblyUtf8Vec> for StringRef {
+    fn with_ref<R>(
+        &self,
+        f: impl FnOnce(&PossiblyUtf8Vec) -> R,
+    ) -> Result<R, DroppedOrBorrowedError> {
+        self.0.with_ref(f)
+    }
+
+    fn with_mut<R>(
+        &self,
+        f: impl FnOnce(&mut PossiblyUtf8Vec) -> R,
+    ) -> Result<R, DroppedOrBorrowedError> {
+        self.0.with_mut(f)
+    }
+}
+
+impl Debug for StringRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0.as_ref())
+    }
+}
+
+impl Display for StringRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.as_ref())
+    }
+}
+
+impl From<StringRef> for Vec<u8> {
+    fn from(value: StringRef) -> Self {
+        value.0.as_ref().into()
+    }
+}
+
+impl TryFrom<StringRef> for String {
+    type Error = <PossiblyUtf8Vec as TryInto<String>>::Error;
+
+    fn try_from(value: StringRef) -> Result<Self, Self::Error> {
+        value.0.as_ref().try_into()
+    }
+}
+
+impl TryFrom<StringRef> for OsString {
+    type Error = <PossiblyUtf8Vec as TryInto<OsString>>::Error;
+
+    fn try_from(value: StringRef) -> Result<Self, Self::Error> {
+        value.0.as_ref().try_into()
+    }
+}
+
+impl TryFrom<StringRef> for PathBuf {
+    type Error = <PossiblyUtf8Vec as TryInto<PathBuf>>::Error;
+
+    fn try_from(value: StringRef) -> Result<Self, Self::Error> {
+        value.0.as_ref().try_into()
     }
 }

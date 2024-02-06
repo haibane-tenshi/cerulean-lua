@@ -63,7 +63,7 @@ fn main() -> Result<()> {
             use rt::chunk_cache::ChunkId;
             use rt::runtime::{Core, DialectBuilder, Runtime};
             // use rt::value::table::TableRef;
-            use rt::gc::{Gc, LeakingGc};
+            use rt::gc::{Gc, RcGc};
             use rt::value::Value;
 
             let (env_chunk, builder) = rt::global_env::empty()
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
                 global_env: Value::Nil,
                 primitive_metatables: Default::default(),
                 dialect: DialectBuilder::lua_5_4(),
-                gc: LeakingGc::new(),
+                gc: RcGc::new(),
             };
 
             let mut runtime = Runtime::new(chunk_cache, core);
