@@ -3,9 +3,6 @@ use std::fmt::{Debug, Display};
 
 use codespan_reporting::diagnostic::Diagnostic;
 
-use super::RuntimeError;
-use crate::value::TypeProvider;
-
 #[derive(Debug)]
 pub struct AlreadyDroppedError;
 

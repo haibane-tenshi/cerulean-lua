@@ -3,9 +3,6 @@ use std::fmt::Display;
 
 use codespan_reporting::diagnostic::Diagnostic;
 
-use super::{ExtraDiagnostic, RuntimeError};
-use crate::value::TypeProvider;
-
 #[derive(Debug)]
 pub enum BorrowError {
     Ref,
@@ -14,6 +11,8 @@ pub enum BorrowError {
 
 impl BorrowError {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
+        use super::ExtraDiagnostic;
+
         let msg = match self {
             BorrowError::Ref => "value is already mutably borrowed",
             BorrowError::Mut => "value is already borrowed",
