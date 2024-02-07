@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::ops::ControlFlow;
 
 use super::{Gc, GcUserdata, Sweeper};
-use crate::error::DroppedOrBorrowedError;
+use crate::error::RefAccessError;
 use crate::value::callable::RustCallable;
 use crate::value::string::PossiblyUtf8Vec;
 use crate::value::traits::{Borrow, TypeProvider};
@@ -132,11 +132,11 @@ impl<T> Hash for LeakedTableHandle<T> {
 }
 
 impl<T> Borrow<T> for LeakedTableHandle<T> {
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, RefAccessError> {
         self.0.with_ref(f)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, RefAccessError> {
         self.0.with_mut(f)
     }
 }
@@ -190,11 +190,11 @@ impl<T> Borrow<T> for LeakedUserdataHandle<T>
 where
     T: ?Sized,
 {
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, RefAccessError> {
         Ok(f(&self.0))
     }
 
-    fn with_mut<R>(&self, _: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, _: impl FnOnce(&mut T) -> R) -> Result<R, RefAccessError> {
         Err(crate::error::BorrowError::Mut.into())
     }
 }

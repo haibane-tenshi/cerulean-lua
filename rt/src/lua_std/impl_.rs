@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
-use crate::error::{DroppedOrBorrowedError, RuntimeError};
+use crate::error::{RefAccessError, RuntimeError};
 use crate::ffi::{self, LuaFfiFnPtr, LuaFfiOnce, Maybe, Opts};
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::{ClosureRef, RuntimeView};
@@ -165,7 +165,7 @@ where
 #[derive(Debug)]
 enum ModeError {
     Invalid(InvalidModeError),
-    DroppedOrBorrowed(DroppedOrBorrowedError),
+    DroppedOrBorrowed(RefAccessError),
     TypeMismatch(TypeMismatchError),
 }
 
@@ -187,8 +187,8 @@ impl From<InvalidModeError> for ModeError {
     }
 }
 
-impl From<DroppedOrBorrowedError> for ModeError {
-    fn from(value: DroppedOrBorrowedError) -> Self {
+impl From<RefAccessError> for ModeError {
+    fn from(value: RefAccessError) -> Self {
         ModeError::DroppedOrBorrowed(value)
     }
 }

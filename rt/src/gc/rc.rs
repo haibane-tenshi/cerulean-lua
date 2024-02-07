@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 use super::{Gc, GcUserdata, Sweeper};
-use crate::error::{DroppedOrBorrowedError, RuntimeError};
+use crate::error::{RefAccessError, RuntimeError};
 use crate::runtime::RuntimeView;
 use crate::value::callable::RustCallable;
 use crate::value::string::PossiblyUtf8Vec;
@@ -140,14 +140,11 @@ impl<Gc> Borrow<Table<Gc>> for TableRef<Gc>
 where
     Gc: TypeProvider<TableRef = Self>,
 {
-    fn with_ref<R>(&self, f: impl FnOnce(&Table<Gc>) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&Table<Gc>) -> R) -> Result<R, RefAccessError> {
         self.0.with_ref(f)
     }
 
-    fn with_mut<R>(
-        &self,
-        f: impl FnOnce(&mut Table<Gc>) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut Table<Gc>) -> R) -> Result<R, RefAccessError> {
         self.0.with_mut(f)
     }
 }
@@ -254,10 +251,7 @@ impl<Gc> Borrow<FullUserdata<Gc>> for UserdataRef<Gc>
 where
     Gc: TypeProvider,
 {
-    fn with_ref<R>(
-        &self,
-        f: impl FnOnce(&FullUserdata<Gc>) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&FullUserdata<Gc>) -> R) -> Result<R, RefAccessError> {
         use crate::error::AlreadyDroppedError;
         let inner = self.0.clone().upgrade().ok_or(AlreadyDroppedError)?;
         Ok(f(&inner))
@@ -266,7 +260,7 @@ where
     fn with_mut<R>(
         &self,
         _f: impl FnOnce(&mut FullUserdata<Gc>) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
+    ) -> Result<R, RefAccessError> {
         use crate::error::BorrowError;
         Err(BorrowError::Mut.into())
     }
@@ -355,17 +349,11 @@ where
 pub struct StringRef(pub Rc<PossiblyUtf8Vec>);
 
 impl Borrow<PossiblyUtf8Vec> for StringRef {
-    fn with_ref<R>(
-        &self,
-        f: impl FnOnce(&PossiblyUtf8Vec) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&PossiblyUtf8Vec) -> R) -> Result<R, RefAccessError> {
         self.0.with_ref(f)
     }
 
-    fn with_mut<R>(
-        &self,
-        f: impl FnOnce(&mut PossiblyUtf8Vec) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut PossiblyUtf8Vec) -> R) -> Result<R, RefAccessError> {
         self.0.with_mut(f)
     }
 }

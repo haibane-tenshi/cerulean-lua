@@ -1,6 +1,6 @@
 use super::string::PossiblyUtf8Vec;
 use super::{KeyValue, Value};
-use crate::error::{AlreadyDroppedError, BorrowError, DroppedOrBorrowedError};
+use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError};
 
 pub trait TypeProvider: Sized {
     type String: Clone + PartialOrd + From<String> + From<&'static str> + Concat + Len;
@@ -13,17 +13,17 @@ pub trait TypeProvider: Sized {
 }
 
 pub trait Borrow<T: ?Sized> {
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError>;
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError>;
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, RefAccessError>;
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, RefAccessError>;
 }
 
 impl<T> Borrow<T> for std::cell::RefCell<T> {
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, RefAccessError> {
         let b = self.try_borrow().map_err(|_| BorrowError::Ref)?;
         Ok(f(&b))
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, RefAccessError> {
         let mut b = self.try_borrow_mut().map_err(|_| BorrowError::Mut)?;
         Ok(f(&mut b))
     }
@@ -33,11 +33,11 @@ impl<T, U> Borrow<T> for std::rc::Rc<U>
 where
     U: Borrow<T>,
 {
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, RefAccessError> {
         self.as_ref().with_ref(f)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, RefAccessError> {
         self.as_ref().with_mut(f)
     }
 }
@@ -46,14 +46,14 @@ impl<T, U> Borrow<T> for std::rc::Weak<U>
 where
     U: Borrow<T>,
 {
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, RefAccessError> {
         self.upgrade()
             .ok_or(AlreadyDroppedError)?
             .with_ref(f)
             .map_err(Into::into)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, RefAccessError> {
         self.upgrade()
             .ok_or(AlreadyDroppedError)?
             .with_mut(f)
@@ -66,27 +66,21 @@ where
     U: Borrow<T> + ?Sized,
     T: ?Sized,
 {
-    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, RefAccessError> {
         <U as Borrow<T>>::with_ref(self, f)
     }
 
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, RefAccessError> {
         <U as Borrow<T>>::with_mut(self, f)
     }
 }
 
 impl Borrow<PossiblyUtf8Vec> for PossiblyUtf8Vec {
-    fn with_ref<R>(
-        &self,
-        f: impl FnOnce(&PossiblyUtf8Vec) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
+    fn with_ref<R>(&self, f: impl FnOnce(&PossiblyUtf8Vec) -> R) -> Result<R, RefAccessError> {
         Ok(f(self))
     }
 
-    fn with_mut<R>(
-        &self,
-        _: impl FnOnce(&mut PossiblyUtf8Vec) -> R,
-    ) -> Result<R, DroppedOrBorrowedError> {
+    fn with_mut<R>(&self, _: impl FnOnce(&mut PossiblyUtf8Vec) -> R) -> Result<R, RefAccessError> {
         Err(BorrowError::Mut.into())
     }
 }

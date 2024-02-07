@@ -130,12 +130,12 @@ impl<Gc: TypeProvider> Display for RuntimeError<Gc> {
 impl<Gc: TypeProvider> Error for RuntimeError<Gc> where Self: Debug + Display {}
 
 #[derive(Debug)]
-pub enum DroppedOrBorrowedError {
+pub enum RefAccessError {
     Dropped(AlreadyDroppedError),
     Borrowed(BorrowError),
 }
 
-impl Display for DroppedOrBorrowedError {
+impl Display for RefAccessError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Dropped(err) => write!(f, "{err}"),
@@ -144,28 +144,28 @@ impl Display for DroppedOrBorrowedError {
     }
 }
 
-impl Error for DroppedOrBorrowedError {}
+impl Error for RefAccessError {}
 
-impl From<AlreadyDroppedError> for DroppedOrBorrowedError {
+impl From<AlreadyDroppedError> for RefAccessError {
     fn from(value: AlreadyDroppedError) -> Self {
-        DroppedOrBorrowedError::Dropped(value)
+        RefAccessError::Dropped(value)
     }
 }
 
-impl From<BorrowError> for DroppedOrBorrowedError {
+impl From<BorrowError> for RefAccessError {
     fn from(value: BorrowError) -> Self {
-        DroppedOrBorrowedError::Borrowed(value)
+        RefAccessError::Borrowed(value)
     }
 }
 
-impl<Gc> From<DroppedOrBorrowedError> for RuntimeError<Gc>
+impl<Gc> From<RefAccessError> for RuntimeError<Gc>
 where
     Gc: TypeProvider,
 {
-    fn from(value: DroppedOrBorrowedError) -> Self {
+    fn from(value: RefAccessError) -> Self {
         match value {
-            DroppedOrBorrowedError::Dropped(err) => err.into(),
-            DroppedOrBorrowedError::Borrowed(err) => err.into(),
+            RefAccessError::Dropped(err) => err.into(),
+            RefAccessError::Borrowed(err) => err.into(),
         }
     }
 }
