@@ -281,10 +281,10 @@ where
     }
 }
 
-pub type FnPtr<Gc> =
+pub type LuaFfiFnPtr<Gc> =
     DebugInfoWrap<fn(RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>, &'static str>;
 
-impl<Gc> FnPtr<Gc>
+impl<Gc> LuaFfiFnPtr<Gc>
 where
     Gc: TypeProvider,
 {
@@ -292,7 +292,7 @@ where
         fn_ptr: fn(RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>,
         name: &'static str,
     ) -> Self {
-        FnPtr { func: fn_ptr, name }
+        LuaFfiFnPtr { func: fn_ptr, name }
     }
 }
 

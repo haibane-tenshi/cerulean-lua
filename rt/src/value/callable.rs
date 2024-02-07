@@ -3,7 +3,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::error::RuntimeError;
-use crate::ffi::{DebugInfo, FnPtr, LuaFfi, LuaFfiMut, LuaFfiOnce};
+use crate::ffi::{DebugInfo, LuaFfi, LuaFfiFnPtr, LuaFfiMut, LuaFfiOnce};
 use crate::gc::Gc as GarbageCollector;
 
 use super::{TypeMismatchError, TypeProvider, Value};
@@ -124,7 +124,7 @@ where
 
 pub enum RustCallable<Gc: TypeProvider> {
     Ref(RustClosureRef<Gc>),
-    Ptr(FnPtr<Gc>),
+    Ptr(LuaFfiFnPtr<Gc>),
 }
 
 impl<Gc> Debug for RustCallable<Gc>
@@ -222,11 +222,11 @@ where
     }
 }
 
-impl<Gc> From<FnPtr<Gc>> for RustCallable<Gc>
+impl<Gc> From<LuaFfiFnPtr<Gc>> for RustCallable<Gc>
 where
     Gc: TypeProvider,
 {
-    fn from(value: FnPtr<Gc>) -> Self {
+    fn from(value: LuaFfiFnPtr<Gc>) -> Self {
         Self::Ptr(value)
     }
 }
