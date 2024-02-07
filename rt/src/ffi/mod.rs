@@ -6,7 +6,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::path::Path;
 
-use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
+use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::RuntimeError;
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
@@ -310,31 +310,9 @@ where
     f.with_name("rt::ffi::call_chunk")
 }
 
-pub fn call_precompiled<Gc, C, Q>(script: &Q) -> impl LuaFfi<Gc, C> + Copy + '_
-where
-    C: ChunkCache + KeyedChunkCache<Q>,
-    Q: ?Sized + Debug,
-    Gc: GarbageCollector,
-    Gc::RustCallable: LuaFfiOnce<Gc, C>,
-    Value<Gc>: Debug + Display,
-{
-    let f = move |mut rt: RuntimeView<'_, Gc, C>| {
-        let chunk_id = rt.chunk_cache().get(script).ok_or_else(|| {
-            let msg = rt
-                .core
-                .gc
-                .alloc_string(format!("chunk with key \"{script:?}\" does not exist").into());
-            Value::String(msg)
-        })?;
-        rt.invoke(call_chunk(chunk_id))
-    };
-
-    f.with_name("rt::ffi::call_precompiled")
-}
-
 pub fn call_file<Gc, C>(script: impl AsRef<Path>) -> impl LuaFfi<Gc, C>
 where
-    C: ChunkCache + KeyedChunkCache<Path>,
+    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,
     Value<Gc>: Debug + Display,

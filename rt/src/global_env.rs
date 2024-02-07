@@ -1,11 +1,11 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::literal::Literal;
 
-use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
+use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::ffi::LuaFfiOnce;
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
@@ -164,7 +164,7 @@ pub fn loadfile<Gc, C>() -> Part<
     impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
-    C: ChunkCache + KeyedChunkCache<Path>,
+    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
     Gc::RustCallable: From<RustClosureRef<Gc, C>> + LuaFfiOnce<Gc, C>,

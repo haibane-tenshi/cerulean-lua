@@ -1,9 +1,9 @@
 use repr::index::StackSlot;
 use std::error::Error;
 use std::fmt::{Debug, Display};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::chunk_cache::{ChunkCache, KeyedChunkCache};
+use crate::chunk_cache::ChunkCache;
 use crate::error::{DroppedOrBorrowedError, RuntimeError};
 use crate::ffi::{self, LuaFfi, LuaFfiOnce, Maybe, Opts, WithName};
 use crate::gc::Gc as GarbageCollector;
@@ -320,7 +320,7 @@ where
 
 pub fn loadfile<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
 where
-    C: ChunkCache + KeyedChunkCache<Path>,
+    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc, C>,

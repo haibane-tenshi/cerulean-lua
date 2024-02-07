@@ -57,10 +57,8 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
-            use rt::chunk_cache::main::MainCache;
-            use rt::chunk_cache::path::PathCache;
-            use rt::chunk_cache::single::SingleChunk;
             use rt::chunk_cache::ChunkId;
+            use rt::chunk_cache::{MainCache, SingleChunk, VecCache};
             use rt::runtime::{Core, DialectBuilder, Runtime};
             // use rt::value::table::TableRef;
             use rt::gc::{Gc, RcGc};
@@ -76,8 +74,14 @@ fn main() -> Result<()> {
                 .include(rt::global_env::getmetatable())
                 .finish();
 
-            let chunk_cache =
-                MainCache::new(SingleChunk::new(env_chunk, None, None), PathCache::new());
+            let chunk_cache = {
+                let env = SingleChunk {
+                    chunk: env_chunk,
+                    source: None,
+                    location: None,
+                };
+                MainCache::new(env, VecCache::new())
+            };
 
             let core = Core {
                 global_env: Value::Nil,

@@ -13,7 +13,7 @@ use enumoid::EnumMap;
 use repr::index::StackSlot;
 
 use crate::backtrace::{Backtrace, Location};
-use crate::chunk_cache::{ChunkCache, ChunkId, KeyedChunkCache};
+use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
@@ -366,51 +366,12 @@ where
         Ok(chunk_id)
     }
 
-    pub fn load_with_key<Q>(
-        &mut self,
-        key: &Q,
-        source: String,
-        location: Option<Location>,
-    ) -> Result<ChunkId, LoadError>
-    where
-        Q: ?Sized,
-        C: KeyedChunkCache<Q>,
-    {
-        let chunk_id = self.load(source, location)?;
-        let _ = self.chunk_cache.bind(key, chunk_id);
-
-        Ok(chunk_id)
-    }
-
-    pub fn precompiled_or_load_with<Q>(
-        &mut self,
-        key: &Q,
-        f: impl FnOnce() -> Result<(String, Option<Location>), RuntimeError<Gc>>,
-    ) -> Result<ChunkId, RuntimeError<Gc>>
-    where
-        Q: ?Sized,
-        C: KeyedChunkCache<Q>,
-    {
-        if let Some(chunk_id) = self.chunk_cache.get(key) {
-            return Ok(chunk_id);
-        }
-
-        let (source, location) = f()?;
-        self.load_with_key(key, source, location)
-            .map_err(Into::into)
-    }
-
     pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RuntimeError<Gc>>
     where
-        C: KeyedChunkCache<Path>,
         Gc::String: From<String>,
         Gc: GarbageCollector,
     {
         let path = path.as_ref();
-
-        if let Some(chunk_id) = self.chunk_cache.get(path) {
-            return Ok(chunk_id);
-        }
 
         let source = std::fs::read_to_string(path).map_err(|err| {
             let msg = self.core.gc.alloc_string(
@@ -424,8 +385,7 @@ where
             column: 0,
         };
 
-        self.load_with_key(path, source, Some(location))
-            .map_err(Into::into)
+        self.load(source, Some(location)).map_err(Into::into)
     }
 }
 
@@ -538,12 +498,12 @@ where
 
 #[derive(Debug)]
 pub enum LoadError {
-    Immutable(crate::chunk_cache::Immutable),
+    Immutable(crate::chunk_cache::ImmutableCacheError),
     CompilationFailure(Diagnostic),
 }
 
-impl From<crate::chunk_cache::Immutable> for LoadError {
-    fn from(value: crate::chunk_cache::Immutable) -> Self {
+impl From<crate::chunk_cache::ImmutableCacheError> for LoadError {
+    fn from(value: crate::chunk_cache::ImmutableCacheError) -> Self {
         LoadError::Immutable(value)
     }
 }

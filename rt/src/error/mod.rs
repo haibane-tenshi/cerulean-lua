@@ -14,7 +14,7 @@ use std::fmt::{Debug, Display};
 
 use crate::value::{TypeProvider, Value};
 
-pub use crate::chunk_cache::Immutable;
+pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
 pub use borrow::BorrowError;
 pub use diagnostic::Diagnostic;
@@ -29,7 +29,7 @@ pub enum RuntimeError<Gc: TypeProvider> {
     Value(ValueError<Gc>),
     Borrow(BorrowError),
     AlreadyDropped(AlreadyDroppedError),
-    Immutable(Immutable),
+    Immutable(ImmutableCacheError),
     Diagnostic(Diagnostic),
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
