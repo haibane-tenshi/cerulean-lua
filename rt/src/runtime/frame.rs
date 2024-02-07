@@ -37,11 +37,11 @@ trait MapControlFlow<F> {
     fn map_br(self, f: F) -> Self::Output;
 }
 
-impl<B, C, T, F> MapControlFlow<F> for ControlFlow<B, C>
+impl<B, T, F> MapControlFlow<F> for ControlFlow<B>
 where
     F: FnOnce(B) -> T,
 {
-    type Output = ControlFlow<T, C>;
+    type Output = ControlFlow<T>;
 
     fn map_br(self, f: F) -> Self::Output {
         match self {
@@ -64,14 +64,11 @@ pub struct Closure {
 }
 
 impl Closure {
-    pub(crate) fn new<Gc: TypeProvider, C>(
-        rt: &mut RuntimeView<Gc, C>,
+    pub(crate) fn new<Gc: TypeProvider>(
+        rt: &mut RuntimeView<Gc>,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = Value<Gc>>,
-    ) -> Result<Self, RuntimeError<Gc>>
-    where
-        C: ChunkCache,
-    {
+    ) -> Result<Self, RuntimeError<Gc>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let signature = &rt
@@ -103,15 +100,12 @@ impl ClosureRef {
         ClosureRef(Rc::new(closure))
     }
 
-    pub(crate) fn construct_frame<Gc: TypeProvider, C>(
+    pub(crate) fn construct_frame<Gc: TypeProvider>(
         self,
-        rt: &mut RuntimeView<Gc, C>,
+        rt: &mut RuntimeView<Gc>,
         start: RawStackSlot,
         event: Option<Event>,
-    ) -> Result<Frame<Value<Gc>>, RuntimeError<Gc>>
-    where
-        C: ChunkCache,
-    {
+    ) -> Result<Frame<Value<Gc>>, RuntimeError<Gc>> {
         use crate::error::{MissingChunk, MissingFunction, OutOfBoundsStack, UpvalueCountMismatch};
         use repr::chunk::Function;
 
@@ -231,9 +225,9 @@ where
     Gc: TypeProvider,
     Value<Gc>: Display,
 {
-    pub(crate) fn activate<'a, C: ChunkCache>(
+    pub(crate) fn activate<'a>(
         self,
-        rt: &'a mut RuntimeView<Gc, C>,
+        rt: &'a mut RuntimeView<Gc>,
     ) -> Result<ActiveFrame<'a, Gc>, RuntimeError<Gc>> {
         use crate::error::{MissingChunk, MissingFunction};
 
@@ -296,10 +290,7 @@ impl<Gc> Frame<Value<Gc>>
 where
     Gc: TypeProvider,
 {
-    pub(crate) fn backtrace<C>(&self, chunk_cache: &C) -> BacktraceFrame
-    where
-        C: ChunkCache,
-    {
+    pub(crate) fn backtrace(&self, chunk_cache: &dyn ChunkCache) -> BacktraceFrame {
         use crate::backtrace::{FrameSource, Location};
 
         let ptr = self.closure.fn_ptr;

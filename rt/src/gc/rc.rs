@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
@@ -17,41 +16,30 @@ use crate::value::traits::{Borrow, TypeProvider};
 use crate::value::userdata::{FullUserdata, Userdata, UserdataValue};
 use crate::value::{Table, Value};
 
-#[derive(Debug)]
-pub struct RcGc<C> {
+#[derive(Debug, Default)]
+pub struct RcGc {
     tables: HashMap<usize, (Rc<RefCell<Table<Self>>>, bool)>,
-    userdata: HashMap<usize, (Rc<FullUserdata<Self, C>>, bool)>,
-    _marker: PhantomData<C>,
+    userdata: HashMap<usize, (Rc<FullUserdata<Self>>, bool)>,
 }
 
-impl<C> RcGc<C> {
+impl RcGc {
     pub fn new() -> Self {
         Default::default()
     }
 }
 
-impl<C> Default for RcGc<C> {
-    fn default() -> Self {
-        Self {
-            tables: Default::default(),
-            userdata: Default::default(),
-            _marker: Default::default(),
-        }
-    }
-}
-
-impl<C> TypeProvider for RcGc<C> {
+impl TypeProvider for RcGc {
     type String = PossiblyUtf8Vec;
     type StringRef = StringRef;
-    type RustCallable = RustCallable<Self, C>;
+    type RustCallable = RustCallable<Self>;
     type Table = Table<Self>;
     type TableRef = TableRef<Self>;
-    type FullUserdata = FullUserdata<Self, C>;
-    type FullUserdataRef = UserdataRef<Self, C>;
+    type FullUserdata = FullUserdata<Self>;
+    type FullUserdataRef = UserdataRef<Self>;
 }
 
-impl<C> Gc for RcGc<C> {
-    type Sweeper<'this> = RcSweeper<'this, C>
+impl Gc for RcGc {
+    type Sweeper<'this> = RcSweeper<'this>
     where
         Self: 'this;
 
@@ -74,9 +62,9 @@ impl<C> Gc for RcGc<C> {
     }
 }
 
-impl<C, T> GcUserdata<T> for RcGc<C>
+impl<T> GcUserdata<T> for RcGc
 where
-    T: Userdata<Self, C> + 'static,
+    T: Userdata<Self> + 'static,
 {
     fn alloc_userdata_with_meta(
         &mut self,
@@ -98,12 +86,12 @@ where
     }
 }
 
-pub struct RcSweeper<'a, C>(&'a mut RcGc<C>);
+pub struct RcSweeper<'a>(&'a mut RcGc);
 
-impl<'a, C> Sweeper<RcGc<C>> for RcSweeper<'a, C> {
-    fn mark_string(&mut self, _: &<RcGc<C> as TypeProvider>::StringRef) {}
+impl<'a> Sweeper<RcGc> for RcSweeper<'a> {
+    fn mark_string(&mut self, _: &<RcGc as TypeProvider>::StringRef) {}
 
-    fn mark_table(&mut self, rf: &<RcGc<C> as TypeProvider>::TableRef) -> ControlFlow<()> {
+    fn mark_table(&mut self, rf: &<RcGc as TypeProvider>::TableRef) -> ControlFlow<()> {
         let index = Weak::as_ptr(&rf.0) as usize;
         if let Some((_, flag)) = self.0.tables.get_mut(&index) {
             let r = if *flag {
@@ -120,7 +108,7 @@ impl<'a, C> Sweeper<RcGc<C>> for RcSweeper<'a, C> {
         }
     }
 
-    fn mark_userdata(&mut self, rf: &<RcGc<C> as TypeProvider>::FullUserdataRef) {
+    fn mark_userdata(&mut self, rf: &<RcGc as TypeProvider>::FullUserdataRef) {
         let index = Weak::as_ptr(&rf.0) as *const () as usize;
         if let Some((_, flag)) = self.0.userdata.get_mut(&index) {
             *flag = true;
@@ -241,11 +229,9 @@ where
     }
 }
 
-pub struct UserdataRef<Gc: TypeProvider, C>(
-    pub Weak<UserdataValue<dyn Userdata<Gc, C>, Gc::TableRef>>,
-);
+pub struct UserdataRef<Gc: TypeProvider>(pub Weak<UserdataValue<dyn Userdata<Gc>, Gc::TableRef>>);
 
-impl<Gc, C> Userdata<Gc, C> for UserdataRef<Gc, C>
+impl<Gc> Userdata<Gc> for UserdataRef<Gc>
 where
     Gc: TypeProvider,
 {
@@ -253,7 +239,7 @@ where
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>> {
         use crate::error::AlreadyDroppedError;
         let inner = self.0.clone().upgrade().ok_or(AlreadyDroppedError);
@@ -264,13 +250,13 @@ where
     }
 }
 
-impl<Gc, C> Borrow<FullUserdata<Gc, C>> for UserdataRef<Gc, C>
+impl<Gc> Borrow<FullUserdata<Gc>> for UserdataRef<Gc>
 where
     Gc: TypeProvider,
 {
     fn with_ref<R>(
         &self,
-        f: impl FnOnce(&FullUserdata<Gc, C>) -> R,
+        f: impl FnOnce(&FullUserdata<Gc>) -> R,
     ) -> Result<R, DroppedOrBorrowedError> {
         use crate::error::AlreadyDroppedError;
         let inner = self.0.clone().upgrade().ok_or(AlreadyDroppedError)?;
@@ -279,14 +265,14 @@ where
 
     fn with_mut<R>(
         &self,
-        _f: impl FnOnce(&mut FullUserdata<Gc, C>) -> R,
+        _f: impl FnOnce(&mut FullUserdata<Gc>) -> R,
     ) -> Result<R, DroppedOrBorrowedError> {
         use crate::error::BorrowError;
         Err(BorrowError::Mut.into())
     }
 }
 
-impl<Gc, C> Debug for UserdataRef<Gc, C>
+impl<Gc> Debug for UserdataRef<Gc>
 where
     Gc: TypeProvider<TableRef = TableRef<Gc>, FullUserdataRef = Self>,
     Gc::StringRef: Debug,
@@ -311,7 +297,7 @@ where
     }
 }
 
-impl<Gc, C> Display for UserdataRef<Gc, C>
+impl<Gc> Display for UserdataRef<Gc>
 where
     Gc: TypeProvider,
 {
@@ -327,7 +313,7 @@ where
     }
 }
 
-impl<Gc, C> Clone for UserdataRef<Gc, C>
+impl<Gc> Clone for UserdataRef<Gc>
 where
     Gc: TypeProvider,
 {
@@ -336,7 +322,7 @@ where
     }
 }
 
-impl<Gc, C> PartialEq for UserdataRef<Gc, C>
+impl<Gc> PartialEq for UserdataRef<Gc>
 where
     Gc: TypeProvider,
 {
@@ -345,9 +331,9 @@ where
     }
 }
 
-impl<Gc, C> Eq for UserdataRef<Gc, C> where Gc: TypeProvider {}
+impl<Gc> Eq for UserdataRef<Gc> where Gc: TypeProvider {}
 
-impl<Gc, C> Hash for UserdataRef<Gc, C>
+impl<Gc> Hash for UserdataRef<Gc>
 where
     Gc: TypeProvider,
 {
@@ -356,11 +342,11 @@ where
     }
 }
 
-impl<Gc, C> From<UserdataRef<Gc, C>> for Value<Gc>
+impl<Gc> From<UserdataRef<Gc>> for Value<Gc>
 where
-    Gc: TypeProvider<FullUserdataRef = UserdataRef<Gc, C>>,
+    Gc: TypeProvider<FullUserdataRef = UserdataRef<Gc>>,
 {
-    fn from(value: UserdataRef<Gc, C>) -> Self {
+    fn from(value: UserdataRef<Gc>) -> Self {
         Value::Userdata(value)
     }
 }

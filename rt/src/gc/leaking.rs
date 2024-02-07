@@ -12,44 +12,33 @@ use crate::value::traits::{Borrow, TypeProvider};
 use crate::value::userdata::{FullUserdata, Userdata};
 use crate::value::Table;
 
-pub struct LeakingGc<C>(PhantomData<(C,)>);
+#[derive(Default)]
+pub struct LeakingGc(PhantomData<()>);
 
-impl<C> LeakingGc<C> {
+impl LeakingGc {
     pub fn new() -> Self {
         Default::default()
     }
 }
 
-impl<C> Debug for LeakingGc<C> {
+impl Debug for LeakingGc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("LeakingGc").finish()
     }
 }
 
-impl<C> Default for LeakingGc<C> {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-impl<C> TypeProvider for LeakingGc<C>
-where
-    C: 'static,
-{
+impl TypeProvider for LeakingGc {
     type String = PossiblyUtf8Vec;
     type StringRef = &'static PossiblyUtf8Vec;
-    type RustCallable = RustCallable<Self, C>;
+    type RustCallable = RustCallable<Self>;
     type Table = Table<Self>;
     type TableRef = &'static LeakedTableHandle<Self::Table>;
-    type FullUserdata = FullUserdata<Self, C>;
+    type FullUserdata = FullUserdata<Self>;
     type FullUserdataRef = &'static LeakedUserdataHandle<Self::FullUserdata>;
 }
 
-impl<C> Gc for LeakingGc<C>
-where
-    C: 'static,
-{
-    type Sweeper<'this> = LeakingGcSweeper<C>;
+impl Gc for LeakingGc {
+    type Sweeper<'this> = LeakingGcSweeper;
 
     fn sweeper(&mut self) -> Self::Sweeper<'_> {
         LeakingGcSweeper(PhantomData)
@@ -64,10 +53,9 @@ where
     }
 }
 
-impl<C, T> GcUserdata<T> for LeakingGc<C>
+impl<T> GcUserdata<T> for LeakingGc
 where
-    C: 'static,
-    T: Userdata<Self, C> + 'static,
+    T: Userdata<Self> + 'static,
 {
     fn alloc_userdata_with_meta(
         &mut self,
@@ -85,19 +73,16 @@ where
     }
 }
 
-pub struct LeakingGcSweeper<C>(PhantomData<(C,)>);
+pub struct LeakingGcSweeper(PhantomData<()>);
 
-impl<C> Sweeper<LeakingGc<C>> for LeakingGcSweeper<C>
-where
-    C: 'static,
-{
-    fn mark_string(&mut self, _: &<LeakingGc<C> as TypeProvider>::StringRef) {}
+impl Sweeper<LeakingGc> for LeakingGcSweeper {
+    fn mark_string(&mut self, _: &<LeakingGc as TypeProvider>::StringRef) {}
 
-    fn mark_table(&mut self, _: &<LeakingGc<C> as TypeProvider>::TableRef) -> ControlFlow<()> {
+    fn mark_table(&mut self, _: &<LeakingGc as TypeProvider>::TableRef) -> ControlFlow<()> {
         ControlFlow::Break(())
     }
 
-    fn mark_userdata(&mut self, _: &<LeakingGc<C> as TypeProvider>::FullUserdataRef) {}
+    fn mark_userdata(&mut self, _: &<LeakingGc as TypeProvider>::FullUserdataRef) {}
 
     fn sweep(self) {}
 }

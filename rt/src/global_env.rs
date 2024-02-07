@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::literal::Literal;
 
-use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::chunk_cache::ChunkId;
 use crate::ffi::LuaFfiOnce;
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
@@ -15,8 +15,8 @@ use crate::value_builder::{ChunkRange, Part, ValueBuilder};
 
 use crate::error::RuntimeError;
 
-pub fn empty<Gc, C>() -> ValueBuilder<
-    impl for<'rt> FnOnce(RuntimeView<'rt, Gc, C>, ChunkId, ()) -> Result<Gc::Table, RuntimeError<Gc>>,
+pub fn empty<Gc>() -> ValueBuilder<
+    impl for<'rt> FnOnce(RuntimeView<'rt, Gc>, ChunkId, ()) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
     Gc: TypeProvider,
@@ -26,7 +26,7 @@ where
 
     let chunk_part = Part {
         chunk_ext: ChunkExtension::empty(),
-        builder: |mut rt: RuntimeView<'_, Gc, C>, _, _| -> Result<Gc::Table, RuntimeError<Gc>> {
+        builder: |mut rt: RuntimeView<'_, Gc>, _, _| -> Result<Gc::Table, RuntimeError<Gc>> {
             rt.stack.clear();
 
             let value = Default::default();
@@ -38,20 +38,19 @@ where
     value_builder::builder().include(chunk_part)
 }
 
-pub fn assert<Gc, C>() -> Part<
+pub fn assert<Gc>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
-    Gc::RustCallable: From<RustClosureRef<Gc, C>>,
+    Gc::RustCallable: From<RustClosureRef<Gc>>,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc, C>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
         let fn_assert = RustClosureRef::new(crate::lua_std::impl_::assert());
         let key = rt.core.gc.alloc_string("assert".into());
 
@@ -66,22 +65,21 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn pcall<Gc, C>() -> Part<
+pub fn pcall<Gc>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: From<RustClosureRef<Gc, C>> + crate::ffi::LuaFfiOnce<Gc, C>,
+    Gc::RustCallable: From<RustClosureRef<Gc>> + crate::ffi::LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc, C>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
         let fn_pcall = RustClosureRef::new(crate::lua_std::impl_::pcall());
         let key = rt.core.gc.alloc_string("pcall".into());
 
@@ -96,22 +94,21 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn print<Gc, C>() -> Part<
+pub fn print<Gc>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: TryInto<String>,
-    Gc::RustCallable: From<RustClosureRef<Gc, C>>,
+    Gc::RustCallable: From<RustClosureRef<Gc>>,
     Value<Gc>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc, C>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
         let fn_print = RustClosureRef::new(crate::lua_std::impl_::print());
         let key = rt.core.gc.alloc_string("print".into());
 
@@ -126,23 +123,22 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn load<Gc, C>() -> Part<
+pub fn load<Gc>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: From<RustClosureRef<Gc, C>> + LuaFfiOnce<Gc, C>,
+    Gc::RustCallable: From<RustClosureRef<Gc>> + LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
     <Value<Gc> as TryInto<LuaString<String>>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc, C>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
         let fn_load = RustClosureRef::new(crate::lua_std::impl_::load());
         let key = rt.core.gc.alloc_string("load".into());
 
@@ -157,23 +153,22 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn loadfile<Gc, C>() -> Part<
+pub fn loadfile<Gc>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
-    Gc::RustCallable: From<RustClosureRef<Gc, C>> + LuaFfiOnce<Gc, C>,
+    Gc::RustCallable: From<RustClosureRef<Gc>> + LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display + TryInto<LuaString<PathBuf>>,
     <Value<Gc> as TryInto<LuaString<PathBuf>>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc, C>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
         let fn_loadfile = RustClosureRef::new(crate::lua_std::impl_::loadfile());
         let key = rt.core.gc.alloc_string("loadfile".into());
 
@@ -188,20 +183,20 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn setmetatable<Gc, C>() -> Part<
+pub fn setmetatable<Gc>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
     Gc: GarbageCollector,
-    Gc::RustCallable: From<RustClosureRef<Gc, C>>,
+    Gc::RustCallable: From<RustClosureRef<Gc>>,
     Value<Gc>: Debug + Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc, C>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
         let f = RustClosureRef::new(crate::lua_std::impl_::setmetatable());
         let key = rt.core.gc.alloc_string("setmetatable".into());
 
@@ -216,20 +211,20 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn getmetatable<Gc, C>() -> Part<
+pub fn getmetatable<Gc>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc, C>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
 >
 where
     Gc: GarbageCollector,
-    Gc::RustCallable: From<RustClosureRef<Gc, C>>,
+    Gc::RustCallable: From<RustClosureRef<Gc>>,
     Value<Gc>: Debug + Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc, C>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
         let f = RustClosureRef::new(crate::lua_std::impl_::getmetatable());
         let key = rt.core.gc.alloc_string("getmetatable".into());
 

@@ -8,7 +8,7 @@ use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
 use crate::value::{TypeProvider, Value};
 
-pub trait Userdata<Gc, C>
+pub trait Userdata<Gc>
 where
     Gc: TypeProvider,
 {
@@ -16,7 +16,7 @@ where
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>>;
 }
 
@@ -26,7 +26,7 @@ pub enum Method<Ref, Mut, Val> {
     Val(Val),
 }
 
-pub trait DispatchMethod<Marker, Gc, C>: Sized
+pub trait DispatchMethod<Marker, Gc>: Sized
 where
     Gc: TypeProvider,
 {
@@ -38,33 +38,29 @@ where
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>>;
 
-    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>>;
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>;
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Result<(), RuntimeError<Gc>>;
-    fn call_once(
-        self,
-        method: Self::Val,
-        rt: RuntimeView<'_, Gc, C>,
-    ) -> Result<(), RuntimeError<Gc>>;
+    fn call_once(self, method: Self::Val, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>;
 }
 
-impl<Marker, Gc, C, T> DispatchMethod<Marker, Gc, C> for RefCell<T>
+impl<Marker, Gc, T> DispatchMethod<Marker, Gc> for RefCell<T>
 where
     Gc: TypeProvider,
-    T: DispatchMethod<Marker, Gc, C>,
+    T: DispatchMethod<Marker, Gc>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc, C>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc>>::SCOPE_NAME;
 
     type Ref = Method<
-        <T as DispatchMethod<Marker, Gc, C>>::Ref,
-        <T as DispatchMethod<Marker, Gc, C>>::Mut,
+        <T as DispatchMethod<Marker, Gc>>::Ref,
+        <T as DispatchMethod<Marker, Gc>>::Mut,
         std::convert::Infallible,
     >;
     type Mut = std::convert::Infallible;
-    type Val = <T as DispatchMethod<Marker, Gc, C>>::Val;
+    type Val = <T as DispatchMethod<Marker, Gc>>::Val;
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>> {
         let r = match T::dispatch_method(name)? {
@@ -76,7 +72,7 @@ where
         Some(r)
     }
 
-    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>> {
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
         match method {
             Method::Ref(m) => self.try_borrow().map_err(|_| BorrowError::Ref)?.call(m, rt),
             Method::Mut(m) => self
@@ -90,33 +86,29 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        _rt: RuntimeView<'_, Gc, C>,
+        _rt: RuntimeView<'_, Gc>,
     ) -> Result<(), RuntimeError<Gc>> {
         match method {}
     }
 
-    fn call_once(
-        self,
-        method: Self::Val,
-        rt: RuntimeView<'_, Gc, C>,
-    ) -> Result<(), RuntimeError<Gc>> {
+    fn call_once(self, method: Self::Val, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
         self.into_inner().call_once(method, rt)
     }
 }
 
-impl<Marker, Gc, C, T> DispatchMethod<Marker, Gc, C> for Option<T>
+impl<Marker, Gc, T> DispatchMethod<Marker, Gc> for Option<T>
 where
     Gc: TypeProvider,
     Gc::String: From<&'static str>,
-    T: DispatchMethod<Marker, Gc, C>,
+    T: DispatchMethod<Marker, Gc>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc, C>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc>>::SCOPE_NAME;
 
-    type Ref = <T as DispatchMethod<Marker, Gc, C>>::Ref;
+    type Ref = <T as DispatchMethod<Marker, Gc>>::Ref;
     type Mut = Method<
         std::convert::Infallible,
-        <T as DispatchMethod<Marker, Gc, C>>::Mut,
-        <T as DispatchMethod<Marker, Gc, C>>::Val,
+        <T as DispatchMethod<Marker, Gc>>::Mut,
+        <T as DispatchMethod<Marker, Gc>>::Val,
     >;
     type Val = std::convert::Infallible;
 
@@ -130,7 +122,7 @@ where
         Some(r)
     }
 
-    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc, C>) -> Result<(), RuntimeError<Gc>> {
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
         use crate::error::AlreadyDroppedError;
 
         let Some(value) = self else {
@@ -143,7 +135,7 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Result<(), RuntimeError<Gc>> {
         use crate::error::AlreadyDroppedError;
 
@@ -169,13 +161,13 @@ where
     fn call_once(
         self,
         method: Self::Val,
-        _rt: RuntimeView<'_, Gc, C>,
+        _rt: RuntimeView<'_, Gc>,
     ) -> Result<(), RuntimeError<Gc>> {
         match method {}
     }
 }
 
-pub trait DispatchTrait<Traits: Tuple, Gc, C>: Sized
+pub trait DispatchTrait<Traits: Tuple, Gc>: Sized
 where
     Gc: TypeProvider,
 {
@@ -183,11 +175,11 @@ where
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>>;
 }
 
-impl<Gc, Cache, T> DispatchTrait<(), Gc, Cache> for T
+impl<Gc, T> DispatchTrait<(), Gc> for T
 where
     Gc: TypeProvider,
 {
@@ -195,24 +187,24 @@ where
         &self,
         _scope: &str,
         _name: &str,
-        _rt: RuntimeView<'_, Gc, Cache>,
+        _rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>> {
         None
     }
 }
 
-impl<T, Tup, Gc, Cache> DispatchTrait<Tup, Gc, Cache> for T
+impl<T, Tup, Gc> DispatchTrait<Tup, Gc> for T
 where
     Gc: GarbageCollector,
     Tup: NonEmptyTuple,
-    T: DispatchMethod<TupleHead<Tup>, Gc, Cache>,
-    T: DispatchTrait<TupleTail<Tup>, Gc, Cache>,
+    T: DispatchMethod<TupleHead<Tup>, Gc>,
+    T: DispatchTrait<TupleTail<Tup>, Gc>,
 {
     fn dispatch_trait(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc, Cache>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>> {
         if scope == T::SCOPE_NAME {
             if let Some(method) = T::dispatch_method(name) {
@@ -229,35 +221,35 @@ where
             }
         }
 
-        <T as DispatchTrait<TupleTail<Tup>, Gc, Cache>>::dispatch_trait(self, scope, name, rt)
+        <T as DispatchTrait<TupleTail<Tup>, Gc>>::dispatch_trait(self, scope, name, rt)
     }
 }
 
 // Self: 'static requires C: 'static
 // see https://github.com/rust-lang/rust/issues/57325
 // https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
-pub struct Dispatchable<T, Gc: TypeProvider, C> {
+pub struct Dispatchable<T, Gc: TypeProvider> {
     value: T,
-    dispatcher: fn(&T, &str, &str, RuntimeView<'_, Gc, C>) -> Option<Result<(), RuntimeError<Gc>>>,
+    dispatcher: fn(&T, &str, &str, RuntimeView<'_, Gc>) -> Option<Result<(), RuntimeError<Gc>>>,
 }
 
-impl<T, Gc, C> Dispatchable<T, Gc, C>
+impl<T, Gc> Dispatchable<T, Gc>
 where
     Gc: TypeProvider,
 {
     pub fn new<Traits>(value: T) -> Self
     where
         Traits: Tuple,
-        T: DispatchTrait<Traits, Gc, C>,
+        T: DispatchTrait<Traits, Gc>,
     {
         Dispatchable {
             value,
-            dispatcher: <T as DispatchTrait<Traits, Gc, C>>::dispatch_trait,
+            dispatcher: <T as DispatchTrait<Traits, Gc>>::dispatch_trait,
         }
     }
 }
 
-impl<T, Gc, C> Userdata<Gc, C> for Dispatchable<T, Gc, C>
+impl<T, Gc> Userdata<Gc> for Dispatchable<T, Gc>
 where
     Gc: TypeProvider,
 {
@@ -265,7 +257,7 @@ where
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>> {
         (self.dispatcher)(&self.value, scope, name, rt)
     }
@@ -285,23 +277,23 @@ impl<T, Traits> DispatchableStatic<T, Traits> {
     }
 }
 
-impl<T, Traits, Gc, C> Userdata<Gc, C> for DispatchableStatic<T, Traits>
+impl<T, Traits, Gc> Userdata<Gc> for DispatchableStatic<T, Traits>
 where
     Gc: TypeProvider,
     Traits: Tuple,
-    T: DispatchTrait<Traits, Gc, C>,
+    T: DispatchTrait<Traits, Gc>,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>> {
         self.value.dispatch_trait(scope, name, rt)
     }
 }
 
-pub type FullUserdata<Gc, C> = UserdataValue<dyn Userdata<Gc, C>, <Gc as TypeProvider>::TableRef>;
+pub type FullUserdata<Gc> = UserdataValue<dyn Userdata<Gc>, <Gc as TypeProvider>::TableRef>;
 
 #[doc(hidden)]
 pub struct UserdataValue<T: ?Sized, TableRef> {
@@ -309,16 +301,16 @@ pub struct UserdataValue<T: ?Sized, TableRef> {
     pub(crate) value: T,
 }
 
-impl<T, Gc, C> Userdata<Gc, C> for UserdataValue<T, Gc::TableRef>
+impl<T, Gc> Userdata<Gc> for UserdataValue<T, Gc::TableRef>
 where
     Gc: TypeProvider,
-    T: Userdata<Gc, C> + ?Sized,
+    T: Userdata<Gc> + ?Sized,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc, C>,
+        rt: RuntimeView<'_, Gc>,
     ) -> Option<Result<(), RuntimeError<Gc>>> {
         self.as_ref().method(scope, name, rt)
     }
@@ -333,7 +325,7 @@ impl<T: ?Sized, TableRef> Debug for UserdataValue<T, TableRef> {
     }
 }
 
-impl<Gc, C> Metatable<Gc::TableRef> for FullUserdata<Gc, C>
+impl<Gc> Metatable<Gc::TableRef> for FullUserdata<Gc>
 where
     Gc: TypeProvider,
 {

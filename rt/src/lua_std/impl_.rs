@@ -3,7 +3,6 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
-use crate::chunk_cache::ChunkCache;
 use crate::error::{DroppedOrBorrowedError, RuntimeError};
 use crate::ffi::{self, LuaFfi, LuaFfiOnce, Maybe, Opts, WithName};
 use crate::gc::Gc as GarbageCollector;
@@ -11,11 +10,11 @@ use crate::runtime::{ClosureRef, RuntimeView};
 use crate::value::table::KeyValue;
 use crate::value::{Callable, LuaString, LuaTable, NilOr, TypeMismatchError, TypeProvider, Value};
 
-pub fn assert<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
+pub fn assert<Gc>() -> impl LuaFfi<Gc> + 'static
 where
     Gc: GarbageCollector,
 {
-    (|rt: RuntimeView<'_, Gc, C>| {
+    (|rt: RuntimeView<'_, Gc>| {
         let Some(cond) = rt.stack.get(StackSlot(0)) else {
             let msg = rt
                 .core
@@ -37,12 +36,12 @@ where
     .with_name("lua_std::assert")
 }
 
-pub fn print<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
+pub fn print<Gc>() -> impl LuaFfi<Gc> + 'static
 where
     Gc: TypeProvider,
     Value<Gc>: Display,
 {
-    (|mut rt: RuntimeView<'_, Gc, C>| {
+    (|mut rt: RuntimeView<'_, Gc>| {
         for value in rt.stack.iter() {
             print!("{value}");
         }
@@ -54,15 +53,14 @@ where
     .with_name("lua_std::print")
 }
 
-pub fn pcall<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
+pub fn pcall<Gc>() -> impl LuaFfi<Gc> + 'static
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Gc::RustCallable: LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display,
 {
-    (|mut rt: RuntimeView<'_, Gc, C>| {
+    (|mut rt: RuntimeView<'_, Gc>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
             let msg = rt
                 .core
@@ -198,12 +196,11 @@ impl From<TypeMismatchError> for ModeError {
     }
 }
 
-pub fn load<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
+pub fn load<Gc>() -> impl LuaFfi<Gc> + 'static
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Gc::RustCallable: LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
     <Value<Gc> as TryInto<LuaString<String>>>::Error: Error,
 {
@@ -255,10 +252,10 @@ where
         }
     }
 
-    let f = |rt: RuntimeView<'_, Gc, C>| {
+    let f = |rt: RuntimeView<'_, Gc>| {
         ffi::try_invoke_with_rt(
             rt,
-            |mut rt: RuntimeView<'_, Gc, C>,
+            |mut rt: RuntimeView<'_, Gc>,
              source: ChunkSource<Gc>,
              opts: Opts<(LuaString<String>, Mode, Value<Gc>)>|
              -> Result<_, RuntimeError<Gc>> {
@@ -318,19 +315,18 @@ where
     f.with_name("lua_std::load")
 }
 
-pub fn loadfile<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
+pub fn loadfile<Gc>() -> impl LuaFfi<Gc> + 'static
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
-    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Gc::RustCallable: LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display + TryInto<LuaString<PathBuf>>,
     <Value<Gc> as TryInto<LuaString<PathBuf>>>::Error: Error,
 {
-    let f = |rt: RuntimeView<'_, Gc, C>| {
+    let f = |rt: RuntimeView<'_, Gc>| {
         ffi::try_invoke_with_rt(
             rt,
-            |mut rt: RuntimeView<'_, Gc, C>,
+            |mut rt: RuntimeView<'_, Gc>,
              opts: Opts<(LuaString<PathBuf>, Mode, Value<Gc>)>|
              -> Result<_, RuntimeError<Gc>> {
                 use crate::ffi::Split;
@@ -373,13 +369,13 @@ where
     f.with_name("lua_std::loadfile")
 }
 
-pub fn getmetatable<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
+pub fn getmetatable<Gc>() -> impl LuaFfi<Gc> + 'static
 where
     Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
 {
-    let f = |rt: RuntimeView<'_, Gc, C>| {
-        ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, Gc, C>, value: Value<Gc>| {
+    let f = |rt: RuntimeView<'_, Gc>| {
+        ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, Gc>, value: Value<Gc>| {
             value
                 .metatable(&rt.core.primitive_metatables)
                 .map(|metatable| {
@@ -405,15 +401,15 @@ where
     f.with_name("lua_std::getmetatable")
 }
 
-pub fn setmetatable<Gc, C>() -> impl LuaFfi<Gc, C> + 'static
+pub fn setmetatable<Gc>() -> impl LuaFfi<Gc> + 'static
 where
     Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
 {
-    let f = |rt: RuntimeView<'_, Gc, C>| {
+    let f = |rt: RuntimeView<'_, Gc>| {
         ffi::try_invoke_with_rt(
             rt,
-            |rt: RuntimeView<'_, Gc, C>,
+            |rt: RuntimeView<'_, Gc>,
              table: LuaTable<Gc::TableRef>,
              metatable: NilOr<LuaTable<Gc::TableRef>>| {
                 use crate::value::{Borrow, Metatable, TableIndex};

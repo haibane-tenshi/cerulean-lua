@@ -77,7 +77,10 @@ where
         }
     }
 
-    pub fn view(&mut self) -> RuntimeView<Gc, C> {
+    pub fn view(&mut self) -> RuntimeView<Gc>
+    where
+        C: ChunkCache,
+    {
         let Runtime {
             core,
             chunk_cache,
@@ -103,21 +106,21 @@ where
     }
 }
 
-pub struct RuntimeView<'rt, Gc: TypeProvider, C> {
+pub struct RuntimeView<'rt, Gc: TypeProvider> {
     pub core: &'rt mut Core<Gc>,
-    pub chunk_cache: &'rt mut C,
+    pub chunk_cache: &'rt mut dyn ChunkCache,
     frames: FrameStackView<'rt, Value<Gc>>,
     pub stack: StackView<'rt, Value<Gc>>,
     upvalue_stack: UpvalueStackView<'rt, Value<Gc>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
-impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
+impl<'rt, Gc> RuntimeView<'rt, Gc>
 where
     Gc: TypeProvider,
     Value<Gc>: Display,
 {
-    pub fn view_full(&mut self) -> RuntimeView<'_, Gc, C> {
+    pub fn view_full(&mut self) -> RuntimeView<'_, Gc> {
         let Ok(view) = self.view(StackSlot(0)) else {
             unreachable!()
         };
@@ -125,15 +128,12 @@ where
         view
     }
 
-    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<'_, Gc, C>, RuntimeError<Gc>> {
+    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<'_, Gc>, RuntimeError<Gc>> {
         let start = self.stack.boundary() + start;
         self.view_raw(start)
     }
 
-    fn view_raw(
-        &mut self,
-        start: RawStackSlot,
-    ) -> Result<RuntimeView<'_, Gc, C>, RuntimeError<Gc>> {
+    fn view_raw(&mut self, start: RawStackSlot) -> Result<RuntimeView<'_, Gc>, RuntimeError<Gc>> {
         use crate::error::OutOfBoundsStack;
 
         let RuntimeView {
@@ -162,13 +162,13 @@ where
         Ok(r)
     }
 
-    pub fn invoke(&mut self, f: impl LuaFfiOnce<Gc, C>) -> Result<(), RuntimeError<Gc>> {
+    pub fn invoke(&mut self, f: impl LuaFfiOnce<Gc>) -> Result<(), RuntimeError<Gc>> {
         self.invoke_at(f, StackSlot(0))
     }
 
     pub fn invoke_at(
         &mut self,
-        f: impl LuaFfiOnce<Gc, C>,
+        f: impl LuaFfiOnce<Gc>,
         start: StackSlot,
     ) -> Result<(), RuntimeError<Gc>> {
         let start = self.stack.boundary() + start;
@@ -177,7 +177,7 @@ where
 
     fn invoke_at_raw(
         &mut self,
-        f: impl LuaFfiOnce<Gc, C>,
+        f: impl LuaFfiOnce<Gc>,
         start: RawStackSlot,
     ) -> Result<(), RuntimeError<Gc>> {
         use crate::backtrace::{BacktraceFrame, FrameSource};
@@ -213,7 +213,7 @@ where
     }
 }
 
-impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
+impl<'rt, Gc> RuntimeView<'rt, Gc>
 where
     Gc: TypeProvider,
 {
@@ -224,7 +224,7 @@ where
     }
 }
 
-impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
+impl<'rt, Gc> RuntimeView<'rt, Gc>
 where
     Gc: TypeProvider,
 {
@@ -256,11 +256,10 @@ where
     }
 }
 
-impl<'rt, Gc, C> RuntimeView<'rt, Gc, C>
+impl<'rt, Gc> RuntimeView<'rt, Gc>
 where
-    C: ChunkCache,
     Gc: GarbageCollector,
-    Gc::RustCallable: LuaFfiOnce<Gc, C>,
+    Gc::RustCallable: LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display,
 {
     pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError<Gc>> {
@@ -326,16 +325,13 @@ where
     }
 }
 
-impl<'rt, Gc: TypeProvider, C> RuntimeView<'rt, Gc, C> {
-    pub fn chunk_cache(&self) -> &C {
+impl<'rt, Gc: TypeProvider> RuntimeView<'rt, Gc> {
+    pub fn chunk_cache(&self) -> &dyn ChunkCache {
         self.chunk_cache
     }
 }
 
-impl<'rt, Gc: TypeProvider, C> RuntimeView<'rt, Gc, C>
-where
-    C: ChunkCache,
-{
+impl<'rt, Gc: TypeProvider> RuntimeView<'rt, Gc> {
     pub fn load(
         &mut self,
         source: String,
@@ -389,10 +385,7 @@ where
     }
 }
 
-impl<'rt, Gc: TypeProvider, C> RuntimeView<'rt, Gc, C>
-where
-    C: ChunkCache,
-{
+impl<'rt, Gc: TypeProvider> RuntimeView<'rt, Gc> {
     pub fn backtrace(&self) -> Backtrace {
         use rust_backtrace_stack::RustFrame;
 
