@@ -6,10 +6,9 @@ use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::literal::Literal;
 
 use crate::chunk_cache::ChunkId;
-use crate::ffi::LuaFfiOnce;
+use crate::ffi::{LuaFfiFnPtr, LuaFfiOnce};
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::RuntimeView;
-use crate::value::callable::RustClosureRef;
 use crate::value::{Callable, KeyValue, LuaString, TableIndex, TypeProvider, Value};
 use crate::value_builder::{ChunkRange, Part, ValueBuilder};
 
@@ -46,12 +45,12 @@ pub fn assert<Gc>() -> Part<
 >
 where
     Gc: GarbageCollector,
-    Gc::RustCallable: From<RustClosureRef<Gc>>,
+    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
-        let fn_assert = RustClosureRef::new(crate::lua_std::impl_::assert());
+        let fn_assert = crate::lua_std::impl_::assert();
         let key = rt.core.gc.alloc_string("assert".into());
 
         value.set(
@@ -74,13 +73,13 @@ pub fn pcall<Gc>() -> Part<
 where
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: From<RustClosureRef<Gc>> + crate::ffi::LuaFfiOnce<Gc>,
+    Gc::RustCallable: From<LuaFfiFnPtr<Gc>> + crate::ffi::LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
-        let fn_pcall = RustClosureRef::new(crate::lua_std::impl_::pcall());
+        let fn_pcall = crate::lua_std::impl_::pcall();
         let key = rt.core.gc.alloc_string("pcall".into());
 
         value.set(
@@ -103,13 +102,13 @@ pub fn print<Gc>() -> Part<
 where
     Gc: GarbageCollector,
     Gc::String: TryInto<String>,
-    Gc::RustCallable: From<RustClosureRef<Gc>>,
+    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
     Value<Gc>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
-        let fn_print = RustClosureRef::new(crate::lua_std::impl_::print());
+        let fn_print = crate::lua_std::impl_::print();
         let key = rt.core.gc.alloc_string("print".into());
 
         value.set(
@@ -132,14 +131,14 @@ pub fn load<Gc>() -> Part<
 where
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: From<RustClosureRef<Gc>> + LuaFfiOnce<Gc>,
+    Gc::RustCallable: From<LuaFfiFnPtr<Gc>> + LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
     <Value<Gc> as TryInto<LuaString<String>>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
-        let fn_load = RustClosureRef::new(crate::lua_std::impl_::load());
+        let fn_load = crate::lua_std::impl_::load();
         let key = rt.core.gc.alloc_string("load".into());
 
         value.set(
@@ -162,14 +161,14 @@ pub fn loadfile<Gc>() -> Part<
 where
     Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
-    Gc::RustCallable: From<RustClosureRef<Gc>> + LuaFfiOnce<Gc>,
+    Gc::RustCallable: From<LuaFfiFnPtr<Gc>> + LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display + TryInto<LuaString<PathBuf>>,
     <Value<Gc> as TryInto<LuaString<PathBuf>>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
-        let fn_loadfile = RustClosureRef::new(crate::lua_std::impl_::loadfile());
+        let fn_loadfile = crate::lua_std::impl_::loadfile();
         let key = rt.core.gc.alloc_string("loadfile".into());
 
         value.set(
@@ -191,13 +190,13 @@ pub fn setmetatable<Gc>() -> Part<
 >
 where
     Gc: GarbageCollector,
-    Gc::RustCallable: From<RustClosureRef<Gc>>,
+    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
     Value<Gc>: Debug + Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
-        let f = RustClosureRef::new(crate::lua_std::impl_::setmetatable());
+        let f = crate::lua_std::impl_::setmetatable();
         let key = rt.core.gc.alloc_string("setmetatable".into());
 
         value.set(
@@ -219,13 +218,13 @@ pub fn getmetatable<Gc>() -> Part<
 >
 where
     Gc: GarbageCollector,
-    Gc::RustCallable: From<RustClosureRef<Gc>>,
+    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
     Value<Gc>: Debug + Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
-        let f = RustClosureRef::new(crate::lua_std::impl_::getmetatable());
+        let f = crate::lua_std::impl_::getmetatable();
         let key = rt.core.gc.alloc_string("getmetatable".into());
 
         value.set(

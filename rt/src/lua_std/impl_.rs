@@ -4,17 +4,17 @@ use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
 use crate::error::{DroppedOrBorrowedError, RuntimeError};
-use crate::ffi::{self, LuaFfi, LuaFfiOnce, Maybe, Opts, WithName};
+use crate::ffi::{self, LuaFfiFnPtr, LuaFfiOnce, Maybe, Opts};
 use crate::gc::Gc as GarbageCollector;
 use crate::runtime::{ClosureRef, RuntimeView};
 use crate::value::table::KeyValue;
 use crate::value::{Callable, LuaString, LuaTable, NilOr, TypeMismatchError, TypeProvider, Value};
 
-pub fn assert<Gc>() -> impl LuaFfi<Gc> + 'static
+pub fn assert<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: GarbageCollector,
 {
-    (|rt: RuntimeView<'_, Gc>| {
+    let f = |rt: RuntimeView<'_, Gc>| {
         let Some(cond) = rt.stack.get(StackSlot(0)) else {
             let msg = rt
                 .core
@@ -32,16 +32,17 @@ where
             });
             Err(err.into())
         }
-    })
-    .with_name("lua_std::assert")
+    };
+
+    LuaFfiFnPtr::new(f, "lua_std::assert")
 }
 
-pub fn print<Gc>() -> impl LuaFfi<Gc> + 'static
+pub fn print<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: TypeProvider,
     Value<Gc>: Display,
 {
-    (|mut rt: RuntimeView<'_, Gc>| {
+    let f = |mut rt: RuntimeView<'_, Gc>| {
         for value in rt.stack.iter() {
             print!("{value}");
         }
@@ -49,18 +50,19 @@ where
         rt.stack.clear();
 
         Ok(())
-    })
-    .with_name("lua_std::print")
+    };
+
+    LuaFfiFnPtr::new(f, "lua_std::print")
 }
 
-pub fn pcall<Gc>() -> impl LuaFfi<Gc> + 'static
+pub fn pcall<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc>,
     Value<Gc>: Debug + Display,
 {
-    (|mut rt: RuntimeView<'_, Gc>| {
+    let f = |mut rt: RuntimeView<'_, Gc>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
             let msg = rt
                 .core
@@ -103,8 +105,9 @@ where
         }
 
         Ok(())
-    })
-    .with_name("lua_std::pcall")
+    };
+
+    LuaFfiFnPtr::new(f, "lua_std::pcall")
 }
 
 #[derive(Default)]
@@ -196,7 +199,7 @@ impl From<TypeMismatchError> for ModeError {
     }
 }
 
-pub fn load<Gc>() -> impl LuaFfi<Gc> + 'static
+pub fn load<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
@@ -312,10 +315,10 @@ where
         )
     };
 
-    f.with_name("lua_std::load")
+    LuaFfiFnPtr::new(f, "lua_std::load")
 }
 
-pub fn loadfile<Gc>() -> impl LuaFfi<Gc> + 'static
+pub fn loadfile<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: GarbageCollector,
     Gc::String: TryInto<String> + AsRef<[u8]>,
@@ -366,10 +369,10 @@ where
         )
     };
 
-    f.with_name("lua_std::loadfile")
+    LuaFfiFnPtr::new(f, "lua_std::loadfile")
 }
 
-pub fn getmetatable<Gc>() -> impl LuaFfi<Gc> + 'static
+pub fn getmetatable<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
@@ -398,10 +401,10 @@ where
         })
     };
 
-    f.with_name("lua_std::getmetatable")
+    LuaFfiFnPtr::new(f, "lua_std::getmetatable")
 }
 
-pub fn setmetatable<Gc>() -> impl LuaFfi<Gc> + 'static
+pub fn setmetatable<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
@@ -446,5 +449,5 @@ where
         )
     };
 
-    f.with_name("lua_std::getmetatable")
+    LuaFfiFnPtr::new(f, "lua_std::getmetatable")
 }
