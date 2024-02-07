@@ -236,7 +236,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DebugInfoWrap<F, N> {
     func: F,
     name: N,
@@ -278,6 +278,21 @@ where
 {
     fn call(&self, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
         self.func.call(rt)
+    }
+}
+
+pub type FnPtr<Gc> =
+    DebugInfoWrap<fn(RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>, &'static str>;
+
+impl<Gc> FnPtr<Gc>
+where
+    Gc: TypeProvider,
+{
+    pub fn new(
+        fn_ptr: fn(RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>,
+        name: &'static str,
+    ) -> Self {
+        FnPtr { func: fn_ptr, name }
     }
 }
 
