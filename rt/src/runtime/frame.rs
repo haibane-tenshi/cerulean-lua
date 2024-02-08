@@ -736,23 +736,22 @@ where
                     _ => args,
                 };
 
-                let metavalue = lhs
-                    .metatable(&self.core.primitive_metatables)
-                    .or_else(|| rhs.metatable(&self.core.primitive_metatables))
-                    .map(|mt| mt.with_ref(|mt| mt.get(&event.into_key(&mut self.core.gc))))
-                    .transpose()?;
+                let key = event.into_key(&mut self.core.gc);
+                let lookup_event = |value: &Value<Gc>| {
+                    value
+                        .metatable(&self.core.primitive_metatables)
+                        .map(|mt| mt.with_ref(|mt| mt.get(&key)))
+                        .transpose()
+                        .map(Option::unwrap_or_default)
+                };
+
+                let metavalue = match lookup_event(&lhs)? {
+                    Value::Nil => lookup_event(&rhs)?,
+                    value => value,
+                };
 
                 match metavalue {
-                    Some(metavalue) => {
-                        let start = self.stack.next_slot();
-                        self.stack.extend([lhs, rhs]);
-                        let callable = self
-                            .prepare_invoke(metavalue, start)
-                            .map_err(|e| e.map_other(|_| err))?;
-
-                        Ok(ControlFlow::Break((event, callable, start)))
-                    }
-                    None => {
+                    Value::Nil => {
                         // Fallback on raw comparison for (in)equality in case metamethod is not found.
                         let fallback_result = match op {
                             BinOp::Eq(eq_op) => match eq_op {
@@ -768,6 +767,15 @@ where
                         } else {
                             Err(err.into())
                         }
+                    }
+                    metavalue => {
+                        let start = self.stack.next_slot();
+                        self.stack.extend([lhs, rhs]);
+                        let callable = self
+                            .prepare_invoke(metavalue, start)
+                            .map_err(|e| e.map_other(|_| err))?;
+
+                        Ok(ControlFlow::Break((event, callable, start)))
                     }
                 }
             }
