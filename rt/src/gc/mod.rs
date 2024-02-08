@@ -9,7 +9,7 @@ pub use leaking::LeakingGc;
 pub use rc::RcGc;
 
 pub trait Gc: TypeProvider {
-    type Sweeper<'this>: Sweeper<Self>
+    type Sweeper<'this>: Sweeper<Gc = Self>
     where
         Self: 'this;
 
@@ -30,10 +30,12 @@ pub trait GcUserdata<T>: Gc {
     }
 }
 
-pub trait Sweeper<Ty: TypeProvider>: Sized {
-    fn mark_string(&mut self, rf: &<Ty as TypeProvider>::StringRef);
-    fn mark_table(&mut self, rf: &<Ty as TypeProvider>::TableRef) -> ControlFlow<()>;
-    fn mark_userdata(&mut self, rf: &<Ty as TypeProvider>::FullUserdataRef);
+pub trait Sweeper: Sized {
+    type Gc: TypeProvider;
+
+    fn mark_string(&mut self, rf: &<Self::Gc as TypeProvider>::StringRef);
+    fn mark_table(&mut self, rf: &<Self::Gc as TypeProvider>::TableRef) -> ControlFlow<()>;
+    fn mark_userdata(&mut self, rf: &<Self::Gc as TypeProvider>::FullUserdataRef);
 
     fn sweep(self);
 

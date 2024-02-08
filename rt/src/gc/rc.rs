@@ -88,7 +88,9 @@ where
 
 pub struct RcSweeper<'a>(&'a mut RcGc);
 
-impl<'a> Sweeper<RcGc> for RcSweeper<'a> {
+impl<'a> Sweeper for RcSweeper<'a> {
+    type Gc = RcGc;
+
     fn mark_string(&mut self, _: &<RcGc as TypeProvider>::StringRef) {}
 
     fn mark_table(&mut self, rf: &<RcGc as TypeProvider>::TableRef) -> ControlFlow<()> {

@@ -75,7 +75,9 @@ where
 
 pub struct LeakingGcSweeper(PhantomData<()>);
 
-impl Sweeper<LeakingGc> for LeakingGcSweeper {
+impl Sweeper for LeakingGcSweeper {
+    type Gc = LeakingGc;
+
     fn mark_string(&mut self, _: &<LeakingGc as TypeProvider>::StringRef) {}
 
     fn mark_table(&mut self, _: &<LeakingGc as TypeProvider>::TableRef) -> ControlFlow<()> {
