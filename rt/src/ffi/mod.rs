@@ -136,8 +136,6 @@ where
     for<'a> &'a [crate::value::Value<Gc>]: ParseArgs<Args>,
     R: FormatReturns<Gc>,
 {
-    use repr::index::StackSlot;
-
     let args = rt.stack.raw.parse().map_err(|err| {
         let msg = rt.core.gc.alloc_string(err.to_string().into());
         Value::String(msg)
@@ -145,7 +143,7 @@ where
 
     rt.stack.clear();
 
-    let ret = f.call(rt.view(StackSlot(0)).unwrap(), args);
+    let ret = f.call(rt.view_full(), args);
     let ret: Vec<_> = ret.format().collect();
 
     rt.stack.extend(ret);
@@ -164,8 +162,6 @@ where
     for<'a> &'a [crate::value::Value<Gc>]: ParseArgs<Args>,
     R: FormatReturns<Gc>,
 {
-    use repr::index::StackSlot;
-
     let args = rt.stack.raw.parse().map_err(|err| {
         let msg = rt.core.gc.alloc_string(err.to_string().into());
         Value::String(msg)
@@ -173,7 +169,7 @@ where
 
     rt.stack.clear();
 
-    let ret = f.call(rt.view(StackSlot(0)).unwrap(), args)?;
+    let ret = f.call(rt.view_full(), args)?;
     let ret: Vec<_> = ret.format().collect();
 
     rt.stack.extend(ret);

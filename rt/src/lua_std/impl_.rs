@@ -82,7 +82,10 @@ where
 
         match rt.invoke_at(func, StackSlot(1)) {
             Ok(()) => {
-                let place = rt.stack.get_mut(StackSlot(0)).unwrap();
+                let place = rt
+                    .stack
+                    .get_mut(StackSlot(0))
+                    .expect("stack space below invocation point should be untouched");
                 *place = Value::Bool(true);
             }
             Err(err) => {
@@ -379,26 +382,29 @@ where
     Value<Gc>: Debug + Display,
 {
     let f = |rt: RuntimeView<'_, Gc>| {
-        ffi::invoke_with_rt(rt, |rt: RuntimeView<'_, Gc>, value: Value<Gc>| {
-            value
+        ffi::try_invoke_with_rt(rt, |rt: RuntimeView<'_, Gc>, value: Value<Gc>| {
+            let r = value
                 .metatable(&rt.core.primitive_metatables)
-                .map(|metatable| {
+                .map(|metatable| -> Result<_, RefAccessError> {
                     use crate::value::{Borrow, TableIndex};
 
-                    let __metatable = metatable
-                        .with_ref(|mt| {
-                            let key = rt.core.gc.alloc_string("__metatable".into());
-                            mt.get(&KeyValue::String(key))
-                        })
-                        .unwrap();
+                    let __metatable = metatable.with_ref(|mt| {
+                        let key = rt.core.gc.alloc_string("__metatable".into());
+                        mt.get(&KeyValue::String(key))
+                    })?;
 
-                    if let Value::Nil = __metatable {
+                    let r = if let Value::Nil = __metatable {
                         Value::Table(metatable)
                     } else {
                         __metatable
-                    }
+                    };
+
+                    Ok(r)
                 })
-                .unwrap_or_default()
+                .transpose()?
+                .unwrap_or_default();
+
+            Ok(r)
         })
     };
 
@@ -418,34 +424,31 @@ where
              metatable: NilOr<LuaTable<Gc::TableRef>>| {
                 use crate::value::{Borrow, Metatable, TableIndex};
 
+                let LuaTable(table) = table;
                 let metatable = metatable.into_option().map(|LuaTable(t)| t);
 
-                table
-                    .0
-                    .with_mut(|t| {
-                        let has_meta = t.metatable().is_some_and(|metatable| {
-                            metatable
-                                .with_ref(|mt| {
-                                    let key = rt.core.gc.alloc_string("__metatable".into());
-                                    mt.contains_key(&KeyValue::String(key))
-                                })
-                                .unwrap()
-                        });
+                table.with_mut(|t| -> Result<_, RuntimeError<Gc>> {
+                    let has_meta_field = match t.metatable() {
+                        Some(metatable) => metatable.with_ref(|mt| {
+                            let key = rt.core.gc.alloc_string("__metatable".into());
+                            mt.contains_key(&KeyValue::String(key))
+                        })?,
+                        None => false,
+                    };
 
-                        if has_meta {
-                            let msg = rt.core.gc.alloc_string(
-                                "table already has metatable with '__metatable' field".into(),
-                            );
-                            return Err(Value::String(msg));
-                        }
+                    if has_meta_field {
+                        let msg = rt.core.gc.alloc_string(
+                            "table already has metatable with '__metatable' field".into(),
+                        );
+                        return Err(Value::String(msg).into());
+                    }
 
-                        t.set_metatable(metatable);
+                    t.set_metatable(metatable);
 
-                        Ok(())
-                    })
-                    .unwrap()?;
+                    Ok(())
+                })??;
 
-                Ok(table)
+                Ok(LuaTable(table))
             },
         )
     };

@@ -307,11 +307,16 @@ where
                             self.invoke_at_raw(closure, start)?;
 
                             if let Some(event) = event {
-                                let mut stack = self.stack.view(start).unwrap();
+                                let mut stack = self.stack.view(start).expect(
+                                    "stack space below invocation bound should be untouched",
+                                );
                                 stack.adjust_event_returns(event);
                             }
 
-                            let frame = self.frames.pop().unwrap();
+                            let frame = self
+                                .frames
+                                .pop()
+                                .expect("suspended frame should still exist");
                             active_frame = frame.activate(self)?;
                         }
                     }

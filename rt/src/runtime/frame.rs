@@ -20,7 +20,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
-use crate::error::RuntimeError;
+use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RuntimeError};
 use crate::gc::{Gc as GarbageCollector, Visit};
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
@@ -430,26 +430,30 @@ where
     Gc: GarbageCollector,
     Value<Gc>: Debug + Display,
 {
-    pub fn step(
+    pub(super) fn step(
         &mut self,
-    ) -> Result<ControlFlow<ChangeFrame<Gc::RustCallable>>, opcode_err::Error> {
+    ) -> Result<ControlFlow<ChangeFrame<Gc::RustCallable>>, RefAccessOrError<opcode_err::Error>>
+    {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
                 self.stack.next_slot(),
             )));
         };
 
-        self.exec(opcode).map_err(|cause| opcode_err::Error {
-            opcode,
-            debug_info: self.opcode_debug_info(self.ip - 1),
-            cause,
+        self.exec(opcode).map_err(|cause| {
+            cause.map_other(|cause| opcode_err::Error {
+                opcode,
+                debug_info: self.opcode_debug_info(self.ip - 1),
+                cause,
+            })
         })
     }
 
     fn exec(
         &mut self,
         opcode: OpCode,
-    ) -> Result<ControlFlow<ChangeFrame<Gc::RustCallable>>, opcode_err::Cause> {
+    ) -> Result<ControlFlow<ChangeFrame<Gc::RustCallable>>, RefAccessOrError<opcode_err::Cause>>
+    {
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -467,11 +471,11 @@ where
                 let value = self.stack.remove(slot).ok_or(MissingStackSlot(slot))?;
                 let type_ = value.type_();
 
-                let (callable, start) = self
+                let callable = self
                     .prepare_invoke(value, slot)
-                    .ok_or(opcode_err::Invoke(type_))?;
+                    .map_err(|err| err.map_other(|_| opcode_err::Invoke(type_).into()))?;
 
-                let start = self.stack.boundary() + start;
+                let start = self.stack.boundary() + slot;
 
                 ControlFlow::Break(ChangeFrame::Invoke(None, callable, start))
             }
@@ -530,7 +534,8 @@ where
             }
             UnaOp(op) => {
                 let args = self.stack.take1()?;
-                self.exec_una_op(args, op)?
+                self.exec_una_op(args, op)
+                    .map_err(|err| err.map_other(Into::into))?
                     .map_br(|(event, callable, start)| {
                         let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(event), callable, start)
@@ -538,7 +543,8 @@ where
             }
             BinOp(op) => {
                 let args = self.stack.take2()?;
-                self.exec_bin_op(args, op)?
+                self.exec_bin_op(args, op)
+                    .map_err(|err| err.map_other(Into::into))?
                     .map_br(|(event, callable, start)| {
                         let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(event), callable, start)
@@ -576,7 +582,7 @@ where
             TabGet => {
                 let args = self.stack.take2()?;
                 self.exec_tab_get(args)
-                    .map_err(Cause::TabGet)?
+                    .map_err(|err| err.map_other(Cause::TabGet))?
                     .map_br(|(callable, start)| {
                         let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(Event::Index), callable, start)
@@ -585,7 +591,7 @@ where
             TabSet => {
                 let args = self.stack.take3()?;
                 self.exec_tab_set(args)
-                    .map_err(Cause::TabSet)?
+                    .map_err(|err| err.map_other(Cause::TabSet))?
                     .map_br(|(callable, start)| {
                         let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(Event::NewIndex), callable, start)
@@ -602,8 +608,10 @@ where
         &mut self,
         args: [Value<Gc>; 1],
         op: UnaOp,
-    ) -> Result<ControlFlow<(Event, Callable<Gc::RustCallable>, StackSlot)>, opcode_err::UnaOpCause>
-    {
+    ) -> Result<
+        ControlFlow<(Event, Callable<Gc::RustCallable>, StackSlot)>,
+        RefAccessOrError<opcode_err::UnaOpCause>,
+    > {
         use crate::value::{Float, Int};
         use ControlFlow::*;
 
@@ -632,7 +640,7 @@ where
 
                 match args {
                     [Value::String(val)] => {
-                        let len = val.with_ref(|s| s.len()).unwrap().try_into().unwrap();
+                        let len = val.with_ref(|s| s.len())?.try_into().unwrap();
 
                         Continue(Value::Int(len))
                     }
@@ -659,28 +667,30 @@ where
                 let metavalue = arg
                     .metatable(&self.core.primitive_metatables)
                     .map(|mt| mt.with_ref(|mt| mt.get(&event.into_key(&mut self.core.gc))))
-                    .transpose()
-                    .unwrap();
+                    .transpose()?
+                    .unwrap_or_default();
 
                 match metavalue {
-                    Some(metavalue) => {
-                        let start = self.stack.next_slot();
-
-                        self.stack.extend(args);
-                        let (callable, start) = self.prepare_invoke(metavalue, start).ok_or(err)?;
-
-                        Ok(Break((event, callable, start)))
-                    }
-                    None => match (op, args) {
+                    Value::Nil => match (op, args) {
                         // Trigger table len builtin on failed metamethod lookup.
                         (UnaOp::StrLen, [Value::Table(tab)]) => {
-                            let border = tab.with_ref(|tab| tab.border()).unwrap();
+                            let border = tab.with_ref(|tab| tab.border())?;
                             self.stack.push(Value::Int(border));
 
                             Ok(Continue(()))
                         }
-                        _ => Err(err),
+                        _ => Err(err.into()),
                     },
+                    metavalue => {
+                        let start = self.stack.next_slot();
+
+                        self.stack.extend(args);
+                        let callable = self
+                            .prepare_invoke(metavalue, start)
+                            .map_err(|e| e.map_other(|_| err))?;
+
+                        Ok(Break((event, callable, start)))
+                    }
                 }
             }
         }
@@ -692,7 +702,7 @@ where
         op: BinOp,
     ) -> Result<
         std::ops::ControlFlow<(Event, Callable<Gc::RustCallable>, StackSlot)>,
-        opcode_err::BinOpCause,
+        RefAccessOrError<opcode_err::BinOpCause>,
     > {
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
@@ -703,8 +713,8 @@ where
             BinOp::Ari(op) => self.exec_bin_op_ari(args, op),
             BinOp::Bit(op) => self.exec_bin_op_bit(args, op),
             BinOp::Eq(op) => self.exec_bin_op_eq(args, op),
-            BinOp::Rel(op) => self.exec_bin_op_rel(args, op),
-            BinOp::Str(op) => self.exec_bin_op_str(args, op),
+            BinOp::Rel(op) => self.exec_bin_op_rel(args, op)?,
+            BinOp::Str(op) => self.exec_bin_op_str(args, op)?,
         };
 
         match eval {
@@ -712,7 +722,7 @@ where
                 self.stack.push(value);
                 Ok(ControlFlow::Continue(()))
             }
-            ControlFlow::Continue(None) => Err(err),
+            ControlFlow::Continue(None) => Err(err.into()),
             ControlFlow::Break(args) => {
                 let event: Event = op.into();
 
@@ -730,14 +740,15 @@ where
                     .metatable(&self.core.primitive_metatables)
                     .or_else(|| rhs.metatable(&self.core.primitive_metatables))
                     .map(|mt| mt.with_ref(|mt| mt.get(&event.into_key(&mut self.core.gc))))
-                    .transpose()
-                    .unwrap();
+                    .transpose()?;
 
                 match metavalue {
                     Some(metavalue) => {
                         let start = self.stack.next_slot();
                         self.stack.extend([lhs, rhs]);
-                        let (callable, start) = self.prepare_invoke(metavalue, start).ok_or(err)?;
+                        let callable = self
+                            .prepare_invoke(metavalue, start)
+                            .map_err(|e| e.map_other(|_| err))?;
 
                         Ok(ControlFlow::Break((event, callable, start)))
                     }
@@ -755,7 +766,7 @@ where
                             self.stack.push(r);
                             Ok(ControlFlow::Continue(()))
                         } else {
-                            Err(err)
+                            Err(err.into())
                         }
                     }
                 }
@@ -767,7 +778,7 @@ where
         &mut self,
         args: [Value<Gc>; 2],
         op: StrBinOp,
-    ) -> ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>> {
+    ) -> Result<ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>>, RefAccessError> {
         use super::CoerceArgs;
         use crate::value::Concat;
 
@@ -779,22 +790,19 @@ where
         match args {
             [Value::String(lhs), Value::String(rhs)] => match op {
                 StrBinOp::Concat => {
-                    let r = lhs
-                        .with_ref(|lhs| {
-                            rhs.with_ref(|rhs| {
-                                let mut r = lhs.clone();
-                                r.concat(rhs);
-                                r
-                            })
+                    let r = lhs.with_ref(|lhs| {
+                        rhs.with_ref(|rhs| {
+                            let mut r = lhs.clone();
+                            r.concat(rhs);
+                            r
                         })
-                        .unwrap()
-                        .unwrap();
+                    })??;
                     let s = self.core.gc.alloc_string(r);
 
-                    ControlFlow::Continue(Some(Value::String(s)))
+                    Ok(ControlFlow::Continue(Some(Value::String(s))))
                 }
             },
-            args => ControlFlow::Break(args),
+            args => Ok(ControlFlow::Break(args)),
         }
     }
 
@@ -833,7 +841,7 @@ where
         &mut self,
         args: [Value<Gc>; 2],
         op: RelBinOp,
-    ) -> ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>> {
+    ) -> Result<ControlFlow<[Value<Gc>; 2], Option<Value<Gc>>>, RefAccessError> {
         use super::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
@@ -844,10 +852,9 @@ where
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
             [Float(lhs), Float(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
-            [String(lhs), String(rhs)] => lhs
-                .with_ref(|lhs| rhs.with_ref(|rhs| PartialOrd::partial_cmp(lhs, rhs)))
-                .unwrap()
-                .unwrap(),
+            [String(lhs), String(rhs)] => {
+                lhs.with_ref(|lhs| rhs.with_ref(|rhs| PartialOrd::partial_cmp(lhs, rhs)))??
+            }
             [Int(lhs), Float(rhs)] if cmp => {
                 PartialOrd::partial_cmp(&value::Int(*lhs), &value::Float(*rhs))
             }
@@ -858,7 +865,7 @@ where
         };
 
         let Some(ord) = ord else {
-            return ControlFlow::Break(args);
+            return Ok(ControlFlow::Break(args));
         };
 
         let r = match op {
@@ -868,7 +875,7 @@ where
             GtEq => ord.is_ge(),
         };
 
-        ControlFlow::Continue(Some(Value::Bool(r)))
+        Ok(ControlFlow::Continue(Some(Value::Bool(r))))
     }
 
     fn exec_bin_op_bit(
@@ -936,7 +943,10 @@ where
     fn exec_tab_get(
         &mut self,
         args: [Value<Gc>; 2],
-    ) -> Result<ControlFlow<(Callable<Gc::RustCallable>, StackSlot)>, opcode_err::TabCause> {
+    ) -> Result<
+        ControlFlow<(Callable<Gc::RustCallable>, StackSlot)>,
+        RefAccessOrError<opcode_err::TabCause>,
+    > {
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -949,7 +959,7 @@ where
                 let index = self.core.dialect.coerce_tab_get(index.clone());
 
                 let key = index.try_into().map_err(InvalidKey)?;
-                let value = table.with_ref(|t| t.get(&key)).unwrap();
+                let value = table.with_ref(|t| t.get(&key))?;
 
                 // It succeeds if any non-nil value is produced.
                 if value != Value::Nil {
@@ -963,8 +973,7 @@ where
                 let metavalue = table
                     .metatable(&self.core.primitive_metatables)
                     .map(|mt| mt.with_ref(|mt| mt.get(&Event::Index.into_key(&mut self.core.gc))))
-                    .transpose()
-                    .unwrap()
+                    .transpose()?
                     .unwrap_or_default();
 
                 match metavalue {
@@ -977,7 +986,7 @@ where
                             self.stack.push(Value::Nil);
                             return Ok(Continue(()));
                         } else {
-                            return Err(TableTypeMismatch(table.type_()));
+                            return Err(TableTypeMismatch(table.type_()).into());
                         }
                     }
                     // Table simply goes on another spin of recursive table lookup.
@@ -1005,7 +1014,10 @@ where
     fn exec_tab_set(
         &mut self,
         args: [Value<Gc>; 3],
-    ) -> Result<ControlFlow<(Callable<Gc::RustCallable>, StackSlot)>, opcode_err::TabCause> {
+    ) -> Result<
+        ControlFlow<(Callable<Gc::RustCallable>, StackSlot)>,
+        RefAccessOrError<opcode_err::TabCause>,
+    > {
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -1018,19 +1030,17 @@ where
                 let index = self.core.dialect.coerce_tab_set(index.clone());
                 let key = index.try_into().map_err(InvalidKey)?;
 
-                let r = table
-                    .with_ref(|table| {
-                        // It succeeds if key is already populated.
-                        if table.contains_key(&key) {
-                            Break(())
-                        } else {
-                            Continue(())
-                        }
-                    })
-                    .unwrap();
+                let r = table.with_ref(|table| {
+                    // It succeeds if key is already populated.
+                    if table.contains_key(&key) {
+                        Break(())
+                    } else {
+                        Continue(())
+                    }
+                })?;
 
                 if matches!(r, Break(())) {
-                    table.with_mut(|table| table.set(key, value)).unwrap();
+                    table.with_mut(|table| table.set(key, value))?;
                     return Ok(Continue(()));
                 }
             };
@@ -1042,8 +1052,7 @@ where
                     .map(|mt| {
                         mt.with_ref(|mt| mt.get(&Event::NewIndex.into_key(&mut self.core.gc)))
                     })
-                    .transpose()
-                    .unwrap()
+                    .transpose()?
                     .unwrap_or_default();
 
                 match metavalue {
@@ -1056,11 +1065,11 @@ where
                             let index = self.core.dialect.coerce_tab_set(index);
                             let key = index.try_into().map_err(InvalidKey)?;
 
-                            table.with_mut(|tab| tab.set(key, value)).unwrap();
+                            table.with_mut(|tab| tab.set(key, value))?;
 
                             return Ok(Continue(()));
                         } else {
-                            return Err(TableTypeMismatch(table.type_()));
+                            return Err(TableTypeMismatch(table.type_()).into());
                         }
                     }
                     // Table simply goes on another spin of recursive table assignment.
@@ -1089,23 +1098,22 @@ where
         &mut self,
         mut callable: Value<Gc>,
         start: StackSlot,
-    ) -> Option<(Callable<Gc::RustCallable>, StackSlot)> {
+    ) -> Result<Callable<Gc::RustCallable>, RefAccessOrError<NotCallableError>> {
         loop {
             callable = match callable {
-                Value::Function(r) => return Some((r, start)),
+                Value::Function(r) => return Ok(r),
                 t => t,
             };
 
             let new_callable = callable
                 .metatable(&self.core.primitive_metatables)
                 .map(|mt| mt.with_ref(|mt| mt.get(&Event::Call.into_key(&mut self.core.gc))))
-                .transpose()
-                .unwrap()
+                .transpose()?
                 .unwrap_or_default();
 
             // Keys associated with nil are not considered part of the table.
             if new_callable == Value::Nil {
-                return None;
+                return Err(RefAccessOrError::Other(NotCallableError));
             }
 
             self.stack.insert(start, callable);
@@ -1362,6 +1370,86 @@ impl From<RelBinOp> for Event {
         match value {
             RelBinOp::Gt | RelBinOp::Lt => Event::Lt,
             RelBinOp::GtEq | RelBinOp::LtEq => Event::LtEq,
+        }
+    }
+}
+
+struct NotCallableError;
+
+#[derive(Debug)]
+pub(super) enum RefAccessOrError<E> {
+    Dropped(AlreadyDroppedError),
+    Borrowed(BorrowError),
+    Other(E),
+}
+
+impl<E> RefAccessOrError<E> {
+    fn map_other<T>(self, f: impl FnOnce(E) -> T) -> RefAccessOrError<T> {
+        use RefAccessOrError::*;
+
+        match self {
+            Borrowed(err) => Borrowed(err),
+            Dropped(err) => Dropped(err),
+            Other(err) => Other(f(err)),
+        }
+    }
+}
+
+impl<E> From<RefAccessError> for RefAccessOrError<E> {
+    fn from(value: RefAccessError) -> Self {
+        match value {
+            RefAccessError::Dropped(err) => RefAccessOrError::Dropped(err),
+            RefAccessError::Borrowed(err) => RefAccessOrError::Borrowed(err),
+        }
+    }
+}
+
+impl<T> From<T> for RefAccessOrError<opcode_err::Cause>
+where
+    T: Into<opcode_err::Cause>,
+{
+    fn from(value: T) -> Self {
+        RefAccessOrError::Other(value.into())
+    }
+}
+
+impl<T> From<T> for RefAccessOrError<opcode_err::UnaOpCause>
+where
+    T: Into<opcode_err::UnaOpCause>,
+{
+    fn from(value: T) -> Self {
+        RefAccessOrError::Other(value.into())
+    }
+}
+
+impl<T> From<T> for RefAccessOrError<opcode_err::BinOpCause>
+where
+    T: Into<opcode_err::BinOpCause>,
+{
+    fn from(value: T) -> Self {
+        RefAccessOrError::Other(value.into())
+    }
+}
+
+impl<T> From<T> for RefAccessOrError<opcode_err::TabCause>
+where
+    T: Into<opcode_err::TabCause>,
+{
+    fn from(value: T) -> Self {
+        RefAccessOrError::Other(value.into())
+    }
+}
+
+impl<E, Gc> From<RefAccessOrError<E>> for RuntimeError<Gc>
+where
+    Gc: TypeProvider,
+    E: Into<RuntimeError<Gc>>,
+{
+    fn from(value: RefAccessOrError<E>) -> Self {
+        match value {
+            RefAccessOrError::Dropped(err) => err.into(),
+            RefAccessOrError::Borrowed(err) => err.into(),
+            RefAccessOrError::Other(err) => err.into(),
         }
     }
 }
