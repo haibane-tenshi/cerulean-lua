@@ -1,6 +1,7 @@
 pub mod leaking;
 pub mod rc;
 
+use crate::error::BorrowError;
 use crate::value::traits::TypeProvider;
 use std::ops::ControlFlow;
 
@@ -36,13 +37,40 @@ pub trait Sweeper<Ty: TypeProvider>: Sized {
 
     fn sweep(self);
 
-    fn mark_with_visitor(&mut self, iter: impl IntoIterator<Item = impl Visit<Self>>) {
+    fn mark_with_visitor(
+        &mut self,
+        iter: impl IntoIterator<Item = impl Visit<Self>>,
+    ) -> Result<(), BorrowError> {
         for item in iter.into_iter() {
-            item.visit(self)
+            item.visit(self)?;
         }
+
+        Ok(())
     }
 }
 
 pub trait Visit<S> {
-    fn visit(&self, sweeper: &mut S);
+    fn visit(&self, sweeper: &mut S) -> Result<(), BorrowError>;
+}
+
+impl<'a, T, S> Visit<S> for &'a T
+where
+    T: Visit<S>,
+{
+    fn visit(&self, sweeper: &mut S) -> Result<(), BorrowError> {
+        <T as Visit<S>>::visit(self, sweeper)
+    }
+}
+
+pub fn visit_borrow<S, T, U>(value: &T, sweeper: &mut S) -> Result<(), BorrowError>
+where
+    T: crate::value::Borrow<U>,
+    U: Visit<S>,
+{
+    use crate::error::RefAccessError;
+
+    match value.with_ref(|value| value.visit(sweeper)) {
+        Ok(Ok(())) | Err(RefAccessError::Dropped(_)) => Ok(()),
+        Ok(Err(err)) | Err(RefAccessError::Borrowed(err)) => Err(err),
+    }
 }

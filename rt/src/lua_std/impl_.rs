@@ -60,6 +60,7 @@ where
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc>,
+    Gc::Table: for<'a> crate::gc::Visit<Gc::Sweeper<'a>>,
     Value<Gc>: Debug + Display,
 {
     let f = |mut rt: RuntimeView<'_, Gc>| {

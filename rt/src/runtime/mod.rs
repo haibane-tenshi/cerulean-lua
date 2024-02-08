@@ -15,9 +15,9 @@ use repr::index::StackSlot;
 use crate::backtrace::{Backtrace, Location};
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
-use crate::error::RuntimeError;
+use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::LuaFfiOnce;
-use crate::gc::Gc as GarbageCollector;
+use crate::gc::{Gc as GarbageCollector, Visit};
 use crate::value::{TypeProvider, TypeWithoutMetatable, Value};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
@@ -260,22 +260,36 @@ impl<'rt, Gc> RuntimeView<'rt, Gc>
 where
     Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc>,
+    Gc::Table: for<'a> Visit<Gc::Sweeper<'a>>,
     Value<Gc>: Debug + Display,
 {
     pub fn enter(&mut self, closure: ClosureRef, start: StackSlot) -> Result<(), RuntimeError<Gc>> {
-        use crate::value::callable::Callable;
-
         let start = self.stack.boundary() + start;
         let frame = closure.construct_frame(self, start, None)?;
+        self.frames.push(frame);
+
+        while let ControlFlow::Continue(()) = self.resume()? {
+            self.collect_garbage()?;
+        }
+
+        Ok(())
+    }
+
+    fn resume(&mut self) -> Result<ControlFlow<()>, RuntimeError<Gc>> {
+        use crate::value::callable::Callable;
+
+        let Some(frame) = self.frames.pop() else {
+            return Ok(ControlFlow::Break(()));
+        };
         let mut active_frame = frame.activate(self)?;
 
-        loop {
+        for _ in 0..10000 {
             match active_frame.step() {
                 Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
                     active_frame.exit(slot)?;
 
                     let Some(frame) = self.frames.pop() else {
-                        break;
+                        return Ok(ControlFlow::Break(()));
                     };
 
                     active_frame = frame.activate(self)?;
@@ -313,9 +327,53 @@ where
             }
         }
 
-        Ok(())
+        let frame = active_frame.suspend();
+        self.frames.push(frame);
+
+        Ok(ControlFlow::Continue(()))
     }
 
+    pub fn collect_garbage(&mut self) -> Result<(), BorrowError>
+    where
+        Gc::Table: for<'a> Visit<Gc::Sweeper<'a>>,
+    {
+        use crate::gc::{visit_borrow, Sweeper};
+
+        let RuntimeView {
+            core:
+                Core {
+                    global_env,
+                    primitive_metatables,
+                    dialect: _,
+                    gc,
+                },
+            chunk_cache: _,
+            frames,
+            stack,
+            upvalue_stack,
+            rust_backtrace_stack: _,
+        } = self;
+
+        let mut sweeper = gc.sweeper();
+        global_env.visit(&mut sweeper)?;
+        for metatable in primitive_metatables
+            .iter()
+            .flat_map(|(_, table)| table.as_ref())
+        {
+            sweeper.mark_table(metatable);
+            visit_borrow(metatable, &mut sweeper)?;
+        }
+        sweeper.mark_with_visitor(frames.iter())?;
+        sweeper.mark_with_visitor(stack.iter())?;
+        sweeper.mark_with_visitor(upvalue_stack.iter())?;
+
+        sweeper.sweep();
+
+        Ok(())
+    }
+}
+
+impl<'rt, Gc: TypeProvider> RuntimeView<'rt, Gc> {
     pub fn construct_closure(
         &mut self,
         fn_ptr: FunctionPtr,
@@ -323,9 +381,7 @@ where
     ) -> Result<Closure, RuntimeError<Gc>> {
         Closure::new(self, fn_ptr, upvalues)
     }
-}
 
-impl<'rt, Gc: TypeProvider> RuntimeView<'rt, Gc> {
     pub fn chunk_cache(&self) -> &dyn ChunkCache {
         self.chunk_cache
     }

@@ -280,6 +280,7 @@ impl<Gc> LuaFfiOnce<Gc> for Callable<Gc::RustCallable>
 where
     Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc>,
+    Gc::Table: for<'a> crate::gc::Visit<Gc::Sweeper<'a>>,
     Value<Gc>: Debug + Display,
 {
     fn call_once(

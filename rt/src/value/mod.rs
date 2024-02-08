@@ -11,7 +11,8 @@ pub mod userdata;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::gc::Gc as GarbageCollector;
+use crate::error::BorrowError;
+use crate::gc::{Gc as GarbageCollector, Visit};
 use enumoid::{EnumMap, Enumoid};
 use repr::literal::Literal;
 
@@ -361,6 +362,31 @@ where
             Table(v) => write!(f, "{v}"),
             Userdata(v) => write!(f, "{v}"),
         }
+    }
+}
+
+impl<Gc> Visit<Gc::Sweeper<'_>> for Value<Gc>
+where
+    Gc: GarbageCollector,
+    Gc::Table: for<'a> Visit<Gc::Sweeper<'a>>,
+{
+    fn visit(&self, sweeper: &mut Gc::Sweeper<'_>) -> Result<(), BorrowError> {
+        use crate::gc::Sweeper;
+        use std::ops::ControlFlow;
+        use Value::*;
+
+        match self {
+            Nil | Bool(_) | Int(_) | Float(_) | Function(_) => (),
+            String(t) => sweeper.mark_string(t),
+            Table(t) => {
+                if let ControlFlow::Continue(_) = sweeper.mark_table(t) {
+                    crate::gc::visit_borrow(t, sweeper)?;
+                }
+            }
+            Userdata(t) => sweeper.mark_userdata(t),
+        }
+
+        Ok(())
     }
 }
 

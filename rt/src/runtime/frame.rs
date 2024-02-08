@@ -21,7 +21,7 @@ use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::RuntimeError;
-use crate::gc::Gc as GarbageCollector;
+use crate::gc::{Gc as GarbageCollector, Visit};
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
 use crate::value::{Borrow, TableIndex, TypeProvider, Value};
@@ -338,6 +338,27 @@ where
             source: FrameSource::Lua,
             location,
         }
+    }
+}
+
+impl<Gc> Visit<Gc::Sweeper<'_>> for Frame<Value<Gc>>
+where
+    Gc: GarbageCollector,
+    Value<Gc>: for<'a> Visit<Gc::Sweeper<'a>>,
+{
+    fn visit(&self, sweeper: &mut Gc::Sweeper<'_>) -> Result<(), crate::error::BorrowError> {
+        use crate::gc::Sweeper;
+
+        let Frame {
+            closure: _,
+            ip: _,
+            stack_start: _,
+            upvalue_start: _,
+            register_variadic,
+            event: _,
+        } = self;
+
+        sweeper.mark_with_visitor(register_variadic)
     }
 }
 

@@ -6,6 +6,8 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::{Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, TypeProvider, Value};
+use crate::error::BorrowError;
+use crate::gc::{Gc as GarbageCollector, Visit};
 
 pub struct Table<Gc: TypeProvider> {
     data: HashMap<KeyValue<Gc>, Value<Gc>>,
@@ -170,6 +172,20 @@ where
     }
 }
 
+impl<Gc> Visit<Gc::Sweeper<'_>> for Table<Gc>
+where
+    Gc: GarbageCollector<Table = Self>,
+{
+    fn visit(&self, sweeper: &mut Gc::Sweeper<'_>) -> Result<(), BorrowError> {
+        for (key, value) in self.data.iter() {
+            key.visit(sweeper)?;
+            value.visit(sweeper)?;
+        }
+
+        Ok(())
+    }
+}
+
 pub enum KeyValue<Gc: TypeProvider> {
     Bool(bool),
     Int(i64),
@@ -277,6 +293,31 @@ where
             Table(val) => val.hash(state),
             Userdata(val) => val.hash(state),
         }
+    }
+}
+
+impl<Gc> Visit<Gc::Sweeper<'_>> for KeyValue<Gc>
+where
+    Gc: GarbageCollector,
+    Gc::Table: for<'a> Visit<Gc::Sweeper<'a>>,
+{
+    fn visit(&self, sweeper: &mut Gc::Sweeper<'_>) -> Result<(), BorrowError> {
+        use crate::gc::Sweeper;
+        use std::ops::ControlFlow;
+        use KeyValue::*;
+
+        match self {
+            Bool(_) | Int(_) | Float(_) | Function(_) => (),
+            String(t) => sweeper.mark_string(t),
+            Table(t) => {
+                if let ControlFlow::Continue(_) = sweeper.mark_table(t) {
+                    crate::gc::visit_borrow(t, sweeper)?;
+                }
+            }
+            Userdata(t) => sweeper.mark_userdata(t),
+        }
+
+        Ok(())
     }
 }
 

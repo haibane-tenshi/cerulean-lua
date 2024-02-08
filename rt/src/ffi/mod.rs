@@ -300,6 +300,7 @@ pub fn call_chunk<Gc>(chunk_id: ChunkId) -> impl LuaFfi<Gc> + Copy + Send + Sync
 where
     Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc>,
+    Gc::Table: for<'a> crate::gc::Visit<Gc::Sweeper<'a>>,
     Value<Gc>: Debug + Display,
 {
     let f = move |mut rt: RuntimeView<'_, Gc>| {
@@ -324,6 +325,7 @@ pub fn call_file<Gc>(script: impl AsRef<Path>) -> impl LuaFfi<Gc>
 where
     Gc: GarbageCollector,
     Gc::RustCallable: LuaFfiOnce<Gc>,
+    Gc::Table: for<'a> crate::gc::Visit<Gc::Sweeper<'a>>,
     Value<Gc>: Debug + Display,
 {
     let f = move |mut rt: RuntimeView<Gc>| {

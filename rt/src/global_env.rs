@@ -74,6 +74,7 @@ where
     Gc: GarbageCollector,
     Gc::String: AsRef<[u8]>,
     Gc::RustCallable: From<LuaFfiFnPtr<Gc>> + crate::ffi::LuaFfiOnce<Gc>,
+    Gc::Table: for<'a> crate::gc::Visit<Gc::Sweeper<'a>>,
     Value<Gc>: Debug + Display,
 {
     let chunk_ext = ChunkExtension::empty();
