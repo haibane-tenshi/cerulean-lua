@@ -13,7 +13,7 @@ use repr::tivec::{TiSlice, TiVec};
 
 use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackView};
-use super::upvalue_stack::{RawUpvalueSlot, UpvalueStackView};
+// use super::upvalue_stack::{RawUpvalueSlot, UpvalueStackView};
 use super::{Core, RuntimeView};
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::{ChunkCache, ChunkId};
@@ -142,18 +142,18 @@ impl ClosureRef {
         };
 
         // Load upvalues onto upvalue stack.
-        let upvalue_start = rt.upvalue_stack.next_raw_slot();
-        rt.upvalue_stack.extend(
-            self.upvalues
-                .iter()
-                .map(|upvalue_id| rt.stack.get_upvalue(*upvalue_id).unwrap().clone()),
-        );
+        // let upvalue_start = rt.upvalue_stack.next_raw_slot();
+        // rt.upvalue_stack.extend(
+        //     self.upvalues
+        //         .iter()
+        //         .map(|upvalue_id| rt.stack.get_upvalue(*upvalue_id).unwrap().clone()),
+        // );
 
         let r = Frame {
             closure: self,
             ip: Default::default(),
             stack_start,
-            upvalue_start,
+            // upvalue_start,
             register_variadic,
             event,
         };
@@ -205,7 +205,7 @@ pub struct Frame<Value> {
     closure: ClosureRef,
     ip: InstrId,
     stack_start: RawStackSlot,
-    upvalue_start: RawUpvalueSlot,
+    // upvalue_start: RawUpvalueSlot,
     register_variadic: Vec<Value>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
@@ -235,7 +235,7 @@ where
             core,
             chunk_cache,
             stack,
-            upvalue_stack,
+            // upvalue_stack,
             ..
         } = rt;
 
@@ -243,7 +243,7 @@ where
             closure,
             ip,
             stack_start,
-            upvalue_start,
+            // upvalue_start,
             register_variadic,
             event,
         } = self;
@@ -262,10 +262,10 @@ where
         let stack = stack.view(stack_start).unwrap();
 
         // Restore upvalue stack and update its values.
-        let mut upvalue_stack = upvalue_stack.view(upvalue_start).unwrap();
-        for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter_mut()) {
-            *upvalue = stack.get_upvalue(upvalue_id).unwrap().clone();
-        }
+        // let mut upvalue_stack = upvalue_stack.view(upvalue_start).unwrap();
+        // for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter_mut()) {
+        //     *upvalue = stack.get_upvalue(upvalue_id).unwrap().clone();
+        // }
 
         tracing::trace!(stack = stack.to_pretty_string(), "activated Lua frame");
 
@@ -277,7 +277,7 @@ where
             opcodes,
             ip,
             stack,
-            upvalue_stack,
+            // upvalue_stack,
             register_variadic,
             event,
         };
@@ -353,7 +353,7 @@ where
             closure: _,
             ip: _,
             stack_start: _,
-            upvalue_start: _,
+            // upvalue_start: _,
             register_variadic,
             event: _,
         } = self;
@@ -370,7 +370,7 @@ pub struct ActiveFrame<'rt, Gc: TypeProvider> {
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
     stack: StackView<'rt, Value<Gc>>,
-    upvalue_stack: UpvalueStackView<'rt, Value<Gc>>,
+    // upvalue_stack: UpvalueStackView<'rt, Value<Gc>>,
     register_variadic: Vec<Value<Gc>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
@@ -388,12 +388,18 @@ where
     }
 
     fn get_upvalue(&self, index: UpvalueSlot) -> Result<&Value<Gc>, MissingUpvalue> {
-        self.upvalue_stack.get(index).ok_or(MissingUpvalue(index))
+        self.closure
+            .upvalues
+            .get(index)
+            .and_then(|upvalue_id| self.stack.get_upvalue(*upvalue_id))
+            .ok_or(MissingUpvalue(index))
     }
 
     fn get_upvalue_mut(&mut self, index: UpvalueSlot) -> Result<&mut Value<Gc>, MissingUpvalue> {
-        self.upvalue_stack
-            .get_mut(index)
+        self.closure
+            .upvalues
+            .get(index)
+            .and_then(|upvalue_id| self.stack.get_upvalue_mut(*upvalue_id))
             .ok_or(MissingUpvalue(index))
     }
 
@@ -1193,25 +1199,25 @@ where
         let ActiveFrame {
             closure,
             ip,
-            mut stack,
-            upvalue_stack,
+            stack,
+            // upvalue_stack,
             register_variadic,
             event,
             ..
         } = self;
 
         let stack_start = stack.boundary();
-        let upvalue_start = upvalue_stack.boundary();
+        // let upvalue_start = upvalue_stack.boundary();
 
-        for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter()) {
-            *stack.get_upvalue_mut(upvalue_id).unwrap() = upvalue.clone();
-        }
+        // for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter()) {
+        //     *stack.get_upvalue_mut(upvalue_id).unwrap() = upvalue.clone();
+        // }
 
         Frame {
             closure,
             ip,
             stack_start,
-            upvalue_start,
+            // upvalue_start,
             register_variadic,
             event,
         }
@@ -1219,7 +1225,7 @@ where
 
     pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Gc>> {
         self.stack.remove_range(StackSlot(0)..drop_under);
-        self.upvalue_stack.clear();
+        // self.upvalue_stack.clear();
 
         if let Some(event) = self.event {
             self.stack.adjust_event_returns(event);
@@ -1244,7 +1250,7 @@ where
             .field("opcodes", &self.opcodes)
             .field("ip", &self.ip)
             .field("stack", &self.stack)
-            .field("upvalue_stack", &self.upvalue_stack)
+            // .field("upvalue_stack", &self.upvalue_stack)
             .field("register_variadic", &self.register_variadic)
             .field("event", &self.event)
             .finish()

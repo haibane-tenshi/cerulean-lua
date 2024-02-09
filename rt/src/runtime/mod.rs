@@ -3,7 +3,7 @@ mod frame;
 mod frame_stack;
 mod rust_backtrace_stack;
 mod stack;
-mod upvalue_stack;
+// mod upvalue_stack;
 
 use std::fmt::{Debug, Display};
 use std::ops::{Bound, ControlFlow};
@@ -23,7 +23,7 @@ use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
 use stack::{RawStackSlot, Stack, StackView};
-use upvalue_stack::{UpvalueStack, UpvalueStackView};
+// use upvalue_stack::{UpvalueStack, UpvalueStackView};
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, ClosureRef, FunctionPtr};
@@ -56,7 +56,7 @@ pub struct Runtime<Gc: TypeProvider, C> {
     pub chunk_cache: C,
     frames: FrameStack<Value<Gc>>,
     stack: Stack<Value<Gc>>,
-    upvalue_stack: UpvalueStack<Value<Gc>>,
+    // upvalue_stack: UpvalueStack<Value<Gc>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
@@ -72,7 +72,7 @@ where
             chunk_cache,
             frames: Default::default(),
             stack: Default::default(),
-            upvalue_stack: Default::default(),
+            // upvalue_stack: Default::default(),
             rust_backtrace_stack: Default::default(),
         }
     }
@@ -86,13 +86,13 @@ where
             chunk_cache,
             frames,
             stack,
-            upvalue_stack,
+            // upvalue_stack,
             rust_backtrace_stack,
         } = self;
 
         let frames = frames.view();
         let stack = stack.view();
-        let upvalue_stack = upvalue_stack.view();
+        // let upvalue_stack = upvalue_stack.view();
         let rust_backtrace_stack = rust_backtrace_stack.view();
 
         RuntimeView {
@@ -100,7 +100,7 @@ where
             chunk_cache,
             frames,
             stack,
-            upvalue_stack,
+            // upvalue_stack,
             rust_backtrace_stack,
         }
     }
@@ -111,7 +111,7 @@ pub struct RuntimeView<'rt, Gc: TypeProvider> {
     pub chunk_cache: &'rt mut dyn ChunkCache,
     frames: FrameStackView<'rt, Value<Gc>>,
     pub stack: StackView<'rt, Value<Gc>>,
-    upvalue_stack: UpvalueStackView<'rt, Value<Gc>>,
+    // upvalue_stack: UpvalueStackView<'rt, Value<Gc>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
@@ -141,13 +141,13 @@ where
             chunk_cache,
             frames,
             stack,
-            upvalue_stack,
+            // upvalue_stack,
             rust_backtrace_stack,
         } = self;
 
         let frames = frames.view();
         let stack = stack.view(start).ok_or(OutOfBoundsStack)?;
-        let upvalue_stack = upvalue_stack.view_over();
+        // let upvalue_stack = upvalue_stack.view_over();
         let rust_backtrace_stack = rust_backtrace_stack.view_over();
 
         let r = RuntimeView {
@@ -155,7 +155,7 @@ where
             chunk_cache: *chunk_cache,
             frames,
             stack,
-            upvalue_stack,
+            // upvalue_stack,
             rust_backtrace_stack,
         };
 
@@ -218,7 +218,7 @@ where
     Gc: TypeProvider,
 {
     fn soft_reset(&mut self) {
-        self.upvalue_stack.clear();
+        // self.upvalue_stack.clear();
         self.frames.clear();
         self.rust_backtrace_stack.clear();
     }
@@ -355,7 +355,7 @@ where
             chunk_cache: _,
             frames,
             stack,
-            upvalue_stack,
+            // upvalue_stack,
             rust_backtrace_stack: _,
         } = self;
 
@@ -370,7 +370,7 @@ where
         }
         sweeper.mark_with_visitor(frames.iter())?;
         sweeper.mark_with_visitor(stack.iter())?;
-        sweeper.mark_with_visitor(upvalue_stack.iter())?;
+        sweeper.mark_with_visitor(stack.evicted_upvalue_iter())?;
 
         sweeper.sweep();
 
