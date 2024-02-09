@@ -368,8 +368,8 @@ where
             sweeper.mark_table(metatable);
             visit_borrow(metatable, &mut sweeper)?;
         }
-        sweeper.mark_with_visitor(frames.iter())?;
-        sweeper.mark_with_visitor(stack.iter())?;
+        sweeper.mark_with_visitor(frames.full_iter())?;
+        sweeper.mark_with_visitor(stack.full_iter())?;
         sweeper.mark_with_visitor(stack.evicted_upvalue_iter())?;
 
         sweeper.sweep();

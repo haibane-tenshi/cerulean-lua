@@ -116,7 +116,7 @@ impl<'a, Value> FrameStackView<'a, Value> {
         self.stack.stack.raw.get((start, end))
     }
 
-    pub(crate) fn iter(&self) -> std::slice::Iter<'_, Frame<Value>> {
+    pub(crate) fn full_iter(&self) -> std::slice::Iter<'_, Frame<Value>> {
         self.stack.stack.iter()
     }
 }

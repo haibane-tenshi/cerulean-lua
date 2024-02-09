@@ -416,6 +416,10 @@ impl<'a, Value> StackView<'a, Value> {
         self.boundary
     }
 
+    pub(crate) fn full_iter(&self) -> impl Iterator<Item = &Value> {
+        self.stack.temporaries.iter()
+    }
+
     pub(crate) fn evicted_upvalue_iter(&self) -> impl Iterator<Item = &Value> {
         self.stack
             .evicted_upvalues
