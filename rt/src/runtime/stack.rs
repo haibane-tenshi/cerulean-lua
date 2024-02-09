@@ -39,19 +39,22 @@ impl From<RawStackSlot> for usize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
-pub struct RawUpvalueId(u32);
+pub struct UpvalueId(usize);
 
-impl RawUpvalueId {
+impl UpvalueId {
     /// Increment and return current id.
-    fn increment(&mut self) -> RawUpvalueId {
+    fn increment(&mut self) -> UpvalueId {
         let r = *self;
         self.0 += 1;
         r
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct UpvalueId(RawUpvalueId, RawStackSlot);
+#[derive(Debug, Clone)]
+enum UpvaluePlace<Value> {
+    Stack(RawStackSlot),
+    Place(Value),
+}
 
 /// Backing storage for stack of temporaries.
 #[derive(Debug, Clone)]
@@ -61,19 +64,16 @@ pub struct Stack<Value> {
 
     /// Indices of upvalues which are currently being hosted on stack.
     ///
-    /// Note that
-    /// * upvalue represent *a place* where value is stored, not value itself
-    /// * upvalue id permanently embeds `RawStackSlot` it was initially created on
-    ///
-    /// so any removals/insertions *must* evict all upvalues hosted above modification point
-    /// since existing upvalue ids are going to point to wrong places.
-    on_stack_upvalues: BTreeMap<RawStackSlot, RawUpvalueId>,
+    /// Note that upvalue represent *a place* where value is stored, not value itself.
+    /// Any removals/insertions *must* update all upvalues hosted above modification point
+    /// since any existing upvalue id id going to point to wrong place.
+    on_stack_upvalues: BTreeMap<RawStackSlot, UpvalueId>,
 
     /// Upvalues that were evicted from the stack.
-    evicted_upvalues: HashMap<RawUpvalueId, Value>,
+    evicted_upvalues: HashMap<UpvalueId, UpvaluePlace<Value>>,
 
     /// Upvalue id counter.
-    next_upvalue_id: RawUpvalueId,
+    next_upvalue_id: UpvalueId,
 }
 
 impl<Value> Stack<Value> {
@@ -100,31 +100,37 @@ impl<Value> Stack<Value> {
     /// Create a new upvalue.
     ///
     /// Resulting upvalue is unique,
-    /// e.g. place it points to is not shared with any existing upvalues.
+    /// e.g. place it points to is not shared with any other existing upvalue.
     fn fresh_upvalue(&mut self, value: Value) -> UpvalueId {
-        let raw_id = self.next_upvalue_id.increment();
+        let id = self.next_upvalue_id.increment();
 
-        self.evicted_upvalues.insert(raw_id, value);
+        self.evicted_upvalues.insert(id, UpvaluePlace::Place(value));
 
-        // Provide a dummy stack slot.
-        // Ideally I would like to wrap it in Option and use None here,
-        // but creating niche on RawStackSlot is pain.
-        // Maybe some other day.
-        // We never remove upvalues right now,
-        // so stack slot is never accessed.
-        UpvalueId(raw_id, RawStackSlot(0))
+        id
     }
 
     fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value> {
-        self.evicted_upvalues
-            .get(&upvalue.0)
-            .or_else(|| self.get(upvalue.1))
+        let value = match self.evicted_upvalues.get(&upvalue)? {
+            UpvaluePlace::Stack(slot) => self
+                .temporaries
+                .get(*slot)
+                .expect("on-stack upvalue should point to an existing stack slot"),
+            UpvaluePlace::Place(value) => value,
+        };
+
+        Some(value)
     }
 
     fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut Value> {
-        self.evicted_upvalues
-            .get_mut(&upvalue.0)
-            .or_else(|| self.temporaries.get_mut(upvalue.1))
+        let value = match self.evicted_upvalues.get_mut(&upvalue)? {
+            UpvaluePlace::Stack(slot) => self
+                .temporaries
+                .get_mut(*slot)
+                .expect("on-stack upvalue should point to an existing stack slot"),
+            UpvaluePlace::Place(value) => value,
+        };
+
+        Some(value)
     }
 
     fn mark_as_upvalue(&mut self, slot: RawStackSlot) -> Option<UpvalueId> {
@@ -132,16 +138,124 @@ impl<Value> Stack<Value> {
             return None;
         }
 
-        let upvalue_id = *self
-            .on_stack_upvalues
-            .entry(slot)
-            .or_insert_with(|| self.next_upvalue_id.increment());
+        let upvalue_id = *self.on_stack_upvalues.entry(slot).or_insert_with(|| {
+            let id = self.next_upvalue_id.increment();
+            self.evicted_upvalues.insert(id, UpvaluePlace::Stack(slot));
+            id
+        });
 
-        Some(UpvalueId(upvalue_id, slot))
+        Some(upvalue_id)
     }
 
     fn len(&self) -> usize {
         self.temporaries.len()
+    }
+
+    fn insert(&mut self, slot: RawStackSlot, value: Value) {
+        // Construct tail iterator before any modifications.
+        let tail = (slot.0..self.temporaries.len())
+            .rev()
+            .map(|i| (RawStackSlot(i), RawStackSlot(i + 1)));
+
+        self.temporaries.insert(slot, value);
+
+        // Shift slots for on-stack upvalues above insertion point.
+        self.reassociate(tail);
+    }
+
+    fn remove_range(&mut self, range: impl RangeBounds<RawStackSlot>) {
+        let (start, end) = self.transform_range(range);
+
+        let len = end
+            .0
+            .checked_sub(start.0)
+            .expect("starting point of range should not be grater than ending point");
+
+        let tail_start = end;
+        let tail_end = self.temporaries.next_key();
+
+        // Construct tail iterator before any modifications.
+        let tail = (tail_start.0..tail_end.0).map(|i| (RawStackSlot(i), RawStackSlot(i - len)));
+
+        // Removing happens in two steps in this order.
+        // First, we need to ensure that upvalues inside removal region are correctly dissoaciated.
+        self.drain_into_upvalues(start..end);
+
+        // Second, we need to adjust any upvalues that reside above removal region
+        // since their stack slots will get shifted.
+        self.reassociate(tail);
+    }
+
+    /// Reassociate upvalue ids using `(old_slot, new_slot)` pairs.
+    ///
+    /// Note that order might matter!
+    /// If the `new_slot` overwrites over some future `old_slot` you will get unspecified behavior.
+    fn reassociate(&mut self, iter: impl IntoIterator<Item = (RawStackSlot, RawStackSlot)>) {
+        for (old_slot, new_slot) in iter.into_iter() {
+            let Some(upvalue_id) = self.on_stack_upvalues.remove(&old_slot) else {
+                continue;
+            };
+
+            let assoc_slot = match self.evicted_upvalues.get_mut(&upvalue_id) {
+                Some(UpvaluePlace::Stack(s)) if *s == old_slot => s,
+                _ => {
+                    unreachable!("on-stack upvalue should be correctly associated with stack slot")
+                }
+            };
+
+            *assoc_slot = new_slot;
+            self.on_stack_upvalues.insert(new_slot, upvalue_id);
+        }
+    }
+
+    /// Remove stack range and move values into associated upvalue places if any.
+    ///
+    /// This function **does not adjust portion of the stack above removal point**.
+    /// As such it is your responsibility to reinforce invariants after calling this function.
+    fn drain_into_upvalues(&mut self, range: impl RangeBounds<RawStackSlot>) {
+        let (start, end) = self.transform_range(range);
+
+        let iter = self
+            .temporaries
+            .drain(start..end)
+            .zip((start.0..end.0).map(RawStackSlot));
+
+        for (value, slot) in iter {
+            let Some(upvalue_id) = self.on_stack_upvalues.remove(&slot) else {
+                continue;
+            };
+
+            let place = self
+                .evicted_upvalues
+                .get_mut(&upvalue_id)
+                .expect("registered upvalues should have their place allocated at creation");
+
+            assert!(matches!(place, UpvaluePlace::Stack(s) if *s == slot));
+
+            *place = UpvaluePlace::Place(value);
+        }
+    }
+
+    fn truncate(&mut self, slot: RawStackSlot) {
+        self.remove_range(slot..)
+    }
+
+    fn transform_range(
+        &self,
+        range: impl RangeBounds<RawStackSlot>,
+    ) -> (RawStackSlot, RawStackSlot) {
+        let start = match range.start_bound().cloned() {
+            Bound::Excluded(RawStackSlot(slot)) => RawStackSlot(slot + 1),
+            Bound::Included(slot) => slot,
+            Bound::Unbounded => RawStackSlot(0),
+        };
+        let end = match range.end_bound().cloned() {
+            Bound::Excluded(slot) => slot,
+            Bound::Included(RawStackSlot(slot)) => RawStackSlot(slot + 1),
+            Bound::Unbounded => self.temporaries.next_key(),
+        };
+
+        (start, end)
     }
 }
 
@@ -149,75 +263,24 @@ impl<Value> Stack<Value>
 where
     Value: Clone,
 {
-    fn pop(&mut self) -> Option<Value> {
-        if let Some(id) = self.temporaries.len().checked_sub(1) {
-            self.evict_upvalue(RawStackSlot(id));
-        }
-        self.temporaries.pop()
-    }
-
-    fn insert(&mut self, slot: RawStackSlot, value: Value) {
-        self.evict_upvalues(slot..);
-        self.temporaries.insert(slot, value);
-    }
-
     fn remove(&mut self, slot: RawStackSlot) -> Option<Value> {
-        if slot.0 < self.temporaries.next_key().0 {
-            self.evict_upvalues(slot..);
-            let value = self.temporaries.remove(slot);
-            Some(value)
+        if slot < self.temporaries.next_key() {
+            let r = self.temporaries.get(slot).cloned();
+            self.remove_range(slot..=slot);
+            r
         } else {
             None
         }
     }
 
-    fn remove_range(&mut self, range: impl RangeBounds<RawStackSlot>) {
-        let start = range.start_bound().cloned();
-        let end = range.end_bound().cloned();
+    fn pop(&mut self) -> Option<Value> {
+        let r = self.temporaries.last().cloned();
 
-        self.evict_upvalues((start, Bound::Unbounded));
-
-        // `TiVec` doesn't implement `TiRangeBounds` for `(Bound, Bound)` tuple :(
-        let start = start.mapb(|RawStackSlot(t)| t);
-        let end = end.mapb(|RawStackSlot(t)| t);
-
-        self.temporaries.raw.drain((start, end));
-    }
-
-    fn truncate(&mut self, new_len: RawStackSlot) {
-        self.evict_upvalues(new_len..);
-        self.temporaries.truncate(new_len.0);
-    }
-
-    fn evict_upvalue(&mut self, slot: RawStackSlot) {
-        let Some(upvalue_id) = self.on_stack_upvalues.remove(&slot) else {
-            return;
-        };
-
-        let value = self
-            .temporaries
-            .get_mut(slot)
-            .expect("there should not exist upvalue id for empty stack slot");
-
-        self.evicted_upvalues.insert(upvalue_id, value.clone());
-    }
-
-    fn evict_upvalues(&mut self, range: impl RangeBounds<RawStackSlot>) {
-        let start = match range.start_bound() {
-            Bound::Included(t) => t.0,
-            Bound::Excluded(t) => t.0 + 1,
-            Bound::Unbounded => 0,
-        };
-
-        let end = match range.end_bound() {
-            Bound::Included(t) => t.0 + 1,
-            Bound::Excluded(t) => t.0,
-            Bound::Unbounded => self.temporaries.len(),
-        };
-
-        for slot in (start..end).map(RawStackSlot) {
-            self.evict_upvalue(slot)
+        if let Some(id) = self.temporaries.last_key() {
+            self.truncate(id);
         }
+
+        r
     }
 }
 
@@ -228,8 +291,9 @@ where
     fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<Value> {
         match height.0.checked_sub(self.temporaries.len()) {
             None => {
-                self.evict_upvalues(height..);
-                self.temporaries.split_off(height).into()
+                let r = self.temporaries[height..].to_vec().into();
+                self.truncate(height);
+                r
             }
             Some(0) => Default::default(),
             Some(n) => {
@@ -327,6 +391,27 @@ impl<'a, Value> StackView<'a, Value> {
         self.stack.mark_as_upvalue(slot)
     }
 
+    pub fn insert(&mut self, slot: StackSlot, value: Value) {
+        let slot = self.boundary + slot;
+        self.stack.insert(slot, value)
+    }
+
+    pub fn remove_range(&mut self, range: impl RangeBounds<StackSlot>) {
+        let start = range.start_bound().mapb(|slot| self.boundary + *slot);
+        let end = range.end_bound().mapb(|slot| self.boundary + *slot);
+
+        self.stack.remove_range((start, end))
+    }
+
+    pub fn truncate(&mut self, new_len: StackSlot) {
+        let new_len = self.boundary + new_len;
+        self.stack.truncate(new_len)
+    }
+
+    pub fn clear(&mut self) {
+        self.truncate(StackSlot(0))
+    }
+
     pub(crate) fn boundary(&self) -> RawStackSlot {
         self.boundary
     }
@@ -381,30 +466,9 @@ where
         self.stack.pop()
     }
 
-    pub fn insert(&mut self, slot: StackSlot, value: Value) {
-        let slot = self.boundary + slot;
-        self.stack.insert(slot, value)
-    }
-
     pub fn remove(&mut self, slot: StackSlot) -> Option<Value> {
         let slot = self.boundary + slot;
         self.stack.remove(slot)
-    }
-
-    pub fn remove_range(&mut self, range: impl RangeBounds<StackSlot>) {
-        let start = range.start_bound().mapb(|slot| self.boundary + *slot);
-        let end = range.end_bound().mapb(|slot| self.boundary + *slot);
-
-        self.stack.remove_range((start, end))
-    }
-
-    pub fn truncate(&mut self, new_len: StackSlot) {
-        let new_len = self.boundary + new_len;
-        self.stack.truncate(new_len)
-    }
-
-    pub fn clear(&mut self) {
-        self.truncate(StackSlot(0))
     }
 }
 
