@@ -90,6 +90,91 @@
 //! assert!(matches!(heap.get(weak_a), None));
 //! assert!(matches!(heap.get(weak_b), None));
 //! ```
+//!
+//! # Common pitfalls: constructing complex objects
+//!
+//! Garbage collection triggered by [`Heap::alloc`] may happen during construction
+//! of a complex object.
+//! Any non-rooted `Gc`s inside such an object may be spuriously deallocated
+//! before the object is placed into heap.
+//!
+//! ```rust,should_panic
+//! # use gc::{Heap, Trace, Collector, Gc};
+//! #
+//! struct Complex {
+//!     a: Gc<u64>,
+//!     b: Gc<i64>,
+//! }
+//!
+//! # impl Trace for Complex {
+//! #     fn trace(&self, collector: &mut Collector) {
+//! #         let Complex { a, b, } = self;
+//! #         a.trace(collector);
+//! #         b.trace(collector);
+//! #     }
+//! # }
+//! #
+//! # let mut heap = Heap::new();
+//! #
+//! let a = heap.alloc(3).downgrade();
+//!
+//! // Oops, this allocation happened to trigger garbage collection.
+//! // `a` is not rooted and will be deallocated.
+//! # heap.gc();
+//! let b = heap.alloc(-3).downgrade();
+//!
+//! let complex = heap.alloc(Complex {
+//!     a,
+//!     b,
+//! });
+//!
+//! assert_eq!(heap.get(heap[&complex].a), Some(&3), "a is dropped :(");
+//! ```
+//!
+//! To avoid this issue you can temporarily pause garbage collection using [`Heap::pause`]:
+//!
+//! ```
+//! # use gc::{Heap, Trace, Collector, Gc};
+//! #
+//! # struct Complex {
+//! #     a: Gc<u64>,
+//! #     b: Gc<i64>,
+//! # }
+//! #
+//! # impl Trace for Complex {
+//! #     fn trace(&self, collector: &mut Collector) {
+//! #         let Complex { a, b, } = self;
+//! #         a.trace(collector);
+//! #         b.trace(collector);
+//! #     }
+//! # }
+//! #
+//! # let mut heap = Heap::new();
+//! #
+//! let weak = heap.alloc('a').downgrade();
+//!
+//! // Garbage allocation will be paused inside the closure.
+//! let complex = heap.pause(|heap| {
+//!     let a = heap.alloc(3).downgrade();
+//!  
+//!     // Even manual triggers are paused.   
+//!     heap.gc();
+//!     let b = heap.alloc(-3).downgrade();
+//!
+//!     heap.alloc(Complex {
+//!         a,
+//!         b,
+//!     })
+//! }); // If any gc pass was triggered it will happen here after closure have exited.
+//!     // `weak` have no roots left so it will be collected here.
+//!
+//! assert_eq!(heap.get(heap[&complex].a), Some(&3), "a is dropped :(");
+//! assert_eq!(heap.get(heap[&complex].b), Some(&-3), "b is dropped :(");
+//! assert_eq!(heap.get(weak), None);
+//! ```
+//!
+//! Also [`Heap::alloc`] immediately roots the object it allocates so you don't need to worry
+//! that inner references will get dropped if gc is triggered as part of the call.
 
 #![forbid(unsafe_code)]
 
@@ -138,6 +223,7 @@ pub use trace::{Trace, Untrace};
 #[derive(Default)]
 pub struct Heap {
     arenas: HashMap<TypeId, Box<dyn Arena>>,
+    status: Status,
 }
 
 impl Heap {
@@ -179,6 +265,9 @@ impl Heap {
     /// Allocate an object.
     ///
     /// This function can potentially trigger a garbage collection phase.
+    ///
+    /// The function immediately roots the object it allocates so you don't need to worry
+    /// that inner references will get dropped if gc is triggered as part of the call.
     pub fn alloc<T>(&mut self, value: T) -> Root<T>
     where
         T: Trace,
@@ -286,6 +375,11 @@ impl Heap {
     }
 
     fn gc_with(&mut self, keep_alive: &dyn Trace) {
+        if !self.status.is_enabled() {
+            self.status.trigger_gc();
+            return;
+        }
+
         let processed = {
             let (mut queue, mut processed) = self.collector();
             keep_alive.trace(&mut queue);
@@ -333,6 +427,23 @@ impl Heap {
             arena.retain(mask);
         }
     }
+
+    /// Execute closure with paused garbage collection.
+    pub fn pause<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let was_running = self.status.is_running();
+
+        if was_running {
+            self.status.pause();
+        }
+
+        let r = f(self);
+
+        if was_running && self.status.unpause() {
+            self.gc();
+        }
+
+        r
+    }
 }
 
 impl<T> Index<&Root<T>> for Heap
@@ -352,6 +463,71 @@ where
 {
     fn index_mut(&mut self, index: &Root<T>) -> &mut Self::Output {
         self.get_root_mut(index)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PauseStatus {
+    Resumed,
+    Paused,
+    PausedPendingGc,
+}
+
+impl PauseStatus {
+    fn is_running(self) -> bool {
+        match self {
+            PauseStatus::Paused | PauseStatus::PausedPendingGc => false,
+            PauseStatus::Resumed => true,
+        }
+    }
+
+    fn pending_gc(self) -> bool {
+        match self {
+            PauseStatus::Paused | PauseStatus::Resumed => false,
+            PauseStatus::PausedPendingGc => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Status {
+    is_enabled: bool,
+    pause: PauseStatus,
+}
+
+impl Status {
+    fn is_enabled(self) -> bool {
+        self.pause.is_running() && self.is_enabled
+    }
+
+    fn is_running(self) -> bool {
+        self.pause.is_running()
+    }
+
+    fn pause(&mut self) {
+        self.pause = PauseStatus::Paused;
+    }
+
+    fn unpause(&mut self) -> bool {
+        let r = self.pause.pending_gc();
+        self.pause = PauseStatus::Resumed;
+
+        r
+    }
+
+    fn trigger_gc(&mut self) {
+        if !self.is_running() {
+            self.pause = PauseStatus::PausedPendingGc;
+        }
+    }
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Status {
+            is_enabled: true,
+            pause: PauseStatus::Resumed,
+        }
     }
 }
 
