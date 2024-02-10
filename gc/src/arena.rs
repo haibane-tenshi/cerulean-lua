@@ -18,8 +18,9 @@ pub(crate) trait Arena {
 
 #[derive(Debug)]
 pub(crate) struct ArenaStore<T> {
-    values: VecList<(T, Cell<Option<Counter>>)>,
+    values: VecList<Place<T>>,
     strong_counters: Rc<RefCell<StrongCounters>>,
+    gen: usize,
 }
 
 impl<T> ArenaStore<T> {
@@ -27,23 +28,28 @@ impl<T> ArenaStore<T> {
         Self {
             values: VecList::with_capacity(10),
             strong_counters: Default::default(),
+            gen: Default::default(),
         }
     }
 
     pub(crate) fn get(&self, index: Location) -> Option<&T> {
-        let Location { index } = index;
+        let Location { index, gen } = index;
 
-        self.get_index(index)
+        self.values
+            .get(index)
+            .and_then(|place| (place.gen == gen).then_some(&place.value))
     }
 
     pub(crate) fn get_mut(&mut self, index: Location) -> Option<&mut T> {
-        let Location { index } = index;
+        let Location { index, gen } = index;
 
-        self.values.get_mut(index).map(|(value, _)| value)
+        self.values
+            .get_mut(index)
+            .and_then(|place| (place.gen == gen).then_some(&mut place.value))
     }
 
     fn get_index(&self, index: usize) -> Option<&T> {
-        self.values.get(index).map(|(value, _)| value)
+        self.values.get(index).map(|place| &place.value)
     }
 
     pub(crate) fn upgrade(&self, ptr: Gc<T>) -> Option<Root<T>> {
@@ -51,7 +57,10 @@ impl<T> ArenaStore<T> {
 
         let Gc { addr, _marker } = ptr;
 
-        let (_, counter_place) = self.values.get(addr.index)?;
+        let Place {
+            counter: counter_place,
+            ..
+        } = self.values.get(addr.index)?;
 
         let counter = match counter_place.get() {
             Some(counter) => {
@@ -77,16 +86,19 @@ impl<T> ArenaStore<T> {
 
     fn insert_weak(&mut self, value: T) -> Result<Gc<T>, T> {
         self.values
-            .try_insert((value, Default::default()))
+            .try_insert(Place::new(value, self.gen))
             .map(|index| {
                 use std::marker::PhantomData;
 
                 Gc {
-                    addr: Location { index },
+                    addr: Location {
+                        index,
+                        gen: self.gen,
+                    },
                     _marker: PhantomData,
                 }
             })
-            .map_err(|(value, _)| value)
+            .map_err(|place| place.value)
     }
 
     pub(crate) fn try_insert(&mut self, value: T) -> Result<Root<T>, T> {
@@ -124,7 +136,10 @@ where
         self.values
             .place_iter()
             .map(|value| match value {
-                Some((_, counter_place)) => match counter_place.get() {
+                Some(Place {
+                    counter: counter_place,
+                    ..
+                }) => match counter_place.get() {
                     Some(counter) => match counters.get(counter) {
                         None => false,
                         Some(0) => {
@@ -152,7 +167,28 @@ where
 
     fn retain(&mut self, indices: &BitSlice) {
         for index in indices.iter_zeros() {
-            self.values.remove(index);
+            let place = self.values.remove(index);
+
+            if let Some(Place { gen, .. }) = place {
+                self.gen = self.gen.max(gen + 1);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Place<T> {
+    value: T,
+    counter: Cell<Option<Counter>>,
+    gen: usize,
+}
+
+impl<T> Place<T> {
+    fn new(value: T, gen: usize) -> Self {
+        Place {
+            value,
+            counter: Default::default(),
+            gen,
         }
     }
 }

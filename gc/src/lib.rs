@@ -836,13 +836,29 @@ impl<T> From<Root<T>> for Gc<T> {
 ///
 /// The struct relates to [`Gc<T>`](Gc) and [`Root<T>`](Root)
 /// as `usize` address to `*const T`.
-/// It uniquely (with some caveats, read further) identifies position of allocated value,
-/// as such it implements `Ord + Hash`.
+/// It uniquely (with some caveats) identifies allocated object.
 /// However unlike `usize`,
 /// location comparisons are *only well defined between pointers of the same type*.
 /// Since `Location` does not include type information
 /// the result of comparing locations constructed out of pointers to different types
 /// is unspecified and meaningless.
+///
+/// Heap uses generations to tag pointers (and therefore `Location`s),
+/// so even if a new value is allocated at exact same memory spot
+/// `Location` of the old object will be unequal to the `Location` of the new object.
+///
+/// With this `Location` gaurantees (as long as both `lhs` and `rhs` are produced from pointers to the same type):
+///
+/// * `Eq` implementation, such that
+///
+///     `lhs == rhs` <=> both pointers are pointing to the same object
+///     or in other words trace to the same `Heap::alloc` call.
+///
+/// * `Ord` implementation
+///
+///     Actual order is unspecified but consistent with `Eq` implementation.
+///
+/// * `Hash` implementation
 ///
 /// Lastly, besides provided functionality `Location` is opaque
 /// (as it contains implementation-specific details)
@@ -850,6 +866,7 @@ impl<T> From<Root<T>> for Gc<T> {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Location {
     index: usize,
+    gen: usize,
 }
 
 impl Debug for Location {
