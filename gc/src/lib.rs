@@ -121,7 +121,7 @@ pub use trace::{Trace, Untrace};
 /// let mut heap = Heap::new();
 /// let a = heap.alloc(3_usize);
 ///
-/// assert_eq!(heap[&a], &3);
+/// assert_eq!(heap[&a], 3);
 /// ```
 ///
 /// Garbage collection can be triggered automatically on [`Heap::alloc`]
@@ -221,7 +221,9 @@ impl Heap {
     where
         T: Trace,
     {
-        todo!()
+        self.arena()
+            .and_then(|arena| arena.get(ptr.addr))
+            .expect("rooted object was deallocated")
     }
 
     /// Get `&T` out of strong reference.
@@ -231,7 +233,9 @@ impl Heap {
     where
         T: Trace,
     {
-        todo!()
+        self.arena_mut()
+            .and_then(|arena| arena.get_mut(ptr.addr))
+            .expect("rooted object was deallocated")
     }
 
     /// Upgrade weak reference into strong reference.
@@ -547,11 +551,11 @@ impl<T> Copy for Gc<T> {}
 /// ```
 /// # use gc::{Heap, Root};
 /// # let mut heap = Heap::new();
-/// # let strong = heap.alloc(3_usize);
-/// assert_eq!(heap[&strong], &4);
+/// # let strong = heap.alloc(4_usize);
+/// assert_eq!(heap[&strong], 4);
 ///
 /// heap[&strong] = 3;
-/// assert_eq!(heap[&strong], &3);
+/// assert_eq!(heap[&strong], 3);
 /// ```
 pub struct Root<T> {
     addr: Location,
@@ -592,7 +596,7 @@ impl<T> Root<T> {
     /// # let mut heap = Heap::new();
     /// # let a = heap.alloc(1_usize);
     /// # let b = heap.alloc(2_usize);
-    /// assert_eq!(Root::ptr_eq(a, b), a.addr() == b.addr());
+    /// assert_eq!(Root::ptr_eq(&a, &b), a.addr() == b.addr());
     /// ```
     pub fn ptr_eq(&self, other: &Self) -> bool {
         self.addr == other.addr
