@@ -165,7 +165,7 @@
 //!         a,
 //!         b,
 //!     })
-//! }); // If any gc pass was triggered it will happen here after closure have exited.
+//! }); // If any gc pass was triggered it will happen after closure have exited.
 //!     // `weak` have no roots left so it will be collected here.
 //!
 //! assert_eq!(heap.get(heap[&complex].a), Some(&3), "a is dropped :(");
