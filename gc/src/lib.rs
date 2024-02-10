@@ -1,5 +1,6 @@
 mod arena;
 mod trace;
+mod vec_list;
 
 use std::any::TypeId;
 use std::cell::RefCell;

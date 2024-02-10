@@ -6,6 +6,7 @@ use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
 use super::{Collector, Gc, Location, Root, Trace};
+use crate::vec_list::VecList;
 
 pub(crate) trait Arena {
     fn as_any(&self) -> &dyn Any;
@@ -17,20 +18,16 @@ pub(crate) trait Arena {
 
 #[derive(Debug)]
 pub(crate) struct ArenaStore<T> {
-    values: Vec<Place<T>>,
+    values: VecList<T>,
     strong_counters: Rc<RefCell<Vec<usize>>>,
-    next_open: Option<usize>,
 }
 
 impl<T> ArenaStore<T> {
     pub(crate) fn new() -> Self {
         let mut r = Self {
-            values: Default::default(),
-            next_open: Default::default(),
+            values: VecList::with_capacity(10),
             strong_counters: Default::default(),
         };
-
-        r.reserve(10);
 
         r
     }
@@ -44,11 +41,11 @@ impl<T> ArenaStore<T> {
     pub(crate) fn get_mut(&mut self, index: Location) -> Option<&mut T> {
         let Location { index } = index;
 
-        self.values.get_mut(index).and_then(Place::as_mut)
+        self.values.get_mut(index)
     }
 
     fn get_index(&self, index: usize) -> Option<&T> {
-        self.values.get(index).and_then(Place::as_ref)
+        self.values.get(index)
     }
 
     pub(crate) fn upgrade(&self, ptr: Gc<T>) -> Option<Root<T>> {
@@ -70,72 +67,33 @@ impl<T> ArenaStore<T> {
     }
 
     pub(crate) fn try_insert(&mut self, value: T) -> Result<Root<T>, T> {
-        use std::marker::PhantomData;
-
-        match self.next_open {
-            Some(index) => {
-                let place = self.values.get_mut(index).unwrap();
-
-                match place {
-                    Place::NextOpen(next) => {
-                        self.next_open = *next;
-                    }
-                    _ => unreachable!(),
-                }
-
-                *place = Place::Occupied(value);
-                self.strong_counters.borrow_mut()[index] = 1;
-
-                let addr = Location { index };
-
-                let r = Root {
-                    addr,
-                    strong_counters: self.strong_counters.clone(),
-                    _marker: PhantomData,
-                };
-
-                Ok(r)
-            }
-            None => Err(value),
-        }
+        self.values
+            .try_insert(value)
+            .map(|index| self.make_root(index))
     }
 
     pub(crate) fn insert(&mut self, value: T) -> Root<T> {
-        // Reserve extra.
-        self.reserve(10);
+        let index = self.values.insert(value);
 
-        let Ok(ptr) = self.try_insert(value) else {
-            unreachable!()
-        };
+        let mut counters = self.strong_counters.borrow_mut();
+        let extra = self.values.len() - counters.len();
+        counters.extend(std::iter::repeat(0).take(extra));
 
-        ptr
+        self.make_root(index)
     }
 
-    fn reserve(&mut self, len: usize) {
-        assert!(len > 0);
+    fn make_root(&self, index: usize) -> Root<T> {
+        use std::marker::PhantomData;
 
-        self.values.reserve(len);
+        let addr = Location { index };
 
-        let start = self.values.len();
-        // Fill the entire vec capacity.
-        // There is no reson not to do it.
-        let len = self.values.capacity() - start;
+        self.strong_counters.borrow_mut()[index] += 1;
 
-        if let Some(last_open) = self.values.iter_mut().rev().find_map(|place| match place {
-            Place::NextOpen(index) => Some(index),
-            Place::Occupied(_) => None,
-        }) {
-            *last_open = Some(start);
+        Root {
+            addr,
+            strong_counters: self.strong_counters.clone(),
+            _marker: PhantomData,
         }
-        self.values
-            .extend((start + 1..start + len).map(|index| Place::NextOpen(Some(index))));
-        self.values.push(Place::NextOpen(None));
-
-        self.strong_counters
-            .borrow_mut()
-            .extend(std::iter::repeat(0).take(len));
-
-        debug_assert_eq!(self.values.len(), self.strong_counters.borrow().len());
     }
 }
 
@@ -169,41 +127,8 @@ where
     }
 
     fn retain(&mut self, indices: &BitSlice) {
-        let iter = indices.iter_zeros().zip(
-            indices
-                .iter_zeros()
-                .skip(1)
-                .map(Some)
-                .chain(std::iter::repeat(None)),
-        );
-        for (index, next_open) in iter {
-            if let Some(place) = self.values.get_mut(index) {
-                *place = Place::NextOpen(next_open)
-            }
-        }
-
-        self.next_open = indices.first_zero();
-    }
-}
-
-#[derive(Debug)]
-enum Place<T> {
-    Occupied(T),
-    NextOpen(Option<usize>),
-}
-
-impl<T> Place<T> {
-    fn as_ref(&self) -> Option<&T> {
-        match self {
-            Place::Occupied(t) => Some(t),
-            Place::NextOpen(_) => None,
-        }
-    }
-
-    fn as_mut(&mut self) -> Option<&mut T> {
-        match self {
-            Place::Occupied(t) => Some(t),
-            Place::NextOpen(_) => None,
+        for index in indices.iter_zeros() {
+            self.values.remove(index);
         }
     }
 }
