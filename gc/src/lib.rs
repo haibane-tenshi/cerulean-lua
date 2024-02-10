@@ -184,13 +184,18 @@ impl Heap {
         T: Trace,
     {
         let arena = self.arena_or_insert();
-        let value = match arena.try_insert(value) {
-            Ok(ptr) => return ptr,
-            Err(value) => value,
-        };
+        match arena.try_insert(value) {
+            Ok(ptr) => ptr,
+            Err(value) => self.alloc_slow(value),
+        }
+    }
 
-        self.gc();
-
+    #[inline(never)]
+    fn alloc_slow<T>(&mut self, value: T) -> Root<T>
+    where
+        T: Trace,
+    {
+        self.gc_with(&value);
         self.arena_mut().unwrap().insert(value)
     }
 
@@ -277,8 +282,13 @@ impl Heap {
 
     /// Trigger garbage collection phase.
     pub fn gc(&mut self) {
+        self.gc_with(&())
+    }
+
+    fn gc_with(&mut self, keep_alive: &dyn Trace) {
         let processed = {
             let (mut queue, mut processed) = self.collector();
+            keep_alive.trace(&mut queue);
 
             let mut last_missed_id = None;
             for (id, arena) in self.arenas.iter().cycle() {
