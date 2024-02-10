@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Pointer};
 use std::marker::PhantomData;
+use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 
 use bitvec::vec::BitVec;
@@ -15,12 +16,32 @@ use arena::{Arena, ArenaStore, Counter, StrongCounters};
 
 pub use trace::{Trace, Untrace};
 
+/// Backing store for garbage-collected objects.
+///
+/// This type hosts all objects that are allocated within garbage collector.
+/// Creating or dereferencing any objects requires access to heap:
+///
+/// ```
+/// # use gc::{Heap};
+/// let mut heap = Heap::new();
+/// let a = heap.alloc(3_usize);
+///
+/// assert_eq!(heap[&a], &3);
+/// ```
+///
+/// Garbage collection can be triggered automatically on [`Heap::alloc`]
+/// or manually via [`Heap::gc`].
+/// We are using standard mark-and-sweep strategy.
+///
+/// Newely allocated objects return [`Root<T>`](Root) which is a strong reference,
+/// but can be downgraded into [`Gc<T>`](Gc) which is a weak reference.
 #[derive(Default)]
 pub struct Heap {
     arenas: HashMap<TypeId, Box<dyn Arena>>,
 }
 
 impl Heap {
+    /// Construct fresh heap.
     pub fn new() -> Self {
         Default::default()
     }
@@ -55,6 +76,9 @@ impl Heap {
         arena.as_any_mut().downcast_mut().unwrap()
     }
 
+    /// Allocate an object.
+    ///
+    /// This function can potentially trigger a garbage collection phase.
     pub fn alloc<T>(&mut self, value: T) -> Root<T>
     where
         T: Trace,
@@ -70,6 +94,9 @@ impl Heap {
         self.arena_mut().unwrap().insert(value)
     }
 
+    /// Get `&T` out of weak reference.
+    ///
+    /// [`Gc`] is a weak reference so it is possible that the object since was deallocated.
     pub fn get<T>(&self, ptr: Gc<T>) -> Option<&T>
     where
         T: Trace,
@@ -77,6 +104,9 @@ impl Heap {
         self.arena()?.get(ptr.addr)
     }
 
+    /// Get `&mut T` out of weak reference.
+    ///
+    /// [`Gc`] is a weak reference so it is possible that the object since was deallocated.
     pub fn get_mut<T>(&mut self, ptr: Gc<T>) -> Option<&mut T>
     where
         T: Trace,
@@ -84,6 +114,29 @@ impl Heap {
         self.arena_mut()?.get_mut(ptr.addr)
     }
 
+    /// Get `&T` out of strong reference.
+    ///
+    /// [`Root`] is a strong reference and prevents objects from being deallocated.
+    pub fn get_root<T>(&self, ptr: &Root<T>) -> &T
+    where
+        T: Trace,
+    {
+        todo!()
+    }
+
+    /// Get `&T` out of strong reference.
+    ///
+    /// [`Root`] is a strong reference and prevents objects from being deallocated.
+    pub fn get_root_mut<T>(&mut self, ptr: &Root<T>) -> &mut T
+    where
+        T: Trace,
+    {
+        todo!()
+    }
+
+    /// Upgrade weak reference into strong reference.
+    ///
+    /// The function will return `None` if object was since deallocated.
     pub fn upgrade<T>(&mut self, ptr: Gc<T>) -> Option<Root<T>>
     where
         T: Trace,
@@ -118,6 +171,7 @@ impl Heap {
         (queue, processed)
     }
 
+    /// Trigger garbage collection phase.
     pub fn gc(&mut self) {
         let processed = {
             let (mut queue, mut processed) = self.collector();
@@ -167,11 +221,33 @@ impl Heap {
     }
 }
 
+impl<T> Index<&Root<T>> for Heap
+where
+    T: Trace,
+{
+    type Output = T;
+
+    fn index(&self, index: &Root<T>) -> &Self::Output {
+        self.get_root(index)
+    }
+}
+
+impl<T> IndexMut<&Root<T>> for Heap
+where
+    T: Trace,
+{
+    fn index_mut(&mut self, index: &Root<T>) -> &mut Self::Output {
+        self.get_root_mut(index)
+    }
+}
+
+/// Intermediary keeping track of visited objects during [`Trace`]ing.
 pub struct Collector {
     masks: HashMap<TypeId, BitVec>,
 }
 
 impl Collector {
+    /// Mark an object as reachable.
     pub fn mark<T>(&mut self, ptr: Gc<T>)
     where
         T: Trace,
@@ -199,24 +275,99 @@ impl Collector {
     }
 }
 
+/// A weak reference to gc-allocated value.
+///
+/// This reference is *weak* as in it alone won't prevent value from being dropped.
+/// However when part of certainly alive object
+/// it will indicate that referencee is also alive through [`Trace`] trait.
+///
+/// Unlike [`Root`] this type implements [`Copy`].
+///
+/// Even though it claims to be a reference type there is no way to [dereference](#dereference)
+/// `Gc` directly into `&T`.
+/// As such it provides none of the related traits that you might expect like
+/// `Deref<Target = T>` or `AsRef<T>`.
+/// Also `Gc` doesn't implement `PartialEq`, `PartialOrd` or `Hash` to avoid ambiguity.
+/// Normal references and smart pointers defer implementations of those traits to referenced value
+/// which is not possible for the type.
+///
+/// If you are looking for a way to provide equivalents of `Eq`, `Ord` or `Hash`
+/// as if applied to an underlying pointer consider using [`Gc::addr`].
+///
+/// # Construct
+///
+/// Common way to construct [`Gc`] is to downgrade [`Root`]:
+///
+/// ```
+/// # use gc::{Heap, Gc, Root};
+/// # let mut heap = Heap::new();
+/// let strong = heap.alloc(3);
+/// let weak: Gc<usize> = strong.downgrade();
+/// ```
+///
+/// Converting `Gc` back to `Root` requires access to heap:
+///
+/// ```
+/// # use gc::{Heap, Gc, Root};
+/// # let mut heap = Heap::new();
+/// # let weak: Gc<usize> = heap.alloc(3).downgrade();
+/// let strong: Root<usize> = heap.upgrade(weak).expect("object is still alive");
+/// ```
+///
+/// # Dereference
+///
+/// Recovering reference to allocated object requires access to heap.
+/// Since `Gc` doesn't guarantee that an object stays alive dereference returns `Option`:
+///
+/// ```
+/// # use gc::{Heap, Gc, Root};
+/// # let mut heap = Heap::new();
+/// let weak = heap.alloc(3_usize).downgrade();
+/// assert_eq!(heap.get(weak), Some(&3));
+///
+/// // Object have no strong references left so it will be collected.
+/// heap.gc();
+/// assert_eq!(heap.get(weak), None);
+/// ```
+///
+/// You can also recover mutable reference although it requires *mutable* access to heap:
+///
+/// ```
+/// # use gc::{Heap, Gc, Root};
+/// # let mut heap = Heap::new();
+/// let weak = heap.alloc(3_usize).downgrade();
+/// assert_eq!(heap.get(weak), Some(&3));
+///
+/// let ref_mut: &mut usize = heap.get_mut(weak).expect("object is still alive");
+/// *ref_mut = 4;
+/// assert_eq!(heap.get(weak), Some(&4));
+/// ```
 pub struct Gc<T> {
     addr: Location,
     _marker: PhantomData<T>,
 }
 
 impl<T> Gc<T> {
+    /// Return location of referenced object.
+    ///
+    /// See [`Location`] struct for more information.
     pub fn addr(self) -> Location {
         self.addr
     }
 
+    /// Whether pointers refer to the same object.
+    ///
+    /// This is equivalent to comparing their locations for equality:
+    ///
+    /// ```
+    /// # use gc::{Heap, Gc};
+    /// # let mut heap = Heap::new();
+    /// # let a = heap.alloc(1_usize).downgrade();
+    /// # let b = heap.alloc(2_usize).downgrade();
+    /// assert_eq!(Gc::ptr_eq(a, b), a.addr() == b.addr());
+    /// ```
     pub fn ptr_eq(self, other: Self) -> bool {
         self.addr == other.addr
-    }
-}
-
-impl<T> Debug for Gc<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Gc").field(&self.addr()).finish()
     }
 }
 
@@ -234,6 +385,74 @@ impl<T> Clone for Gc<T> {
 
 impl<T> Copy for Gc<T> {}
 
+/// A strong reference to gc-allocated value.
+///
+/// This reference is *strong* as in it will prevent the value from being dropped
+/// while the reference exists.
+/// Internally it is implemented through reference counting which makes it similar to [`Rc`].
+/// However unlike `Rc` we don't count weak references which allows [`Gc`] to be copyable.
+///
+/// Even though it claims to be a reference type there is no way to [dereference](#dereference)
+/// `Root` directly into `&T`.
+/// As such it provides none of the related traits that you might expect like
+/// `Deref<Target = T>` or `AsRef<T>`.
+/// Also `Root` doesn't implement `PartialEq`, `PartialOrd` or `Hash` to avoid ambiguity.
+/// Normal references and smart pointers defer implementations of those traits to referenced value
+/// which is not possible for the type.
+///
+/// If you are looking for a way to provide equivalents of `Eq`, `Ord` or `Hash`
+/// as if applied to an underlying pointer consider using [`Root::addr`].
+///
+/// # Construct
+///
+/// [`Heap`] naturally returns [`Root`] after allocating a value:
+///
+/// ```
+/// # use gc::{Heap, Root};
+/// # let mut heap = Heap::new();
+/// let strong: Root<usize> = heap.alloc(3);
+/// ```
+///
+/// You can also clone already existing roots or upgrade weak references:
+///
+/// ```
+/// # use gc::{Heap, Root};
+/// # let mut heap = Heap::new();
+/// # let strong: Root<usize> = heap.alloc(3_usize);
+/// let weak = strong.downgrade();
+/// let strong = heap.upgrade(weak).expect("object is still alive");
+/// ```
+///
+/// # Dereference
+///
+/// Recovering reference to allocated object requires access to heap.
+/// Since [`Root`] guarantees that object stays alive methods return reference directly:
+///
+/// ```
+/// # use gc::{Heap, Root};
+/// # let mut heap = Heap::new();
+/// let strong = heap.alloc(3_usize);
+/// assert_eq!(heap.get_root(&strong), &3);
+///
+/// // Root prevents object from being collected.
+/// heap.gc();
+/// assert_eq!(heap.get_root(&strong), &3);
+///
+/// *heap.get_root_mut(&strong) = 4;
+/// assert_eq!(heap.get_root(&strong), &4);
+/// ```
+///
+/// Alternatively [`Heap`] can be indexed using `&Root<T>`:
+///
+/// ```
+/// # use gc::{Heap, Root};
+/// # let mut heap = Heap::new();
+/// # let strong = heap.alloc(3_usize);
+/// assert_eq!(heap[&strong], &4);
+///
+/// heap[&strong] = 3;
+/// assert_eq!(heap[&strong], &3);
+/// ```
 pub struct Root<T> {
     addr: Location,
     counter: Counter,
@@ -262,12 +481,6 @@ impl<T> Root<T> {
 
     pub fn ptr_eq(&self, other: &Self) -> bool {
         self.addr == other.addr
-    }
-}
-
-impl<T> Debug for Root<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Root").field(&self.addr()).finish()
     }
 }
 

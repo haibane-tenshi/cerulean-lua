@@ -20,6 +20,33 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::{Collector, Gc};
 
+/// Track transitive reference dependencies.
+///
+/// This trait is *safe*.
+///
+/// Correct implementor should recursively trace all of its fields
+/// to ensure that garbage collector can observe weak references owned
+/// by the type.
+///
+/// Note that an incorrect implementation does not lead to memory unsafety:
+/// garbage collector uses no unsafe code.
+/// However, failure to provide correct implementation will likely cause
+/// some objects to be collected earlier than expected,
+/// leaving *dangling* [`Gc`](Gc) *references* behind.
+/// Any attempt to dereference such reference is *safe*
+/// but will fail returning `None`.
+///
+/// The trait is implemented for most useful types in `std`.
+/// Still there is a number of types that intentionally don't provide an implementation:
+///
+/// * [`Root<T>`](crate::Root) - comitting strong reference to garbage collector potentially
+///     allows circular references that effectively leak memory similarly to [`Rc`].
+/// * Raw pointers - it isn't clear if and when those should be followed through.
+/// * Cells - correctly handling internal mutability requires additional knoweledge about how the value is used.
+///
+/// In case you have a type that cannot/should not implement `Trace`
+/// consider wrapping it in [`Untrace`].
+/// [`Untrace`] provides trivial trait implementation that doesn't propagate tracing to wrapped value.
 pub trait Trace: 'static {
     fn trace(&self, collector: &mut Collector);
 }
