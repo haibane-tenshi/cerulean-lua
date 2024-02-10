@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use bitvec::vec::BitVec;
 
-use arena::{Arena, ArenaStore};
+use arena::{Arena, ArenaStore, Counter, StrongCounters};
 
 pub use trace::{Trace, Untrace};
 
@@ -236,7 +236,8 @@ impl<T> Copy for Gc<T> {}
 
 pub struct Root<T> {
     addr: Location,
-    strong_counters: Rc<RefCell<Vec<usize>>>,
+    counter: Counter,
+    strong_counters: Rc<RefCell<StrongCounters>>,
     _marker: PhantomData<T>,
 }
 
@@ -244,6 +245,7 @@ impl<T> Root<T> {
     pub fn downgrade(&self) -> Gc<T> {
         let Root {
             addr,
+            counter: _,
             strong_counters: _,
             _marker,
         } = self;
@@ -279,14 +281,16 @@ impl<T> Clone for Root<T> {
     fn clone(&self) -> Self {
         let Root {
             addr,
+            counter,
             strong_counters,
             _marker,
         } = self;
 
-        strong_counters.borrow_mut()[addr.index] += 1;
+        strong_counters.borrow_mut().increment(*counter);
 
         Root {
             addr: *addr,
+            counter: *counter,
             strong_counters: strong_counters.clone(),
             _marker: PhantomData,
         }
@@ -295,7 +299,7 @@ impl<T> Clone for Root<T> {
 
 impl<T> Drop for Root<T> {
     fn drop(&mut self) {
-        self.strong_counters.borrow_mut()[self.addr.index] -= 1;
+        self.strong_counters.borrow_mut().decrement(self.counter);
     }
 }
 

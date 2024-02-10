@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use bitvec::slice::BitSlice;
@@ -18,18 +18,16 @@ pub(crate) trait Arena {
 
 #[derive(Debug)]
 pub(crate) struct ArenaStore<T> {
-    values: VecList<T>,
-    strong_counters: Rc<RefCell<Vec<usize>>>,
+    values: VecList<(T, Cell<Option<Counter>>)>,
+    strong_counters: Rc<RefCell<StrongCounters>>,
 }
 
 impl<T> ArenaStore<T> {
     pub(crate) fn new() -> Self {
-        let mut r = Self {
+        Self {
             values: VecList::with_capacity(10),
             strong_counters: Default::default(),
-        };
-
-        r
+        }
     }
 
     pub(crate) fn get(&self, index: Location) -> Option<&T> {
@@ -41,11 +39,11 @@ impl<T> ArenaStore<T> {
     pub(crate) fn get_mut(&mut self, index: Location) -> Option<&mut T> {
         let Location { index } = index;
 
-        self.values.get_mut(index)
+        self.values.get_mut(index).map(|(value, _)| value)
     }
 
     fn get_index(&self, index: usize) -> Option<&T> {
-        self.values.get(index)
+        self.values.get(index).map(|(value, _)| value)
     }
 
     pub(crate) fn upgrade(&self, ptr: Gc<T>) -> Option<Root<T>> {
@@ -53,12 +51,23 @@ impl<T> ArenaStore<T> {
 
         let Gc { addr, _marker } = ptr;
 
-        let _ = self.get(addr)?;
+        let (_, counter_place) = self.values.get(addr.index)?;
 
-        self.strong_counters.borrow_mut()[addr.index] += 1;
+        let counter = match counter_place.get() {
+            Some(counter) => {
+                self.strong_counters.borrow_mut().increment(counter);
+                counter
+            }
+            None => {
+                let counter = self.strong_counters.borrow_mut().insert(1);
+                counter_place.set(Some(counter));
+                counter
+            }
+        };
 
         let r = Root {
             addr,
+            counter,
             strong_counters: self.strong_counters.clone(),
             _marker: PhantomData,
         };
@@ -66,34 +75,33 @@ impl<T> ArenaStore<T> {
         Some(r)
     }
 
-    pub(crate) fn try_insert(&mut self, value: T) -> Result<Root<T>, T> {
+    fn insert_weak(&mut self, value: T) -> Result<Gc<T>, T> {
         self.values
-            .try_insert(value)
-            .map(|index| self.make_root(index))
+            .try_insert((value, Default::default()))
+            .map(|index| {
+                use std::marker::PhantomData;
+
+                Gc {
+                    addr: Location { index },
+                    _marker: PhantomData,
+                }
+            })
+            .map_err(|(value, _)| value)
+    }
+
+    pub(crate) fn try_insert(&mut self, value: T) -> Result<Root<T>, T> {
+        self.insert_weak(value)
+            .map(|ptr| self.upgrade(ptr).unwrap())
     }
 
     pub(crate) fn insert(&mut self, value: T) -> Root<T> {
-        let index = self.values.insert(value);
+        self.values.grow();
 
-        let mut counters = self.strong_counters.borrow_mut();
-        let extra = self.values.len() - counters.len();
-        counters.extend(std::iter::repeat(0).take(extra));
+        let Ok(ptr) = self.try_insert(value) else {
+            unreachable!()
+        };
 
-        self.make_root(index)
-    }
-
-    fn make_root(&self, index: usize) -> Root<T> {
-        use std::marker::PhantomData;
-
-        let addr = Location { index };
-
-        self.strong_counters.borrow_mut()[index] += 1;
-
-        Root {
-            addr,
-            strong_counters: self.strong_counters.clone(),
-            _marker: PhantomData,
-        }
+        ptr
     }
 }
 
@@ -111,10 +119,26 @@ where
     }
 
     fn roots(&self) -> BitVec {
-        self.strong_counters
-            .borrow()
-            .iter()
-            .map(|counter| *counter != 0)
+        let mut counters = self.strong_counters.borrow_mut();
+
+        self.values
+            .place_iter()
+            .map(|value| match value {
+                Some((_, counter_place)) => match counter_place.get() {
+                    Some(counter) => match counters.get(counter) {
+                        None => false,
+                        Some(0) => {
+                            counters.remove(counter);
+                            counter_place.set(None);
+
+                            false
+                        }
+                        Some(_) => true,
+                    },
+                    None => false,
+                },
+                None => false,
+            })
             .collect()
     }
 
@@ -132,3 +156,40 @@ where
         }
     }
 }
+
+#[derive(Debug, Default)]
+pub(crate) struct StrongCounters(VecList<usize>);
+
+impl StrongCounters {
+    fn insert(&mut self, value: usize) -> Counter {
+        let index = self
+            .0
+            .try_insert(value)
+            .unwrap_or_else(|_| self.0.insert(value));
+
+        Counter(index)
+    }
+
+    fn remove(&mut self, index: Counter) {
+        self.0.remove(index.0);
+    }
+
+    fn get(&self, index: Counter) -> Option<usize> {
+        self.0.get(index.0).copied()
+    }
+
+    pub(crate) fn increment(&mut self, index: Counter) {
+        if let Some(counter) = self.0.get_mut(index.0) {
+            *counter += 1;
+        }
+    }
+
+    pub(crate) fn decrement(&mut self, index: Counter) {
+        if let Some(counter) = self.0.get_mut(index.0) {
+            *counter -= 1;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Counter(usize);

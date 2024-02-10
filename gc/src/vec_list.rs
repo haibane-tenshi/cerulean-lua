@@ -25,9 +25,9 @@ impl<T> VecList<T> {
             .count()
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.values.len()
-    }
+    // pub(crate) fn len(&self) -> usize {
+    //     self.values.len()
+    // }
 
     pub(crate) fn grow(&mut self) {
         let extra = if self.values.is_empty() {
@@ -108,6 +108,14 @@ impl<T> VecList<T> {
             None
         }
     }
+
+    pub(crate) fn place_iter(&self) -> impl Iterator<Item = Option<&T>> {
+        self.values.iter().map(|place| place.as_ref())
+    }
+
+    // pub(crate) fn place_iter_mut(&mut self) -> impl Iterator<Item = Option<&mut T>> {
+    //     self.values.iter_mut().map(|place| place.as_mut())
+    // }
 }
 
 impl<T> Default for VecList<T> {
