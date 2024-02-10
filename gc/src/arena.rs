@@ -5,7 +5,7 @@ use std::rc::Rc;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
-use super::{Collector, Gc, Root, Trace};
+use super::{Collector, Gc, Location, Root, Trace};
 
 pub(crate) trait Arena {
     fn as_any(&self) -> &dyn Any;
@@ -35,23 +35,33 @@ impl<T> ArenaStore<T> {
         r
     }
 
-    pub(crate) fn get(&self, index: usize) -> Option<&T> {
-        self.values.get(index).and_then(Place::as_ref)
+    pub(crate) fn get(&self, index: Location) -> Option<&T> {
+        let Location { index } = index;
+
+        self.get_index(index)
     }
 
-    pub(crate) fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+    pub(crate) fn get_mut(&mut self, index: Location) -> Option<&mut T> {
+        let Location { index } = index;
+
         self.values.get_mut(index).and_then(Place::as_mut)
+    }
+
+    fn get_index(&self, index: usize) -> Option<&T> {
+        self.values.get(index).and_then(Place::as_ref)
     }
 
     pub(crate) fn upgrade(&self, ptr: Gc<T>) -> Option<Root<T>> {
         use std::marker::PhantomData;
 
-        let _ = self.values.get(ptr.index)?.as_ref()?;
+        let Gc { addr, _marker } = ptr;
 
-        self.strong_counters.borrow_mut()[ptr.index] += 1;
+        let _ = self.get(addr)?;
+
+        self.strong_counters.borrow_mut()[addr.index] += 1;
 
         let r = Root {
-            index: ptr.index,
+            addr,
             strong_counters: self.strong_counters.clone(),
             _marker: PhantomData,
         };
@@ -76,8 +86,10 @@ impl<T> ArenaStore<T> {
                 *place = Place::Occupied(value);
                 self.strong_counters.borrow_mut()[index] = 1;
 
+                let addr = Location { index };
+
                 let r = Root {
-                    index,
+                    addr,
                     strong_counters: self.strong_counters.clone(),
                     _marker: PhantomData,
                 };
@@ -150,7 +162,7 @@ where
 
     fn trace(&self, indices: &BitSlice, collector: &mut Collector) {
         for index in indices.iter_ones() {
-            if let Some(value) = self.get(index) {
+            if let Some(value) = self.get_index(index) {
                 value.trace(collector)
             }
         }
