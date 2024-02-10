@@ -1,3 +1,98 @@
+//! Entirely safe generic garbage collector implementation
+//!
+//! This crate contains no unsafe code.
+//!
+//! # Quick start
+//!
+//! You need to implement [`Trace`] trait for your type so that gc can traverse it:
+//!
+//! ```
+//! use gc::{Gc, Trace, Collector};
+//!
+//! #[derive(Default)]
+//! struct BinaryTree {
+//!     left: Option<Gc<Self>>,
+//!     right: Option<Gc<Self>>,
+//! }
+//!
+//! impl Trace for BinaryTree {
+//!     fn trace(&self, collector: &mut Collector) {
+//!         let BinaryTree {
+//!             left,
+//!             right
+//!         } = self;
+//!
+//!         left.trace(collector);
+//!         right.trace(collector);
+//!     }
+//! }
+//! ```
+//!
+//! Note that this is a *safe* trait.
+//! Even if you implement it incorrectly there is no way for you to cause memory unsafety.
+//! An incorrect implementation may cause some objects to be collected too early,
+//! but this will be [exposed](Gc#dereference) to you when you try to recover references from heap.
+//!
+//! Any type implementing `Trace` can be allocated:
+//!
+//! ```
+//! # use gc::{Gc, Trace, Collector};
+//! #
+//! # #[derive(Default)]
+//! # struct BinaryTree {
+//! #     left: Option<Gc<Self>>,
+//! #     right: Option<Gc<Self>>,
+//! # }
+//! #
+//! # impl Trace for BinaryTree {
+//! #     fn trace(&self, collector: &mut Collector) {
+//! #         let BinaryTree {
+//! #             left,
+//! #             right
+//! #         } = self;
+//! #
+//! #         left.trace(collector);
+//! #         right.trace(collector);
+//! #     }
+//! # }
+//! use gc::Heap;
+//!
+//! let mut heap = Heap::new();
+//!
+//! let a = heap.alloc(BinaryTree::default());
+//! let b = heap.alloc(BinaryTree::default());
+//!
+//! heap[&a].left = Some(b.downgrade());
+//! heap[&b].right = Some(b.downgrade());
+//!
+//! // Oops, this is no longer a tree :(
+//! heap[&b].left = Some(a.downgrade());
+//! ```
+//!
+//! [`Heap::alloc`] returns a [`Root`] - a strong reference that prevents object from being deallocated.
+//! You can downgrade them into weak references - [`Gc`],
+//! but if an object is not reachable from one of the roots it will be considered garbage and collected:
+//!
+//! ```
+//! # use gc::{Heap, Gc};
+//! # let mut heap = Heap::new();
+//! # let a = heap.alloc(3_usize);
+//! # let b = heap.alloc(3_usize);
+//! // Drop strong references leaving only weak ones.
+//! let weak_a: Gc<_> = a.downgrade();
+//! let weak_b: Gc<_> = b.downgrade();
+//!
+//! drop(a);
+//! drop(b);
+//!
+//! heap.gc();
+//!
+//! assert!(matches!(heap.get(weak_a), None));
+//! assert!(matches!(heap.get(weak_b), None));
+//! ```
+
+#![forbid(unsafe_code)]
+
 mod arena;
 mod trace;
 mod vec_list;
@@ -35,6 +130,11 @@ pub use trace::{Trace, Untrace};
 ///
 /// Newely allocated objects return [`Root<T>`](Root) which is a strong reference,
 /// but can be downgraded into [`Gc<T>`](Gc) which is a weak reference.
+///
+/// Result of dereferencing a pointer constructed in a different heap is unspecified,
+/// but guaranteed to be *safe*.
+/// It may or may not return a valid reference if an object is found at the location
+/// or invoke panic.
 #[derive(Default)]
 pub struct Heap {
     arenas: HashMap<TypeId, Box<dyn Arena>>,
@@ -461,6 +561,7 @@ pub struct Root<T> {
 }
 
 impl<T> Root<T> {
+    /// Downgrade into weak reference.
     pub fn downgrade(&self) -> Gc<T> {
         let Root {
             addr,
@@ -475,10 +576,24 @@ impl<T> Root<T> {
         }
     }
 
+    /// Return location of referenced object.
+    ///
+    /// See [`Location`] struct for more information.
     pub fn addr(&self) -> Location {
         self.addr
     }
 
+    /// Whether pointers refer to the same object.
+    ///
+    /// This is equivalent to comparing their locations for equality:
+    ///
+    /// ```
+    /// # use gc::{Heap, Root};
+    /// # let mut heap = Heap::new();
+    /// # let a = heap.alloc(1_usize);
+    /// # let b = heap.alloc(2_usize);
+    /// assert_eq!(Root::ptr_eq(a, b), a.addr() == b.addr());
+    /// ```
     pub fn ptr_eq(&self, other: &Self) -> bool {
         self.addr == other.addr
     }
