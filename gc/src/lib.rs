@@ -1,6 +1,66 @@
-//! Entirely safe generic garbage collector implementation
+//! Entirely safe generic garbage collector implementation.
 //!
 //! This crate contains no unsafe code.
+//!
+//! Design of this garbage collector is heavily inspired by [`safe-rs`][docs.rs:safe-rs].
+//!
+//! [docs.rs:safe-rs]: https://docs.rs/safe-gc/latest/safe_gc/
+//!
+//! # Overview
+//!
+//! [`Heap`] is the core type which manages memory and allocated objects.
+//! The memory itself is represented by a vec with potential "holes" left after deallocated objects.
+//!
+//! There are two reference types:
+//!
+//! * [`Root<T>`](Root) is a *strong* reference which keeps the pointed-to object alive.
+//!
+//!     Internally `Root`s are counted which makes them similar to [`Rc`].
+//!     Because of this roots implement `Clone` but not `Copy`.
+//!
+//!     You are expected to keep roots outside of the heap so it doesn't implement [`Trace`].
+//!
+//! * [`Gc<T>`](Gc) is a *weak* reference.
+//!     It doesn't prevent pointed-to object from being deallocated unless it can trace to a root.
+//!
+//!     `Gc` is implemented as a lightweight index and is `Copy`able
+//!     which makes it different from [`Weak`](std::rc::Weak) references.
+//!
+//!     To keep behavior consistent `Gc`s also contain *generation* tag,
+//!     so weak reference will dangle once the object is deallocated
+//!     even if another object is later placed in exact same memory.
+//!
+//! Tracing of weak references is expressed via [`Trace`] trait.
+//! An object is required to implement `Trace` in order to get allocated inside heap.
+//!
+//! The trait is *safe* to implement.
+//! There is no memory unsafety or undefined behavior incorrect implementation may cause:
+//! this crate uses no unsafe code.
+//! It doesn't mean correctness is irrelevant -
+//! missed objects will be considered garbage and potentially collected while still in use.
+//!
+//! The primary limitation of purely safe approach is how allocated objects are accessed.
+//! Dereferencing our pointers *requires access to heap*:
+//!
+//! ```
+//! # gc::{Heap};
+//! # let mut heap = Heap::new();
+//! let ptr = heap.alloc(3_usize);
+//!
+//! // Need heap to dereference
+//! assert_eq!(heap[&ptr], 3);
+//! ```
+//!
+//! With this it might be better to imagine `Heap` as a sort of map (analogous to `HashMap` or `BTreeMap`)
+//! of reference-counted `(Gc<T>, T)` pairs.
+//!
+//! ## Differences from `safe-rs`
+//!
+//! * Dereferencing weak pointers returns `Option<&T>`.
+//!     It is expected that lookup might fail and produce no reference instead of panicking.
+//! * Some internal implementation details are quite different
+//!     in particular handling of strong references and presence of generation tag.
+//! * Overall API surface is more developed due to its actual use in a Lua interpreter.
 //!
 //! # Quick start
 //!
@@ -28,12 +88,9 @@
 //! }
 //! ```
 //!
-//! Note that this is a *safe* trait.
-//! Even if you implement it incorrectly there is no way for you to cause memory unsafety.
-//! An incorrect implementation may cause some objects to be collected too early,
-//! but this will be [exposed](Gc#dereference) to you when you try to recover references from heap.
+//! Currently there is no derive macro to do it for you yet.
 //!
-//! Any type implementing `Trace` can be allocated:
+//! Now objects of this type can be allocated:
 //!
 //! ```
 //! # use gc::{Gc, Trace, Collector};
@@ -90,6 +147,9 @@
 //! assert!(matches!(heap.get(weak_a), None));
 //! assert!(matches!(heap.get(weak_b), None));
 //! ```
+//!
+//! Notice how dereferencing weak pointer returns `Option<&T>` and not `&T` directly.
+//! It is expected that weak references might get deallocated while you are not looking.
 //!
 //! # Common pitfalls: constructing complex objects
 //!
