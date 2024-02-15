@@ -2,22 +2,24 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use gc::Trace;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::{Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, TypeProvider, Value};
-use crate::error::BorrowError;
-use crate::gc::{Gc as GarbageCollector, Visit};
+use super::{
+    Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, TypeProvider, Types, Value, Weak,
+};
 
-pub struct Table<Gc: TypeProvider> {
-    data: HashMap<KeyValue<Gc>, Value<Gc>>,
-    metatable: Option<Gc::TableRef>,
+pub struct Table<Ty: Types> {
+    data: HashMap<KeyValue<Ty>, Value<Ty>>,
+    metatable: Option<Ty::Table>,
 }
 
 impl<Gc> TableIndex<Gc> for Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     KeyValue<Gc>: Hash + Eq,
+    Value<Gc>: Clone,
 {
     fn get(&self, key: &KeyValue<Gc>) -> Value<Gc> {
         self.data.get(key).cloned().unwrap_or_default()
@@ -45,7 +47,7 @@ where
 
 impl<Gc> Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     KeyValue<Gc>: Hash + Eq,
     Value<Gc>: Clone,
 {
@@ -56,7 +58,7 @@ where
 
 impl<Gc> Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     KeyValue<Gc>: Hash + Eq,
 {
     pub fn get_ref<'s>(&'s self, key: &KeyValue<Gc>) -> Option<&'s Value<Gc>> {
@@ -87,43 +89,58 @@ where
 }
 impl<Gc> Table<Gc>
 where
-    Gc: TypeProvider,
-    Gc::TableRef: Clone,
+    Gc: Types,
+    Gc::Table: Clone,
 {
-    pub fn metatable(&self) -> Option<Gc::TableRef> {
+    pub fn metatable(&self) -> Option<Gc::Table> {
         self.metatable.clone()
     }
 }
 
 impl<Gc> Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
-    pub fn set_metatable(&mut self, metatable: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
+    pub fn set_metatable(&mut self, metatable: Option<Gc::Table>) -> Option<Gc::Table> {
         std::mem::replace(&mut self.metatable, metatable)
     }
 }
 
-impl<Gc> Metatable<Gc::TableRef> for Table<Gc>
+impl<Gc> Metatable<Gc::Table> for Table<Gc>
 where
-    Gc: TypeProvider,
-    Gc::TableRef: Clone,
+    Gc: Types,
+    Gc::Table: Clone,
 {
-    fn metatable(&self) -> Option<Gc::TableRef> {
+    fn metatable(&self) -> Option<Gc::Table> {
         Table::metatable(self)
     }
 
-    fn set_metatable(&mut self, mt: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
+    fn set_metatable(&mut self, mt: Option<Gc::Table>) -> Option<Gc::Table> {
         Table::set_metatable(self, mt)
+    }
+}
+
+impl<Ty> Trace for Table<Weak<Ty>>
+where
+    Ty: TypeProvider + 'static,
+    Ty::String: Trace,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        for (key, value) in self.data.iter() {
+            key.trace(collector);
+            value.trace(collector);
+        }
+
+        self.metatable.trace(collector);
     }
 }
 
 impl<Gc> Debug for Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     KeyValue<Gc>: Debug,
     Value<Gc>: Debug,
-    Gc::TableRef: Debug,
+    Gc::Table: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Table")
@@ -135,10 +152,10 @@ where
 
 impl<Gc> Clone for Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     KeyValue<Gc>: Clone,
     Value<Gc>: Clone,
-    Gc::TableRef: Clone,
+    Gc::Table: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -150,10 +167,10 @@ where
 
 impl<Gc> PartialEq for Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     KeyValue<Gc>: Hash + Eq,
     Value<Gc>: PartialEq,
-    Gc::TableRef: PartialEq,
+    Gc::Table: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.data == other.data && self.metatable == other.metatable
@@ -162,7 +179,7 @@ where
 
 impl<Gc> Default for Table<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
     fn default() -> Self {
         Self {
@@ -172,37 +189,46 @@ where
     }
 }
 
-impl<Gc> Visit<Gc::Sweeper<'_>> for Table<Gc>
-where
-    Gc: GarbageCollector<Table = Self>,
-{
-    fn visit(&self, sweeper: &mut Gc::Sweeper<'_>) -> Result<(), BorrowError> {
-        for (key, value) in self.data.iter() {
-            key.visit(sweeper)?;
-            value.visit(sweeper)?;
-        }
-
-        Ok(())
-    }
-}
-
-pub enum KeyValue<Gc: TypeProvider> {
+pub enum KeyValue<Ty: Types> {
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
-    String(Gc::StringRef),
-    Function(Callable<Gc::RustCallable>),
-    Table(Gc::TableRef),
-    Userdata(Gc::FullUserdataRef),
+    String(Ty::String),
+    Function(Callable<Ty>),
+    Table(Ty::Table),
+    Userdata(Ty::FullUserdata),
 }
 
-impl<Gc> Debug for KeyValue<Gc>
+impl<Ty> Trace for KeyValue<Ty>
 where
-    Gc: TypeProvider,
-    Gc::StringRef: Debug,
-    Gc::RustCallable: Debug,
-    Gc::TableRef: Debug,
-    Gc::FullUserdataRef: Debug,
+    Ty: Types + 'static,
+    Ty::String: Trace,
+    Ty::LuaCallable: Trace,
+    Ty::RustCallable: Trace,
+    Ty::Table: Trace,
+    Ty::FullUserdata: Trace,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        use KeyValue::*;
+
+        match self {
+            Bool(_) | Int(_) | Float(_) => (),
+            String(t) => t.trace(collector),
+            Function(t) => t.trace(collector),
+            Table(t) => t.trace(collector),
+            Userdata(t) => t.trace(collector),
+        }
+    }
+}
+
+impl<Ty> Debug for KeyValue<Ty>
+where
+    Ty: Types,
+    Ty::String: Debug,
+    Ty::LuaCallable: Debug,
+    Ty::RustCallable: Debug,
+    Ty::Table: Debug,
+    Ty::FullUserdata: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -219,11 +245,12 @@ where
 
 impl<Gc> Clone for KeyValue<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     Gc::String: Clone,
+    Gc::LuaCallable: Clone,
     Gc::RustCallable: Clone,
-    Gc::TableRef: Clone,
-    Gc::FullUserdataRef: Clone,
+    Gc::Table: Clone,
+    Gc::FullUserdata: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -241,11 +268,12 @@ where
 
 impl<Gc> PartialEq for KeyValue<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     Gc::String: PartialEq,
+    Gc::LuaCallable: PartialEq,
     Gc::RustCallable: PartialEq,
-    Gc::TableRef: PartialEq,
-    Gc::FullUserdataRef: PartialEq,
+    Gc::Table: PartialEq,
+    Gc::FullUserdata: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -263,21 +291,23 @@ where
 
 impl<Gc> Eq for KeyValue<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     Gc::String: Eq,
+    Gc::LuaCallable: Eq,
     Gc::RustCallable: Eq,
-    Gc::TableRef: Eq,
-    Gc::FullUserdataRef: Eq,
+    Gc::Table: Eq,
+    Gc::FullUserdata: Eq,
 {
 }
 
 impl<Gc> Hash for KeyValue<Gc>
 where
-    Gc: TypeProvider,
-    Gc::StringRef: Hash,
+    Gc: Types,
+    Gc::String: Hash,
+    Gc::LuaCallable: Hash,
     Gc::RustCallable: Hash,
-    Gc::TableRef: Hash,
-    Gc::FullUserdataRef: Hash,
+    Gc::Table: Hash,
+    Gc::FullUserdata: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         use KeyValue::*;
@@ -293,31 +323,6 @@ where
             Table(val) => val.hash(state),
             Userdata(val) => val.hash(state),
         }
-    }
-}
-
-impl<Gc> Visit<Gc::Sweeper<'_>> for KeyValue<Gc>
-where
-    Gc: GarbageCollector,
-    Gc::Table: for<'a> Visit<Gc::Sweeper<'a>>,
-{
-    fn visit(&self, sweeper: &mut Gc::Sweeper<'_>) -> Result<(), BorrowError> {
-        use crate::gc::Sweeper;
-        use std::ops::ControlFlow;
-        use KeyValue::*;
-
-        match self {
-            Bool(_) | Int(_) | Float(_) | Function(_) => (),
-            String(t) => sweeper.mark_string(t),
-            Table(t) => {
-                if let ControlFlow::Continue(_) = sweeper.mark_table(t) {
-                    crate::gc::visit_borrow(t, sweeper)?;
-                }
-            }
-            Userdata(t) => sweeper.mark_userdata(t),
-        }
-
-        Ok(())
     }
 }
 
@@ -338,7 +343,7 @@ impl InvalidTableKeyError {
 
 impl<Gc> TryFrom<Value<Gc>> for KeyValue<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
     type Error = InvalidTableKeyError;
 
@@ -363,7 +368,7 @@ where
 
 impl<Gc> From<KeyValue<Gc>> for Value<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
     fn from(value: KeyValue<Gc>) -> Self {
         match value {
@@ -382,10 +387,10 @@ pub struct LuaTable<T>(pub T);
 
 impl<Gc, T> TryInto<LuaTable<T>> for Value<Gc>
 where
-    Gc: TypeProvider,
-    Gc::TableRef: TryInto<T>,
+    Gc: Types,
+    Gc::Table: TryInto<T>,
 {
-    type Error = TypeMismatchOrError<<Gc::TableRef as TryInto<T>>::Error>;
+    type Error = TypeMismatchOrError<<Gc::Table as TryInto<T>>::Error>;
 
     fn try_into(self) -> Result<LuaTable<T>, Self::Error> {
         match self {
@@ -409,8 +414,8 @@ where
 
 impl<Gc, T> From<LuaTable<T>> for Value<Gc>
 where
-    Gc: TypeProvider,
-    Gc::TableRef: From<T>,
+    Gc: Types,
+    Gc::Table: From<T>,
 {
     fn from(value: LuaTable<T>) -> Self {
         let LuaTable(value) = value;

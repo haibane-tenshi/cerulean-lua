@@ -3,21 +3,24 @@ use std::ffi::OsString;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
-use super::{Concat, Len, TypeMismatchOrError, TypeProvider, Value};
+use gc::Trace;
+
+use super::{Concat, Len, TypeMismatchOrError, Types, Value};
+use crate::gc::{TryFromWithGc, TryIntoWithGc};
 
 pub struct LuaString<T>(pub T);
 
-impl<T, Gc> TryFrom<Value<Gc>> for LuaString<T>
+impl<T, Ty, Gc> TryFromWithGc<Value<Ty>, Gc> for LuaString<T>
 where
-    Gc: TypeProvider,
-    Gc::StringRef: TryInto<T>,
+    Ty: Types,
+    Ty::String: TryIntoWithGc<T, Gc>,
 {
-    type Error = TypeMismatchOrError<<Gc::StringRef as TryInto<T>>::Error>;
+    type Error = TypeMismatchOrError<<Ty::String as TryIntoWithGc<T, Gc>>::Error>;
 
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: Value<Ty>, gc: &mut Gc) -> Result<Self, Self::Error> {
         match value {
             Value::String(t) => {
-                let r = t.try_into().map_err(TypeMismatchOrError::Other)?;
+                let r = t.try_into_with_gc(gc).map_err(TypeMismatchOrError::Other)?;
                 Ok(LuaString(r))
             }
             value => {
@@ -36,8 +39,8 @@ where
 
 impl<T, Gc> From<LuaString<T>> for Value<Gc>
 where
-    Gc: TypeProvider,
-    T: Into<Gc::StringRef>,
+    Gc: Types,
+    T: Into<Gc::String>,
 {
     fn from(value: LuaString<T>) -> Self {
         let LuaString(value) = value;
@@ -48,6 +51,10 @@ where
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct PossiblyUtf8Vec(pub Vec<u8>);
+
+impl Trace for PossiblyUtf8Vec {
+    fn trace(&self, _collector: &mut gc::Collector) {}
+}
 
 impl Len for PossiblyUtf8Vec {
     fn len(&self) -> usize {

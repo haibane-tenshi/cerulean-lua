@@ -57,19 +57,19 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
+            use gc::Heap;
             use rt::chunk_cache::ChunkId;
             use rt::chunk_cache::{MainCache, SingleChunk, VecCache};
             use rt::runtime::{Core, DialectBuilder, Runtime};
-            // use rt::value::table::TableRef;
-            use rt::gc::{Gc, RcGc};
+            use rt::value::traits::DefaultTypes;
             use rt::value::Value;
 
             let (env_chunk, builder) = rt::global_env::empty()
                 .include(rt::global_env::assert())
                 .include(rt::global_env::pcall())
                 .include(rt::global_env::print())
-                .include(rt::global_env::load())
-                .include(rt::global_env::loadfile())
+                // .include(rt::global_env::load())
+                // .include(rt::global_env::loadfile())
                 .include(rt::global_env::setmetatable())
                 .include(rt::global_env::getmetatable())
                 .finish();
@@ -87,14 +87,14 @@ fn main() -> Result<()> {
                 global_env: Value::Nil,
                 primitive_metatables: Default::default(),
                 dialect: DialectBuilder::lua_5_4(),
-                gc: RcGc::new(),
+                gc: Heap::new(),
             };
 
-            let mut runtime = Runtime::new(chunk_cache, core);
+            let mut runtime = Runtime::<DefaultTypes, _>::new(chunk_cache, core);
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0), ())?;
-                runtime.core.global_env = Value::Table(runtime.core.gc.alloc_table(global_env));
+                runtime.core.global_env = Value::Table(global_env);
 
                 runtime.view().invoke(rt::ffi::call_file(&path))
             };

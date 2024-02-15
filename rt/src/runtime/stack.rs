@@ -7,7 +7,7 @@ use repr::tivec::{TiSlice, TiVec};
 
 use super::{Event, MapBound};
 use crate::error::opcode::MissingArgsError;
-use crate::value::{TypeProvider, Value};
+use crate::value::{Types, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct RawStackSlot(usize);
@@ -551,7 +551,7 @@ where
 
 impl<'a, Gc> StackView<'a, Value<Gc>>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     Value<Gc>: Clone,
 {
     pub(crate) fn adjust_event_returns(&mut self, event: Event) {

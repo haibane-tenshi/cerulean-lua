@@ -164,28 +164,31 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
+use gc::Heap;
+
 use super::Maybe;
-use crate::value::{TypeProvider, Value};
+use crate::gc::{IntoWithGc, TryIntoWithGc};
+use crate::value::{Types, Value};
 use sealed::{BubbleUp, Sealed};
 
 /// Attempt to parse `Args` out of list of values.
 ///
 /// See module level [documentation](self#parsing-arguments) for usage explanation.
-pub trait ParseArgs<Values>: Sealed {
+pub trait ParseArgs<Values, Gc>: Sealed {
     type Error: Error;
 
-    fn parse(self) -> Result<Values, ParseError<Self::Error>>;
+    fn parse(self, gc: &mut Gc) -> Result<Values, ParseError<Self::Error>>;
 }
 
-impl<'a, Value, Values> ParseArgs<Values> for &'a [Value]
+impl<'a, Value, Values, Gc> ParseArgs<Values, Gc> for &'a [Value]
 where
-    Self: ExtractArgs<Values>,
-    <<Self as ExtractArgs<Values>>::Error as BubbleUp>::Output: Error,
+    Self: ExtractArgs<Values, Gc>,
+    <<Self as ExtractArgs<Values, Gc>>::Error as BubbleUp>::Output: Error,
 {
-    type Error = <<Self as ExtractArgs<Values>>::Error as BubbleUp>::Output;
+    type Error = <<Self as ExtractArgs<Values, Gc>>::Error as BubbleUp>::Output;
 
-    fn parse(self) -> Result<Values, ParseError<Self::Error>> {
-        match self.extract() {
+    fn parse(self, gc: &mut Gc) -> Result<Values, ParseError<Self::Error>> {
+        match self.extract(gc) {
             Ok((view, args)) if view.is_empty() => Ok(args),
             Ok((view, _)) => {
                 let expected = self.len() - view.len();
@@ -259,45 +262,45 @@ where
 impl<E> Error for ParseError<E> where Self: Debug + Display {}
 
 #[doc(hidden)]
-pub trait ExtractArgs<Values>: Sealed + Sized {
+pub trait ExtractArgs<Values, Gc>: Sealed + Sized {
     type Error: BubbleUp;
 
-    fn extract(self) -> Result<(Self, Values), Self::Error>;
+    fn extract(self, gc: &mut Gc) -> Result<(Self, Values), Self::Error>;
 }
 
-impl<'a, Value> ExtractArgs<()> for &'a [Value] {
+impl<'a, Value, Gc> ExtractArgs<(), Gc> for &'a [Value] {
     type Error = std::convert::Infallible;
 
-    fn extract(self) -> Result<(Self, ()), Self::Error> {
+    fn extract(self, _gc: &mut Gc) -> Result<(Self, ()), Self::Error> {
         Ok((self, ()))
     }
 }
 
-impl<'a, Value, A> ExtractArgs<(A,)> for &'a [Value]
+impl<'a, Value, Gc, A> ExtractArgs<(A,), Gc> for &'a [Value]
 where
-    Self: ExtractArgs<A>,
+    Self: ExtractArgs<A, Gc>,
 {
-    type Error = <Self as ExtractArgs<A>>::Error;
+    type Error = <Self as ExtractArgs<A, Gc>>::Error;
 
-    fn extract(self) -> Result<(Self, (A,)), Self::Error> {
-        let (view, a) = self.extract()?;
+    fn extract(self, gc: &mut Gc) -> Result<(Self, (A,)), Self::Error> {
+        let (view, a) = self.extract(gc)?;
         Ok((view, (a,)))
     }
 }
 
 macro_rules! extract_tuple {
     ($error:ident, $($t:ident),*) => {
-        impl<'a, Value, $($t),*> ExtractArgs<($($t),*)> for &'a [Value]
+        impl<'a, Value, Gc, $($t),*> ExtractArgs<($($t),*), Gc> for &'a [Value]
         where
-            Self: $(ExtractArgs<$t>+)*,
+            Self: $(ExtractArgs<$t, Gc>+)*,
         {
-            type Error = $error<$(<Self as ExtractArgs<$t>>::Error),*>;
+            type Error = $error<$(<Self as ExtractArgs<$t, Gc>>::Error),*>;
 
-            fn extract(self) -> Result<(Self, ($($t),*)), Self::Error> {
+            fn extract(self, gc: &mut Gc) -> Result<(Self, ($($t),*)), Self::Error> {
                 let view = self;
                 $(
                     #[allow(non_snake_case)]
-                    let (view, $t) = view.extract().map_err($error::$t)?;
+                    let (view, $t) = view.extract(gc).map_err($error::$t)?;
                 )*
                 Ok((view, ($($t),*)))
             }
@@ -317,38 +320,38 @@ extract_tuple!(Error10, A, B, C, D, E, F, G, H, I, J);
 extract_tuple!(Error11, A, B, C, D, E, F, G, H, I, J, K);
 extract_tuple!(Error12, A, B, C, D, E, F, G, H, I, J, K, L);
 
-impl<'a, Value, T> ExtractArgs<Maybe<T>> for &'a [Value]
+impl<'a, Value, Gc, T> ExtractArgs<Maybe<T>, Gc> for &'a [Value]
 where
-    Self: ExtractArgs<T>,
+    Self: ExtractArgs<T, Gc>,
 {
     type Error = std::convert::Infallible;
 
-    fn extract(self) -> Result<(Self, Maybe<T>), Self::Error> {
-        match self.extract().ok() {
+    fn extract(self, gc: &mut Gc) -> Result<(Self, Maybe<T>), Self::Error> {
+        match self.extract(gc).ok() {
             Some((view, value)) => Ok((view, Maybe::Some(value))),
             None => Ok((self, Maybe::None)),
         }
     }
 }
 
-impl<'a, Value, T, const N: usize> ExtractArgs<[T; N]> for &'a [Value]
+impl<'a, Value, Gc, T, const N: usize> ExtractArgs<[T; N], Gc> for &'a [Value]
 where
-    Self: ExtractArgs<T>,
+    Self: ExtractArgs<T, Gc>,
 {
-    type Error = <Self as ExtractArgs<T>>::Error;
+    type Error = <Self as ExtractArgs<T, Gc>>::Error;
 
-    fn extract(mut self) -> Result<(Self, [T; N]), Self::Error> {
+    fn extract(mut self, gc: &mut Gc) -> Result<(Self, [T; N]), Self::Error> {
         // Unfortunately std::array::try_from_fn is still unstable.
         // The following is ugly... but best we can do for now without unsafe.
         let r = std::array::from_fn(|_| {
-            self.extract().map(|(view, value)| {
+            self.extract(gc).map(|(view, value)| {
                 self = view;
                 value
             })
         });
 
         if r.iter().any(|t| t.is_err()) {
-            let Err(err) = self.extract() else {
+            let Err(err) = self.extract(gc) else {
                 unreachable!()
             };
             return Err(err);
@@ -364,15 +367,15 @@ where
     }
 }
 
-impl<'a, Value, T> ExtractArgs<Vec<T>> for &'a [Value]
+impl<'a, Value, Gc, T> ExtractArgs<Vec<T>, Gc> for &'a [Value]
 where
-    Self: ExtractArgs<T>,
+    Self: ExtractArgs<T, Gc>,
 {
     type Error = std::convert::Infallible;
 
-    fn extract(mut self) -> Result<(Self, Vec<T>), Self::Error> {
+    fn extract(mut self, gc: &mut Gc) -> Result<(Self, Vec<T>), Self::Error> {
         let r = std::iter::from_fn(|| {
-            self.extract().ok().map(|(view, value)| {
+            self.extract(gc).ok().map(|(view, value)| {
                 self = view;
                 value
             })
@@ -383,20 +386,23 @@ where
     }
 }
 
-impl<'a, Gc, T> ExtractArgs<T> for &'a [Value<Gc>]
+impl<'a, Ty, T> ExtractArgs<T, Heap> for &'a [Value<Ty>]
 where
-    Gc: TypeProvider,
-    Value<Gc>: TryInto<T>,
-    <Value<Gc> as TryInto<T>>::Error: Error,
+    Ty: Types,
+    Value<Ty>: Clone + TryIntoWithGc<T, Heap>,
+    <Value<Ty> as TryIntoWithGc<T, Heap>>::Error: Error,
 {
-    type Error = MissingArg<<Value<Gc> as TryInto<T>>::Error>;
+    type Error = MissingArg<<Value<Ty> as TryIntoWithGc<T, Heap>>::Error>;
 
-    fn extract(self) -> Result<(Self, T), Self::Error> {
+    fn extract(self, gc: &mut Heap) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;
-        let value = value.clone().try_into().map_err(|err| MissingArg::Other {
-            leftover_args: view.len() + 1,
-            err,
-        })?;
+        let value = value
+            .clone()
+            .try_into_with_gc(gc)
+            .map_err(|err| MissingArg::Other {
+                leftover_args: view.len() + 1,
+                err,
+            })?;
 
         Ok((view, value))
     }
@@ -475,53 +481,53 @@ impl<E> MissingArg<E> {
 /// Render type into iterator of Lua [`Value`]s.
 ///
 /// See module-level [documentation](self#formatting-returns) for usage explanation.
-pub trait FormatReturns<Gc>
+pub trait FormatReturns<Ty, Gc>
 where
-    Gc: TypeProvider,
+    Ty: Types,
 {
-    type Iter: Iterator<Item = Value<Gc>>;
+    type Iter: Iterator<Item = Value<Ty>>;
 
-    fn format(self) -> Self::Iter;
+    fn format(self, gc: &mut Gc) -> Self::Iter;
 }
 
-impl<Gc> FormatReturns<Gc> for ()
+impl<Ty, Gc> FormatReturns<Ty, Gc> for ()
 where
-    Gc: TypeProvider,
+    Ty: Types,
 {
-    type Iter = std::iter::Empty<Value<Gc>>;
+    type Iter = std::iter::Empty<Value<Ty>>;
 
-    fn format(self) -> Self::Iter {
+    fn format(self, _gc: &mut Gc) -> Self::Iter {
         std::iter::empty()
     }
 }
 
-impl<Gc, A> FormatReturns<Gc> for (A,)
+impl<Ty, Gc, A> FormatReturns<Ty, Gc> for (A,)
 where
-    Gc: TypeProvider,
-    A: FormatReturns<Gc>,
+    Ty: Types,
+    A: FormatReturns<Ty, Gc>,
 {
-    type Iter = <A as FormatReturns<Gc>>::Iter;
+    type Iter = <A as FormatReturns<Ty, Gc>>::Iter;
 
-    fn format(self) -> Self::Iter {
+    fn format(self, gc: &mut Gc) -> Self::Iter {
         let (a,) = self;
-        a.format()
+        a.format(gc)
     }
 }
 
 macro_rules! format_tuple {
     ($first:ident, $($t:ident),*) => {
-        impl<Gc, $first, $($t),*> FormatReturns<Gc> for ($first, $($t),*)
+        impl<Ty, Gc, $first, $($t),*> FormatReturns<Ty, Gc> for ($first, $($t),*)
         where
-        Gc: TypeProvider,
-            $first: FormatReturns<Gc>,
-            $($t: FormatReturns<Gc>,)*
+            Ty: Types,
+            $first: FormatReturns<Ty, Gc>,
+            $($t: FormatReturns<Ty, Gc>,)*
         {
-            type Iter = std::iter::Chain<<$first as FormatReturns<Gc>>::Iter, <($($t,)*) as FormatReturns<Gc>>::Iter>;
+            type Iter = std::iter::Chain<<$first as FormatReturns<Ty, Gc>>::Iter, <($($t,)*) as FormatReturns<Ty, Gc>>::Iter>;
 
-            fn format(self) -> Self::Iter {
+            fn format(self, gc: &mut Gc) -> Self::Iter {
                 #[allow(non_snake_case)]
                 let ($first, $($t,)*) = self;
-                $first.format().chain(($($t,)*).format())
+                $first.format(gc).chain(($($t,)*).format(gc))
             }
         }
     };
@@ -539,59 +545,61 @@ format_tuple!(A, B, C, D, E, F, G, H, I, J);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
-impl<Gc, T> FormatReturns<Gc> for Maybe<T>
+impl<Ty, Gc, T> FormatReturns<Ty, Gc> for Maybe<T>
 where
-    Gc: TypeProvider,
-    T: FormatReturns<Gc>,
+    Ty: Types,
+    T: FormatReturns<Ty, Gc>,
 {
-    type Iter = std::iter::Flatten<std::option::IntoIter<<T as FormatReturns<Gc>>::Iter>>;
+    type Iter = std::iter::Flatten<std::option::IntoIter<<T as FormatReturns<Ty, Gc>>::Iter>>;
 
-    fn format(self) -> Self::Iter {
+    fn format(self, gc: &mut Gc) -> Self::Iter {
         self.into_option()
-            .map(FormatReturns::format)
+            .map(|t| t.format(gc))
             .into_iter()
             .flatten()
     }
 }
 
-impl<Gc, T, const N: usize> FormatReturns<Gc> for [T; N]
+impl<Ty, Gc, T, const N: usize> FormatReturns<Ty, Gc> for [T; N]
 where
-    Gc: TypeProvider,
-    T: FormatReturns<Gc>,
+    Ty: Types,
+    T: FormatReturns<Ty, Gc>,
 {
-    type Iter = std::iter::Flatten<std::array::IntoIter<<T as FormatReturns<Gc>>::Iter, N>>;
+    type Iter = std::iter::Flatten<std::array::IntoIter<<T as FormatReturns<Ty, Gc>>::Iter, N>>;
 
-    fn format(self) -> Self::Iter {
-        self.map(FormatReturns::format).into_iter().flatten()
+    fn format(self, gc: &mut Gc) -> Self::Iter {
+        self.map(|t| t.format(gc)).into_iter().flatten()
     }
 }
 
-impl<Gc, T> FormatReturns<Gc> for Vec<T>
+impl<Ty, Gc, T> FormatReturns<Ty, Gc> for Vec<T>
 where
-    Gc: TypeProvider,
-    T: FormatReturns<Gc>,
+    Ty: Types,
+    T: FormatReturns<Ty, Gc>,
 {
     type Iter = std::iter::FlatMap<
         std::vec::IntoIter<T>,
-        <T as FormatReturns<Gc>>::Iter,
-        fn(T) -> <T as FormatReturns<Gc>>::Iter,
+        <T as FormatReturns<Ty, Gc>>::Iter,
+        Box<dyn FnMut(T) -> <T as FormatReturns<Ty, Gc>>::Iter>,
     >;
 
-    fn format(self) -> Self::Iter {
-        self.into_iter()
-            .flat_map(FormatReturns::format as fn(_) -> _)
+    fn format(self, gc: &mut Gc) -> Self::Iter {
+        // self.into_iter()
+        //     .flat_map(Box::new(|value| value.format(gc)))
+        todo!()
     }
 }
 
-impl<Gc, T> FormatReturns<Gc> for T
+impl<Ty, T> FormatReturns<Ty, Heap> for T
 where
-    Gc: TypeProvider,
-    T: Into<Value<Gc>>,
+    Ty: Types,
+    T: IntoWithGc<Value<Ty>, Heap>,
 {
-    type Iter = std::iter::Once<Value<Gc>>;
+    type Iter = std::iter::Once<Value<Ty>>;
 
-    fn format(self) -> Self::Iter {
-        std::iter::once(self.into())
+    fn format(self, gc: &mut Heap) -> Self::Iter {
+        let value = self.into_with_gc(gc);
+        std::iter::once(value)
     }
 }
 

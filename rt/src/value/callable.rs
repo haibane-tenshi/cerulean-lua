@@ -2,13 +2,15 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::rc::Rc;
 
+use gc::{Heap, Trace};
+
 use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiFnPtr, LuaFfiMut, LuaFfiOnce};
-use crate::gc::Gc as GarbageCollector;
+use crate::gc::TryFromWithGc;
 
-use super::{TypeMismatchError, TypeProvider, Value};
+use super::{RootValue, Strong, TypeMismatchError, TypeProvider, Types, Value, Weak};
 
-pub use crate::runtime::{Closure as LuaClosure, ClosureRef as LuaClosureRef};
+pub use crate::runtime::Closure as LuaClosure;
 
 pub struct RustClosureRef<Gc>(Rc<dyn LuaFfi<Gc> + 'static>);
 
@@ -122,9 +124,21 @@ where
     }
 }
 
-pub enum RustCallable<Gc: TypeProvider> {
-    Ref(RustClosureRef<Gc>),
-    Ptr(LuaFfiFnPtr<Gc>),
+pub enum RustCallable<Ty>
+where
+    Ty: TypeProvider,
+{
+    Ref(RustClosureRef<Ty>),
+    Ptr(LuaFfiFnPtr<Ty>),
+}
+
+impl<Ty> Trace for RustCallable<Ty>
+where
+    Ty: TypeProvider + 'static,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        todo!()
+    }
 }
 
 impl<Gc> Debug for RustCallable<Gc>
@@ -191,15 +205,15 @@ where
     }
 }
 
-impl<Gc> LuaFfiOnce<Gc> for RustCallable<Gc>
+impl<Ty> LuaFfiOnce<Ty> for RustCallable<Ty>
 where
-    Gc: TypeProvider,
-    Value<Gc>: Display,
+    Ty: TypeProvider,
+    RootValue<Ty>: Display,
 {
     fn call_once(
         self,
-        mut rt: crate::runtime::RuntimeView<'_, Gc>,
-    ) -> Result<(), RuntimeError<Gc>> {
+        mut rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), RuntimeError<Ty>> {
         match self {
             Self::Ref(f) => rt.invoke(f),
             Self::Ptr(f) => rt.invoke(f),
@@ -231,42 +245,68 @@ where
     }
 }
 
-impl<Gc> From<LuaClosureRef> for Value<Gc>
+pub enum Callable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: Types,
 {
-    fn from(value: LuaClosureRef) -> Self {
-        Value::Function(value.into())
+    Lua(Ty::LuaCallable),
+    Rust(Ty::RustCallable),
+}
+
+pub type RootCallable<Ty> = Callable<Strong<Ty>>;
+pub type GcCallable<Ty> = Callable<Weak<Ty>>;
+
+impl<Ty> TryFromWithGc<GcCallable<Ty>, Heap> for RootCallable<Ty>
+where
+    Ty: TypeProvider,
+{
+    type Error = crate::error::AlreadyDroppedError;
+
+    fn try_from_with_gc(value: GcCallable<Ty>, gc: &mut Heap) -> Result<Self, Self::Error> {
+        use crate::gc::TryIntoWithGc;
+
+        let r = match value {
+            Callable::Rust(t) => Callable::Rust(t),
+            Callable::Lua(t) => Callable::Lua(t.try_into_with_gc(gc)?),
+        };
+
+        Ok(r)
     }
 }
 
-impl<Gc> From<RustCallable<Gc>> for Value<Gc>
+impl<Ty> Trace for Callable<Ty>
 where
-    Gc: TypeProvider<RustCallable = RustCallable<Gc>>,
+    Ty: Types + 'static,
+    Ty::LuaCallable: Trace,
+    Ty::RustCallable: Trace,
 {
-    fn from(value: RustCallable<Gc>) -> Self {
-        Value::Function(value.into())
+    fn trace(&self, collector: &mut gc::Collector) {
+        match self {
+            Callable::Lua(t) => t.trace(collector),
+            Callable::Rust(t) => t.trace(collector),
+        }
     }
 }
 
-impl<Gc> From<RustClosureRef<Gc>> for Value<Gc>
+impl<Ty> Debug for Callable<Ty>
 where
-    Gc: TypeProvider<RustCallable = RustCallable<Gc>>,
+    Ty: Types,
+    Ty::LuaCallable: Debug,
+    Ty::RustCallable: Debug,
 {
-    fn from(value: RustClosureRef<Gc>) -> Self {
-        Value::Function(value.into())
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lua(arg0) => f.debug_tuple("Lua").field(arg0).finish(),
+            Self::Rust(arg0) => f.debug_tuple("Rust").field(arg0).finish(),
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Callable<RustCallable> {
-    Lua(LuaClosureRef),
-    Rust(RustCallable),
-}
-
-impl<RustCallable> Display for Callable<RustCallable>
+impl<Ty> Display for Callable<Ty>
 where
-    RustCallable: Display,
+    Ty: Types,
+    Ty::LuaCallable: Display,
+    Ty::RustCallable: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -276,21 +316,81 @@ where
     }
 }
 
-impl<Gc> LuaFfiOnce<Gc> for Callable<Gc::RustCallable>
+impl<Ty> Clone for Callable<Ty>
 where
-    Gc: GarbageCollector,
-    Gc::RustCallable: LuaFfiOnce<Gc>,
-    Gc::Table: for<'a> crate::gc::Visit<Gc::Sweeper<'a>>,
-    Value<Gc>: Debug + Display,
+    Ty: Types,
+    Ty::LuaCallable: Clone,
+    Ty::RustCallable: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Lua(arg0) => Self::Lua(arg0.clone()),
+            Self::Rust(arg0) => Self::Rust(arg0.clone()),
+        }
+    }
+}
+
+impl<Ty> Copy for Callable<Ty>
+where
+    Ty: Types,
+    Ty::LuaCallable: Copy,
+    Ty::RustCallable: Copy,
+{
+}
+
+impl<Ty> PartialEq for Callable<Ty>
+where
+    Ty: Types,
+    Ty::LuaCallable: PartialEq,
+    Ty::RustCallable: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Lua(l0), Self::Lua(r0)) => l0 == r0,
+            (Self::Rust(l0), Self::Rust(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
+}
+
+impl<Ty> Eq for Callable<Ty>
+where
+    Ty: Types,
+    Ty::LuaCallable: Eq,
+    Ty::RustCallable: Eq,
+{
+}
+
+impl<Ty> Hash for Callable<Ty>
+where
+    Ty: Types,
+    Ty::LuaCallable: Hash,
+    Ty::RustCallable: Hash,
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+
+        match self {
+            Callable::Lua(t) => t.hash(state),
+            Callable::Rust(t) => t.hash(state),
+        }
+    }
+}
+
+impl<Ty> LuaFfiOnce<Ty> for RootCallable<Ty>
+where
+    Ty: TypeProvider,
+    Ty::RustCallable: LuaFfiOnce<Ty>,
+    RootValue<Ty>: Display,
 {
     fn call_once(
         self,
-        mut rt: crate::runtime::RuntimeView<'_, Gc>,
-    ) -> Result<(), RuntimeError<Gc>> {
+        mut rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), RuntimeError<Ty>> {
         use repr::index::StackSlot;
 
         match self {
-            Callable::Lua(f) => rt.enter(f, StackSlot(0)),
+            Callable::Lua(f) => rt.enter(f.into(), StackSlot(0)),
             Callable::Rust(f) => rt.invoke(f),
         }
     }
@@ -302,34 +402,13 @@ where
     }
 }
 
-impl<C> From<LuaClosureRef> for Callable<C> {
-    fn from(value: LuaClosureRef) -> Self {
-        Self::Lua(value)
-    }
-}
-
-impl<Gc> From<RustCallable<Gc>> for Callable<RustCallable<Gc>>
+impl<Ty> TryFrom<Value<Ty>> for Callable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: Types,
 {
-    fn from(value: RustCallable<Gc>) -> Self {
-        Self::Rust(value)
-    }
-}
-
-impl<Gc> From<RustClosureRef<Gc>> for Callable<RustCallable<Gc>>
-where
-    Gc: TypeProvider,
-{
-    fn from(value: RustClosureRef<Gc>) -> Self {
-        Self::Rust(value.into())
-    }
-}
-
-impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Callable<Gc::RustCallable> {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Ty>) -> Result<Self, Self::Error> {
         use super::Type;
 
         match value {
@@ -346,8 +425,8 @@ impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Callable<Gc::RustCallable> {
     }
 }
 
-impl<Gc: TypeProvider> From<Callable<Gc::RustCallable>> for Value<Gc> {
-    fn from(value: Callable<Gc::RustCallable>) -> Self {
+impl<Ty: Types> From<Callable<Ty>> for Value<Ty> {
+    fn from(value: Callable<Ty>) -> Self {
         Value::Function(value)
     }
 }

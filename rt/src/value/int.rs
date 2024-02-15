@@ -5,7 +5,7 @@ use std::ops::{
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
-use super::{Float, Type, TypeMismatchError, TypeProvider, Value};
+use super::{Float, Type, TypeMismatchError, Types, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int(pub i64);
@@ -294,7 +294,7 @@ impl ShrAssign for Int {
     }
 }
 
-impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Int {
+impl<Gc: Types> TryFrom<Value<Gc>> for Int {
     type Error = TypeMismatchError;
 
     fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
@@ -312,7 +312,7 @@ impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Int {
     }
 }
 
-impl<Gc: TypeProvider> From<Int> for Value<Gc> {
+impl<Gc: Types> From<Int> for Value<Gc> {
     fn from(value: Int) -> Self {
         let Int(value) = value;
         Value::Int(value)

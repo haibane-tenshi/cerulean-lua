@@ -1,35 +1,32 @@
 use codespan_reporting::diagnostic::Diagnostic;
 use std::fmt::{Debug, Display};
 
-use crate::value::{TypeProvider, Value};
+use crate::value::{RootValue, TypeProvider as Types, Value};
 
-pub struct ValueError<Gc: TypeProvider>(pub Value<Gc>);
+pub struct ValueError<Gc: Types>(pub RootValue<Gc>);
 
 impl<Gc> ValueError<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
     Gc::String: AsRef<[u8]>,
-    Value<Gc>: Display,
+    RootValue<Gc>: Display,
 {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
-        use crate::value::Borrow;
         use Value::*;
 
         let ValueError(value) = self;
 
         let mut diag = Diagnostic::error();
         let valid_utf8 = match &value {
-            String(s) => s
-                .with_ref(|s| {
-                    if let Ok(s) = std::str::from_utf8(s.as_ref()) {
-                        diag.message = s.into();
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .unwrap_or_default(),
+            String(s) => {
+                if let Ok(s) = std::str::from_utf8(s.as_ref().as_ref()) {
+                    diag.message = s.into();
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         };
 
@@ -48,19 +45,19 @@ where
     }
 }
 
-impl<Gc> From<Value<Gc>> for ValueError<Gc>
+impl<Gc> From<RootValue<Gc>> for ValueError<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
-    fn from(value: Value<Gc>) -> Self {
+    fn from(value: RootValue<Gc>) -> Self {
         ValueError(value)
     }
 }
 
 impl<Gc> Debug for ValueError<Gc>
 where
-    Gc: TypeProvider,
-    Value<Gc>: Debug,
+    Gc: Types,
+    RootValue<Gc>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Value").field(&self.0).finish()

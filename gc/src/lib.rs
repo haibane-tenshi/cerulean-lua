@@ -395,7 +395,7 @@ impl Heap {
     /// Upgrade weak reference into strong reference.
     ///
     /// The function will return `None` if object was since deallocated.
-    pub fn upgrade<T>(&mut self, ptr: Gc<T>) -> Option<Root<T>>
+    pub fn upgrade<T>(&self, ptr: Gc<T>) -> Option<Root<T>>
     where
         T: Trace,
     {
@@ -503,6 +503,12 @@ impl Heap {
         }
 
         r
+    }
+}
+
+impl Debug for Heap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Heap").finish_non_exhaustive()
     }
 }
 
@@ -721,6 +727,14 @@ impl<T> Gc<T> {
     }
 }
 
+impl<T> Debug for Gc<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gc")
+            .field("addr", &self.addr)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<T> Pointer for Gc<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.addr)
@@ -846,6 +860,14 @@ impl<T> Root<T> {
     /// ```
     pub fn ptr_eq(&self, other: &Self) -> bool {
         self.addr == other.addr
+    }
+}
+
+impl<T> Debug for Root<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Root")
+            .field("addr", &self.addr)
+            .finish_non_exhaustive()
     }
 }
 

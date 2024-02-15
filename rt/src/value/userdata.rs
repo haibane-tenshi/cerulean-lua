@@ -1,14 +1,16 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
 
-use super::Metatable;
+use gc::{Gc, Trace};
+
+use super::{Metatable, Weak};
 use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
-use crate::gc::Gc as GarbageCollector;
+use crate::gc::GcOrd;
 use crate::runtime::RuntimeView;
 use crate::value::{TypeProvider, Value};
 
-pub trait Userdata<Gc>
+pub trait Userdata<Gc>: Trace
 where
     Gc: TypeProvider,
 {
@@ -195,7 +197,7 @@ where
 
 impl<T, Tup, Gc> DispatchTrait<Tup, Gc> for T
 where
-    Gc: GarbageCollector,
+    Gc: TypeProvider,
     Tup: NonEmptyTuple,
     T: DispatchMethod<TupleHead<Tup>, Gc>,
     T: DispatchTrait<TupleTail<Tup>, Gc>,
@@ -211,7 +213,7 @@ where
                 let r = if let Method::Ref(f) = method {
                     T::call(self, f, rt)
                 } else {
-                    let msg = rt.core.gc.alloc_string(
+                    let msg = std::rc::Rc::new(
                         "userdata can only dispatch on methods with `&self` receiver".into(),
                     );
                     Err(Value::String(msg).into())
@@ -228,37 +230,53 @@ where
 // Self: 'static requires C: 'static
 // see https://github.com/rust-lang/rust/issues/57325
 // https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
-pub struct Dispatchable<T, Gc: TypeProvider> {
+pub struct Dispatchable<T, Ty: TypeProvider> {
     value: T,
-    dispatcher: fn(&T, &str, &str, RuntimeView<'_, Gc>) -> Option<Result<(), RuntimeError<Gc>>>,
+    dispatcher: fn(&T, &str, &str, RuntimeView<'_, Ty>) -> Option<Result<(), RuntimeError<Ty>>>,
 }
 
-impl<T, Gc> Dispatchable<T, Gc>
+impl<T, Ty> Dispatchable<T, Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
     pub fn new<Traits>(value: T) -> Self
     where
         Traits: Tuple,
-        T: DispatchTrait<Traits, Gc>,
+        T: DispatchTrait<Traits, Ty>,
     {
         Dispatchable {
             value,
-            dispatcher: <T as DispatchTrait<Traits, Gc>>::dispatch_trait,
+            dispatcher: <T as DispatchTrait<Traits, Ty>>::dispatch_trait,
         }
     }
 }
 
-impl<T, Gc> Userdata<Gc> for Dispatchable<T, Gc>
+impl<T, Ty> Trace for Dispatchable<T, Ty>
 where
-    Gc: TypeProvider,
+    T: Trace,
+    Ty: TypeProvider + 'static,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        let Dispatchable {
+            value,
+            dispatcher: _,
+        } = self;
+
+        value.trace(collector);
+    }
+}
+
+impl<T, Ty> Userdata<Ty> for Dispatchable<T, Ty>
+where
+    T: Trace,
+    Ty: TypeProvider + 'static,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Option<Result<(), RuntimeError<Gc>>> {
+        rt: RuntimeView<'_, Ty>,
+    ) -> Option<Result<(), RuntimeError<Ty>>> {
         (self.dispatcher)(&self.value, scope, name, rt)
     }
 }
@@ -277,11 +295,23 @@ impl<T, Traits> DispatchableStatic<T, Traits> {
     }
 }
 
+impl<T, Traits> Trace for DispatchableStatic<T, Traits>
+where
+    T: Trace,
+    Traits: 'static,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        let DispatchableStatic { value, traits: _ } = self;
+
+        value.trace(collector);
+    }
+}
+
 impl<T, Traits, Gc> Userdata<Gc> for DispatchableStatic<T, Traits>
 where
     Gc: TypeProvider,
-    Traits: Tuple,
-    T: DispatchTrait<Traits, Gc>,
+    Traits: Tuple + 'static,
+    T: DispatchTrait<Traits, Gc> + Trace,
 {
     fn method(
         &self,
@@ -293,25 +323,100 @@ where
     }
 }
 
-pub type FullUserdata<Gc> = UserdataValue<dyn Userdata<Gc>, <Gc as TypeProvider>::TableRef>;
-
-#[doc(hidden)]
-pub struct UserdataValue<T: ?Sized, TableRef> {
-    pub(crate) metatable: RefCell<Option<TableRef>>,
-    pub(crate) value: T,
+pub trait FullUserdata<Ty>: Userdata<Ty> + Metatable<GcOrd<Ty::Table>>
+where
+    Ty: TypeProvider,
+{
 }
 
-impl<T, Gc> Userdata<Gc> for UserdataValue<T, Gc::TableRef>
+impl<Ty, T> FullUserdata<Ty> for T
 where
-    Gc: TypeProvider,
-    T: Userdata<Gc> + ?Sized,
+    Ty: TypeProvider,
+    T: Userdata<Ty> + Metatable<GcOrd<Ty::Table>>,
+{
+}
+
+impl<Ty, T> Userdata<Ty> for Box<T>
+where
+    Ty: TypeProvider,
+    T: Userdata<Ty> + ?Sized,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Option<Result<(), RuntimeError<Gc>>> {
+        rt: RuntimeView<'_, Ty>,
+    ) -> Option<Result<(), RuntimeError<Ty>>> {
+        self.as_ref().method(scope, name, rt)
+    }
+}
+
+impl<Table, T> Metatable<Table> for Box<T>
+where
+    T: Metatable<Table> + ?Sized,
+{
+    fn metatable(&self) -> Option<Table> {
+        self.as_ref().metatable()
+    }
+
+    fn set_metatable(&mut self, mt: Option<Table>) -> Option<Table> {
+        self.as_mut().set_metatable(mt)
+    }
+}
+
+pub fn new_full_userdata<T, Ty>(
+    value: T,
+    metatable: Option<GcOrd<Ty::Table>>,
+) -> Box<dyn FullUserdata<Ty>>
+where
+    Ty: TypeProvider,
+    T: Userdata<Ty>,
+{
+    let value = UserdataValue { value, metatable };
+
+    Box::new(value)
+}
+
+#[doc(hidden)]
+struct UserdataValue<T: ?Sized, TableRef> {
+    metatable: Option<TableRef>,
+    value: T,
+}
+
+impl<T, TableRef> AsRef<T> for UserdataValue<T, TableRef>
+where
+    T: ?Sized,
+{
+    fn as_ref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T, Table> Trace for UserdataValue<T, Table>
+where
+    T: Trace + ?Sized,
+    Table: Trace,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        let UserdataValue { metatable, value } = self;
+
+        value.trace(collector);
+        metatable.trace(collector);
+    }
+}
+
+impl<T, Ty, Table> Userdata<Ty> for UserdataValue<T, Table>
+where
+    Ty: TypeProvider,
+    T: Userdata<Ty> + Trace + ?Sized,
+    Table: Trace,
+{
+    fn method(
+        &self,
+        scope: &str,
+        name: &str,
+        rt: RuntimeView<'_, Ty>,
+    ) -> Option<Result<(), RuntimeError<Ty>>> {
         self.as_ref().method(scope, name, rt)
     }
 }
@@ -325,24 +430,15 @@ impl<T: ?Sized, TableRef> Debug for UserdataValue<T, TableRef> {
     }
 }
 
-impl<Gc> Metatable<Gc::TableRef> for FullUserdata<Gc>
+impl<T, Table> Metatable<Table> for UserdataValue<T, Table>
 where
-    Gc: TypeProvider,
+    Table: Clone,
 {
-    fn metatable(&self) -> Option<Gc::TableRef> {
-        self.metatable.borrow().clone()
+    fn metatable(&self) -> Option<Table> {
+        self.metatable.clone()
     }
 
-    fn set_metatable(&mut self, mt: Option<Gc::TableRef>) -> Option<Gc::TableRef> {
-        self.metatable.replace(mt)
-    }
-}
-
-impl<T, TableRef> AsRef<T> for UserdataValue<T, TableRef>
-where
-    T: ?Sized,
-{
-    fn as_ref(&self) -> &T {
-        &self.value
+    fn set_metatable(&mut self, mt: Option<Table>) -> Option<Table> {
+        self.metatable.replace(mt?)
     }
 }

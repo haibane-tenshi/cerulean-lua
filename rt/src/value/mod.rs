@@ -11,10 +11,11 @@ pub mod userdata;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::error::BorrowError;
-use crate::gc::{Gc as GarbageCollector, Visit};
 use enumoid::{EnumMap, Enumoid};
+use gc::{Gc, Heap, Trace};
 use repr::literal::Literal;
+
+use crate::gc::{RootOrd, TryFromWithGc};
 
 pub use boolean::Boolean;
 pub use callable::Callable;
@@ -23,7 +24,7 @@ pub use int::Int;
 pub use nil::{Nil, NilOr};
 pub use string::LuaString;
 pub use table::{KeyValue, LuaTable, Table};
-pub use traits::{Borrow, Concat, Len, Metatable, TableIndex, TypeProvider};
+pub use traits::{Borrow, Concat, Len, Metatable, Strong, TableIndex, TypeProvider, Types, Weak};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
@@ -163,6 +164,9 @@ impl Display for TypeWithoutMetatable {
     }
 }
 
+pub type RootValue<Ty> = Value<Strong<Ty>>;
+pub type GcValue<Ty> = Value<Weak<Ty>>;
+
 /// Enum representing all possible Lua values.
 ///
 /// Value supports normal and alternate rendering for `Display` impl:
@@ -177,18 +181,18 @@ impl Display for TypeWithoutMetatable {
 /// Default rendering will only include the contents.
 /// Alternate rendering will include type information as well,
 /// but looks a little bit nicer compared to `Debug` output.
-pub enum Value<Gc: TypeProvider> {
+pub enum Value<Ty: Types> {
     Nil,
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(Gc::StringRef),
-    Function(Callable<Gc::RustCallable>),
-    Table(Gc::TableRef),
-    Userdata(Gc::FullUserdataRef),
+    String(Ty::String),
+    Function(Callable<Ty>),
+    Table(Ty::Table),
+    Userdata(Ty::FullUserdata),
 }
 
-impl<Gc: TypeProvider> Value<Gc> {
+impl<Ty: Types> Value<Ty> {
     pub fn to_bool(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
     }
@@ -209,11 +213,30 @@ impl<Gc: TypeProvider> Value<Gc> {
     pub fn take(&mut self) -> Self {
         std::mem::take(self)
     }
+}
 
+impl<Ty> RootValue<Ty>
+where
+    Ty: TypeProvider,
+    Ty::RustCallable: Clone,
+{
+    pub fn downgrade(&self) -> GcValue<Ty> {
+        self.clone().into()
+    }
+}
+
+type RootTable<Ty> = <Strong<Ty> as Types>::Table;
+type GcTable<Ty> = <Weak<Ty> as Types>::Table;
+
+impl<Ty> RootValue<Ty>
+where
+    Ty: TypeProvider,
+{
     pub(crate) fn metatable<'a>(
         &'a self,
-        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<Gc::TableRef>>,
-    ) -> Option<Gc::TableRef> {
+        heap: &Heap,
+        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<RootTable<Ty>>>,
+    ) -> Option<RootTable<Ty>> {
         match self {
             Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].clone(),
             Value::Bool(_) => primitive_metatables[TypeWithoutMetatable::Bool].clone(),
@@ -221,49 +244,115 @@ impl<Gc: TypeProvider> Value<Gc> {
             Value::Float(_) => primitive_metatables[TypeWithoutMetatable::Float].clone(),
             Value::String(_) => primitive_metatables[TypeWithoutMetatable::String].clone(),
             Value::Function(_) => primitive_metatables[TypeWithoutMetatable::Function].clone(),
-            Value::Table(t) => {
-                let Ok(r) = t.with_ref(|t| t.metatable()) else {
-                    todo!()
-                };
-
-                r
-            }
-            Value::Userdata(t) => {
-                let Ok(r) = t.with_ref(|t| t.metatable()) else {
-                    todo!()
-                };
-
-                r
-            }
+            Value::Table(t) => heap[&t]
+                .metatable()
+                .and_then(|table| Some(RootOrd(heap.upgrade(table.0)?))),
+            Value::Userdata(t) => heap[&t]
+                .metatable()
+                .and_then(|table| Some(RootOrd(heap.upgrade(table.0)?))),
         }
     }
 }
 
-impl<Gc> Value<Gc>
+impl<Ty> From<RootValue<Ty>> for GcValue<Ty>
 where
-    Gc: GarbageCollector,
+    Ty: TypeProvider,
 {
-    pub fn from_literal(literal: Literal, gc: &mut Gc) -> Self {
-        match literal {
-            Literal::Nil => Value::Nil,
-            Literal::Bool(value) => Value::Bool(value),
-            Literal::Int(value) => Value::Int(value),
-            Literal::Float(value) => Value::Float(value.into_inner()),
-            Literal::String(value) => {
-                let value = gc.alloc_string(value.into());
-                Value::String(value)
+    fn from(value: RootValue<Ty>) -> Self {
+        match value {
+            Value::Nil => Value::Nil,
+            Value::Bool(t) => Value::Bool(t),
+            Value::Int(t) => Value::Int(t),
+            Value::Float(t) => Value::Float(t),
+            Value::String(t) => Value::String(t),
+            Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade())),
+            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t)),
+            Value::Table(t) => Value::Table(t.downgrade()),
+            Value::Userdata(t) => Value::Userdata(t.downgrade()),
+        }
+    }
+}
+
+impl<Ty> TryFromWithGc<Literal, Heap> for RootValue<Ty>
+where
+    Ty: TypeProvider,
+    Ty::String: From<String>,
+{
+    type Error = std::convert::Infallible;
+
+    fn try_from_with_gc(value: Literal, gc: &mut Heap) -> Result<Self, Self::Error> {
+        match value {
+            Literal::Nil => Ok(Value::Nil),
+            Literal::Bool(t) => Ok(Value::Bool(t)),
+            Literal::Int(t) => Ok(Value::Int(t)),
+            Literal::Float(t) => Ok(Value::Float(t.into_inner())),
+            Literal::String(t) => {
+                let t = std::rc::Rc::new(t.into());
+                Ok(Value::String(t))
             }
         }
     }
 }
 
-impl<Gc> Debug for Value<Gc>
+impl<Ty> TryFromWithGc<GcValue<Ty>, Heap> for RootValue<Ty>
 where
-    Gc: TypeProvider,
-    Gc::StringRef: Debug,
-    Gc::RustCallable: Debug,
-    Gc::TableRef: Debug,
-    Gc::FullUserdataRef: Debug,
+    Ty: TypeProvider,
+    Ty::Table: Trace,
+    Ty::FullUserdata: Trace,
+{
+    type Error = crate::error::AlreadyDroppedError;
+
+    fn try_from_with_gc(value: GcValue<Ty>, heap: &mut Heap) -> Result<Self, Self::Error> {
+        use crate::gc::TryIntoWithGc;
+
+        let r = match value {
+            Value::Nil => Value::Nil,
+            Value::Bool(t) => Value::Bool(t),
+            Value::Int(t) => Value::Int(t),
+            Value::Float(t) => Value::Float(t),
+            Value::String(t) => Value::String(t),
+            Value::Function(Callable::Lua(t)) => {
+                Value::Function(Callable::Lua(t.try_into_with_gc(heap)?))
+            }
+            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t)),
+            Value::Table(t) => Value::Table(t.try_into_with_gc(heap)?),
+            Value::Userdata(t) => Value::Userdata(t.try_into_with_gc(heap)?),
+        };
+
+        Ok(r)
+    }
+}
+
+impl<Ty> Trace for Value<Ty>
+where
+    Ty: Types + 'static,
+    Ty::String: Trace,
+    Ty::LuaCallable: Trace,
+    Ty::RustCallable: Trace,
+    Ty::Table: Trace,
+    Ty::FullUserdata: Trace,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        use Value::*;
+
+        match self {
+            Nil | Bool(_) | Int(_) | Float(_) => (),
+            String(t) => t.trace(collector),
+            Function(t) => t.trace(collector),
+            Table(t) => t.trace(collector),
+            Userdata(t) => t.trace(collector),
+        }
+    }
+}
+
+impl<Ty> Debug for Value<Ty>
+where
+    Ty: Types,
+    Ty::String: Debug,
+    Ty::LuaCallable: Debug,
+    Ty::RustCallable: Debug,
+    Ty::Table: Debug,
+    Ty::FullUserdata: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -279,13 +368,14 @@ where
     }
 }
 
-impl<Gc> Clone for Value<Gc>
+impl<Ty> Clone for Value<Ty>
 where
-    Gc: TypeProvider,
-    Gc::String: Clone,
-    Gc::RustCallable: Clone,
-    Gc::TableRef: Clone,
-    Gc::FullUserdataRef: Clone,
+    Ty: Types,
+    Ty::String: Clone,
+    Ty::LuaCallable: Clone,
+    Ty::RustCallable: Clone,
+    Ty::Table: Clone,
+    Ty::FullUserdata: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -302,13 +392,14 @@ where
     }
 }
 
-impl<Gc> PartialEq for Value<Gc>
+impl<Ty> PartialEq for Value<Ty>
 where
-    Gc: TypeProvider,
-    Gc::String: PartialEq,
-    Gc::RustCallable: PartialEq,
-    Gc::TableRef: PartialEq,
-    Gc::FullUserdataRef: PartialEq,
+    Ty: Types,
+    Ty::String: PartialEq,
+    Ty::LuaCallable: PartialEq,
+    Ty::RustCallable: PartialEq,
+    Ty::Table: PartialEq,
+    Ty::FullUserdata: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -326,22 +417,23 @@ where
 
 // No, clippy, you cannot.
 #[allow(clippy::derivable_impls)]
-impl<Gc> Default for Value<Gc>
+impl<Ty> Default for Value<Ty>
 where
-    Gc: TypeProvider,
+    Ty: Types,
 {
     fn default() -> Self {
         Value::Nil
     }
 }
 
-impl<Gc> Display for Value<Gc>
+impl<Ty> Display for Value<Ty>
 where
-    Gc: TypeProvider,
-    Gc::StringRef: Display,
-    Gc::RustCallable: Display,
-    Gc::TableRef: Display,
-    Gc::FullUserdataRef: Display,
+    Ty: Types,
+    Ty::String: Display,
+    Ty::LuaCallable: Display,
+    Ty::RustCallable: Display,
+    Ty::Table: Display,
+    Ty::FullUserdata: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
@@ -349,44 +441,16 @@ where
         match self {
             Nil => write!(f, "{}", nil::Nil),
             Bool(v) => write!(f, "{}", boolean::Boolean(*v)),
-            Int(v) => {
-                write!(f, "{}", int::Int(*v))
-            }
-            Float(v) => {
-                write!(f, "{}", float::Float(*v))
-            }
-            String(v) => {
-                write!(f, "{v}")
-            }
+            Int(v) => write!(f, "{}", int::Int(*v)),
+
+            Float(v) => write!(f, "{}", float::Float(*v)),
+
+            String(v) => write!(f, "{v}"),
+
             Function(v) => write!(f, "{v}"),
             Table(v) => write!(f, "{v}"),
             Userdata(v) => write!(f, "{v}"),
         }
-    }
-}
-
-impl<Gc> Visit<Gc::Sweeper<'_>> for Value<Gc>
-where
-    Gc: GarbageCollector,
-    Gc::Table: for<'a> Visit<Gc::Sweeper<'a>>,
-{
-    fn visit(&self, sweeper: &mut Gc::Sweeper<'_>) -> Result<(), BorrowError> {
-        use crate::gc::Sweeper;
-        use std::ops::ControlFlow;
-        use Value::*;
-
-        match self {
-            Nil | Bool(_) | Int(_) | Float(_) | Function(_) => (),
-            String(t) => sweeper.mark_string(t),
-            Table(t) => {
-                if let ControlFlow::Continue(_) = sweeper.mark_table(t) {
-                    crate::gc::visit_borrow(t, sweeper)?;
-                }
-            }
-            Userdata(t) => sweeper.mark_userdata(t),
-        }
-
-        Ok(())
     }
 }
 

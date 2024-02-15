@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-use super::{Type, TypeMismatchError, TypeProvider, Value};
+use super::{Type, TypeMismatchError, Types, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Boolean(pub bool);
@@ -72,7 +72,7 @@ impl BitXorAssign for Boolean {
     }
 }
 
-impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Boolean {
+impl<Gc: Types> TryFrom<Value<Gc>> for Boolean {
     type Error = TypeMismatchError;
 
     fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
@@ -89,7 +89,7 @@ impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Boolean {
         }
     }
 }
-impl<Gc: TypeProvider> From<Boolean> for Value<Gc> {
+impl<Gc: Types> From<Boolean> for Value<Gc> {
     fn from(value: Boolean) -> Self {
         let Boolean(value) = value;
 

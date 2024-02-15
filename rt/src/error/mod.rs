@@ -12,7 +12,7 @@ use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::value::{TypeProvider, Value};
+use crate::value::{RootValue, TypeProvider as Types};
 
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
@@ -25,8 +25,11 @@ pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use upvalue_count_mismatch::UpvalueCountMismatch;
 pub use value::ValueError;
 
-pub enum RuntimeError<Gc: TypeProvider> {
-    Value(ValueError<Gc>),
+pub enum RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    Value(ValueError<Ty>),
     Borrow(BorrowError),
     AlreadyDropped(AlreadyDroppedError),
     Immutable(ImmutableCacheError),
@@ -38,15 +41,15 @@ pub enum RuntimeError<Gc: TypeProvider> {
     OpCode(OpCodeError),
 }
 
-impl<Gc: TypeProvider> From<Value<Gc>> for RuntimeError<Gc> {
-    fn from(value: Value<Gc>) -> Self {
+impl<Gc: Types> From<RootValue<Gc>> for RuntimeError<Gc> {
+    fn from(value: RootValue<Gc>) -> Self {
         RuntimeError::Value(ValueError(value))
     }
 }
 
 impl<Gc> From<BorrowError> for RuntimeError<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
     fn from(value: BorrowError) -> Self {
         Self::Borrow(value)
@@ -55,44 +58,44 @@ where
 
 impl<Gc> From<AlreadyDroppedError> for RuntimeError<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
     fn from(value: AlreadyDroppedError) -> Self {
         Self::AlreadyDropped(value)
     }
 }
 
-impl<Gc: TypeProvider> From<MissingChunk> for RuntimeError<Gc> {
+impl<Gc: Types> From<MissingChunk> for RuntimeError<Gc> {
     fn from(value: MissingChunk) -> Self {
         RuntimeError::MissingChunk(value)
     }
 }
 
-impl<Gc: TypeProvider> From<MissingFunction> for RuntimeError<Gc> {
+impl<Gc: Types> From<MissingFunction> for RuntimeError<Gc> {
     fn from(value: MissingFunction) -> Self {
         RuntimeError::MissingFunction(value)
     }
 }
 
-impl<Gc: TypeProvider> From<OutOfBoundsStack> for RuntimeError<Gc> {
+impl<Gc: Types> From<OutOfBoundsStack> for RuntimeError<Gc> {
     fn from(value: OutOfBoundsStack) -> Self {
         RuntimeError::OutOfBoundsStack(value)
     }
 }
 
-impl<Gc: TypeProvider> From<UpvalueCountMismatch> for RuntimeError<Gc> {
+impl<Gc: Types> From<UpvalueCountMismatch> for RuntimeError<Gc> {
     fn from(value: UpvalueCountMismatch) -> Self {
         RuntimeError::UpvalueCountMismatch(value)
     }
 }
 
-impl<Gc: TypeProvider> From<ValueError<Gc>> for RuntimeError<Gc> {
+impl<Gc: Types> From<ValueError<Gc>> for RuntimeError<Gc> {
     fn from(value: ValueError<Gc>) -> Self {
         RuntimeError::Value(value)
     }
 }
 
-impl<Gc: TypeProvider> From<OpCodeError> for RuntimeError<Gc> {
+impl<Gc: Types> From<OpCodeError> for RuntimeError<Gc> {
     fn from(value: OpCodeError) -> Self {
         RuntimeError::OpCode(value)
     }
@@ -100,8 +103,8 @@ impl<Gc: TypeProvider> From<OpCodeError> for RuntimeError<Gc> {
 
 impl<Gc> Debug for RuntimeError<Gc>
 where
-    Gc: TypeProvider,
-    Value<Gc>: Debug,
+    Gc: Types,
+    RootValue<Gc>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -121,13 +124,13 @@ where
     }
 }
 
-impl<Gc: TypeProvider> Display for RuntimeError<Gc> {
+impl<Gc: Types> Display for RuntimeError<Gc> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "runtime error")
     }
 }
 
-impl<Gc: TypeProvider> Error for RuntimeError<Gc> where Self: Debug + Display {}
+impl<Gc: Types> Error for RuntimeError<Gc> where Self: Debug + Display {}
 
 #[derive(Debug)]
 pub enum RefAccessError {
@@ -160,7 +163,7 @@ impl From<BorrowError> for RefAccessError {
 
 impl<Gc> From<RefAccessError> for RuntimeError<Gc>
 where
-    Gc: TypeProvider,
+    Gc: Types,
 {
     fn from(value: RefAccessError) -> Self {
         match value {

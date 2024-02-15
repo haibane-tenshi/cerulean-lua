@@ -1,5 +1,4 @@
-use crate::gc::Gc as GarbageCollector;
-use crate::value::{TypeProvider, Value};
+use crate::value::{RootValue, Strong, TypeProvider, Types, Value};
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
 /// Define fine aspects of runtime behavior.
@@ -310,22 +309,31 @@ impl DialectBuilder {
     }
 }
 
-pub trait CoerceArgs<Gc: TypeProvider>: sealed::Sealed {
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2];
-    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2];
-    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Gc>; 2], gc: &mut Gc) -> [Value<Gc>; 2];
-    fn coerce_una_op_bit(&self, args: [Value<Gc>; 1]) -> [Value<Gc>; 1];
-    fn coerce_tab_set(&self, key: Value<Gc>) -> Value<Gc>;
-    fn coerce_tab_get(&self, key: Value<Gc>) -> Value<Gc>;
+pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
+    type Gc;
+
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
+    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
+    fn coerce_bin_op_str(
+        &self,
+        op: StrBinOp,
+        args: [Value<Ty>; 2],
+        gc: &mut Self::Gc,
+    ) -> [Value<Ty>; 2];
+    fn coerce_una_op_bit(&self, args: [Value<Ty>; 1]) -> [Value<Ty>; 1];
+    fn coerce_tab_set(&self, key: Value<Ty>) -> Value<Ty>;
+    fn coerce_tab_get(&self, key: Value<Ty>) -> Value<Ty>;
     fn cmp_float_and_int(&self) -> bool;
 }
 
-impl<Gc> CoerceArgs<Gc> for DialectBuilder
+impl<Ty> CoerceArgs<Strong<Ty>> for DialectBuilder
 where
-    Gc: GarbageCollector,
-    Gc::String: From<String>,
+    Ty: TypeProvider,
+    Ty::String: From<String>,
 {
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2] {
+    type Gc = gc::Heap;
+
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [RootValue<Ty>; 2]) -> [RootValue<Ty>; 2] {
         use crate::value::{Float, Int};
 
         match (op, args) {
@@ -349,10 +357,10 @@ where
         }
     }
 
-    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [Value<Gc>; 2]) -> [Value<Gc>; 2] {
+    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [RootValue<Ty>; 2]) -> [RootValue<Ty>; 2] {
         use crate::value::{Float, Int};
 
-        let try_into = |value: f64| -> Value<Gc> {
+        let try_into = |value: f64| -> RootValue<Ty> {
             if let Ok(value) = Int::try_from(Float(value)) {
                 value.into()
             } else {
@@ -377,18 +385,23 @@ where
         }
     }
 
-    fn coerce_bin_op_str(&self, op: StrBinOp, args: [Value<Gc>; 2], gc: &mut Gc) -> [Value<Gc>; 2] {
+    fn coerce_bin_op_str(
+        &self,
+        op: StrBinOp,
+        args: [RootValue<Ty>; 2],
+        gc: &mut Self::Gc,
+    ) -> [RootValue<Ty>; 2] {
         match op {
             StrBinOp::Concat => {
                 use Value::*;
 
-                let flt_to_string = |x: f64, gc: &mut Gc| {
-                    let value = gc.alloc_string(x.to_string().into());
+                let flt_to_string = |x: f64, gc: &mut Self::Gc| {
+                    let value = std::rc::Rc::new(x.to_string().into());
                     Value::String(value)
                 };
 
-                let int_to_string = |x: i64, gc: &mut Gc| {
-                    let value = gc.alloc_string(x.to_string().into());
+                let int_to_string = |x: i64, gc: &mut Self::Gc| {
+                    let value = std::rc::Rc::new(x.to_string().into());
                     Value::String(value)
                 };
 
@@ -407,7 +420,7 @@ where
         }
     }
 
-    fn coerce_una_op_bit(&self, args: [Value<Gc>; 1]) -> [Value<Gc>; 1] {
+    fn coerce_una_op_bit(&self, args: [RootValue<Ty>; 1]) -> [RootValue<Ty>; 1] {
         use crate::value::{Float, Int};
 
         match args {
@@ -422,7 +435,7 @@ where
         }
     }
 
-    fn coerce_tab_set(&self, key: Value<Gc>) -> Value<Gc> {
+    fn coerce_tab_set(&self, key: RootValue<Ty>) -> RootValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_set_float_to_int {
@@ -441,7 +454,7 @@ where
         }
     }
 
-    fn coerce_tab_get(&self, key: Value<Gc>) -> Value<Gc> {
+    fn coerce_tab_get(&self, key: RootValue<Ty>) -> RootValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_get_float_to_int {

@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
-use super::{Type, TypeMismatchError, TypeProvider, Value};
+use super::{Type, TypeMismatchError, Types, Value};
+use crate::gc::{TryFromWithGc, TryIntoWithGc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Nil;
@@ -21,7 +22,7 @@ impl Display for Nil {
     }
 }
 
-impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Nil {
+impl<Gc: Types> TryFrom<Value<Gc>> for Nil {
     type Error = TypeMismatchError;
 
     fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
@@ -39,7 +40,7 @@ impl<Gc: TypeProvider> TryFrom<Value<Gc>> for Nil {
     }
 }
 
-impl<Gc: TypeProvider> From<Nil> for Value<Gc> {
+impl<Gc: Types> From<Nil> for Value<Gc> {
     fn from(Nil: Nil) -> Self {
         Value::Nil
     }
@@ -76,17 +77,17 @@ impl<T> From<NilOr<T>> for Option<T> {
     }
 }
 
-impl<T, Gc> TryInto<NilOr<T>> for Value<Gc>
+impl<T, Ty, Gc> TryFromWithGc<Value<Ty>, Gc> for NilOr<T>
 where
-    Gc: TypeProvider,
-    Value<Gc>: TryInto<T>,
+    Ty: Types,
+    Value<Ty>: TryIntoWithGc<T, Gc>,
 {
-    type Error = <Value<Gc> as TryInto<T>>::Error;
+    type Error = <Value<Ty> as TryIntoWithGc<T, Gc>>::Error;
 
-    fn try_into(self) -> Result<NilOr<T>, Self::Error> {
-        match self {
+    fn try_from_with_gc(value: Value<Ty>, gc: &mut Gc) -> Result<NilOr<T>, Self::Error> {
+        match value {
             Value::Nil => Ok(NilOr::Nil),
-            value => Ok(NilOr::Some(value.try_into()?)),
+            value => Ok(NilOr::Some(value.try_into_with_gc(gc)?)),
         }
     }
 }
@@ -97,7 +98,7 @@ impl<T> From<Nil> for NilOr<T> {
     }
 }
 
-impl<T, Gc: TypeProvider> From<NilOr<T>> for Value<Gc>
+impl<T, Gc: Types> From<NilOr<T>> for Value<Gc>
 where
     T: Into<Value<Gc>>,
 {

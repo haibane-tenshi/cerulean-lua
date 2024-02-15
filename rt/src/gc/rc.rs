@@ -28,15 +28,15 @@ impl RcGc {
     }
 }
 
-impl TypeProvider for RcGc {
-    type String = PossiblyUtf8Vec;
-    type StringRef = StringRef;
-    type RustCallable = RustCallable<Self>;
-    type Table = Table<Self>;
-    type TableRef = TableRef<Self>;
-    type FullUserdata = FullUserdata<Self>;
-    type FullUserdataRef = UserdataRef<Self>;
-}
+// impl TypeProvider for RcGc {
+//     type String = PossiblyUtf8Vec;
+//     type String = StringRef;
+//     type RustCallable = RustCallable<Self>;
+//     type Table = Table<Self>;
+//     type Table = TableRef<Self>;
+//     type FullUserdata = FullUserdata<Self>;
+//     type FullUserdata = UserdataRef<Self>;
+// }
 
 impl Gc for RcGc {
     type Sweeper<'this> = RcSweeper<'this>
@@ -47,11 +47,11 @@ impl Gc for RcGc {
         RcSweeper(self)
     }
 
-    fn alloc_string(&mut self, value: Self::String) -> Self::StringRef {
+    fn alloc_string(&mut self, value: Self::String) -> Self::String {
         StringRef(Rc::new(value))
     }
 
-    fn alloc_table(&mut self, value: Self::Table) -> Self::TableRef {
+    fn alloc_table(&mut self, value: Self::Table) -> Self::Table {
         let handle = Rc::new(RefCell::new(value));
         let index = Rc::as_ptr(&handle) as usize;
         let r = Rc::downgrade(&handle);
@@ -69,8 +69,8 @@ where
     fn alloc_userdata_with_meta(
         &mut self,
         value: T,
-        metatable: Option<Self::TableRef>,
-    ) -> Self::FullUserdataRef {
+        metatable: Option<Self::Table>,
+    ) -> Self::FullUserdata {
         let value = UserdataValue {
             value,
             metatable: RefCell::new(metatable),
@@ -91,9 +91,9 @@ pub struct RcSweeper<'a>(&'a mut RcGc);
 impl<'a> Sweeper for RcSweeper<'a> {
     type Gc = RcGc;
 
-    fn mark_string(&mut self, _: &<RcGc as TypeProvider>::StringRef) {}
+    fn mark_string(&mut self, _: &<RcGc as TypeProvider>::String) {}
 
-    fn mark_table(&mut self, rf: &<RcGc as TypeProvider>::TableRef) -> ControlFlow<()> {
+    fn mark_table(&mut self, rf: &<RcGc as TypeProvider>::Table) -> ControlFlow<()> {
         let index = Weak::as_ptr(&rf.0) as usize;
         if let Some((_, flag)) = self.0.tables.get_mut(&index) {
             let r = if *flag {
@@ -110,7 +110,7 @@ impl<'a> Sweeper for RcSweeper<'a> {
         }
     }
 
-    fn mark_userdata(&mut self, rf: &<RcGc as TypeProvider>::FullUserdataRef) {
+    fn mark_userdata(&mut self, rf: &<RcGc as TypeProvider>::FullUserdata) {
         let index = Weak::as_ptr(&rf.0) as *const () as usize;
         if let Some((_, flag)) = self.0.userdata.get_mut(&index) {
             *flag = true;
@@ -136,11 +136,11 @@ impl<'a> Sweeper for RcSweeper<'a> {
 
 pub struct TableRef<Gc>(pub Weak<RefCell<Table<Gc>>>)
 where
-    Gc: TypeProvider<TableRef = Self>;
+    Gc: TypeProvider<Table = Self>;
 
 impl<Gc> Borrow<Table<Gc>> for TableRef<Gc>
 where
-    Gc: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<Table = Self>,
 {
     fn with_ref<R>(&self, f: impl FnOnce(&Table<Gc>) -> R) -> Result<R, RefAccessError> {
         self.0.with_ref(f)
@@ -153,10 +153,10 @@ where
 
 impl<Gc> Debug for TableRef<Gc>
 where
-    Gc: TypeProvider<TableRef = Self>,
-    Gc::StringRef: Debug,
+    Gc: TypeProvider<Table = Self>,
+    Gc::String: Debug,
     Gc::RustCallable: Debug,
-    Gc::FullUserdataRef: Debug,
+    Gc::FullUserdata: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_struct("TableRef");
@@ -176,7 +176,7 @@ where
 
 impl<Gc> Display for TableRef<Gc>
 where
-    Gc: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<Table = Self>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = Weak::as_ptr(&self.0);
@@ -192,7 +192,7 @@ where
 
 impl<Gc> Clone for TableRef<Gc>
 where
-    Gc: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<Table = Self>,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -201,18 +201,18 @@ where
 
 impl<Gc> PartialEq for TableRef<Gc>
 where
-    Gc: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<Table = Self>,
 {
     fn eq(&self, other: &Self) -> bool {
         Weak::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<Gc> Eq for TableRef<Gc> where Gc: TypeProvider<TableRef = Self> {}
+impl<Gc> Eq for TableRef<Gc> where Gc: TypeProvider<Table = Self> {}
 
 impl<Gc> Hash for TableRef<Gc>
 where
-    Gc: TypeProvider<TableRef = Self>,
+    Gc: TypeProvider<Table = Self>,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Weak::as_ptr(&self.0).hash(state)
@@ -221,14 +221,14 @@ where
 
 impl<Gc> From<TableRef<Gc>> for Value<Gc>
 where
-    Gc: TypeProvider<TableRef = TableRef<Gc>>,
+    Gc: TypeProvider<Table = TableRef<Gc>>,
 {
     fn from(value: TableRef<Gc>) -> Self {
         Value::Table(value)
     }
 }
 
-pub struct UserdataRef<Gc: TypeProvider>(pub Weak<UserdataValue<dyn Userdata<Gc>, Gc::TableRef>>);
+pub struct UserdataRef<Gc: TypeProvider>(pub Weak<UserdataValue<dyn Userdata<Gc>, Gc::Table>>);
 
 impl<Gc> Userdata<Gc> for UserdataRef<Gc>
 where
@@ -270,8 +270,8 @@ where
 
 impl<Gc> Debug for UserdataRef<Gc>
 where
-    Gc: TypeProvider<TableRef = TableRef<Gc>, FullUserdataRef = Self>,
-    Gc::StringRef: Debug,
+    Gc: TypeProvider<Table = TableRef<Gc>, FullUserdata = Self>,
+    Gc::String: Debug,
     Gc::RustCallable: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -340,7 +340,7 @@ where
 
 impl<Gc> From<UserdataRef<Gc>> for Value<Gc>
 where
-    Gc: TypeProvider<FullUserdataRef = UserdataRef<Gc>>,
+    Gc: TypeProvider<FullUserdata = UserdataRef<Gc>>,
 {
     fn from(value: UserdataRef<Gc>) -> Self {
         Value::Userdata(value)

@@ -29,12 +29,12 @@ impl Debug for LeakingGc {
 
 impl TypeProvider for LeakingGc {
     type String = PossiblyUtf8Vec;
-    type StringRef = &'static PossiblyUtf8Vec;
+    type String = &'static PossiblyUtf8Vec;
     type RustCallable = RustCallable<Self>;
     type Table = Table<Self>;
-    type TableRef = &'static LeakedTableHandle<Self::Table>;
+    type Table = &'static LeakedTableHandle<Self::Table>;
     type FullUserdata = FullUserdata<Self>;
-    type FullUserdataRef = &'static LeakedUserdataHandle<Self::FullUserdata>;
+    type FullUserdata = &'static LeakedUserdataHandle<Self::FullUserdata>;
 }
 
 impl Gc for LeakingGc {
@@ -44,11 +44,11 @@ impl Gc for LeakingGc {
         LeakingGcSweeper(PhantomData)
     }
 
-    fn alloc_string(&mut self, value: Self::String) -> Self::StringRef {
+    fn alloc_string(&mut self, value: Self::String) -> Self::String {
         Box::leak(Box::new(value))
     }
 
-    fn alloc_table(&mut self, value: Self::Table) -> Self::TableRef {
+    fn alloc_table(&mut self, value: Self::Table) -> Self::Table {
         Box::leak(Box::new(LeakedTableHandle(RefCell::new(value))))
     }
 }
@@ -60,8 +60,8 @@ where
     fn alloc_userdata_with_meta(
         &mut self,
         value: T,
-        metatable: Option<Self::TableRef>,
-    ) -> Self::FullUserdataRef {
+        metatable: Option<Self::Table>,
+    ) -> Self::FullUserdata {
         use crate::value::userdata::UserdataValue;
 
         let value = LeakedUserdataHandle(UserdataValue {
@@ -78,13 +78,13 @@ pub struct LeakingGcSweeper(PhantomData<()>);
 impl Sweeper for LeakingGcSweeper {
     type Gc = LeakingGc;
 
-    fn mark_string(&mut self, _: &<LeakingGc as TypeProvider>::StringRef) {}
+    fn mark_string(&mut self, _: &<LeakingGc as TypeProvider>::String) {}
 
-    fn mark_table(&mut self, _: &<LeakingGc as TypeProvider>::TableRef) -> ControlFlow<()> {
+    fn mark_table(&mut self, _: &<LeakingGc as TypeProvider>::Table) -> ControlFlow<()> {
         ControlFlow::Break(())
     }
 
-    fn mark_userdata(&mut self, _: &<LeakingGc as TypeProvider>::FullUserdataRef) {}
+    fn mark_userdata(&mut self, _: &<LeakingGc as TypeProvider>::FullUserdata) {}
 
     fn sweep(self) {}
 }
@@ -93,10 +93,10 @@ pub struct LeakedTableHandle<T>(RefCell<T>);
 
 impl<Ty> Debug for LeakedTableHandle<Table<Ty>>
 where
-    Ty: TypeProvider<TableRef = &'static Self> + 'static,
-    Ty::StringRef: Debug,
+    Ty: TypeProvider<Table = &'static Self> + 'static,
+    Ty::String: Debug,
     Ty::RustCallable: Debug,
-    Ty::FullUserdataRef: Debug,
+    Ty::FullUserdata: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_struct("LeakedTableHandle");

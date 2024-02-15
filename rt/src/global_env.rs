@@ -1,59 +1,69 @@
 use std::error::Error;
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 use std::path::PathBuf;
 
+use gc::{Heap, Trace};
 use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::literal::Literal;
 
 use crate::chunk_cache::ChunkId;
 use crate::ffi::{LuaFfiFnPtr, LuaFfiOnce};
-use crate::gc::Gc as GarbageCollector;
+use crate::gc::TryIntoWithGc;
 use crate::runtime::RuntimeView;
-use crate::value::{Callable, KeyValue, LuaString, TableIndex, TypeProvider, Value};
+use crate::value::{
+    Callable, KeyValue, LuaString, RootValue, Strong, TableIndex, TypeProvider, Types, Value, Weak,
+};
 use crate::value_builder::{ChunkRange, Part, ValueBuilder};
 
 use crate::error::RuntimeError;
 
-pub fn empty<Gc>() -> ValueBuilder<
-    impl for<'rt> FnOnce(RuntimeView<'rt, Gc>, ChunkId, ()) -> Result<Gc::Table, RuntimeError<Gc>>,
+type RootTable<Ty> = <Strong<Ty> as Types>::Table;
+
+pub fn empty<Ty>() -> ValueBuilder<
+    impl for<'rt> FnOnce(RuntimeView<'rt, Ty>, ChunkId, ()) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: TypeProvider,
-    Value<Gc>: Display,
+    Ty: TypeProvider,
+    RootValue<Ty>: Clone,
+    Ty::Table: Default + Trace,
 {
     use crate::value_builder;
 
     let chunk_part = Part {
         chunk_ext: ChunkExtension::empty(),
-        builder: |mut rt: RuntimeView<'_, Gc>, _, _| -> Result<Gc::Table, RuntimeError<Gc>> {
+        builder: |mut rt: RuntimeView<'_, Ty>, _, _| -> Result<RootTable<Ty>, RuntimeError<Ty>> {
+            use crate::gc::RootOrd;
+
             rt.stack.clear();
 
-            let value = Default::default();
+            let value = rt.core.gc.alloc(Default::default());
 
-            Ok(value)
+            Ok(RootOrd(value))
         },
     };
 
     value_builder::builder().include(chunk_part)
 }
 
-pub fn assert<Gc>() -> Part<
+pub fn assert<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: GarbageCollector,
-    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
+    Ty: TypeProvider,
+    Ty::String: From<&'static str>,
+    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
+    Ty::Table: Trace + TableIndex<Weak<Ty>>,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_assert = crate::lua_std::impl_::assert();
-        let key = rt.core.gc.alloc_string("assert".into());
+        let key = std::rc::Rc::new("assert".into());
 
-        value.set(
+        rt.core.gc[&value].set(
             KeyValue::String(key),
             Value::Function(Callable::Rust(fn_assert.into())),
         );
@@ -64,26 +74,26 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn pcall<Gc>() -> Part<
+pub fn pcall<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: GarbageCollector,
-    Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: From<LuaFfiFnPtr<Gc>> + crate::ffi::LuaFfiOnce<Gc>,
-    Gc::Table: for<'a> crate::gc::Visit<Gc::Sweeper<'a>>,
-    Value<Gc>: Debug + Display,
+    Ty: TypeProvider,
+    Ty::String: AsRef<[u8]> + From<&'static str>,
+    Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::Table: Trace + TableIndex<Weak<Ty>>,
+    RootValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_pcall = crate::lua_std::impl_::pcall();
-        let key = rt.core.gc.alloc_string("pcall".into());
+        let key = std::rc::Rc::new("pcall".into());
 
-        value.set(
+        rt.core.gc[&value].set(
             KeyValue::String(key),
             Value::Function(Callable::Rust(fn_pcall.into())),
         );
@@ -94,25 +104,26 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn print<Gc>() -> Part<
+pub fn print<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: GarbageCollector,
-    Gc::String: TryInto<String>,
-    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
-    Value<Gc>: Display,
+    Ty: TypeProvider,
+    Ty::String: TryInto<String> + From<&'static str>,
+    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
+    Ty::Table: Trace + TableIndex<Weak<Ty>>,
+    RootValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_print = crate::lua_std::impl_::print();
-        let key = rt.core.gc.alloc_string("print".into());
+        let key = std::rc::Rc::new("print".into());
 
-        value.set(
+        rt.core.gc[&value].set(
             KeyValue::String(key),
             Value::Function(Callable::Rust(fn_print.into())),
         );
@@ -123,26 +134,27 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn load<Gc>() -> Part<
+pub fn load<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: GarbageCollector,
-    Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: From<LuaFfiFnPtr<Gc>> + LuaFfiOnce<Gc>,
-    Value<Gc>: Debug + Display + TryInto<LuaString<String>>,
-    <Value<Gc> as TryInto<LuaString<String>>>::Error: Error,
+    Ty: TypeProvider,
+    Ty::String: AsRef<[u8]> + From<&'static str>,
+    Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::Table: Trace + TableIndex<Weak<Ty>>,
+    RootValue<Ty>: TryIntoWithGc<LuaString<String>, Heap>,
+    <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_load = crate::lua_std::impl_::load();
-        let key = rt.core.gc.alloc_string("load".into());
+        let key = std::rc::Rc::new("load".into());
 
-        value.set(
+        rt.core.gc[&value].set(
             KeyValue::String(key),
             Value::Function(Callable::Rust(fn_load.into())),
         );
@@ -153,26 +165,27 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn loadfile<Gc>() -> Part<
+pub fn loadfile<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: GarbageCollector,
-    Gc::String: TryInto<String> + AsRef<[u8]>,
-    Gc::RustCallable: From<LuaFfiFnPtr<Gc>> + LuaFfiOnce<Gc>,
-    Value<Gc>: Debug + Display + TryInto<LuaString<PathBuf>>,
-    <Value<Gc> as TryInto<LuaString<PathBuf>>>::Error: Error,
+    Ty: TypeProvider,
+    Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str>,
+    Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::Table: Trace + TableIndex<Weak<Ty>>,
+    RootValue<Ty>: TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_loadfile = crate::lua_std::impl_::loadfile();
-        let key = rt.core.gc.alloc_string("loadfile".into());
+        let key = std::rc::Rc::new("loadfile".into());
 
-        value.set(
+        rt.core.gc[&value].set(
             KeyValue::String(key),
             Value::Function(Callable::Rust(fn_loadfile.into())),
         );
@@ -183,24 +196,25 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn setmetatable<Gc>() -> Part<
+pub fn setmetatable<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: GarbageCollector,
-    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
-    Value<Gc>: Debug + Display,
+    Ty: TypeProvider,
+    Ty::String: From<&'static str>,
+    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
+    Ty::Table: Trace + TableIndex<Weak<Ty>>,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let f = crate::lua_std::impl_::setmetatable();
-        let key = rt.core.gc.alloc_string("setmetatable".into());
+        let key = std::rc::Rc::new("setmetatable".into());
 
-        value.set(
+        rt.core.gc[&value].set(
             KeyValue::String(key),
             Value::Function(Callable::Rust(f.into())),
         );
@@ -211,24 +225,25 @@ where
     Part { chunk_ext, builder }
 }
 
-pub fn getmetatable<Gc>() -> Part<
+pub fn getmetatable<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Gc>, ChunkRange, Gc::Table) -> Result<Gc::Table, RuntimeError<Gc>>,
+    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Gc: GarbageCollector,
-    Gc::RustCallable: From<LuaFfiFnPtr<Gc>>,
-    Value<Gc>: Debug + Display,
+    Ty: TypeProvider,
+    Ty::String: From<&'static str>,
+    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
+    Ty::Table: Trace + TableIndex<Weak<Ty>>,
 {
     let chunk_ext = ChunkExtension::empty();
 
-    let builder = |rt: RuntimeView<Gc>, _: ChunkRange, mut value: Gc::Table| {
+    let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let f = crate::lua_std::impl_::getmetatable();
-        let key = rt.core.gc.alloc_string("getmetatable".into());
+        let key = std::rc::Rc::new("getmetatable".into());
 
-        value.set(
+        rt.core.gc[&value].set(
             KeyValue::String(key),
             Value::Function(Callable::Rust(f.into())),
         );
