@@ -6,7 +6,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::path::Path;
 
-use gc::Heap;
+use gc::{Heap, Trace};
 
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
@@ -302,6 +302,13 @@ where
     ) -> Self {
         LuaFfiFnPtr { func: fn_ptr, name }
     }
+}
+
+impl<Ty> Trace for LuaFfiFnPtr<Ty>
+where
+    Ty: TypeProvider + 'static,
+{
+    fn trace(&self, _collector: &mut gc::Collector) {}
 }
 
 pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync

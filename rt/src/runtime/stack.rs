@@ -415,20 +415,6 @@ impl<'a, Value> StackView<'a, Value> {
     pub(crate) fn boundary(&self) -> RawStackSlot {
         self.boundary
     }
-
-    pub(crate) fn full_iter(&self) -> impl Iterator<Item = &Value> {
-        self.stack.temporaries.iter()
-    }
-
-    pub(crate) fn evicted_upvalue_iter(&self) -> impl Iterator<Item = &Value> {
-        self.stack
-            .evicted_upvalues
-            .values()
-            .flat_map(|place| match place {
-                UpvaluePlace::Place(value) => Some(value),
-                UpvaluePlace::Stack(_) => None,
-            })
-    }
 }
 
 impl<'a, Value> StackView<'a, Value>

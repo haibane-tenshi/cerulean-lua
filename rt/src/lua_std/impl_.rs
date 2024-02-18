@@ -202,7 +202,7 @@ where
     Ty: TypeProvider,
     Ty::String: AsRef<[u8]>,
     Ty::RustCallable: LuaFfiOnce<Ty>,
-    RootValue<Ty>: TryIntoWithGc<LuaString<String>, Heap>,
+    RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
 {
     use crate::value::{Strong, Type};
@@ -314,7 +314,7 @@ where
     Ty: TypeProvider,
     Ty::String: TryInto<String> + AsRef<[u8]>,
     Ty::RustCallable: LuaFfiOnce<Ty>,
-    RootValue<Ty>: TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
@@ -404,7 +404,6 @@ where
     // Value<Gc>: Debug + Display,
 {
     use crate::gc::RootOrd;
-    use crate::value::Weak;
 
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(
@@ -413,7 +412,7 @@ where
              table: LuaTable<RootOrd<Ty::Table>>,
              metatable: NilOr<LuaTable<RootOrd<Ty::Table>>>| {
                 use crate::error::AlreadyDroppedError;
-                use crate::value::{Borrow, Metatable, TableIndex};
+                use crate::value::{Metatable, TableIndex};
 
                 let LuaTable(table) = table;
                 let metatable = metatable.into_option().map(|LuaTable(t)| t);

@@ -12,7 +12,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use enumoid::{EnumMap, Enumoid};
-use gc::{Gc, Heap, Trace};
+use gc::{Heap, Trace};
 use repr::literal::Literal;
 
 use crate::gc::{RootOrd, TryFromWithGc};
@@ -226,7 +226,6 @@ where
 }
 
 type RootTable<Ty> = <Strong<Ty> as Types>::Table;
-type GcTable<Ty> = <Weak<Ty> as Types>::Table;
 
 impl<Ty> RootValue<Ty>
 where
@@ -280,7 +279,7 @@ where
 {
     type Error = std::convert::Infallible;
 
-    fn try_from_with_gc(value: Literal, gc: &mut Heap) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: Literal, _gc: &mut Heap) -> Result<Self, Self::Error> {
         match value {
             Literal::Nil => Ok(Value::Nil),
             Literal::Bool(t) => Ok(Value::Bool(t)),

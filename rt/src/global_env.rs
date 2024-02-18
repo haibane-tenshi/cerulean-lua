@@ -145,7 +145,7 @@ where
     Ty::String: AsRef<[u8]> + From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    RootValue<Ty>: TryIntoWithGc<LuaString<String>, Heap>,
+    RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
@@ -176,7 +176,7 @@ where
     Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    RootValue<Ty>: TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();

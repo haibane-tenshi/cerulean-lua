@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
 
-use gc::{Gc, Trace};
+use gc::Trace;
 
-use super::{Metatable, Weak};
+use super::Metatable;
 use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::gc::GcOrd;
@@ -227,7 +227,7 @@ where
     }
 }
 
-// Self: 'static requires C: 'static
+// Self: 'static requires Ty: 'static
 // see https://github.com/rust-lang/rust/issues/57325
 // https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
 pub struct Dispatchable<T, Ty: TypeProvider> {

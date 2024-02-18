@@ -395,12 +395,12 @@ where
             StrBinOp::Concat => {
                 use Value::*;
 
-                let flt_to_string = |x: f64, gc: &mut Self::Gc| {
+                let flt_to_string = |x: f64, _gc: &mut Self::Gc| {
                     let value = std::rc::Rc::new(x.to_string().into());
                     Value::String(value)
                 };
 
-                let int_to_string = |x: i64, gc: &mut Self::Gc| {
+                let int_to_string = |x: i64, _gc: &mut Self::Gc| {
                     let value = std::rc::Rc::new(x.to_string().into());
                     Value::String(value)
                 };

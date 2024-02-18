@@ -69,7 +69,7 @@ pub struct Closure {
 }
 
 impl Trace for Closure {
-    fn trace(&self, collector: &mut Collector) {}
+    fn trace(&self, _collector: &mut Collector) {}
 }
 
 impl Closure {
@@ -102,6 +102,23 @@ impl Closure {
 
         Ok(closure)
     }
+
+    pub(crate) fn fn_ptr(&self) -> FunctionPtr {
+        self.fn_ptr
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Frame<Value> {
+    closure: Root<Closure>,
+    ip: InstrId,
+    stack_start: RawStackSlot,
+    register_variadic: Vec<Value>,
+    /// Whether frame was created as result of evaluating metamethod.
+    ///
+    /// Metamethods in general mimic builtin behavior of opcodes,
+    /// therefore need cleanup to ensure correct stack state after frame is exited.
+    event: Option<Event>,
 }
 
 impl<Ty> Frame<RootValue<Ty>>
@@ -111,11 +128,10 @@ where
 {
     pub(crate) fn new(
         closure: Root<Closure>,
-        rt: &mut RuntimeView<Ty>,
-        start: RawStackSlot,
+        rt: RuntimeView<Ty>,
         event: Option<Event>,
     ) -> Result<Self, RuntimeError<Ty>> {
-        use crate::error::{MissingChunk, MissingFunction, OutOfBoundsStack, UpvalueCountMismatch};
+        use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
         use repr::chunk::Function;
 
         let cls = &rt.core.gc[&closure];
@@ -141,9 +157,9 @@ where
         }
 
         // Adjust stack, move varargs into register if needed.
-        let stack_start = start;
+        let mut stack = rt.stack;
         let call_height = StackSlot(0) + signature.arg_count;
-        let mut stack = rt.stack.view(stack_start).ok_or(OutOfBoundsStack)?;
+        let stack_start = stack.boundary();
 
         let register_variadic = if signature.is_variadic {
             stack.adjust_height_and_collect(call_height)
@@ -164,22 +180,9 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct Frame<Value> {
-    closure: Root<Closure>,
-    ip: InstrId,
-    stack_start: RawStackSlot,
-    register_variadic: Vec<Value>,
-    /// Whether frame was created as result of evaluating metamethod.
-    ///
-    /// Metamethods in general mimic builtin behavior of opcodes,
-    /// therefore need cleanup to ensure correct stack state after frame is exited.
-    event: Option<Event>,
-}
-
 impl<Value> Frame<Value> {
-    pub(crate) fn fn_ptr(&self, heap: &Heap) -> FunctionPtr {
-        heap[&self.closure].fn_ptr
+    pub(crate) fn closure(&self) -> &Root<Closure> {
+        &self.closure
     }
 }
 
@@ -247,7 +250,7 @@ where
     pub(crate) fn backtrace(&self, heap: &Heap, chunk_cache: &dyn ChunkCache) -> BacktraceFrame {
         use crate::backtrace::{FrameSource, Location};
 
-        let ptr = self.fn_ptr(heap);
+        let ptr = heap[&self.closure].fn_ptr;
         // Instruction pointer always points at the *next* instruction.
         let ip = self.ip - 1;
         let (name, location) = chunk_cache
@@ -318,7 +321,7 @@ impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
     Ty: TypeProvider,
 {
-    pub fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
+    fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
@@ -1106,7 +1109,10 @@ where
         Some(r)
     }
 
-    pub fn construct_closure(&mut self, recipe_id: RecipeId) -> Result<Closure, opcode_err::Cause> {
+    pub(crate) fn construct_closure(
+        &mut self,
+        recipe_id: RecipeId,
+    ) -> Result<Closure, opcode_err::Cause> {
         let recipe = self
             .chunk
             .get_recipe(recipe_id)
@@ -1152,37 +1158,29 @@ where
         Ok(r)
     }
 
-    pub fn suspend(self) -> Frame<RootValue<Ty>> {
+    pub(crate) fn suspend(self) -> Frame<RootValue<Ty>> {
         let ActiveFrame {
             closure,
             ip,
             stack,
-            // upvalue_stack,
             register_variadic,
             event,
             ..
         } = self;
 
         let stack_start = stack.boundary();
-        // let upvalue_start = upvalue_stack.boundary();
-
-        // for (&upvalue_id, upvalue) in closure.upvalues.iter().zip(upvalue_stack.iter()) {
-        //     *stack.get_upvalue_mut(upvalue_id).unwrap() = upvalue.clone();
-        // }
 
         Frame {
             closure,
             ip,
             stack_start,
-            // upvalue_start,
             register_variadic,
             event,
         }
     }
 
-    pub fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Ty>> {
+    pub(crate) fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Ty>> {
         self.stack.remove_range(StackSlot(0)..drop_under);
-        // self.upvalue_stack.clear();
 
         if let Some(event) = self.event {
             self.stack.adjust_event_returns(event);

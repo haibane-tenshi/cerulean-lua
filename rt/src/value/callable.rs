@@ -12,18 +12,18 @@ use super::{RootValue, Strong, TypeMismatchError, TypeProvider, Types, Value, We
 
 pub use crate::runtime::Closure as LuaClosure;
 
-pub struct RustClosureRef<Gc>(Rc<dyn LuaFfi<Gc> + 'static>);
+pub struct RustClosureRef<Ty>(Rc<dyn LuaFfi<Ty> + 'static>);
 
-impl<Gc> RustClosureRef<Gc>
+impl<Ty> RustClosureRef<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
-    pub fn new(value: impl LuaFfi<Gc> + 'static) -> Self {
+    pub fn new(value: impl LuaFfi<Ty> + 'static) -> Self {
         let rc = Rc::new(value);
         RustClosureRef(rc)
     }
 
-    pub fn new_mut(value: impl LuaFfiMut<Gc> + 'static) -> Self {
+    pub fn new_mut(value: impl LuaFfiMut<Ty> + 'static) -> Self {
         use crate::error::BorrowError;
         use crate::ffi::WithName;
         use crate::runtime::RuntimeView;
@@ -31,7 +31,7 @@ where
 
         let name = value.debug_info().name;
         let original = RefCell::new(value);
-        let value = (move |rt: RuntimeView<'_, Gc>| {
+        let value = (move |rt: RuntimeView<'_, Ty>| {
             let mut f = original.try_borrow_mut().map_err(|_| BorrowError::Mut)?;
             f.call_mut(rt)
         })
@@ -40,7 +40,7 @@ where
         Self::new(value)
     }
 
-    pub fn new_once(value: impl LuaFfiOnce<Gc> + 'static) -> Self {
+    pub fn new_once(value: impl LuaFfiOnce<Ty> + 'static) -> Self {
         use crate::error::AlreadyDroppedError;
         use crate::ffi::WithName;
         use crate::runtime::RuntimeView;
@@ -48,7 +48,7 @@ where
 
         let name = value.debug_info().name;
         let original = Cell::new(Some(value));
-        let value = (move |rt: RuntimeView<'_, Gc>| {
+        let value = (move |rt: RuntimeView<'_, Ty>| {
             let f = original.take().ok_or(AlreadyDroppedError)?;
             f.call_once(rt)
         })
@@ -56,45 +56,39 @@ where
 
         Self::new(value)
     }
-
-    pub fn with_name(name: impl AsRef<str> + 'static, value: impl LuaFfi<Gc> + 'static) -> Self {
-        use crate::ffi::WithName;
-
-        Self::new(value.with_name(name))
-    }
 }
 
-impl<Gc> Debug for RustClosureRef<Gc> {
+impl<Ty> Debug for RustClosureRef<Ty> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RustClosureRef").field(&"<omitted>").finish()
     }
 }
 
-impl<Gc> Clone for RustClosureRef<Gc> {
+impl<Ty> Clone for RustClosureRef<Ty> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<Gc> PartialEq for RustClosureRef<Gc> {
+impl<Ty> PartialEq for RustClosureRef<Ty> {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<Gc> Eq for RustClosureRef<Gc> {}
+impl<Ty> Eq for RustClosureRef<Ty> {}
 
-impl<Gc> Hash for RustClosureRef<Gc> {
+impl<Ty> Hash for RustClosureRef<Ty> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.0).hash(state);
     }
 }
 
-impl<Gc> LuaFfiOnce<Gc> for RustClosureRef<Gc>
+impl<Ty> LuaFfiOnce<Ty> for RustClosureRef<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
-    fn call_once(self, rt: crate::runtime::RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
+    fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         self.call(rt)
     }
 
@@ -103,24 +97,33 @@ where
     }
 }
 
-impl<Gc> LuaFfiMut<Gc> for RustClosureRef<Gc>
+impl<Ty> LuaFfiMut<Ty> for RustClosureRef<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
     fn call_mut(
         &mut self,
-        rt: crate::runtime::RuntimeView<'_, Gc>,
-    ) -> Result<(), RuntimeError<Gc>> {
+        rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), RuntimeError<Ty>> {
         self.call(rt)
     }
 }
 
-impl<Gc> LuaFfi<Gc> for RustClosureRef<Gc>
+impl<Ty> LuaFfi<Ty> for RustClosureRef<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
-    fn call(&self, rt: crate::runtime::RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
+    fn call(&self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         self.0.call(rt)
+    }
+}
+
+impl<Ty> Trace for RustClosureRef<Ty>
+where
+    Ty: TypeProvider + 'static,
+{
+    fn trace(&self, _collector: &mut gc::Collector) {
+        todo!()
     }
 }
 
@@ -137,13 +140,16 @@ where
     Ty: TypeProvider + 'static,
 {
     fn trace(&self, collector: &mut gc::Collector) {
-        todo!()
+        match self {
+            RustCallable::Ptr(t) => t.trace(collector),
+            RustCallable::Ref(t) => t.trace(collector),
+        }
     }
 }
 
-impl<Gc> Debug for RustCallable<Gc>
+impl<Ty> Debug for RustCallable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -153,9 +159,9 @@ where
     }
 }
 
-impl<Gc> Display for RustCallable<Gc>
+impl<Ty> Display for RustCallable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // let name = self.debug_info().name;
@@ -164,21 +170,21 @@ where
     }
 }
 
-impl<Gc> Clone for RustCallable<Gc>
+impl<Ty> Clone for RustCallable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
     fn clone(&self) -> Self {
         match self {
             Self::Ref(arg0) => Self::Ref(arg0.clone()),
-            Self::Ptr(arg0) => Self::Ptr(arg0.clone()),
+            Self::Ptr(arg0) => Self::Ptr(*arg0),
         }
     }
 }
 
-impl<Gc> PartialEq for RustCallable<Gc>
+impl<Ty> PartialEq for RustCallable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -189,11 +195,11 @@ where
     }
 }
 
-impl<Gc> Eq for RustCallable<Gc> where Gc: TypeProvider {}
+impl<Ty> Eq for RustCallable<Ty> where Ty: TypeProvider {}
 
-impl<Gc> Hash for RustCallable<Gc>
+impl<Ty> Hash for RustCallable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
@@ -227,20 +233,20 @@ where
     }
 }
 
-impl<Gc> From<RustClosureRef<Gc>> for RustCallable<Gc>
+impl<Ty> From<RustClosureRef<Ty>> for RustCallable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
-    fn from(value: RustClosureRef<Gc>) -> Self {
+    fn from(value: RustClosureRef<Ty>) -> Self {
         Self::Ref(value)
     }
 }
 
-impl<Gc> From<LuaFfiFnPtr<Gc>> for RustCallable<Gc>
+impl<Ty> From<LuaFfiFnPtr<Ty>> for RustCallable<Ty>
 where
-    Gc: TypeProvider,
+    Ty: TypeProvider,
 {
-    fn from(value: LuaFfiFnPtr<Gc>) -> Self {
+    fn from(value: LuaFfiFnPtr<Ty>) -> Self {
         Self::Ptr(value)
     }
 }
@@ -254,15 +260,15 @@ where
 }
 
 pub type RootCallable<Ty> = Callable<Strong<Ty>>;
-pub type GcCallable<Ty> = Callable<Weak<Ty>>;
+pub type TyCallable<Ty> = Callable<Weak<Ty>>;
 
-impl<Ty> TryFromWithGc<GcCallable<Ty>, Heap> for RootCallable<Ty>
+impl<Ty> TryFromWithGc<TyCallable<Ty>, Heap> for RootCallable<Ty>
 where
     Ty: TypeProvider,
 {
     type Error = crate::error::AlreadyDroppedError;
 
-    fn try_from_with_gc(value: GcCallable<Ty>, gc: &mut Heap) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: TyCallable<Ty>, gc: &mut Heap) -> Result<Self, Self::Error> {
         use crate::gc::TryIntoWithGc;
 
         let r = match value {

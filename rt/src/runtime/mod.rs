@@ -128,21 +128,15 @@ where
     Ty: TypeProvider,
 {
     pub fn view_full(&mut self) -> RuntimeView<'_, Ty> {
-        let Ok(view) = self.view(StackSlot(0)) else {
-            unreachable!()
-        };
-
-        view
+        self.view(StackSlot(0)).unwrap()
     }
 
-    pub fn view(&mut self, start: StackSlot) -> Result<RuntimeView<'_, Ty>, RuntimeError<Ty>> {
+    pub fn view(&mut self, start: StackSlot) -> Option<RuntimeView<'_, Ty>> {
         let start = self.stack.boundary() + start;
         self.view_raw(start)
     }
 
-    fn view_raw(&mut self, start: RawStackSlot) -> Result<RuntimeView<'_, Ty>, RuntimeError<Ty>> {
-        use crate::error::OutOfBoundsStack;
-
+    fn view_raw(&mut self, start: RawStackSlot) -> Option<RuntimeView<'_, Ty>> {
         let RuntimeView {
             core,
             chunk_cache,
@@ -152,7 +146,7 @@ where
         } = self;
 
         let frames = frames.view();
-        let stack = stack.view(start).ok_or(OutOfBoundsStack)?;
+        let stack = stack.view(start)?;
         let rust_backtrace_stack = rust_backtrace_stack.view_over();
 
         let r = RuntimeView {
@@ -163,7 +157,7 @@ where
             rust_backtrace_stack,
         };
 
-        Ok(r)
+        Some(r)
     }
 }
 
@@ -191,6 +185,7 @@ where
         start: RawStackSlot,
     ) -> Result<(), RuntimeError<Ty>> {
         use crate::backtrace::{BacktraceFrame, FrameSource};
+        use crate::error::OutOfBoundsStack;
         use rust_backtrace_stack::RustFrame;
 
         let rust_frame = RustFrame {
@@ -202,7 +197,7 @@ where
             },
         };
 
-        let mut view = self.view_raw(start)?;
+        let mut view = self.view_raw(start).ok_or(OutOfBoundsStack)?;
         view.rust_backtrace_stack.push(rust_frame);
 
         tracing::trace!(
@@ -228,7 +223,6 @@ where
     Ty: TypeProvider,
 {
     fn soft_reset(&mut self) {
-        // self.upvalue_stack.clear();
         self.frames.clear();
         self.rust_backtrace_stack.clear();
     }
@@ -257,9 +251,9 @@ where
     /// and since most things (tables, closures, etc.) are shared through references,
     /// this corrupted state may be observed by outside code.
     /// If that code doesn't expect to find malformed data it may lead to weird and/or buggy behavior.
-    /// There is nothing that runtime can do to help you.
+    /// There is nothing runtime can do to help you.
     /// In case this presents an issue,
-    /// the best thing you can do is to discard the runtime and construct a fresh one.
+    /// the best course of action is to discard the runtime and construct a fresh one.
     pub fn reset(&mut self) {
         self.stack.clear();
         self.soft_reset();
@@ -277,33 +271,23 @@ where
         closure: Root<Closure>,
         start: StackSlot,
     ) -> Result<(), RuntimeError<Ty>> {
-        use frame::Frame;
-
-        let start = self.stack.boundary() + start;
-        let frame = Frame::new(closure, self, start, None)?;
-        self.frames.push(frame);
-
-        while let ControlFlow::Continue(()) = self.resume()? {}
-
-        Ok(())
-    }
-
-    fn resume(&mut self) -> Result<ControlFlow<()>, RuntimeError<Ty>> {
+        use crate::error::OutOfBoundsStack;
         use crate::value::callable::Callable;
         use frame::Frame;
 
-        let Some(frame) = self.frames.pop() else {
-            return Ok(ControlFlow::Break(()));
-        };
+        let start = self.stack.boundary() + start;
+        let rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
+        let frame = Frame::new(closure, rt, None)?;
+
         let mut active_frame = frame.activate(self)?;
 
-        for _ in 0..10000 {
+        loop {
             match active_frame.step() {
                 Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
                     active_frame.exit(slot)?;
 
                     let Some(frame) = self.frames.pop() else {
-                        return Ok(ControlFlow::Break(()));
+                        break Ok(());
                     };
 
                     active_frame = frame.activate(self)?;
@@ -314,7 +298,8 @@ where
 
                     match callable {
                         Callable::Lua(closure) => {
-                            let frame = Frame::new(closure.into(), self, start, event)?;
+                            let rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
+                            let frame = Frame::new(closure.into(), rt, event)?;
                             active_frame = frame.activate(self)?;
                         }
                         Callable::Rust(closure) => {
@@ -341,15 +326,10 @@ where
                     let frame = active_frame.suspend();
                     self.frames.push(frame);
 
-                    return Err(err.into());
+                    break Err(err.into());
                 }
             }
         }
-
-        let frame = active_frame.suspend();
-        self.frames.push(frame);
-
-        Ok(ControlFlow::Continue(()))
     }
 }
 
@@ -467,12 +447,12 @@ where
     pub fn into_diagnostic(&self, err: RuntimeError<Ty>) -> Diagnostic
     where
         Ty::String: AsRef<[u8]>,
-        // RootValue<Ty>: Display,
+        RootValue<Ty>: Display,
     {
         use codespan_reporting::files::SimpleFile;
 
         let message = match err {
-            RuntimeError::Value(err) => todo!(), //err.into_diagnostic(),
+            RuntimeError::Value(err) => err.into_diagnostic(),
             RuntimeError::Borrow(err) => err.into_diagnostic(),
             RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
             RuntimeError::Immutable(err) => err.into_diagnostic(),
@@ -488,7 +468,7 @@ where
             .frames
             .last()
             .map(|frame| {
-                let ptr = frame.fn_ptr(&self.core.gc);
+                let ptr = self.core.gc[frame.closure()].fn_ptr();
 
                 let source = self.chunk_cache.source(ptr.chunk_id);
                 let name = self

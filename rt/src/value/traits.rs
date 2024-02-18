@@ -8,7 +8,7 @@ use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError};
 use crate::gc::{GcOrd, RootOrd};
 use crate::runtime::Closure;
 
-use gc::{Gc, Trace};
+use gc::Trace;
 
 pub trait Types: Sized {
     type String;
