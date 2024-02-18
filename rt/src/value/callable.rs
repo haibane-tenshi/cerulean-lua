@@ -12,49 +12,198 @@ use super::{RootValue, Strong, TypeMismatchError, TypeProvider, Types, Value, We
 
 pub use crate::runtime::Closure as LuaClosure;
 
-pub struct RustClosureRef<Ty>(Rc<dyn LuaFfi<Ty> + 'static>);
+pub struct RustClosureRef<Ty>(Rc<dyn LuaFfiAndTrace<Ty> + 'static>);
+
+trait LuaFfiAndTrace<Ty>: LuaFfi<Ty> + Trace
+where
+    Ty: TypeProvider,
+{
+}
+
+impl<Ty, T> LuaFfiAndTrace<Ty> for T
+where
+    Ty: TypeProvider,
+    T: LuaFfi<Ty> + Trace,
+{
+}
 
 impl<Ty> RustClosureRef<Ty>
 where
     Ty: TypeProvider,
 {
-    pub fn new(value: impl LuaFfi<Ty> + 'static) -> Self {
-        let rc = Rc::new(value);
-        RustClosureRef(rc)
+    pub fn new(closure: impl LuaFfi<Ty> + 'static, trace: impl Trace) -> Self {
+        struct Inner<T, F> {
+            trace: T,
+            func: F,
+        }
+
+        impl<T, F> Trace for Inner<T, F>
+        where
+            T: Trace,
+            F: 'static,
+        {
+            fn trace(&self, collector: &mut gc::Collector) {
+                self.trace.trace(collector)
+            }
+        }
+
+        impl<Ty, T, F> LuaFfiOnce<Ty> for Inner<T, F>
+        where
+            Ty: TypeProvider,
+            F: LuaFfiOnce<Ty>,
+        {
+            fn call_once(
+                self,
+                rt: crate::runtime::RuntimeView<'_, Ty>,
+            ) -> Result<(), RuntimeError<Ty>> {
+                self.func.call_once(rt)
+            }
+
+            fn debug_info(&self) -> DebugInfo {
+                self.func.debug_info()
+            }
+        }
+
+        impl<Ty, T, F> LuaFfiMut<Ty> for Inner<T, F>
+        where
+            Ty: TypeProvider,
+            F: LuaFfiMut<Ty>,
+        {
+            fn call_mut(
+                &mut self,
+                rt: crate::runtime::RuntimeView<'_, Ty>,
+            ) -> Result<(), RuntimeError<Ty>> {
+                self.func.call_mut(rt)
+            }
+        }
+
+        impl<Ty, T, F> LuaFfi<Ty> for Inner<T, F>
+        where
+            Ty: TypeProvider,
+            F: LuaFfi<Ty>,
+        {
+            fn call(
+                &self,
+                rt: crate::runtime::RuntimeView<'_, Ty>,
+            ) -> Result<(), RuntimeError<Ty>> {
+                self.func.call(rt)
+            }
+        }
+
+        let inner = Inner {
+            trace,
+            func: closure,
+        };
+
+        RustClosureRef(Rc::new(inner))
     }
 
-    pub fn new_mut(value: impl LuaFfiMut<Ty> + 'static) -> Self {
+    pub fn new_mut(closure: impl LuaFfiMut<Ty> + 'static, trace: impl Trace) -> Self {
         use crate::error::BorrowError;
         use crate::ffi::WithName;
         use crate::runtime::RuntimeView;
         use std::cell::RefCell;
 
-        let name = value.debug_info().name;
-        let original = RefCell::new(value);
+        let name = closure.debug_info().name;
+        let original = RefCell::new(closure);
         let value = (move |rt: RuntimeView<'_, Ty>| {
             let mut f = original.try_borrow_mut().map_err(|_| BorrowError::Mut)?;
             f.call_mut(rt)
         })
         .with_name(name);
 
-        Self::new(value)
+        Self::new(value, trace)
     }
 
-    pub fn new_once(value: impl LuaFfiOnce<Ty> + 'static) -> Self {
+    pub fn new_once(closure: impl LuaFfiOnce<Ty> + 'static, trace: impl Trace) -> Self {
         use crate::error::AlreadyDroppedError;
-        use crate::ffi::WithName;
-        use crate::runtime::RuntimeView;
         use std::cell::Cell;
 
-        let name = value.debug_info().name;
-        let original = Cell::new(Some(value));
-        let value = (move |rt: RuntimeView<'_, Ty>| {
-            let f = original.take().ok_or(AlreadyDroppedError)?;
-            f.call_once(rt)
-        })
-        .with_name(name);
+        struct Inner<T, F> {
+            trace: T,
+            func: Cell<Option<F>>,
+            debug_info: DebugInfo,
+        }
 
-        Self::new(value)
+        impl<T, F> Trace for Inner<T, F>
+        where
+            T: Trace,
+            F: 'static,
+        {
+            fn trace(&self, collector: &mut gc::Collector) {
+                // Don't trace when closure is already dropped.
+                let func = self.func.take();
+                if func.is_some() {
+                    self.trace.trace(collector)
+                }
+                self.func.set(func);
+            }
+        }
+
+        impl<Ty, T, F> LuaFfiOnce<Ty> for Inner<T, F>
+        where
+            Ty: TypeProvider,
+            F: LuaFfiOnce<Ty>,
+        {
+            fn call_once(
+                self,
+                rt: crate::runtime::RuntimeView<'_, Ty>,
+            ) -> Result<(), RuntimeError<Ty>> {
+                self.call(rt)
+            }
+
+            fn debug_info(&self) -> DebugInfo {
+                self.debug_info.clone()
+            }
+        }
+
+        impl<Ty, T, F> LuaFfiMut<Ty> for Inner<T, F>
+        where
+            Ty: TypeProvider,
+            F: LuaFfiOnce<Ty>,
+        {
+            fn call_mut(
+                &mut self,
+                rt: crate::runtime::RuntimeView<'_, Ty>,
+            ) -> Result<(), RuntimeError<Ty>> {
+                self.call(rt)
+            }
+        }
+
+        impl<Ty, T, F> LuaFfi<Ty> for Inner<T, F>
+        where
+            Ty: TypeProvider,
+            F: LuaFfiOnce<Ty>,
+        {
+            fn call(
+                &self,
+                rt: crate::runtime::RuntimeView<'_, Ty>,
+            ) -> Result<(), RuntimeError<Ty>> {
+                let f = self.func.take().ok_or(AlreadyDroppedError)?;
+                f.call_once(rt)
+            }
+        }
+
+        let debug_info = closure.debug_info();
+        let inner = Inner {
+            trace,
+            func: Cell::new(Some(closure)),
+            debug_info,
+        };
+
+        RustClosureRef(Rc::new(inner))
+    }
+
+    pub fn new_untrace(closure: impl LuaFfi<Ty> + 'static) -> Self {
+        Self::new(closure, ())
+    }
+
+    pub fn new_untrace_mut(closure: impl LuaFfiMut<Ty> + 'static) -> Self {
+        Self::new_mut(closure, ())
+    }
+
+    pub fn new_untrace_once(closure: impl LuaFfiOnce<Ty> + 'static) -> Self {
+        Self::new_once(closure, ())
     }
 }
 
@@ -122,8 +271,8 @@ impl<Ty> Trace for RustClosureRef<Ty>
 where
     Ty: TypeProvider + 'static,
 {
-    fn trace(&self, _collector: &mut gc::Collector) {
-        todo!()
+    fn trace(&self, collector: &mut gc::Collector) {
+        self.0.trace(collector)
     }
 }
 
