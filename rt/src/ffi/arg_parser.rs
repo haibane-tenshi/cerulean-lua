@@ -481,53 +481,36 @@ impl<E> MissingArg<E> {
 /// Render type into iterator of Lua [`Value`]s.
 ///
 /// See module-level [documentation](self#formatting-returns) for usage explanation.
-pub trait FormatReturns<Ty, Gc>
-where
-    Ty: Types,
-{
-    type Iter: Iterator<Item = Value<Ty>>;
-
-    fn format(self, gc: &mut Gc) -> Self::Iter;
+pub trait FormatReturns<Ty, Gc, R> {
+    fn format(&mut self, gc: &mut Gc, value: R);
 }
 
-impl<Ty, Gc> FormatReturns<Ty, Gc> for ()
-where
-    Ty: Types,
-{
-    type Iter = std::iter::Empty<Value<Ty>>;
-
-    fn format(self, _gc: &mut Gc) -> Self::Iter {
-        std::iter::empty()
-    }
+impl<Ty, Gc, T> FormatReturns<Ty, Gc, ()> for T {
+    fn format(&mut self, _gc: &mut Gc, (): ()) {}
 }
 
-impl<Ty, Gc, A> FormatReturns<Ty, Gc> for (A,)
+impl<Ty, Gc, T, A> FormatReturns<Ty, Gc, (A,)> for T
 where
-    Ty: Types,
-    A: FormatReturns<Ty, Gc>,
+    T: FormatReturns<Ty, Gc, A>,
 {
-    type Iter = <A as FormatReturns<Ty, Gc>>::Iter;
-
-    fn format(self, gc: &mut Gc) -> Self::Iter {
-        let (a,) = self;
-        a.format(gc)
+    fn format(&mut self, gc: &mut Gc, value: (A,)) {
+        let (a,) = value;
+        self.format(gc, a);
     }
 }
 
 macro_rules! format_tuple {
     ($first:ident, $($t:ident),*) => {
-        impl<Ty, Gc, $first, $($t),*> FormatReturns<Ty, Gc> for ($first, $($t),*)
+        impl<Ty, Gc, T, $first, $($t),*> FormatReturns<Ty, Gc, ($first, $($t),*)> for T
         where
-            Ty: Types,
-            $first: FormatReturns<Ty, Gc>,
-            $($t: FormatReturns<Ty, Gc>,)*
+            T: FormatReturns<Ty, Gc, $first>,
+            $(T: FormatReturns<Ty, Gc, $t>,)*
         {
-            type Iter = std::iter::Chain<<$first as FormatReturns<Ty, Gc>>::Iter, <($($t,)*) as FormatReturns<Ty, Gc>>::Iter>;
-
-            fn format(self, gc: &mut Gc) -> Self::Iter {
+            fn format(&mut self, gc: &mut Gc, value: ($first, $($t),*)) {
                 #[allow(non_snake_case)]
-                let ($first, $($t,)*) = self;
-                $first.format(gc).chain(($($t,)*).format(gc))
+                let ($first, $($t,)*) = value;
+                self.format(gc, $first);
+                $(self.format(gc, $t);)*
             }
         }
     };
@@ -545,61 +528,48 @@ format_tuple!(A, B, C, D, E, F, G, H, I, J);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
-impl<Ty, Gc, T> FormatReturns<Ty, Gc> for Maybe<T>
+impl<Ty, Gc, T, R> FormatReturns<Ty, Gc, Maybe<R>> for T
 where
-    Ty: Types,
-    T: FormatReturns<Ty, Gc>,
+    T: FormatReturns<Ty, Gc, R>,
 {
-    type Iter = std::iter::Flatten<std::option::IntoIter<<T as FormatReturns<Ty, Gc>>::Iter>>;
-
-    fn format(self, gc: &mut Gc) -> Self::Iter {
-        self.into_option()
-            .map(|t| t.format(gc))
-            .into_iter()
-            .flatten()
+    fn format(&mut self, gc: &mut Gc, value: Maybe<R>) {
+        if let Some(value) = value.into_option() {
+            self.format(gc, value);
+        }
     }
 }
 
-impl<Ty, Gc, T, const N: usize> FormatReturns<Ty, Gc> for [T; N]
+impl<Ty, Gc, T, R, const N: usize> FormatReturns<Ty, Gc, [R; N]> for T
 where
-    Ty: Types,
-    T: FormatReturns<Ty, Gc>,
+    T: FormatReturns<Ty, Gc, R>,
 {
-    type Iter = std::iter::Flatten<std::array::IntoIter<<T as FormatReturns<Ty, Gc>>::Iter, N>>;
-
-    fn format(self, gc: &mut Gc) -> Self::Iter {
-        self.map(|t| t.format(gc)).into_iter().flatten()
+    fn format(&mut self, gc: &mut Gc, values: [R; N]) {
+        for value in values {
+            self.format(gc, value);
+        }
     }
 }
 
-impl<Ty, Gc, T> FormatReturns<Ty, Gc> for Vec<T>
+impl<Ty, Gc, T, R> FormatReturns<Ty, Gc, Vec<R>> for T
 where
-    Ty: Types,
-    T: FormatReturns<Ty, Gc>,
+    T: FormatReturns<Ty, Gc, R>,
 {
-    type Iter = std::iter::FlatMap<
-        std::vec::IntoIter<T>,
-        <T as FormatReturns<Ty, Gc>>::Iter,
-        Box<dyn FnMut(T) -> <T as FormatReturns<Ty, Gc>>::Iter>,
-    >;
-
-    fn format(self, gc: &mut Gc) -> Self::Iter {
-        // self.into_iter()
-        //     .flat_map(Box::new(|value| value.format(gc)))
-        todo!()
+    fn format(&mut self, gc: &mut Gc, values: Vec<R>) {
+        for value in values {
+            self.format(gc, value);
+        }
     }
 }
 
-impl<Ty, T> FormatReturns<Ty, Heap> for T
+impl<Ty, T, R> FormatReturns<Ty, Heap, R> for T
 where
     Ty: Types,
-    T: IntoWithGc<Value<Ty>, Heap>,
+    T: Extend<Value<Ty>>,
+    R: IntoWithGc<Value<Ty>, Heap>,
 {
-    type Iter = std::iter::Once<Value<Ty>>;
-
-    fn format(self, gc: &mut Heap) -> Self::Iter {
-        let value = self.into_with_gc(gc);
-        std::iter::once(value)
+    fn format(&mut self, gc: &mut Heap, value: R) {
+        let value = value.into_with_gc(gc);
+        self.extend([value]);
     }
 }
 

@@ -10,7 +10,7 @@ use gc::Heap;
 
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
-use crate::runtime::RuntimeView;
+use crate::runtime::{RuntimeView, StackView};
 use crate::value::{NilOr, RootValue, Strong, TypeProvider, Value};
 
 use arg_parser::{FormatReturns, ParseArgs};
@@ -86,7 +86,8 @@ where
     Ty: TypeProvider,
     F: Signature<Args>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    <F as Signature<Args>>::Output: FormatReturns<Strong<Ty>, Heap>,
+    for<'a> StackView<'a, RootValue<Ty>>:
+        FormatReturns<Strong<Ty>, Heap, <F as Signature<Args>>::Output>,
 {
     let heap = &mut rt.core.gc;
 
@@ -99,7 +100,7 @@ where
 
     let ret = f.call(args);
 
-    rt.stack.extend(ret.format(heap));
+    rt.stack.format(heap, ret);
 
     Ok(())
 }
@@ -112,7 +113,7 @@ where
     Ty: TypeProvider,
     F: Signature<Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    R: FormatReturns<Strong<Ty>, Heap>,
+    for<'a> StackView<'a, RootValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
@@ -125,7 +126,7 @@ where
 
     let ret = f.call(args)?;
 
-    rt.stack.extend(ret.format(heap));
+    rt.stack.format(heap, ret);
 
     Ok(())
 }
@@ -139,7 +140,11 @@ where
     // Value<Ty>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    R: FormatReturns<Strong<Ty>, Heap>,
+    for<'a> StackView<'a, RootValue<Ty>>: FormatReturns<
+        Strong<Ty>,
+        Heap,
+        <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output,
+    >,
 {
     let heap = &mut rt.core.gc;
 
@@ -151,9 +156,8 @@ where
     rt.stack.clear();
 
     let ret = f.call(rt.view_full(), args);
-    let ret: Vec<_> = ret.format(&mut rt.core.gc).collect();
 
-    rt.stack.extend(ret);
+    rt.stack.format(&mut rt.core.gc, ret);
 
     Ok(())
 }
@@ -167,7 +171,7 @@ where
     // Value<Ty>: Debug + Display,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    R: FormatReturns<Strong<Ty>, Heap>,
+    for<'a> StackView<'a, RootValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
@@ -179,9 +183,8 @@ where
     rt.stack.clear();
 
     let ret = f.call(rt.view_full(), args)?;
-    let ret: Vec<_> = ret.format(&mut rt.core.gc).collect();
 
-    rt.stack.extend(ret);
+    rt.stack.format(&mut rt.core.gc, ret);
 
     Ok(())
 }

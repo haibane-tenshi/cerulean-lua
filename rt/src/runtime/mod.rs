@@ -22,11 +22,12 @@ use crate::value::{RootValue, Strong, TypeProvider, TypeWithoutMetatable, Types,
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
-use stack::{RawStackSlot, Stack, StackView};
+use stack::{RawStackSlot, Stack};
 // use upvalue_stack::{UpvalueStack, UpvalueStackView};
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, FunctionPtr};
+pub use stack::StackView;
 
 pub struct Core<Ty>
 where
