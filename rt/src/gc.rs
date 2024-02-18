@@ -1,3 +1,5 @@
+//! Utilities to deal with our garbage collector idiosyncracies.
+
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
