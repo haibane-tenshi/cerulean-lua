@@ -11,7 +11,7 @@ use crate::ffi::{LuaFfiFnPtr, LuaFfiOnce};
 use crate::gc::TryIntoWithGc;
 use crate::runtime::RuntimeView;
 use crate::value::{
-    Callable, KeyValue, LuaString, RootValue, Strong, TableIndex, TypeProvider, Types, Value, Weak,
+    Callable, CoreTypes, KeyValue, LuaString, RootValue, Strong, TableIndex, Types, Value, Weak,
 };
 use crate::value_builder::{ChunkRange, Part, ValueBuilder};
 
@@ -23,7 +23,7 @@ pub fn empty<Ty>() -> ValueBuilder<
     impl for<'rt> FnOnce(RuntimeView<'rt, Ty>, ChunkId, ()) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Clone,
     Ty::Table: Default + Trace,
 {
@@ -52,7 +52,7 @@ pub fn assert<Ty>() -> Part<
     impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
@@ -81,7 +81,7 @@ pub fn pcall<Ty>() -> Part<
     impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
@@ -111,7 +111,7 @@ pub fn print<Ty>() -> Part<
     impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: TryInto<String> + From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
@@ -141,7 +141,7 @@ pub fn load<Ty>() -> Part<
     impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
@@ -172,7 +172,7 @@ pub fn loadfile<Ty>() -> Part<
     impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
@@ -203,7 +203,7 @@ pub fn setmetatable<Ty>() -> Part<
     impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
@@ -232,7 +232,7 @@ pub fn getmetatable<Ty>() -> Part<
     impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
 >
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: From<&'static str>,
     Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,

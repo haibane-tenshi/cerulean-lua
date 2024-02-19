@@ -8,11 +8,11 @@ use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::gc::GcOrd;
 use crate::runtime::RuntimeView;
-use crate::value::{TypeProvider, Value};
+use crate::value::{CoreTypes, Value};
 
 pub trait Userdata<Gc>: Trace
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
 {
     fn method(
         &self,
@@ -30,7 +30,7 @@ pub enum Method<Ref, Mut, Val> {
 
 pub trait DispatchMethod<Marker, Gc>: Sized
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
 {
     const SCOPE_NAME: &'static str;
 
@@ -51,7 +51,7 @@ where
 
 impl<Marker, Gc, T> DispatchMethod<Marker, Gc> for RefCell<T>
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
     T: DispatchMethod<Marker, Gc>,
 {
     const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc>>::SCOPE_NAME;
@@ -100,7 +100,7 @@ where
 
 impl<Marker, Gc, T> DispatchMethod<Marker, Gc> for Option<T>
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
     Gc::String: From<&'static str>,
     T: DispatchMethod<Marker, Gc>,
 {
@@ -171,7 +171,7 @@ where
 
 pub trait DispatchTrait<Traits: Tuple, Gc>: Sized
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
 {
     fn dispatch_trait(
         &self,
@@ -183,7 +183,7 @@ where
 
 impl<Gc, T> DispatchTrait<(), Gc> for T
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
 {
     fn dispatch_trait(
         &self,
@@ -197,7 +197,7 @@ where
 
 impl<T, Tup, Gc> DispatchTrait<Tup, Gc> for T
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
     Tup: NonEmptyTuple,
     T: DispatchMethod<TupleHead<Tup>, Gc>,
     T: DispatchTrait<TupleTail<Tup>, Gc>,
@@ -230,14 +230,14 @@ where
 // Self: 'static requires Ty: 'static
 // see https://github.com/rust-lang/rust/issues/57325
 // https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
-pub struct Dispatchable<T, Ty: TypeProvider> {
+pub struct Dispatchable<T, Ty: CoreTypes> {
     value: T,
     dispatcher: fn(&T, &str, &str, RuntimeView<'_, Ty>) -> Option<Result<(), RuntimeError<Ty>>>,
 }
 
 impl<T, Ty> Dispatchable<T, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub fn new<Traits>(value: T) -> Self
     where
@@ -254,7 +254,7 @@ where
 impl<T, Ty> Trace for Dispatchable<T, Ty>
 where
     T: Trace,
-    Ty: TypeProvider + 'static,
+    Ty: CoreTypes + 'static,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         let Dispatchable {
@@ -269,7 +269,7 @@ where
 impl<T, Ty> Userdata<Ty> for Dispatchable<T, Ty>
 where
     T: Trace,
-    Ty: TypeProvider + 'static,
+    Ty: CoreTypes + 'static,
 {
     fn method(
         &self,
@@ -309,7 +309,7 @@ where
 
 impl<T, Traits, Gc> Userdata<Gc> for DispatchableStatic<T, Traits>
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
     Traits: Tuple + 'static,
     T: DispatchTrait<Traits, Gc> + Trace,
 {
@@ -325,20 +325,20 @@ where
 
 pub trait FullUserdata<Ty>: Userdata<Ty> + Metatable<GcOrd<Ty::Table>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
 }
 
 impl<Ty, T> FullUserdata<Ty> for T
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     T: Userdata<Ty> + Metatable<GcOrd<Ty::Table>>,
 {
 }
 
 impl<Ty, T> Userdata<Ty> for Box<T>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     T: Userdata<Ty> + ?Sized,
 {
     fn method(
@@ -369,7 +369,7 @@ pub fn new_full_userdata<T, Ty>(
     metatable: Option<GcOrd<Ty::Table>>,
 ) -> Box<dyn FullUserdata<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     T: Userdata<Ty>,
 {
     let value = UserdataValue { value, metatable };
@@ -407,7 +407,7 @@ where
 
 impl<T, Ty, Table> Userdata<Ty> for UserdataValue<T, Table>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     T: Userdata<Ty> + Trace + ?Sized,
     Table: Trace,
 {

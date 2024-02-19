@@ -1,4 +1,4 @@
-use crate::value::{RootValue, Strong, TypeProvider, Types, Value};
+use crate::value::{CoreTypes, RootValue, Strong, Types, Value};
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
 /// Define fine aspects of runtime behavior.
@@ -328,7 +328,7 @@ pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
 
 impl<Ty> CoerceArgs<Strong<Ty>> for DialectBuilder
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: From<String>,
 {
     type Gc = gc::Heap;

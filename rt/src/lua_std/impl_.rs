@@ -11,12 +11,12 @@ use crate::gc::TryIntoWithGc;
 use crate::runtime::RuntimeView;
 use crate::value::table::KeyValue;
 use crate::value::{
-    Callable, LuaString, LuaTable, NilOr, RootValue, TypeMismatchError, TypeProvider, Types, Value,
+    Callable, CoreTypes, LuaString, LuaTable, NilOr, RootValue, TypeMismatchError, Types, Value,
 };
 
 pub fn assert<Ty>() -> LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
         let Some(cond) = rt.stack.get(StackSlot(0)) else {
@@ -40,7 +40,7 @@ where
 
 pub fn print<Ty>() -> LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Display,
 {
     let f = |mut rt: RuntimeView<'_, Ty>| {
@@ -58,7 +58,7 @@ where
 
 pub fn pcall<Gc>() -> LuaFfiFnPtr<Gc>
 where
-    Gc: TypeProvider,
+    Gc: CoreTypes,
     Gc::String: AsRef<[u8]>,
     Gc::RustCallable: LuaFfiOnce<Gc>,
     RootValue<Gc>: Display,
@@ -129,7 +129,7 @@ impl Error for InvalidModeError {}
 
 impl<Ty> TryFrom<RootValue<Ty>> for Mode
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
 {
     type Error = ModeError;
@@ -199,7 +199,7 @@ impl From<TypeMismatchError> for ModeError {
 
 pub fn load<Ty>() -> LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
     Ty::RustCallable: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
@@ -311,7 +311,7 @@ where
 
 pub fn loadfile<Ty>() -> LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]>,
     Ty::RustCallable: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
@@ -365,7 +365,7 @@ where
 
 pub fn getmetatable<Ty>() -> LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     // Value<Gc>: Debug + Display,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
@@ -400,7 +400,7 @@ where
 
 pub fn setmetatable<Ty>() -> LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     // Value<Gc>: Debug + Display,
 {
     use crate::gc::RootOrd;

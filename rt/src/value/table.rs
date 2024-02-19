@@ -7,7 +7,7 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::{
-    Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, TypeProvider, Types, Value, Weak,
+    CoreTypes, Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, Types, Value, Weak,
 };
 
 pub struct Table<Ty: Types> {
@@ -122,7 +122,7 @@ where
 
 impl<Ty> Trace for Table<Weak<Ty>>
 where
-    Ty: TypeProvider + 'static,
+    Ty: CoreTypes + 'static,
     Ty::String: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {

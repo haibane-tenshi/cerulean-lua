@@ -1,7 +1,7 @@
 use codespan_reporting::diagnostic::Diagnostic;
 use std::fmt::{Debug, Display};
 
-use crate::value::{RootValue, TypeProvider as Types, Value};
+use crate::value::{CoreTypes as Types, RootValue, Value};
 
 pub struct ValueError<Ty: Types>(pub RootValue<Ty>);
 

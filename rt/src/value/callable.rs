@@ -8,7 +8,7 @@ use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiFnPtr, LuaFfiMut, LuaFfiOnce};
 use crate::gc::TryFromWithGc;
 
-use super::{RootValue, Strong, TypeMismatchError, TypeProvider, Types, Value, Weak};
+use super::{CoreTypes, RootValue, Strong, TypeMismatchError, Types, Value, Weak};
 
 pub use crate::runtime::Closure as LuaClosure;
 
@@ -16,20 +16,20 @@ pub struct RustClosureRef<Ty>(Rc<dyn LuaFfiAndTrace<Ty> + 'static>);
 
 trait LuaFfiAndTrace<Ty>: LuaFfi<Ty> + Trace
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
 }
 
 impl<Ty, T> LuaFfiAndTrace<Ty> for T
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     T: LuaFfi<Ty> + Trace,
 {
 }
 
 impl<Ty> RustClosureRef<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub fn new(closure: impl LuaFfi<Ty> + 'static, trace: impl Trace) -> Self {
         struct Inner<T, F> {
@@ -49,7 +49,7 @@ where
 
         impl<Ty, T, F> LuaFfiOnce<Ty> for Inner<T, F>
         where
-            Ty: TypeProvider,
+            Ty: CoreTypes,
             F: LuaFfiOnce<Ty>,
         {
             fn call_once(
@@ -66,7 +66,7 @@ where
 
         impl<Ty, T, F> LuaFfiMut<Ty> for Inner<T, F>
         where
-            Ty: TypeProvider,
+            Ty: CoreTypes,
             F: LuaFfiMut<Ty>,
         {
             fn call_mut(
@@ -79,7 +79,7 @@ where
 
         impl<Ty, T, F> LuaFfi<Ty> for Inner<T, F>
         where
-            Ty: TypeProvider,
+            Ty: CoreTypes,
             F: LuaFfi<Ty>,
         {
             fn call(
@@ -142,7 +142,7 @@ where
 
         impl<Ty, T, F> LuaFfiOnce<Ty> for Inner<T, F>
         where
-            Ty: TypeProvider,
+            Ty: CoreTypes,
             F: LuaFfiOnce<Ty>,
         {
             fn call_once(
@@ -159,7 +159,7 @@ where
 
         impl<Ty, T, F> LuaFfiMut<Ty> for Inner<T, F>
         where
-            Ty: TypeProvider,
+            Ty: CoreTypes,
             F: LuaFfiOnce<Ty>,
         {
             fn call_mut(
@@ -172,7 +172,7 @@ where
 
         impl<Ty, T, F> LuaFfi<Ty> for Inner<T, F>
         where
-            Ty: TypeProvider,
+            Ty: CoreTypes,
             F: LuaFfiOnce<Ty>,
         {
             fn call(
@@ -235,7 +235,7 @@ impl<Ty> Hash for RustClosureRef<Ty> {
 
 impl<Ty> LuaFfiOnce<Ty> for RustClosureRef<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         self.call(rt)
@@ -248,7 +248,7 @@ where
 
 impl<Ty> LuaFfiMut<Ty> for RustClosureRef<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn call_mut(
         &mut self,
@@ -260,7 +260,7 @@ where
 
 impl<Ty> LuaFfi<Ty> for RustClosureRef<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn call(&self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         self.0.call(rt)
@@ -269,7 +269,7 @@ where
 
 impl<Ty> Trace for RustClosureRef<Ty>
 where
-    Ty: TypeProvider + 'static,
+    Ty: CoreTypes + 'static,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         self.0.trace(collector)
@@ -278,7 +278,7 @@ where
 
 pub enum RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     Ref(RustClosureRef<Ty>),
     Ptr(LuaFfiFnPtr<Ty>),
@@ -286,7 +286,7 @@ where
 
 impl<Ty> Trace for RustCallable<Ty>
 where
-    Ty: TypeProvider + 'static,
+    Ty: CoreTypes + 'static,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         match self {
@@ -298,7 +298,7 @@ where
 
 impl<Ty> Debug for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -310,7 +310,7 @@ where
 
 impl<Ty> Display for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // let name = self.debug_info().name;
@@ -321,7 +321,7 @@ where
 
 impl<Ty> Clone for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn clone(&self) -> Self {
         match self {
@@ -333,7 +333,7 @@ where
 
 impl<Ty> PartialEq for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -344,11 +344,11 @@ where
     }
 }
 
-impl<Ty> Eq for RustCallable<Ty> where Ty: TypeProvider {}
+impl<Ty> Eq for RustCallable<Ty> where Ty: CoreTypes {}
 
 impl<Ty> Hash for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
@@ -362,7 +362,7 @@ where
 
 impl<Ty> LuaFfiOnce<Ty> for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Display,
 {
     fn call_once(
@@ -384,7 +384,7 @@ where
 
 impl<Ty> From<RustClosureRef<Ty>> for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn from(value: RustClosureRef<Ty>) -> Self {
         Self::Ref(value)
@@ -393,7 +393,7 @@ where
 
 impl<Ty> From<LuaFfiFnPtr<Ty>> for RustCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn from(value: LuaFfiFnPtr<Ty>) -> Self {
         Self::Ptr(value)
@@ -413,7 +413,7 @@ pub type TyCallable<Ty> = Callable<Weak<Ty>>;
 
 impl<Ty> TryFromWithGc<TyCallable<Ty>, Heap> for RootCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     type Error = crate::error::AlreadyDroppedError;
 
@@ -534,7 +534,7 @@ where
 
 impl<Ty> LuaFfiOnce<Ty> for RootCallable<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::RustCallable: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display,
 {

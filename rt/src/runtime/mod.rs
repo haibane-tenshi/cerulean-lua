@@ -18,7 +18,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::LuaFfiOnce;
-use crate::value::{RootValue, Strong, TypeProvider, TypeWithoutMetatable, Types, Value};
+use crate::value::{CoreTypes, RootValue, Strong, TypeWithoutMetatable, Types, Value};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
@@ -31,7 +31,7 @@ pub use stack::StackView;
 
 pub struct Core<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub global_env: RootValue<Ty>,
     pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<<Strong<Ty> as Types>::Table>>,
@@ -41,7 +41,7 @@ where
 
 impl<Ty> Debug for Core<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Debug,
     <Strong<Ty> as Types>::Table: Debug,
 {
@@ -57,7 +57,7 @@ where
 
 pub struct Runtime<Ty, C>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub core: Core<Ty>,
     pub chunk_cache: C,
@@ -68,7 +68,7 @@ where
 
 impl<Ty, C> Runtime<Ty, C>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     C: Debug,
 {
     pub fn new(chunk_cache: C, core: Core<Ty>) -> Self {
@@ -114,7 +114,7 @@ where
 
 pub struct RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
@@ -125,7 +125,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub fn view_full(&mut self) -> RuntimeView<'_, Ty> {
         self.view(StackSlot(0)).unwrap()
@@ -163,7 +163,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Display,
 {
     pub fn invoke(&mut self, f: impl LuaFfiOnce<Ty>) -> Result<(), RuntimeError<Ty>> {
@@ -220,7 +220,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn soft_reset(&mut self) {
         self.frames.clear();
@@ -230,7 +230,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     /// Return runtime into consistent state.
     ///
@@ -262,7 +262,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::RustCallable: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display,
 {
@@ -335,7 +335,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub fn construct_closure(
         &mut self,
@@ -352,7 +352,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub fn load(
         &mut self,
@@ -408,7 +408,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub fn backtrace(&self) -> Backtrace {
         use rust_backtrace_stack::RustFrame;
@@ -532,7 +532,7 @@ impl From<Diagnostic> for LoadError {
 
 impl<Ty> From<LoadError> for RuntimeError<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn from(value: LoadError) -> Self {
         match value {

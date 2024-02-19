@@ -11,7 +11,7 @@ use gc::{Heap, Trace};
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
 use crate::runtime::{RuntimeView, StackView};
-use crate::value::{NilOr, RootValue, Strong, TypeProvider, Value};
+use crate::value::{CoreTypes, NilOr, RootValue, Strong, Value};
 
 use arg_parser::{FormatReturns, ParseArgs};
 use signature::{Signature, SignatureWithFirst};
@@ -19,7 +19,7 @@ use tuple::Tuple;
 
 pub trait LuaFfiOnce<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn call_once(self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>;
     fn debug_info(&self) -> DebugInfo;
@@ -27,14 +27,14 @@ where
 
 pub trait LuaFfiMut<Ty>: LuaFfiOnce<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn call_mut(&mut self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>;
 }
 
 pub trait LuaFfi<Ty>: LuaFfiMut<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn call(&self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>;
 }
@@ -47,7 +47,7 @@ pub struct DebugInfo {
 
 impl<Ty, F> LuaFfiOnce<Ty> for F
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<Ty>>,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
@@ -63,7 +63,7 @@ where
 
 impl<Ty, F> LuaFfiMut<Ty> for F
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<Ty>>,
 {
     fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
@@ -73,7 +73,7 @@ where
 
 impl<Ty, F> LuaFfi<Ty> for F
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: for<'rt> Fn(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<Ty>>,
 {
     fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
@@ -83,7 +83,7 @@ where
 
 pub fn invoke<'rt, Ty, F, Args>(mut rt: RuntimeView<'rt, Ty>, f: F) -> Result<(), RuntimeError<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: Signature<Args>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
     for<'a> StackView<'a, RootValue<Ty>>:
@@ -110,7 +110,7 @@ pub fn try_invoke<'rt, Ty, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: Signature<Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
     for<'a> StackView<'a, RootValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
@@ -136,7 +136,7 @@ pub fn invoke_with_rt<'rt, Ty, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     // Value<Ty>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
@@ -167,7 +167,7 @@ pub fn try_invoke_with_rt<'rt, Ty, F, Args, R>(
     f: F,
 ) -> Result<(), RuntimeError<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     // Value<Ty>: Debug + Display,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
@@ -236,7 +236,7 @@ pub trait WithName<Gc>: Sized {
 
 impl<F, Ty> WithName<Ty> for F
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: LuaFfiOnce<Ty>,
 {
     fn with_name<N>(self, name: N) -> DebugInfoWrap<Self, N> {
@@ -252,7 +252,7 @@ pub struct DebugInfoWrap<F, N> {
 
 impl<Ty, F, N> LuaFfiOnce<Ty> for DebugInfoWrap<F, N>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: LuaFfiOnce<Ty>,
     N: AsRef<str>,
 {
@@ -269,7 +269,7 @@ where
 
 impl<Ty, F, N> LuaFfiMut<Ty> for DebugInfoWrap<F, N>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: LuaFfiMut<Ty>,
     N: AsRef<str>,
 {
@@ -280,7 +280,7 @@ where
 
 impl<Ty, F, N> LuaFfi<Ty> for DebugInfoWrap<F, N>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     F: LuaFfi<Ty>,
     N: AsRef<str>,
 {
@@ -294,7 +294,7 @@ pub type LuaFfiFnPtr<Ty> =
 
 impl<Ty> LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub fn new(
         fn_ptr: fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>,
@@ -306,14 +306,14 @@ where
 
 impl<Ty> Trace for LuaFfiFnPtr<Ty>
 where
-    Ty: TypeProvider + 'static,
+    Ty: CoreTypes + 'static,
 {
     fn trace(&self, _collector: &mut gc::Collector) {}
 }
 
 pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::RustCallable: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display,
 {
@@ -337,7 +337,7 @@ where
 
 pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::RustCallable: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display,
 {

@@ -24,7 +24,7 @@ pub use int::Int;
 pub use nil::{Nil, NilOr};
 pub use string::LuaString;
 pub use table::{KeyValue, LuaTable, Table};
-pub use traits::{Borrow, Concat, Len, Metatable, Strong, TableIndex, TypeProvider, Types, Weak};
+pub use traits::{Concat, CoreTypes, Len, Metatable, Strong, TableIndex, Types, Weak};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
@@ -217,7 +217,7 @@ impl<Ty: Types> Value<Ty> {
 
 impl<Ty> RootValue<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::RustCallable: Clone,
 {
     pub fn downgrade(&self) -> GcValue<Ty> {
@@ -229,7 +229,7 @@ type RootTable<Ty> = <Strong<Ty> as Types>::Table;
 
 impl<Ty> RootValue<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     pub(crate) fn metatable<'a>(
         &'a self,
@@ -255,7 +255,7 @@ where
 
 impl<Ty> From<RootValue<Ty>> for GcValue<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn from(value: RootValue<Ty>) -> Self {
         match value {
@@ -274,7 +274,7 @@ where
 
 impl<Ty> TryFromWithGc<Literal, Heap> for RootValue<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: From<String>,
 {
     type Error = std::convert::Infallible;
@@ -295,7 +295,7 @@ where
 
 impl<Ty> TryFromWithGc<GcValue<Ty>, Heap> for RootValue<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::Table: Trace,
     Ty::FullUserdata: Trace,
 {

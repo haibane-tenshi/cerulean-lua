@@ -12,7 +12,7 @@ use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::value::{RootValue, TypeProvider as Types};
+use crate::value::{CoreTypes as Types, RootValue};
 
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;

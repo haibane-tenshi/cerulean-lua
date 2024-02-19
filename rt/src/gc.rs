@@ -8,7 +8,7 @@ use gc::{Collector, Gc, Heap, Root, Trace};
 
 use crate::runtime::Closure;
 use crate::value::userdata::FullUserdata;
-use crate::value::{Table, TypeProvider, Types};
+use crate::value::{CoreTypes, Table, Types};
 
 pub struct GcOrd<T>(pub Gc<T>);
 
@@ -174,7 +174,7 @@ where
 
 impl<Ty> Display for RootOrd<Box<dyn FullUserdata<Ty>>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{userdata <{:p}>}}", self.addr())

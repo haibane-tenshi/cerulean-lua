@@ -22,11 +22,11 @@ use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RuntimeErro
 use crate::gc::{FromWithGc, IntoWithGc, TryIntoWithGc};
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
-use crate::value::{Concat, Len, RootValue, Strong, TableIndex, TypeProvider, Types, Value, Weak};
+use crate::value::{Concat, CoreTypes, Len, RootValue, Strong, TableIndex, Types, Value, Weak};
 
 pub(crate) enum ChangeFrame<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     Return(StackSlot),
     Invoke(Option<Event>, Callable<Strong<Ty>>, RawStackSlot),
@@ -79,7 +79,7 @@ impl Closure {
         upvalues: impl IntoIterator<Item = RootValue<Ty>>,
     ) -> Result<Self, RuntimeError<Ty>>
     where
-        Ty: TypeProvider,
+        Ty: CoreTypes,
     {
         use crate::error::{MissingChunk, MissingFunction};
 
@@ -123,7 +123,7 @@ pub(crate) struct Frame<Value> {
 
 impl<Ty> Frame<RootValue<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Clone,
 {
     pub(crate) fn new(
@@ -188,7 +188,7 @@ impl<Value> Frame<Value> {
 
 impl<Ty> Frame<RootValue<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Display,
 {
     pub(crate) fn activate<'a>(
@@ -300,7 +300,7 @@ where
 
 pub struct ActiveFrame<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     core: &'rt mut Core<Ty>,
     closure: Root<Closure>,
@@ -319,7 +319,7 @@ where
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
 {
     fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
         self.constants.get(index).ok_or(MissingConstId(index))
@@ -378,7 +378,7 @@ where
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     RootValue<Ty>: Display,
 {
     pub(super) fn step(
@@ -1192,7 +1192,7 @@ where
 
 impl<'rt, Ty> Debug for ActiveFrame<'rt, Ty>
 where
-    Ty: Debug + TypeProvider,
+    Ty: Debug + CoreTypes,
     RootValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1271,7 +1271,7 @@ impl Event {
 
 impl<Ty> FromWithGc<Event, Heap> for KeyValue<Weak<Ty>>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     Ty::String: From<&'static str>,
 {
     fn from_with_gc(value: Event, gc: &mut Heap) -> Self {
@@ -1424,7 +1424,7 @@ where
 
 impl<E, Ty> From<RefAccessOrError<E>> for RuntimeError<Ty>
 where
-    Ty: TypeProvider,
+    Ty: CoreTypes,
     E: Into<RuntimeError<Ty>>,
 {
     fn from(value: RefAccessOrError<E>) -> Self {
