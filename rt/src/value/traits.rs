@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+use super::callable::{RustCallable, RustClosureRef};
 use super::string::PossiblyUtf8Vec;
 use super::userdata::FullUserdata;
 use super::{KeyValue, Value};
@@ -25,7 +26,7 @@ where
 {
     type String = Rc<<Ty as CoreTypes>::String>;
     type LuaCallable = RootOrd<Closure>;
-    type RustCallable = <Ty as CoreTypes>::RustCallable;
+    type RustCallable = RustCallable<Ty, <Ty as CoreTypes>::RustCallable>;
     type Table = RootOrd<<Ty as CoreTypes>::Table>;
     type FullUserdata = RootOrd<<Ty as CoreTypes>::FullUserdata>;
 }
@@ -38,7 +39,7 @@ where
 {
     type String = Rc<<Ty as CoreTypes>::String>;
     type LuaCallable = GcOrd<Closure>;
-    type RustCallable = <Ty as CoreTypes>::RustCallable;
+    type RustCallable = RustCallable<Ty, <Ty as CoreTypes>::RustCallable>;
     type Table = GcOrd<<Ty as CoreTypes>::Table>;
     type FullUserdata = GcOrd<<Ty as CoreTypes>::FullUserdata>;
 }
@@ -54,7 +55,7 @@ pub struct DefaultTypes;
 
 impl CoreTypes for DefaultTypes {
     type String = PossiblyUtf8Vec;
-    type RustCallable = super::callable::RustCallable<Self>;
+    type RustCallable = RustClosureRef<Self>;
     type Table = super::Table<Weak<Self>>;
     type FullUserdata = Box<dyn FullUserdata<Self>>;
 }

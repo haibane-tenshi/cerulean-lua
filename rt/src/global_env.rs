@@ -54,7 +54,6 @@ pub fn assert<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: From<&'static str>,
-    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
 {
     let chunk_ext = ChunkExtension::empty();
@@ -83,7 +82,7 @@ pub fn pcall<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + From<&'static str>,
-    Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::RustCallable: LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     RootValue<Ty>: Display,
 {
@@ -113,7 +112,6 @@ pub fn print<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + From<&'static str>,
-    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     RootValue<Ty>: Display,
 {
@@ -205,7 +203,6 @@ pub fn setmetatable<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: From<&'static str>,
-    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
 {
     let chunk_ext = ChunkExtension::empty();
@@ -234,7 +231,6 @@ pub fn getmetatable<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: From<&'static str>,
-    Ty::RustCallable: From<LuaFfiFnPtr<Ty>>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
 {
     let chunk_ext = ChunkExtension::empty();

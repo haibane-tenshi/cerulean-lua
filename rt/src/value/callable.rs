@@ -276,17 +276,18 @@ where
     }
 }
 
-pub enum RustCallable<Ty>
+pub enum RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
 {
-    Ref(RustClosureRef<Ty>),
+    Ref(Closure),
     Ptr(LuaFfiFnPtr<Ty>),
 }
 
-impl<Ty> Trace for RustCallable<Ty>
+impl<Ty, Closure> Trace for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes + 'static,
+    Closure: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         match self {
@@ -296,9 +297,10 @@ where
     }
 }
 
-impl<Ty> Debug for RustCallable<Ty>
+impl<Ty, Closure> Debug for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
+    Closure: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -308,7 +310,7 @@ where
     }
 }
 
-impl<Ty> Display for RustCallable<Ty>
+impl<Ty, Closure> Display for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
 {
@@ -319,9 +321,10 @@ where
     }
 }
 
-impl<Ty> Clone for RustCallable<Ty>
+impl<Ty, Closure> Clone for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
+    Closure: Clone,
 {
     fn clone(&self) -> Self {
         match self {
@@ -331,9 +334,17 @@ where
     }
 }
 
-impl<Ty> PartialEq for RustCallable<Ty>
+impl<Ty, Closure> Copy for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
+    Closure: Copy,
+{
+}
+
+impl<Ty, Closure> PartialEq for RustCallable<Ty, Closure>
+where
+    Ty: CoreTypes,
+    Closure: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -344,11 +355,17 @@ where
     }
 }
 
-impl<Ty> Eq for RustCallable<Ty> where Ty: CoreTypes {}
-
-impl<Ty> Hash for RustCallable<Ty>
+impl<Ty, Closure> Eq for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
+    Closure: Eq,
+{
+}
+
+impl<Ty, Closure> Hash for RustCallable<Ty, Closure>
+where
+    Ty: CoreTypes,
+    Closure: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
@@ -360,9 +377,10 @@ where
     }
 }
 
-impl<Ty> LuaFfiOnce<Ty> for RustCallable<Ty>
+impl<Ty, Closure> LuaFfiOnce<Ty> for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
+    Closure: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display,
 {
     fn call_once(
@@ -382,16 +400,7 @@ where
     }
 }
 
-impl<Ty> From<RustClosureRef<Ty>> for RustCallable<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn from(value: RustClosureRef<Ty>) -> Self {
-        Self::Ref(value)
-    }
-}
-
-impl<Ty> From<LuaFfiFnPtr<Ty>> for RustCallable<Ty>
+impl<Ty, Closure> From<LuaFfiFnPtr<Ty>> for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
 {
@@ -408,16 +417,13 @@ where
     Rust(Ty::RustCallable),
 }
 
-pub type RootCallable<Ty> = Callable<Strong<Ty>>;
-pub type TyCallable<Ty> = Callable<Weak<Ty>>;
-
-impl<Ty> TryFromWithGc<TyCallable<Ty>, Heap> for RootCallable<Ty>
+impl<Ty> TryFromWithGc<Callable<Weak<Ty>>, Heap> for Callable<Strong<Ty>>
 where
     Ty: CoreTypes,
 {
     type Error = crate::error::AlreadyDroppedError;
 
-    fn try_from_with_gc(value: TyCallable<Ty>, gc: &mut Heap) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: Callable<Weak<Ty>>, gc: &mut Heap) -> Result<Self, Self::Error> {
         use crate::gc::TryIntoWithGc;
 
         let r = match value {
@@ -532,7 +538,7 @@ where
     }
 }
 
-impl<Ty> LuaFfiOnce<Ty> for RootCallable<Ty>
+impl<Ty> LuaFfiOnce<Ty> for Callable<Strong<Ty>>
 where
     Ty: CoreTypes,
     Ty::RustCallable: LuaFfiOnce<Ty>,
