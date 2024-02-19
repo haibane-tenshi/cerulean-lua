@@ -20,7 +20,7 @@ where
         let mut diag = Diagnostic::error();
         let valid_utf8 = match &value {
             String(s) => {
-                if let Ok(s) = std::str::from_utf8(s.as_ref().as_ref()) {
+                if let Ok(s) = std::str::from_utf8(s.as_ref()) {
                     diag.message = s.into();
                     true
                 } else {

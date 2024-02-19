@@ -10,6 +10,7 @@ use gc::{Heap, Trace};
 
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
+use crate::gc::StringRef;
 use crate::runtime::{RuntimeView, StackView};
 use crate::value::{CoreTypes, NilOr, RootValue, Strong, Value};
 
@@ -92,7 +93,7 @@ where
     let heap = &mut rt.core.gc;
 
     let args = rt.stack.raw.parse(heap).map_err(|err| {
-        let msg = std::rc::Rc::new(err.to_string().into());
+        let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
 
@@ -118,7 +119,7 @@ where
     let heap = &mut rt.core.gc;
 
     let args = rt.stack.raw.parse(heap).map_err(|err| {
-        let msg = std::rc::Rc::new(err.to_string().into());
+        let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
 
@@ -149,7 +150,7 @@ where
     let heap = &mut rt.core.gc;
 
     let args = rt.stack.raw.parse(heap).map_err(|err| {
-        let msg = std::rc::Rc::new(err.to_string().into());
+        let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
 
@@ -176,7 +177,7 @@ where
     let heap = &mut rt.core.gc;
 
     let args = rt.stack.raw.parse(heap).map_err(|err| {
-        let msg = std::rc::Rc::new(err.to_string().into());
+        let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
 

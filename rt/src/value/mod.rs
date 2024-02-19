@@ -295,7 +295,7 @@ where
             Literal::Int(t) => Ok(Value::Int(t)),
             Literal::Float(t) => Ok(Value::Float(t.into_inner())),
             Literal::String(t) => {
-                let t = std::rc::Rc::new(t.into());
+                let t = crate::gc::StringRef::new(t.into());
                 Ok(Value::String(t))
             }
         }

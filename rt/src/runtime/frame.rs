@@ -751,9 +751,12 @@ where
         match args {
             [Value::String(lhs), Value::String(rhs)] => match op {
                 StrBinOp::Concat => {
-                    let mut r = lhs.as_ref().clone();
-                    r.concat(rhs.as_ref());
-                    let s = std::rc::Rc::new(r);
+                    use crate::gc::StringRef;
+                    use std::ops::Deref;
+
+                    let mut r = lhs.deref().clone();
+                    r.concat(rhs.deref());
+                    let s = StringRef::new(r);
 
                     Ok(ControlFlow::Continue(Some(Value::String(s))))
                 }
@@ -1275,7 +1278,7 @@ where
     Ty::String: From<&'static str>,
 {
     fn from_with_gc(value: Event, gc: &mut Heap) -> Self {
-        let s = std::rc::Rc::new(value.to_str().into());
+        let s = crate::gc::StringRef::new(value.to_str().into());
         KeyValue::String(s)
     }
 }

@@ -388,10 +388,12 @@ where
     where
         Ty::String: From<String>,
     {
+        use crate::gc::StringRef;
+
         let path = path.as_ref();
 
         let source = std::fs::read_to_string(path).map_err(|err| {
-            let msg = std::rc::Rc::new(
+            let msg = StringRef::new(
                 format!("failed to load file {}: {err}", path.to_string_lossy()).into(),
             );
             Value::String(msg)

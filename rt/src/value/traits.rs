@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::rc::Rc;
 
 use super::callable::{RustCallable, RustClosureRef};
 use super::string::PossiblyUtf8Vec;
@@ -7,7 +6,7 @@ use super::userdata::FullUserdata;
 use super::{KeyValue, Value};
 use crate::gc::{
     GcFullUserdata, GcLuaClosure, GcRustClosure, GcTable, RootFullUserdata, RootLuaClosure,
-    RootRustClosure, RootTable,
+    RootRustClosure, RootTable, StringRef,
 };
 use crate::runtime::Closure;
 
@@ -27,7 +26,7 @@ impl<Ty> Types for Strong<Ty>
 where
     Ty: CoreTypes,
 {
-    type String = Rc<<Ty as CoreTypes>::String>;
+    type String = StringRef<<Ty as CoreTypes>::String>;
     type LuaCallable = RootLuaClosure<Closure>;
     type RustCallable = RustCallable<Ty, RootRustClosure<<Ty as CoreTypes>::RustClosure>>;
     type Table = RootTable<<Ty as CoreTypes>::Table>;
@@ -40,7 +39,7 @@ impl<Ty> Types for Weak<Ty>
 where
     Ty: CoreTypes,
 {
-    type String = Rc<<Ty as CoreTypes>::String>;
+    type String = StringRef<<Ty as CoreTypes>::String>;
     type LuaCallable = GcLuaClosure<Closure>;
     type RustCallable = RustCallable<Ty, GcRustClosure<<Ty as CoreTypes>::RustClosure>>;
     type Table = GcTable<<Ty as CoreTypes>::Table>;

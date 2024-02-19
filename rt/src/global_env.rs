@@ -7,8 +7,8 @@ use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::literal::Literal;
 
 use crate::chunk_cache::ChunkId;
-use crate::ffi::{LuaFfi, LuaFfiFnPtr, LuaFfiOnce};
-use crate::gc::TryIntoWithGc;
+use crate::ffi::{LuaFfi, LuaFfiOnce};
+use crate::gc::{StringRef, TryIntoWithGc};
 use crate::runtime::RuntimeView;
 use crate::value::{
     Callable, CoreTypes, KeyValue, LuaString, RootValue, Strong, TableIndex, Types, Value, Weak,
@@ -60,7 +60,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_assert = crate::lua_std::impl_::assert();
-        let key = std::rc::Rc::new("assert".into());
+        let key = StringRef::new("assert".into());
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -90,7 +90,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_pcall = crate::lua_std::impl_::pcall();
-        let key = std::rc::Rc::new("pcall".into());
+        let key = StringRef::new("pcall".into());
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -119,7 +119,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_print = crate::lua_std::impl_::print();
-        let key = std::rc::Rc::new("print".into());
+        let key = StringRef::new("print".into());
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -141,7 +141,7 @@ pub fn load<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + From<&'static str>,
-    Ty::RustClosure: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
@@ -150,7 +150,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_load = crate::lua_std::impl_::load();
-        let key = std::rc::Rc::new("load".into());
+        let key = StringRef::new("load".into());
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -172,7 +172,7 @@ pub fn loadfile<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str>,
-    Ty::RustClosure: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
@@ -181,7 +181,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_loadfile = crate::lua_std::impl_::loadfile();
-        let key = std::rc::Rc::new("loadfile".into());
+        let key = StringRef::new("loadfile".into());
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -209,7 +209,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let f = crate::lua_std::impl_::setmetatable();
-        let key = std::rc::Rc::new("setmetatable".into());
+        let key = StringRef::new("setmetatable".into());
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -237,7 +237,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let f = crate::lua_std::impl_::getmetatable();
-        let key = std::rc::Rc::new("getmetatable".into());
+        let key = StringRef::new("getmetatable".into());
 
         rt.core.gc[&value].set(
             KeyValue::String(key),

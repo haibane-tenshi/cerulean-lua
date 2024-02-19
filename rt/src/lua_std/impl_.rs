@@ -7,7 +7,7 @@ use gc::Heap;
 
 use crate::error::{RefAccessError, RuntimeError};
 use crate::ffi::{self, LuaFfi, LuaFfiFnPtr, LuaFfiOnce, Maybe, Opts};
-use crate::gc::TryIntoWithGc;
+use crate::gc::{StringRef, TryIntoWithGc};
 use crate::runtime::RuntimeView;
 use crate::value::table::KeyValue;
 use crate::value::{
@@ -20,7 +20,7 @@ where
 {
     let f = |rt: RuntimeView<'_, Ty>| {
         let Some(cond) = rt.stack.get(StackSlot(0)) else {
-            let msg = std::rc::Rc::new("assert expects at least one argument".into());
+            let msg = StringRef::new("assert expects at least one argument".into());
             return Err(Value::String(msg).into());
         };
 
@@ -28,7 +28,7 @@ where
             Ok(())
         } else {
             let err = rt.stack.get(StackSlot(1)).cloned().unwrap_or_else(|| {
-                let msg = std::rc::Rc::new("assertion failed!".into());
+                let msg = StringRef::new("assertion failed!".into());
                 Value::String(msg)
             });
             Err(err.into())
@@ -65,12 +65,12 @@ where
 {
     let f = |mut rt: RuntimeView<'_, Gc>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
-            let msg = std::rc::Rc::new("pcall expects at least one argument".into());
+            let msg = StringRef::new("pcall expects at least one argument".into());
             return Err(Value::String(msg).into());
         };
 
         let Value::Function(func) = value.take() else {
-            let msg = std::rc::Rc::new("pcall expects the first argument to be a function".into());
+            let msg = StringRef::new("pcall expects the first argument to be a function".into());
             return Err(Value::String(msg).into());
         };
 
@@ -94,7 +94,7 @@ where
                     .into_diagnostic(err)
                     .emit(&mut NoColor::new(&mut s), &Default::default());
                 let string = String::from_utf8_lossy(&s).to_string();
-                let msg = std::rc::Rc::new(string.into());
+                let msg = StringRef::new(string.into());
 
                 rt.reset();
                 rt.stack.push(Value::Bool(false));
@@ -149,7 +149,7 @@ where
             }
         };
 
-        let r = match s.as_ref().as_ref() {
+        let r = match s.as_ref() {
             b"t" => Ok(Mode::Text),
             b"b" => Ok(Mode::Binary),
             b"bt" => Ok(Mode::BinaryOrText),
@@ -271,14 +271,14 @@ where
                 let source = match source {
                     ChunkSource::String(s) => s,
                     ChunkSource::Function(_) => {
-                        let msg = std::rc::Rc::new("source functions are not yet supported".into());
+                        let msg = StringRef::new("source functions are not yet supported".into());
                         return Err(Value::String(msg).into());
                     }
                 };
 
                 {
                     let source = std::str::from_utf8(source.as_ref().as_ref()).map_err(|_| {
-                        let msg = std::rc::Rc::new("string does not contain valid utf8".into());
+                        let msg = StringRef::new("string does not contain valid utf8".into());
                         Value::String(msg)
                     })?;
 
@@ -296,7 +296,7 @@ where
                         }
                         Err(err) => {
                             let msg = rt.into_diagnostic(err.into()).emit_to_string();
-                            let msg = std::rc::Rc::new(msg.into());
+                            let msg = StringRef::new(msg.into());
 
                             Ok((NilOr::Nil, Maybe::Some(LuaString(msg))))
                         }
@@ -331,7 +331,7 @@ where
                 let _mode = mode.unwrap_or_default();
 
                 let Some(LuaString(filename)) = filename else {
-                    let msg = std::rc::Rc::new(
+                    let msg = StringRef::new(
                         "loadfile doesn't yet support loading chunks from stdin".into(),
                     );
                     return Err(Value::String(msg).into());
@@ -351,7 +351,7 @@ where
                     }
                     Err(err) => {
                         let msg = rt.into_diagnostic(err).emit_to_string();
-                        let msg = std::rc::Rc::new(msg.into());
+                        let msg = StringRef::new(msg.into());
 
                         Ok((NilOr::Nil, Maybe::Some(LuaString(msg))))
                     }
@@ -376,7 +376,7 @@ where
                     use crate::value::TableIndex;
 
                     let __metatable = {
-                        let key = std::rc::Rc::new("__metatable".into());
+                        let key = StringRef::new("__metatable".into());
                         rt.core.gc[&metatable].get(&KeyValue::String(key))
                     };
 
@@ -419,7 +419,7 @@ where
 
                 let has_meta_field = match rt.core.gc[&table].metatable() {
                     Some(metatable) => {
-                        let key = std::rc::Rc::new("__metatable".into());
+                        let key = StringRef::new("__metatable".into());
                         rt.core
                             .gc
                             .get(metatable.into())
@@ -430,7 +430,7 @@ where
                 };
 
                 if has_meta_field {
-                    let msg = std::rc::Rc::new(
+                    let msg = StringRef::new(
                         "table already has metatable with '__metatable' field".into(),
                     );
                     return Err(Value::String(msg).into());

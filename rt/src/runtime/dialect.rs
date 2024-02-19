@@ -393,15 +393,16 @@ where
     ) -> [RootValue<Ty>; 2] {
         match op {
             StrBinOp::Concat => {
+                use crate::gc::StringRef;
                 use Value::*;
 
                 let flt_to_string = |x: f64, _gc: &mut Self::Gc| {
-                    let value = std::rc::Rc::new(x.to_string().into());
+                    let value = StringRef::new(x.to_string().into());
                     Value::String(value)
                 };
 
                 let int_to_string = |x: i64, _gc: &mut Self::Gc| {
-                    let value = std::rc::Rc::new(x.to_string().into());
+                    let value = StringRef::new(x.to_string().into());
                     Value::String(value)
                 };
 
