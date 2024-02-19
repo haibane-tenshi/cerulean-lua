@@ -17,7 +17,7 @@ use crate::backtrace::{Backtrace, Location};
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
-use crate::ffi::LuaFfiOnce;
+use crate::ffi::{LuaFfi, LuaFfiOnce};
 use crate::value::{CoreTypes, RootValue, Strong, TypeWithoutMetatable, Types, Value};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
@@ -263,7 +263,7 @@ where
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
-    Ty::RustCallable: LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfi<Ty>,
     RootValue<Ty>: Display,
 {
     pub fn enter(

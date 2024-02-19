@@ -6,7 +6,7 @@ use gc::Trace;
 use super::Metatable;
 use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
-use crate::gc::GcOrd;
+use crate::gc::GcTable;
 use crate::runtime::RuntimeView;
 use crate::value::{CoreTypes, Value};
 
@@ -323,7 +323,7 @@ where
     }
 }
 
-pub trait FullUserdata<Ty>: Userdata<Ty> + Metatable<GcOrd<Ty::Table>>
+pub trait FullUserdata<Ty>: Userdata<Ty> + Metatable<GcTable<Ty::Table>>
 where
     Ty: CoreTypes,
 {
@@ -332,7 +332,7 @@ where
 impl<Ty, T> FullUserdata<Ty> for T
 where
     Ty: CoreTypes,
-    T: Userdata<Ty> + Metatable<GcOrd<Ty::Table>>,
+    T: Userdata<Ty> + Metatable<GcTable<Ty::Table>>,
 {
 }
 
@@ -366,7 +366,7 @@ where
 
 pub fn new_full_userdata<T, Ty>(
     value: T,
-    metatable: Option<GcOrd<Ty::Table>>,
+    metatable: Option<GcTable<Ty::Table>>,
 ) -> Box<dyn FullUserdata<Ty>>
 where
     Ty: CoreTypes,

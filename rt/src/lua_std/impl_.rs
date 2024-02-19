@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use gc::Heap;
 
 use crate::error::{RefAccessError, RuntimeError};
-use crate::ffi::{self, LuaFfiFnPtr, LuaFfiOnce, Maybe, Opts};
+use crate::ffi::{self, LuaFfi, LuaFfiFnPtr, LuaFfiOnce, Maybe, Opts};
 use crate::gc::TryIntoWithGc;
 use crate::runtime::RuntimeView;
 use crate::value::table::KeyValue;
@@ -60,7 +60,7 @@ pub fn pcall<Gc>() -> LuaFfiFnPtr<Gc>
 where
     Gc: CoreTypes,
     Gc::String: AsRef<[u8]>,
-    Gc::RustCallable: LuaFfiOnce<Gc>,
+    Gc::RustClosure: LuaFfi<Gc>,
     RootValue<Gc>: Display,
 {
     let f = |mut rt: RuntimeView<'_, Gc>| {
@@ -201,7 +201,7 @@ pub fn load<Ty>() -> LuaFfiFnPtr<Ty>
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
-    Ty::RustCallable: LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
 {
@@ -313,7 +313,7 @@ pub fn loadfile<Ty>() -> LuaFfiFnPtr<Ty>
 where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]>,
-    Ty::RustCallable: LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
 {
@@ -403,14 +403,14 @@ where
     Ty: CoreTypes,
     // Value<Gc>: Debug + Display,
 {
-    use crate::gc::RootOrd;
+    use crate::gc::RootTable;
 
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(
             rt,
             |rt: RuntimeView<'_, Ty>,
-             table: LuaTable<RootOrd<Ty::Table>>,
-             metatable: NilOr<LuaTable<RootOrd<Ty::Table>>>| {
+             table: LuaTable<RootTable<Ty::Table>>,
+             metatable: NilOr<LuaTable<RootTable<Ty::Table>>>| {
                 use crate::error::AlreadyDroppedError;
                 use crate::value::{Metatable, TableIndex};
 
@@ -436,7 +436,8 @@ where
                     return Err(Value::String(msg).into());
                 }
 
-                rt.core.gc[&table].set_metatable(metatable.map(RootOrd::downgrade).map(Into::into));
+                rt.core.gc[&table]
+                    .set_metatable(metatable.as_ref().map(RootTable::downgrade).map(Into::into));
 
                 Ok(LuaTable(table))
             },

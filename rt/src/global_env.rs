@@ -7,7 +7,7 @@ use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::literal::Literal;
 
 use crate::chunk_cache::ChunkId;
-use crate::ffi::{LuaFfiFnPtr, LuaFfiOnce};
+use crate::ffi::{LuaFfi, LuaFfiFnPtr, LuaFfiOnce};
 use crate::gc::TryIntoWithGc;
 use crate::runtime::RuntimeView;
 use crate::value::{
@@ -32,13 +32,13 @@ where
     let chunk_part = Part {
         chunk_ext: ChunkExtension::empty(),
         builder: |mut rt: RuntimeView<'_, Ty>, _, _| -> Result<RootTable<Ty>, RuntimeError<Ty>> {
-            use crate::gc::RootOrd;
+            use crate::gc::RootTable;
 
             rt.stack.clear();
 
             let value = rt.core.gc.alloc(Default::default());
 
-            Ok(RootOrd(value))
+            Ok(RootTable(value))
         },
     };
 
@@ -82,7 +82,7 @@ pub fn pcall<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + From<&'static str>,
-    Ty::RustCallable: LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfi<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     RootValue<Ty>: Display,
 {
@@ -141,7 +141,7 @@ pub fn load<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + From<&'static str>,
-    Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::RustClosure: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
@@ -172,7 +172,7 @@ pub fn loadfile<Ty>() -> Part<
 where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str>,
-    Ty::RustCallable: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
+    Ty::RustClosure: From<LuaFfiFnPtr<Ty>> + LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,

@@ -5,7 +5,10 @@ use super::callable::{RustCallable, RustClosureRef};
 use super::string::PossiblyUtf8Vec;
 use super::userdata::FullUserdata;
 use super::{KeyValue, Value};
-use crate::gc::{GcOrd, RootOrd};
+use crate::gc::{
+    GcFullUserdata, GcLuaClosure, GcRustClosure, GcTable, RootFullUserdata, RootLuaClosure,
+    RootRustClosure, RootTable,
+};
 use crate::runtime::Closure;
 
 use gc::Trace;
@@ -25,10 +28,10 @@ where
     Ty: CoreTypes,
 {
     type String = Rc<<Ty as CoreTypes>::String>;
-    type LuaCallable = RootOrd<Closure>;
-    type RustCallable = RustCallable<Ty, <Ty as CoreTypes>::RustCallable>;
-    type Table = RootOrd<<Ty as CoreTypes>::Table>;
-    type FullUserdata = RootOrd<<Ty as CoreTypes>::FullUserdata>;
+    type LuaCallable = RootLuaClosure<Closure>;
+    type RustCallable = RustCallable<Ty, RootRustClosure<<Ty as CoreTypes>::RustClosure>>;
+    type Table = RootTable<<Ty as CoreTypes>::Table>;
+    type FullUserdata = RootFullUserdata<<Ty as CoreTypes>::FullUserdata>;
 }
 
 pub struct Weak<Ty>(PhantomData<(Ty,)>);
@@ -38,24 +41,24 @@ where
     Ty: CoreTypes,
 {
     type String = Rc<<Ty as CoreTypes>::String>;
-    type LuaCallable = GcOrd<Closure>;
-    type RustCallable = RustCallable<Ty, <Ty as CoreTypes>::RustCallable>;
-    type Table = GcOrd<<Ty as CoreTypes>::Table>;
-    type FullUserdata = GcOrd<<Ty as CoreTypes>::FullUserdata>;
+    type LuaCallable = GcLuaClosure<Closure>;
+    type RustCallable = RustCallable<Ty, GcRustClosure<<Ty as CoreTypes>::RustClosure>>;
+    type Table = GcTable<<Ty as CoreTypes>::Table>;
+    type FullUserdata = GcFullUserdata<<Ty as CoreTypes>::FullUserdata>;
 }
 
 pub trait CoreTypes: Sized {
     type String: Concat + Len + Clone + PartialOrd + From<String> + From<&'static str>;
-    type RustCallable: Clone + PartialEq + Trace;
-    type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcOrd<Self::Table>>;
-    type FullUserdata: Trace + Metatable<GcOrd<Self::Table>>;
+    type RustClosure: Clone + PartialEq + Trace;
+    type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcTable<Self::Table>>;
+    type FullUserdata: Trace + Metatable<GcTable<Self::Table>>;
 }
 
 pub struct DefaultTypes;
 
 impl CoreTypes for DefaultTypes {
     type String = PossiblyUtf8Vec;
-    type RustCallable = RustClosureRef<Self>;
+    type RustClosure = RustClosureRef<Self>;
     type Table = super::Table<Weak<Self>>;
     type FullUserdata = Box<dyn FullUserdata<Self>>;
 }

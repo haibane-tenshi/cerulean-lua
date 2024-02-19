@@ -427,7 +427,10 @@ where
         use crate::gc::TryIntoWithGc;
 
         let r = match value {
-            Callable::Rust(t) => Callable::Rust(t),
+            Callable::Rust(RustCallable::Ptr(t)) => Callable::Rust(RustCallable::Ptr(t)),
+            Callable::Rust(RustCallable::Ref(t)) => {
+                Callable::Rust(RustCallable::Ref(t.try_into_with_gc(gc)?))
+            }
             Callable::Lua(t) => Callable::Lua(t.try_into_with_gc(gc)?),
         };
 
@@ -541,7 +544,7 @@ where
 impl<Ty> LuaFfiOnce<Ty> for Callable<Strong<Ty>>
 where
     Ty: CoreTypes,
-    Ty::RustCallable: LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfi<Ty>,
     RootValue<Ty>: Display,
 {
     fn call_once(

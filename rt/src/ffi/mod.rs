@@ -314,7 +314,7 @@ where
 pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
 where
     Ty: CoreTypes,
-    Ty::RustCallable: LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfi<Ty>,
     RootValue<Ty>: Display,
 {
     let f = move |mut rt: RuntimeView<'_, Ty>| {
@@ -338,7 +338,7 @@ where
 pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
     Ty: CoreTypes,
-    Ty::RustCallable: LuaFfiOnce<Ty>,
+    Ty::RustClosure: LuaFfi<Ty>,
     RootValue<Ty>: Display,
 {
     let f = move |mut rt: RuntimeView<Ty>| {

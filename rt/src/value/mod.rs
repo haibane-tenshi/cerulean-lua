@@ -15,7 +15,7 @@ use enumoid::{EnumMap, Enumoid};
 use gc::{Heap, Trace};
 use repr::literal::Literal;
 
-use crate::gc::{RootOrd, TryFromWithGc};
+use crate::gc::TryFromWithGc;
 
 pub use boolean::Boolean;
 pub use callable::Callable;
@@ -218,7 +218,7 @@ impl<Ty: Types> Value<Ty> {
 impl<Ty> RootValue<Ty>
 where
     Ty: CoreTypes,
-    Ty::RustCallable: Clone,
+    Ty::RustClosure: Clone,
 {
     pub fn downgrade(&self) -> GcValue<Ty> {
         self.clone().into()
@@ -236,6 +236,8 @@ where
         heap: &Heap,
         primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<RootTable<Ty>>>,
     ) -> Option<RootTable<Ty>> {
+        use crate::gc::RootTable;
+
         match self {
             Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].clone(),
             Value::Bool(_) => primitive_metatables[TypeWithoutMetatable::Bool].clone(),
@@ -245,10 +247,10 @@ where
             Value::Function(_) => primitive_metatables[TypeWithoutMetatable::Function].clone(),
             Value::Table(t) => heap[&t]
                 .metatable()
-                .and_then(|table| Some(RootOrd(heap.upgrade(table.0)?))),
+                .and_then(|table| Some(RootTable(heap.upgrade(table.0)?))),
             Value::Userdata(t) => heap[&t]
                 .metatable()
-                .and_then(|table| Some(RootOrd(heap.upgrade(table.0)?))),
+                .and_then(|table| Some(RootTable(heap.upgrade(table.0)?))),
         }
     }
 }
@@ -258,6 +260,8 @@ where
     Ty: CoreTypes,
 {
     fn from(value: RootValue<Ty>) -> Self {
+        use callable::RustCallable;
+
         match value {
             Value::Nil => Value::Nil,
             Value::Bool(t) => Value::Bool(t),
@@ -265,7 +269,12 @@ where
             Value::Float(t) => Value::Float(t),
             Value::String(t) => Value::String(t),
             Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade())),
-            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t)),
+            Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
+                Value::Function(Callable::Rust(RustCallable::Ptr(t)))
+            }
+            Value::Function(Callable::Rust(RustCallable::Ref(t))) => {
+                Value::Function(Callable::Rust(RustCallable::Ref(t.downgrade())))
+            }
             Value::Table(t) => Value::Table(t.downgrade()),
             Value::Userdata(t) => Value::Userdata(t.downgrade()),
         }
@@ -303,6 +312,7 @@ where
 
     fn try_from_with_gc(value: GcValue<Ty>, heap: &mut Heap) -> Result<Self, Self::Error> {
         use crate::gc::TryIntoWithGc;
+        use callable::RustCallable;
 
         let r = match value {
             Value::Nil => Value::Nil,
@@ -313,7 +323,12 @@ where
             Value::Function(Callable::Lua(t)) => {
                 Value::Function(Callable::Lua(t.try_into_with_gc(heap)?))
             }
-            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t)),
+            Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
+                Value::Function(Callable::Rust(RustCallable::Ptr(t)))
+            }
+            Value::Function(Callable::Rust(RustCallable::Ref(t))) => {
+                Value::Function(Callable::Rust(RustCallable::Ref(t.try_into_with_gc(heap)?)))
+            }
             Value::Table(t) => Value::Table(t.try_into_with_gc(heap)?),
             Value::Userdata(t) => Value::Userdata(t.try_into_with_gc(heap)?),
         };

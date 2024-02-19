@@ -6,210 +6,337 @@ use std::ops::{Deref, DerefMut};
 
 use gc::{Collector, Gc, Heap, Root, Trace};
 
-use crate::runtime::Closure;
-use crate::value::userdata::FullUserdata;
-use crate::value::{CoreTypes, Table, Types};
+use crate::error::AlreadyDroppedError;
+use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
+use crate::value::{CoreTypes, RootValue};
 
-pub struct GcOrd<T>(pub Gc<T>);
+macro_rules! ref_pair {
+    ($gc_name:ident, $root_name:ident) => {
+        pub struct $gc_name<T>(pub Gc<T>);
 
-impl<T> From<Gc<T>> for GcOrd<T> {
-    fn from(value: Gc<T>) -> Self {
-        Self(value)
-    }
+        impl<T> From<Gc<T>> for $gc_name<T> {
+            fn from(value: Gc<T>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl<T> From<$gc_name<T>> for Gc<T> {
+            fn from(value: $gc_name<T>) -> Self {
+                value.0
+            }
+        }
+
+        impl<T> AsRef<Gc<T>> for $gc_name<T> {
+            fn as_ref(&self) -> &Gc<T> {
+                &self.0
+            }
+        }
+
+        impl<T> AsMut<Gc<T>> for $gc_name<T> {
+            fn as_mut(&mut self) -> &mut Gc<T> {
+                &mut self.0
+            }
+        }
+
+        impl<T> Deref for $gc_name<T> {
+            type Target = Gc<T>;
+
+            fn deref(&self) -> &Self::Target {
+                self.as_ref()
+            }
+        }
+
+        impl<T> DerefMut for $gc_name<T> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                self.as_mut()
+            }
+        }
+
+        impl<T> Trace for $gc_name<T>
+        where
+            T: Trace,
+        {
+            fn trace(&self, collector: &mut Collector) {
+                self.0.trace(collector)
+            }
+        }
+
+        impl<T> Clone for $gc_name<T> {
+            fn clone(&self) -> Self {
+                *self
+            }
+        }
+
+        impl<T> Copy for $gc_name<T> {}
+
+        impl<T> PartialEq for $gc_name<T> {
+            fn eq(&self, other: &Self) -> bool {
+                self.0.addr() == other.0.addr()
+            }
+        }
+
+        impl<T> Eq for $gc_name<T> {}
+
+        impl<T> PartialOrd for $gc_name<T> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        impl<T> Ord for $gc_name<T> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.0.addr().cmp(&other.0.addr())
+            }
+        }
+
+        impl<T> Hash for $gc_name<T> {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                self.0.addr().hash(state)
+            }
+        }
+
+        pub struct $root_name<T>(pub Root<T>);
+
+        impl<T> $root_name<T> {
+            pub fn downgrade(&self) -> $gc_name<T> {
+                $gc_name(self.0.downgrade())
+            }
+        }
+
+        impl<T> From<Root<T>> for $root_name<T> {
+            fn from(value: Root<T>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl<T> From<$root_name<T>> for Root<T> {
+            fn from(value: $root_name<T>) -> Self {
+                value.0
+            }
+        }
+
+        impl<T> AsRef<Root<T>> for $root_name<T> {
+            fn as_ref(&self) -> &Root<T> {
+                &self.0
+            }
+        }
+
+        impl<T> AsMut<Root<T>> for $root_name<T> {
+            fn as_mut(&mut self) -> &mut Root<T> {
+                &mut self.0
+            }
+        }
+
+        impl<T> Deref for $root_name<T> {
+            type Target = Root<T>;
+
+            fn deref(&self) -> &Self::Target {
+                self.as_ref()
+            }
+        }
+
+        impl<T> DerefMut for $root_name<T> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                self.as_mut()
+            }
+        }
+
+        impl<T> Clone for $root_name<T> {
+            fn clone(&self) -> Self {
+                $root_name(self.0.clone())
+            }
+        }
+
+        impl<T> PartialEq for $root_name<T> {
+            fn eq(&self, other: &Self) -> bool {
+                self.0.addr() == other.0.addr()
+            }
+        }
+
+        impl<T> Eq for $root_name<T> {}
+
+        impl<T> PartialOrd for $root_name<T> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        impl<T> Ord for $root_name<T> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.0.addr().cmp(&other.0.addr())
+            }
+        }
+
+        impl<T> Hash for $root_name<T> {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                self.0.addr().hash(state)
+            }
+        }
+
+        impl<T> TryFromWithGc<$gc_name<T>, Heap> for $root_name<T>
+        where
+            T: Trace,
+        {
+            type Error = AlreadyDroppedError;
+
+            fn try_from_with_gc(value: $gc_name<T>, gc: &mut Heap) -> Result<Self, Self::Error> {
+                let value = gc.upgrade(value.0).ok_or(AlreadyDroppedError)?;
+                Ok($root_name(value))
+            }
+        }
+    };
 }
 
-impl<T> From<GcOrd<T>> for Gc<T> {
-    fn from(value: GcOrd<T>) -> Self {
-        value.0
-    }
-}
+ref_pair!(GcLuaClosure, RootLuaClosure);
 
-impl<T> AsRef<Gc<T>> for GcOrd<T> {
-    fn as_ref(&self) -> &Gc<T> {
-        &self.0
-    }
-}
-
-impl<T> AsMut<Gc<T>> for GcOrd<T> {
-    fn as_mut(&mut self) -> &mut Gc<T> {
-        &mut self.0
-    }
-}
-
-impl<T> Deref for GcOrd<T> {
-    type Target = Gc<T>;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_ref()
-    }
-}
-
-impl<T> DerefMut for GcOrd<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.as_mut()
-    }
-}
-
-impl<T> Trace for GcOrd<T>
-where
-    T: Trace,
-{
-    fn trace(&self, collector: &mut Collector) {
-        self.0.trace(collector)
-    }
-}
-
-impl<T> Debug for GcOrd<T> {
+impl<T> Debug for GcLuaClosure<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("GcOrd").field(&self.0).finish()
+        f.debug_tuple("GcLuaClosure").field(&self.0).finish()
     }
 }
 
-impl Display for GcOrd<Closure> {
+impl<T> Display for GcLuaClosure<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{[lua] closure <{:p}>}}", self.0.addr())
     }
 }
 
-impl<T> Clone for GcOrd<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for GcOrd<T> {}
-
-impl<T> PartialEq for GcOrd<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.addr() == other.0.addr()
-    }
-}
-
-impl<T> Eq for GcOrd<T> {}
-
-impl<T> PartialOrd for GcOrd<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T> Ord for GcOrd<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.addr().cmp(&other.0.addr())
-    }
-}
-
-impl<T> Hash for GcOrd<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.addr().hash(state)
-    }
-}
-
-pub struct RootOrd<T>(pub Root<T>);
-
-impl<T> RootOrd<T> {
-    pub fn downgrade(self) -> GcOrd<T> {
-        GcOrd(self.0.downgrade())
-    }
-}
-
-impl<T> From<Root<T>> for RootOrd<T> {
-    fn from(value: Root<T>) -> Self {
-        Self(value)
-    }
-}
-
-impl<T> From<RootOrd<T>> for Root<T> {
-    fn from(value: RootOrd<T>) -> Self {
-        value.0
-    }
-}
-
-impl<T> AsRef<Root<T>> for RootOrd<T> {
-    fn as_ref(&self) -> &Root<T> {
-        &self.0
-    }
-}
-
-impl<T> AsMut<Root<T>> for RootOrd<T> {
-    fn as_mut(&mut self) -> &mut Root<T> {
-        &mut self.0
-    }
-}
-
-impl<T> Deref for RootOrd<T> {
-    type Target = Root<T>;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_ref()
-    }
-}
-
-impl<T> DerefMut for RootOrd<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.as_mut()
-    }
-}
-
-impl<T> Debug for RootOrd<T> {
+impl<T> Debug for RootLuaClosure<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RootOrd").field(&self.0).finish()
+        f.debug_tuple("RootLuaClosure").field(&self.0).finish()
     }
 }
 
-impl Display for RootOrd<Closure> {
+impl<T> Display for RootLuaClosure<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{[lua] closure <{:p}>}}", self.addr())
+        write!(f, "{}", self.downgrade())
     }
 }
 
-impl<Ty> Display for RootOrd<Table<Ty>>
-where
-    Ty: Types,
-{
+ref_pair!(GcRustClosure, RootRustClosure);
+
+impl<T> Debug for GcRustClosure<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{table <{:p}>}}", self.addr())
+        f.debug_tuple("GcRustClosure").field(&self.0).finish()
     }
 }
 
-impl<Ty> Display for RootOrd<Box<dyn FullUserdata<Ty>>>
+impl<T> Display for GcRustClosure<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{[rust] closure <{:p}>}}", self.0.addr())
+    }
+}
+
+impl<T> Debug for RootRustClosure<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RootRustClosure").field(&self.0).finish()
+    }
+}
+
+impl<T> Display for RootRustClosure<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.downgrade())
+    }
+}
+
+impl<Ty, T> LuaFfiOnce<Ty> for RootRustClosure<T>
 where
     Ty: CoreTypes,
+    T: LuaFfi<Ty> + Clone + Trace,
+    RootValue<Ty>: Display,
 {
+    fn call_once(
+        self,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), crate::error::RuntimeError<Ty>> {
+        self.call(rt)
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "<rooted rust closure>".to_string(),
+        }
+    }
+}
+
+impl<Ty, T> LuaFfiMut<Ty> for RootRustClosure<T>
+where
+    Ty: CoreTypes,
+    T: LuaFfi<Ty> + Clone + Trace,
+    RootValue<Ty>: Display,
+{
+    fn call_mut(
+        &mut self,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), crate::error::RuntimeError<Ty>> {
+        self.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfi<Ty> for RootRustClosure<T>
+where
+    Ty: CoreTypes,
+    T: LuaFfi<Ty> + Clone + Trace,
+    RootValue<Ty>: Display,
+{
+    fn call(
+        &self,
+        mut rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), crate::error::RuntimeError<Ty>> {
+        let func = rt.core.gc[&self].clone();
+        rt.invoke(func)
+    }
+}
+
+ref_pair!(GcTable, RootTable);
+
+impl<T> Debug for GcTable<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{userdata <{:p}>}}", self.addr())
+        f.debug_tuple("GcTable").field(&self.0).finish()
     }
 }
 
-impl<T> Clone for RootOrd<T> {
-    fn clone(&self) -> Self {
-        RootOrd(self.0.clone())
+impl<T> Display for GcTable<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{[lua] table <{:p}>}}", self.0.addr())
     }
 }
 
-impl<T> PartialEq for RootOrd<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.addr() == other.0.addr()
+impl<T> Debug for RootTable<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RootTable").field(&self.0).finish()
     }
 }
 
-impl<T> Eq for RootOrd<T> {}
-
-impl<T> PartialOrd for RootOrd<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+impl<T> Display for RootTable<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.downgrade())
     }
 }
 
-impl<T> Ord for RootOrd<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.addr().cmp(&other.0.addr())
+ref_pair!(GcFullUserdata, RootFullUserdata);
+
+impl<T> Debug for GcFullUserdata<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("GcFullUserdata").field(&self.0).finish()
     }
 }
 
-impl<T> Hash for RootOrd<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.addr().hash(state)
+impl<T> Display for GcFullUserdata<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{[rust] userdata <{:p}>}}", self.addr())
+    }
+}
+
+impl<T> Debug for RootFullUserdata<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RootFullUserdata").field(&self.0).finish()
+    }
+}
+
+impl<T> Display for RootFullUserdata<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.downgrade())
     }
 }
 
@@ -273,19 +400,5 @@ where
 {
     fn into_with_gc(self, gc: &mut Gc) -> T {
         T::from_with_gc(self, gc)
-    }
-}
-
-impl<T> TryFromWithGc<GcOrd<T>, Heap> for RootOrd<T>
-where
-    T: Trace,
-{
-    type Error = crate::error::AlreadyDroppedError;
-
-    fn try_from_with_gc(value: GcOrd<T>, gc: &mut Heap) -> Result<Self, Self::Error> {
-        use crate::error::AlreadyDroppedError;
-
-        let value = gc.upgrade(value.0).ok_or(AlreadyDroppedError)?;
-        Ok(RootOrd(value))
     }
 }
