@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use gc::Heap;
 
 use crate::error::{RefAccessError, RuntimeError};
-use crate::ffi::{self, LuaFfi, LuaFfiFnPtr, LuaFfiOnce, Maybe, Opts};
+use crate::ffi::{self, LuaFfi, LuaFfiOnce, LuaFfiPtr, Maybe, Opts};
 use crate::gc::{StringRef, TryIntoWithGc};
 use crate::runtime::RuntimeView;
 use crate::value::table::KeyValue;
@@ -14,7 +14,7 @@ use crate::value::{
     Callable, CoreTypes, LuaString, LuaTable, NilOr, RootValue, TypeMismatchError, Types, Value,
 };
 
-pub fn assert<Ty>() -> LuaFfiFnPtr<Ty>
+pub fn assert<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
 {
@@ -35,10 +35,10 @@ where
         }
     };
 
-    LuaFfiFnPtr::new(f, "lua_std::assert")
+    LuaFfiPtr::new(f, "lua_std::assert")
 }
 
-pub fn print<Ty>() -> LuaFfiFnPtr<Ty>
+pub fn print<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
     RootValue<Ty>: Display,
@@ -53,10 +53,10 @@ where
         Ok(())
     };
 
-    LuaFfiFnPtr::new(f, "lua_std::print")
+    LuaFfiPtr::new(f, "lua_std::print")
 }
 
-pub fn pcall<Gc>() -> LuaFfiFnPtr<Gc>
+pub fn pcall<Gc>() -> LuaFfiPtr<Gc>
 where
     Gc: CoreTypes,
     Gc::String: AsRef<[u8]>,
@@ -105,7 +105,7 @@ where
         Ok(())
     };
 
-    LuaFfiFnPtr::new(f, "lua_std::pcall")
+    LuaFfiPtr::new(f, "lua_std::pcall")
 }
 
 #[derive(Default)]
@@ -197,7 +197,7 @@ impl From<TypeMismatchError> for ModeError {
     }
 }
 
-pub fn load<Ty>() -> LuaFfiFnPtr<Ty>
+pub fn load<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
@@ -306,10 +306,10 @@ where
         )
     };
 
-    LuaFfiFnPtr::new(f, "lua_std::load")
+    LuaFfiPtr::new(f, "lua_std::load")
 }
 
-pub fn loadfile<Ty>() -> LuaFfiFnPtr<Ty>
+pub fn loadfile<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]>,
@@ -360,10 +360,10 @@ where
         )
     };
 
-    LuaFfiFnPtr::new(f, "lua_std::loadfile")
+    LuaFfiPtr::new(f, "lua_std::loadfile")
 }
 
-pub fn getmetatable<Ty>() -> LuaFfiFnPtr<Ty>
+pub fn getmetatable<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
     // Value<Gc>: Debug + Display,
@@ -395,10 +395,10 @@ where
         })
     };
 
-    LuaFfiFnPtr::new(f, "lua_std::getmetatable")
+    LuaFfiPtr::new(f, "lua_std::getmetatable")
 }
 
-pub fn setmetatable<Ty>() -> LuaFfiFnPtr<Ty>
+pub fn setmetatable<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
     // Value<Gc>: Debug + Display,
@@ -444,5 +444,5 @@ where
         )
     };
 
-    LuaFfiFnPtr::new(f, "lua_std::getmetatable")
+    LuaFfiPtr::new(f, "lua_std::getmetatable")
 }

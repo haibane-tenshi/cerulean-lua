@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gc::{Heap, Trace};
 
 use crate::error::RuntimeError;
-use crate::ffi::{DebugInfo, LuaFfi, LuaFfiFnPtr, LuaFfiMut, LuaFfiOnce};
+use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce, LuaFfiPtr};
 use crate::gc::TryFromWithGc;
 
 use super::{CoreTypes, RootValue, Strong, TypeMismatchError, Types, Value, Weak};
@@ -281,7 +281,7 @@ where
     Ty: CoreTypes,
 {
     Ref(Closure),
-    Ptr(LuaFfiFnPtr<Ty>),
+    Ptr(LuaFfiPtr<Ty>),
 }
 
 impl<Ty, Closure> Trace for RustCallable<Ty, Closure>
@@ -400,11 +400,11 @@ where
     }
 }
 
-impl<Ty, Closure> From<LuaFfiFnPtr<Ty>> for RustCallable<Ty, Closure>
+impl<Ty, Closure> From<LuaFfiPtr<Ty>> for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
 {
-    fn from(value: LuaFfiFnPtr<Ty>) -> Self {
+    fn from(value: LuaFfiPtr<Ty>) -> Self {
         Self::Ptr(value)
     }
 }

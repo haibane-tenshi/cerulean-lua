@@ -290,10 +290,15 @@ where
     }
 }
 
-pub type LuaFfiFnPtr<Ty> =
-    DebugInfoWrap<fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>, &'static str>;
+pub struct LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    func: fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>,
+    name: &'static str,
+}
 
-impl<Ty> LuaFfiFnPtr<Ty>
+impl<Ty> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
 {
@@ -301,15 +306,121 @@ where
         fn_ptr: fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>,
         name: &'static str,
     ) -> Self {
-        LuaFfiFnPtr { func: fn_ptr, name }
+        LuaFfiPtr { func: fn_ptr, name }
     }
 }
 
-impl<Ty> Trace for LuaFfiFnPtr<Ty>
+impl<Ty> Trace for LuaFfiPtr<Ty>
 where
     Ty: CoreTypes + 'static,
 {
     fn trace(&self, _collector: &mut gc::Collector) {}
+}
+
+impl<Ty> Clone for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn clone(&self) -> Self {
+        Self {
+            func: self.func,
+            name: self.name,
+        }
+    }
+}
+
+impl<Ty> Copy for LuaFfiPtr<Ty> where Ty: CoreTypes {}
+
+impl<Ty> Debug for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LuaFfiFnPtr")
+            .field("func", &self.func)
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+impl<Ty> Display for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{[rust] fn ptr <{:p}> \"{}\"}}", self.func, self.name)
+    }
+}
+
+impl<Ty> PartialEq for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.func == other.func
+    }
+}
+
+impl<Ty> Eq for LuaFfiPtr<Ty> where Ty: CoreTypes {}
+
+impl<Ty> PartialOrd for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.func.partial_cmp(&other.func)
+    }
+}
+
+impl<Ty> Ord for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.func.cmp(&other.func)
+    }
+}
+
+impl<Ty> Hash for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.func.hash(state);
+    }
+}
+
+impl<Ty> LuaFfiOnce<Ty> for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: self.name.to_string(),
+        }
+    }
+}
+
+impl<Ty> LuaFfiMut<Ty> for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+}
+
+impl<Ty> LuaFfi<Ty> for LuaFfiPtr<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        (self.func)(rt)
+    }
 }
 
 pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
