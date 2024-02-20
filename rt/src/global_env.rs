@@ -11,7 +11,7 @@ use crate::ffi::{LuaFfi, LuaFfiOnce};
 use crate::gc::{StringRef, TryIntoWithGc};
 use crate::runtime::RuntimeView;
 use crate::value::{
-    Callable, CoreTypes, KeyValue, LuaString, RootValue, Strong, TableIndex, Types, Value, Weak,
+    Callable, CoreTypes, KeyValue, LuaString, Strong, StrongValue, TableIndex, Types, Value, Weak,
 };
 use crate::value_builder::{ChunkRange, Part, ValueBuilder};
 
@@ -24,7 +24,7 @@ pub fn empty<Ty>() -> ValueBuilder<
 >
 where
     Ty: CoreTypes,
-    RootValue<Ty>: Clone,
+    StrongValue<Ty>: Clone,
     Ty::Table: Default + Trace,
 {
     use crate::value_builder;
@@ -84,7 +84,7 @@ where
     Ty::String: AsRef<[u8]> + From<&'static str>,
     Ty::RustClosure: LuaFfi<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
@@ -113,7 +113,7 @@ where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + From<&'static str>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
@@ -143,8 +143,8 @@ where
     Ty::String: AsRef<[u8]> + From<&'static str>,
     Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
-    <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
+    <StrongValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 
@@ -174,8 +174,8 @@ where
     Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str>,
     Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
-    <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    <StrongValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
 {
     let chunk_ext = ChunkExtension::empty();
 

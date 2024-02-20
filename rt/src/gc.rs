@@ -9,7 +9,7 @@ use gc::{Collector, Gc, Heap, Root, Trace};
 
 use crate::error::AlreadyDroppedError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
-use crate::value::{CoreTypes, RootValue};
+use crate::value::{CoreTypes, StrongValue};
 
 macro_rules! ref_pair {
     ($gc_name:ident, $root_name:ident) => {
@@ -244,7 +244,7 @@ impl<Ty, T> LuaFfiOnce<Ty> for RootRustClosure<T>
 where
     Ty: CoreTypes,
     T: LuaFfi<Ty> + Clone + Trace,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     fn call_once(
         self,
@@ -264,7 +264,7 @@ impl<Ty, T> LuaFfiMut<Ty> for RootRustClosure<T>
 where
     Ty: CoreTypes,
     T: LuaFfi<Ty> + Clone + Trace,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     fn call_mut(
         &mut self,
@@ -278,7 +278,7 @@ impl<Ty, T> LuaFfi<Ty> for RootRustClosure<T>
 where
     Ty: CoreTypes,
     T: LuaFfi<Ty> + Clone + Trace,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     fn call(
         &self,

@@ -1,15 +1,15 @@
 use codespan_reporting::diagnostic::Diagnostic;
 use std::fmt::{Debug, Display};
 
-use crate::value::{CoreTypes as Types, RootValue, Value};
+use crate::value::{CoreTypes as Types, StrongValue, Value};
 
-pub struct ValueError<Ty: Types>(pub RootValue<Ty>);
+pub struct ValueError<Ty: Types>(pub StrongValue<Ty>);
 
 impl<Ty> ValueError<Ty>
 where
     Ty: Types,
     Ty::String: AsRef<[u8]>,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
@@ -45,11 +45,11 @@ where
     }
 }
 
-impl<Ty> From<RootValue<Ty>> for ValueError<Ty>
+impl<Ty> From<StrongValue<Ty>> for ValueError<Ty>
 where
     Ty: Types,
 {
-    fn from(value: RootValue<Ty>) -> Self {
+    fn from(value: StrongValue<Ty>) -> Self {
         ValueError(value)
     }
 }
@@ -57,7 +57,7 @@ where
 impl<Ty> Debug for ValueError<Ty>
 where
     Ty: Types,
-    RootValue<Ty>: Debug,
+    StrongValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Value").field(&self.0).finish()

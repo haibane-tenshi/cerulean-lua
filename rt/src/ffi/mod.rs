@@ -12,7 +12,7 @@ use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
 use crate::gc::StringRef;
 use crate::runtime::{RuntimeView, StackView};
-use crate::value::{CoreTypes, NilOr, RootValue, Strong, Value};
+use crate::value::{CoreTypes, NilOr, Strong, StrongValue, Value};
 
 use arg_parser::{FormatReturns, ParseArgs};
 use signature::{Signature, SignatureWithFirst};
@@ -86,8 +86,8 @@ pub fn invoke<'rt, Ty, F, Args>(mut rt: RuntimeView<'rt, Ty>, f: F) -> Result<()
 where
     Ty: CoreTypes,
     F: Signature<Args>,
-    for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, RootValue<Ty>>:
+    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackView<'a, StrongValue<Ty>>:
         FormatReturns<Strong<Ty>, Heap, <F as Signature<Args>>::Output>,
 {
     let heap = &mut rt.core.gc;
@@ -113,8 +113,8 @@ pub fn try_invoke<'rt, Ty, F, Args, R>(
 where
     Ty: CoreTypes,
     F: Signature<Args, Output = Result<R, RuntimeError<Ty>>>,
-    for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, RootValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
+    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackView<'a, StrongValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
@@ -140,8 +140,8 @@ where
     Ty: CoreTypes,
     // Value<Ty>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
-    for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, RootValue<Ty>>: FormatReturns<
+    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackView<'a, StrongValue<Ty>>: FormatReturns<
         Strong<Ty>,
         Heap,
         <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output,
@@ -171,8 +171,8 @@ where
     Ty: CoreTypes,
     // Value<Ty>: Debug + Display,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = Result<R, RuntimeError<Ty>>>,
-    for<'a> &'a [RootValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, RootValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
+    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackView<'a, StrongValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
@@ -427,7 +427,7 @@ pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     let f = move |mut rt: RuntimeView<'_, Ty>| {
         use crate::runtime::FunctionPtr;
@@ -451,7 +451,7 @@ pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     let f = move |mut rt: RuntimeView<Ty>| {
         let script = script.as_ref();

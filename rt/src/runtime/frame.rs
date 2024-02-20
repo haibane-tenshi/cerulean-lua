@@ -22,7 +22,7 @@ use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RuntimeErro
 use crate::gc::{FromWithGc, IntoWithGc, TryIntoWithGc};
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
-use crate::value::{Concat, CoreTypes, Len, RootValue, Strong, TableIndex, Types, Value, Weak};
+use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Types, Value, Weak};
 
 pub(crate) enum ChangeFrame<Ty>
 where
@@ -76,7 +76,7 @@ impl Closure {
     pub(crate) fn new<Ty>(
         rt: &mut RuntimeView<Ty>,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = RootValue<Ty>>,
+        upvalues: impl IntoIterator<Item = StrongValue<Ty>>,
     ) -> Result<Self, RuntimeError<Ty>>
     where
         Ty: CoreTypes,
@@ -121,10 +121,10 @@ pub(crate) struct Frame<Value> {
     event: Option<Event>,
 }
 
-impl<Ty> Frame<RootValue<Ty>>
+impl<Ty> Frame<StrongValue<Ty>>
 where
     Ty: CoreTypes,
-    RootValue<Ty>: Clone,
+    StrongValue<Ty>: Clone,
 {
     pub(crate) fn new(
         closure: Root<Closure>,
@@ -186,10 +186,10 @@ impl<Value> Frame<Value> {
     }
 }
 
-impl<Ty> Frame<RootValue<Ty>>
+impl<Ty> Frame<StrongValue<Ty>>
 where
     Ty: CoreTypes,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     pub(crate) fn activate<'a>(
         self,
@@ -308,8 +308,8 @@ where
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt, RootValue<Ty>>,
-    register_variadic: Vec<RootValue<Ty>>,
+    stack: StackView<'rt, StrongValue<Ty>>,
+    register_variadic: Vec<StrongValue<Ty>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -325,7 +325,7 @@ where
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
-    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&RootValue<Ty>, MissingUpvalue> {
+    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&StrongValue<Ty>, MissingUpvalue> {
         let closure = &self.core.gc[&self.closure];
 
         closure
@@ -338,7 +338,7 @@ where
     fn get_upvalue_mut(
         &mut self,
         index: UpvalueSlot,
-    ) -> Result<&mut RootValue<Ty>, MissingUpvalue> {
+    ) -> Result<&mut StrongValue<Ty>, MissingUpvalue> {
         let closure = &self.core.gc[&self.closure];
 
         closure
@@ -348,11 +348,14 @@ where
             .ok_or(MissingUpvalue(index))
     }
 
-    fn get_stack(&self, index: StackSlot) -> Result<&RootValue<Ty>, MissingStackSlot> {
+    fn get_stack(&self, index: StackSlot) -> Result<&StrongValue<Ty>, MissingStackSlot> {
         self.stack.get(index).ok_or(MissingStackSlot(index))
     }
 
-    fn get_stack_mut(&mut self, index: StackSlot) -> Result<&mut RootValue<Ty>, MissingStackSlot> {
+    fn get_stack_mut(
+        &mut self,
+        index: StackSlot,
+    ) -> Result<&mut StrongValue<Ty>, MissingStackSlot> {
         self.stack.get_mut(index).ok_or(MissingStackSlot(index))
     }
 
@@ -379,7 +382,7 @@ where
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
     Ty: CoreTypes,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     pub(super) fn step(
         &mut self,
@@ -556,7 +559,7 @@ where
 
     fn exec_una_op(
         &mut self,
-        args: [RootValue<Ty>; 1],
+        args: [StrongValue<Ty>; 1],
         op: UnaOp,
     ) -> Result<
         ControlFlow<(Event, Callable<Strong<Ty>>, StackSlot)>,
@@ -650,7 +653,7 @@ where
 
     fn exec_bin_op(
         &mut self,
-        args: [RootValue<Ty>; 2],
+        args: [StrongValue<Ty>; 2],
         op: BinOp,
     ) -> Result<
         std::ops::ControlFlow<(Event, Callable<Strong<Ty>>, StackSlot)>,
@@ -691,7 +694,7 @@ where
                 };
 
                 let key = event.into_with_gc(heap);
-                let lookup_event = |value: &RootValue<Ty>| {
+                let lookup_event = |value: &StrongValue<Ty>| {
                     value
                         .metatable(heap, &self.core.primitive_metatables)
                         .map(|mt| heap[&mt].get(&key))
@@ -738,9 +741,9 @@ where
 
     fn exec_bin_op_str(
         &mut self,
-        args: [RootValue<Ty>; 2],
+        args: [StrongValue<Ty>; 2],
         op: StrBinOp,
-    ) -> Result<ControlFlow<[RootValue<Ty>; 2], Option<RootValue<Ty>>>, RefAccessError> {
+    ) -> Result<ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>>, RefAccessError> {
         use super::CoerceArgs;
 
         let args = self
@@ -767,9 +770,9 @@ where
 
     fn exec_bin_op_eq(
         &mut self,
-        args: [RootValue<Ty>; 2],
+        args: [StrongValue<Ty>; 2],
         op: EqBinOp,
-    ) -> ControlFlow<[RootValue<Ty>; 2], Option<RootValue<Ty>>> {
+    ) -> ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
@@ -798,9 +801,9 @@ where
 
     fn exec_bin_op_rel(
         &mut self,
-        args: [RootValue<Ty>; 2],
+        args: [StrongValue<Ty>; 2],
         op: RelBinOp,
-    ) -> Result<ControlFlow<[RootValue<Ty>; 2], Option<RootValue<Ty>>>, RefAccessError> {
+    ) -> Result<ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>>, RefAccessError> {
         use super::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
@@ -837,9 +840,9 @@ where
 
     fn exec_bin_op_bit(
         &mut self,
-        args: [RootValue<Ty>; 2],
+        args: [StrongValue<Ty>; 2],
         op: BitBinOp,
-    ) -> ControlFlow<[RootValue<Ty>; 2], Option<RootValue<Ty>>> {
+    ) -> ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::Int;
 
@@ -861,9 +864,9 @@ where
 
     fn exec_bin_op_ari(
         &mut self,
-        args: [RootValue<Ty>; 2],
+        args: [StrongValue<Ty>; 2],
         op: AriBinOp,
-    ) -> ControlFlow<[RootValue<Ty>; 2], Option<RootValue<Ty>>> {
+    ) -> ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
@@ -899,7 +902,7 @@ where
 
     fn exec_tab_get(
         &mut self,
-        args: [RootValue<Ty>; 2],
+        args: [StrongValue<Ty>; 2],
     ) -> Result<
         ControlFlow<(Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
@@ -975,7 +978,7 @@ where
 
     fn exec_tab_set(
         &mut self,
-        args: [RootValue<Ty>; 3],
+        args: [StrongValue<Ty>; 3],
     ) -> Result<
         ControlFlow<(Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
@@ -1059,7 +1062,7 @@ where
 
     fn prepare_invoke(
         &mut self,
-        mut callable: RootValue<Ty>,
+        mut callable: StrongValue<Ty>,
         start: StackSlot,
     ) -> Result<Callable<Strong<Ty>>, RefAccessOrError<NotCallableError>> {
         let heap = &mut self.core.gc;
@@ -1161,7 +1164,7 @@ where
         Ok(r)
     }
 
-    pub(crate) fn suspend(self) -> Frame<RootValue<Ty>> {
+    pub(crate) fn suspend(self) -> Frame<StrongValue<Ty>> {
         let ActiveFrame {
             closure,
             ip,
@@ -1196,7 +1199,7 @@ where
 impl<'rt, Ty> Debug for ActiveFrame<'rt, Ty>
 where
     Ty: Debug + CoreTypes,
-    RootValue<Ty>: Debug,
+    StrongValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ActiveFrame")

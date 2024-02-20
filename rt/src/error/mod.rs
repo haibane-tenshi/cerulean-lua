@@ -12,7 +12,7 @@ use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::value::{CoreTypes as Types, RootValue};
+use crate::value::{CoreTypes as Types, StrongValue};
 
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
@@ -41,8 +41,8 @@ where
     OpCode(OpCodeError),
 }
 
-impl<Gc: Types> From<RootValue<Gc>> for RuntimeError<Gc> {
-    fn from(value: RootValue<Gc>) -> Self {
+impl<Gc: Types> From<StrongValue<Gc>> for RuntimeError<Gc> {
+    fn from(value: StrongValue<Gc>) -> Self {
         RuntimeError::Value(ValueError(value))
     }
 }
@@ -104,7 +104,7 @@ impl<Gc: Types> From<OpCodeError> for RuntimeError<Gc> {
 impl<Gc> Debug for RuntimeError<Gc>
 where
     Gc: Types,
-    RootValue<Gc>: Debug,
+    StrongValue<Gc>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

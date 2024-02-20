@@ -11,7 +11,7 @@ use crate::gc::{StringRef, TryIntoWithGc};
 use crate::runtime::RuntimeView;
 use crate::value::table::KeyValue;
 use crate::value::{
-    Callable, CoreTypes, LuaString, LuaTable, NilOr, RootValue, TypeMismatchError, Types, Value,
+    Callable, CoreTypes, LuaString, LuaTable, NilOr, StrongValue, TypeMismatchError, Types, Value,
 };
 
 pub fn assert<Ty>() -> LuaFfiPtr<Ty>
@@ -41,7 +41,7 @@ where
 pub fn print<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     let f = |mut rt: RuntimeView<'_, Ty>| {
         for value in rt.stack.iter() {
@@ -61,7 +61,7 @@ where
     Gc: CoreTypes,
     Gc::String: AsRef<[u8]>,
     Gc::RustClosure: LuaFfi<Gc>,
-    RootValue<Gc>: Display,
+    StrongValue<Gc>: Display,
 {
     let f = |mut rt: RuntimeView<'_, Gc>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
@@ -127,14 +127,14 @@ impl Display for InvalidModeError {
 
 impl Error for InvalidModeError {}
 
-impl<Ty> TryFrom<RootValue<Ty>> for Mode
+impl<Ty> TryFrom<StrongValue<Ty>> for Mode
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
 {
     type Error = ModeError;
 
-    fn try_from(value: RootValue<Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: StrongValue<Ty>) -> Result<Self, Self::Error> {
         use crate::value::Type;
 
         let s = match value {
@@ -202,8 +202,8 @@ where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
     Ty::RustClosure: LuaFfiOnce<Ty>,
-    RootValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
-    <RootValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
+    <StrongValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
 {
     use crate::value::{Strong, Type};
 
@@ -258,7 +258,7 @@ where
             rt,
             |mut rt: RuntimeView<'_, Ty>,
              source: ChunkSource<Strong<Ty>>,
-             opts: Opts<(LuaString<String>, Mode, RootValue<Ty>)>|
+             opts: Opts<(LuaString<String>, Mode, StrongValue<Ty>)>|
              -> Result<_, RuntimeError<Ty>> {
                 use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
@@ -314,14 +314,14 @@ where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]>,
     Ty::RustClosure: LuaFfiOnce<Ty>,
-    RootValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
-    <RootValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    <StrongValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(
             rt,
             |mut rt: RuntimeView<'_, Ty>,
-             opts: Opts<(LuaString<PathBuf>, Mode, RootValue<Ty>)>|
+             opts: Opts<(LuaString<PathBuf>, Mode, StrongValue<Ty>)>|
              -> Result<_, RuntimeError<Ty>> {
                 use crate::ffi::Split;
                 use crate::runtime::FunctionPtr;
@@ -369,10 +369,10 @@ where
     // Value<Gc>: Debug + Display,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
-        ffi::try_invoke_with_rt(rt, |rt: RuntimeView<'_, Ty>, value: RootValue<Ty>| {
+        ffi::try_invoke_with_rt(rt, |rt: RuntimeView<'_, Ty>, value: StrongValue<Ty>| {
             let r = value
                 .metatable(&rt.core.gc, &rt.core.primitive_metatables)
-                .map(|metatable| -> Result<RootValue<Ty>, RefAccessError> {
+                .map(|metatable| -> Result<StrongValue<Ty>, RefAccessError> {
                     use crate::value::TableIndex;
 
                     let __metatable = {

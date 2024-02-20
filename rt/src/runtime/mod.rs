@@ -18,7 +18,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::{LuaFfi, LuaFfiOnce};
-use crate::value::{CoreTypes, RootValue, Strong, TypeWithoutMetatable, Types, Value};
+use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
@@ -33,7 +33,7 @@ pub struct Core<Ty>
 where
     Ty: CoreTypes,
 {
-    pub global_env: RootValue<Ty>,
+    pub global_env: StrongValue<Ty>,
     pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<<Strong<Ty> as Types>::Table>>,
     pub dialect: DialectBuilder,
     pub gc: Heap,
@@ -42,7 +42,7 @@ where
 impl<Ty> Debug for Core<Ty>
 where
     Ty: CoreTypes,
-    RootValue<Ty>: Debug,
+    StrongValue<Ty>: Debug,
     <Strong<Ty> as Types>::Table: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,8 +61,8 @@ where
 {
     pub core: Core<Ty>,
     pub chunk_cache: C,
-    frames: FrameStack<RootValue<Ty>>,
-    stack: Stack<RootValue<Ty>>,
+    frames: FrameStack<StrongValue<Ty>>,
+    stack: Stack<StrongValue<Ty>>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
@@ -118,8 +118,8 @@ where
 {
     pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
-    frames: FrameStackView<'rt, RootValue<Ty>>,
-    pub stack: StackView<'rt, RootValue<Ty>>,
+    frames: FrameStackView<'rt, StrongValue<Ty>>,
+    pub stack: StackView<'rt, StrongValue<Ty>>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
@@ -164,7 +164,7 @@ where
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     pub fn invoke(&mut self, f: impl LuaFfiOnce<Ty>) -> Result<(), RuntimeError<Ty>> {
         self.invoke_at(f, StackSlot(0))
@@ -264,7 +264,7 @@ impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    RootValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     pub fn enter(
         &mut self,
@@ -340,7 +340,7 @@ where
     pub fn construct_closure(
         &mut self,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = RootValue<Ty>>,
+        upvalues: impl IntoIterator<Item = StrongValue<Ty>>,
     ) -> Result<Closure, RuntimeError<Ty>> {
         Closure::new(self, fn_ptr, upvalues)
     }
@@ -449,7 +449,7 @@ where
     pub fn into_diagnostic(&self, err: RuntimeError<Ty>) -> Diagnostic
     where
         Ty::String: AsRef<[u8]>,
-        RootValue<Ty>: Display,
+        StrongValue<Ty>: Display,
     {
         use codespan_reporting::files::SimpleFile;
 

@@ -164,8 +164,8 @@ impl Display for TypeWithoutMetatable {
     }
 }
 
-pub type RootValue<Ty> = Value<Strong<Ty>>;
-pub type GcValue<Ty> = Value<Weak<Ty>>;
+pub type StrongValue<Ty> = Value<Strong<Ty>>;
+pub type WeakValue<Ty> = Value<Weak<Ty>>;
 
 /// Enum representing all possible Lua values.
 ///
@@ -215,19 +215,19 @@ impl<Ty: Types> Value<Ty> {
     }
 }
 
-impl<Ty> RootValue<Ty>
+impl<Ty> StrongValue<Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: Clone,
 {
-    pub fn downgrade(&self) -> GcValue<Ty> {
+    pub fn downgrade(&self) -> WeakValue<Ty> {
         self.clone().into()
     }
 }
 
 type RootTable<Ty> = <Strong<Ty> as Types>::Table;
 
-impl<Ty> RootValue<Ty>
+impl<Ty> StrongValue<Ty>
 where
     Ty: CoreTypes,
 {
@@ -255,11 +255,11 @@ where
     }
 }
 
-impl<Ty> From<RootValue<Ty>> for GcValue<Ty>
+impl<Ty> From<StrongValue<Ty>> for WeakValue<Ty>
 where
     Ty: CoreTypes,
 {
-    fn from(value: RootValue<Ty>) -> Self {
+    fn from(value: StrongValue<Ty>) -> Self {
         use callable::RustCallable;
 
         match value {
@@ -281,7 +281,7 @@ where
     }
 }
 
-impl<Ty> TryFromWithGc<Literal, Heap> for RootValue<Ty>
+impl<Ty> TryFromWithGc<Literal, Heap> for StrongValue<Ty>
 where
     Ty: CoreTypes,
     Ty::String: From<String>,
@@ -302,7 +302,7 @@ where
     }
 }
 
-impl<Ty> TryFromWithGc<GcValue<Ty>, Heap> for RootValue<Ty>
+impl<Ty> TryFromWithGc<WeakValue<Ty>, Heap> for StrongValue<Ty>
 where
     Ty: CoreTypes,
     Ty::Table: Trace,
@@ -310,7 +310,7 @@ where
 {
     type Error = crate::error::AlreadyDroppedError;
 
-    fn try_from_with_gc(value: GcValue<Ty>, heap: &mut Heap) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: WeakValue<Ty>, heap: &mut Heap) -> Result<Self, Self::Error> {
         use crate::gc::TryIntoWithGc;
         use callable::RustCallable;
 
