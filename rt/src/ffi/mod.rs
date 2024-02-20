@@ -87,8 +87,7 @@ where
     Ty: CoreTypes,
     F: Signature<Args>,
     for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, StrongValue<Ty>>:
-        FormatReturns<Strong<Ty>, Heap, <F as Signature<Args>>::Output>,
+    for<'a> StackView<'a, Ty>: FormatReturns<Strong<Ty>, Heap, <F as Signature<Args>>::Output>,
 {
     let heap = &mut rt.core.gc;
 
@@ -114,7 +113,7 @@ where
     Ty: CoreTypes,
     F: Signature<Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, StrongValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
+    for<'a> StackView<'a, Ty>: FormatReturns<Strong<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
@@ -141,7 +140,7 @@ where
     // Value<Ty>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
     for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, StrongValue<Ty>>: FormatReturns<
+    for<'a> StackView<'a, Ty>: FormatReturns<
         Strong<Ty>,
         Heap,
         <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output,
@@ -172,7 +171,7 @@ where
     // Value<Ty>: Debug + Display,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, StrongValue<Ty>>: FormatReturns<Strong<Ty>, Heap, R>,
+    for<'a> StackView<'a, Ty>: FormatReturns<Strong<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 

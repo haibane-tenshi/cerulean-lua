@@ -308,7 +308,7 @@ where
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt, StrongValue<Ty>>,
+    stack: StackView<'rt, Ty>,
     register_variadic: Vec<StrongValue<Ty>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///

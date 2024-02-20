@@ -7,7 +7,7 @@ use repr::tivec::{TiSlice, TiVec};
 
 use super::{Event, MapBound};
 use crate::error::opcode::MissingArgsError;
-use crate::value::{Types, Value};
+use crate::value::{CoreTypes, StrongValue, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct RawStackSlot(usize);
@@ -57,10 +57,12 @@ enum UpvaluePlace<Value> {
 }
 
 /// Backing storage for stack of temporaries.
-#[derive(Debug, Clone)]
-pub struct Stack<Value> {
+pub struct Stack<Ty>
+where
+    Ty: CoreTypes,
+{
     /// Values contained on the stack.
-    temporaries: TiVec<RawStackSlot, Value>,
+    temporaries: TiVec<RawStackSlot, StrongValue<Ty>>,
 
     /// Indices of upvalues which are currently being hosted on stack.
     ///
@@ -70,30 +72,33 @@ pub struct Stack<Value> {
     on_stack_upvalues: BTreeMap<RawStackSlot, UpvalueId>,
 
     /// Upvalues that were evicted from the stack.
-    evicted_upvalues: HashMap<UpvalueId, UpvaluePlace<Value>>,
+    evicted_upvalues: HashMap<UpvalueId, UpvaluePlace<StrongValue<Ty>>>,
 
     /// Upvalue id counter.
     next_upvalue_id: UpvalueId,
 }
 
-impl<Value> Stack<Value> {
+impl<Ty> Stack<Ty>
+where
+    Ty: CoreTypes,
+{
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn view(&mut self) -> StackView<Value> {
+    pub fn view(&mut self) -> StackView<Ty> {
         StackView::new(self)
     }
 
-    fn push(&mut self, value: Value) -> RawStackSlot {
+    fn push(&mut self, value: StrongValue<Ty>) -> RawStackSlot {
         self.temporaries.push_and_get_key(value)
     }
 
-    fn get(&self, slot: RawStackSlot) -> Option<&Value> {
+    fn get(&self, slot: RawStackSlot) -> Option<&StrongValue<Ty>> {
         self.temporaries.get(slot)
     }
 
-    fn get_mut(&mut self, slot: RawStackSlot) -> Option<&mut Value> {
+    fn get_mut(&mut self, slot: RawStackSlot) -> Option<&mut StrongValue<Ty>> {
         self.temporaries.get_mut(slot)
     }
 
@@ -101,7 +106,7 @@ impl<Value> Stack<Value> {
     ///
     /// Resulting upvalue is unique,
     /// e.g. place it points to is not shared with any other existing upvalue.
-    fn fresh_upvalue(&mut self, value: Value) -> UpvalueId {
+    fn fresh_upvalue(&mut self, value: StrongValue<Ty>) -> UpvalueId {
         let id = self.next_upvalue_id.increment();
 
         self.evicted_upvalues.insert(id, UpvaluePlace::Place(value));
@@ -109,7 +114,7 @@ impl<Value> Stack<Value> {
         id
     }
 
-    fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value> {
+    fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&StrongValue<Ty>> {
         let value = match self.evicted_upvalues.get(&upvalue)? {
             UpvaluePlace::Stack(slot) => self
                 .temporaries
@@ -121,7 +126,7 @@ impl<Value> Stack<Value> {
         Some(value)
     }
 
-    fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut Value> {
+    fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut StrongValue<Ty>> {
         let value = match self.evicted_upvalues.get_mut(&upvalue)? {
             UpvaluePlace::Stack(slot) => self
                 .temporaries
@@ -151,7 +156,7 @@ impl<Value> Stack<Value> {
         self.temporaries.len()
     }
 
-    fn insert(&mut self, slot: RawStackSlot, value: Value) {
+    fn insert(&mut self, slot: RawStackSlot, value: StrongValue<Ty>) {
         // Construct tail iterator before any modifications.
         let tail = (slot.0..self.temporaries.len())
             .rev()
@@ -259,11 +264,12 @@ impl<Value> Stack<Value> {
     }
 }
 
-impl<Value> Stack<Value>
+impl<Ty> Stack<Ty>
 where
-    Value: Clone,
+    Ty: CoreTypes,
+    StrongValue<Ty>: Clone,
 {
-    fn remove(&mut self, slot: RawStackSlot) -> Option<Value> {
+    fn remove(&mut self, slot: RawStackSlot) -> Option<StrongValue<Ty>> {
         if slot < self.temporaries.next_key() {
             let r = self.temporaries.get(slot).cloned();
             self.remove_range(slot..=slot);
@@ -273,7 +279,7 @@ where
         }
     }
 
-    fn pop(&mut self) -> Option<Value> {
+    fn pop(&mut self) -> Option<StrongValue<Ty>> {
         let r = self.temporaries.last().cloned();
 
         if let Some(id) = self.temporaries.last_key() {
@@ -284,11 +290,12 @@ where
     }
 }
 
-impl<Value> Stack<Value>
+impl<Ty> Stack<Ty>
 where
-    Value: Default + Clone,
+    Ty: CoreTypes,
+    StrongValue<Ty>: Default + Clone,
 {
-    fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<Value> {
+    fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<StrongValue<Ty>> {
         match height.0.checked_sub(self.temporaries.len()) {
             None => {
                 let r = self.temporaries[height..].to_vec().into();
@@ -298,14 +305,17 @@ where
             Some(0) => Default::default(),
             Some(n) => {
                 self.temporaries
-                    .extend(std::iter::repeat_with(|| Default::default()).take(n));
+                    .extend(std::iter::repeat_with(Default::default).take(n));
                 Default::default()
             }
         }
     }
 }
 
-impl<Value> Default for Stack<Value> {
+impl<Ty> Default for Stack<Ty>
+where
+    Ty: CoreTypes,
+{
     fn default() -> Self {
         Self {
             temporaries: Default::default(),
@@ -316,21 +326,41 @@ impl<Value> Default for Stack<Value> {
     }
 }
 
-#[derive(Debug)]
-pub struct StackView<'a, Value> {
-    stack: &'a mut Stack<Value>,
+impl<Ty> Debug for Stack<Ty>
+where
+    Ty: CoreTypes,
+    StrongValue<Ty>: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Stack")
+            .field("temporaries", &self.temporaries)
+            .field("on_stack_upvalues", &self.on_stack_upvalues)
+            .field("evicted_upvalues", &self.evicted_upvalues)
+            .field("next_upvalue_id", &self.next_upvalue_id)
+            .finish()
+    }
+}
+
+pub struct StackView<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    stack: &'a mut Stack<Ty>,
     boundary: RawStackSlot,
 }
 
-impl<'a, Value> StackView<'a, Value> {
-    pub fn new(stack: &'a mut Stack<Value>) -> Self {
+impl<'a, Ty> StackView<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    pub fn new(stack: &'a mut Stack<Ty>) -> Self {
         StackView {
             stack,
             boundary: RawStackSlot(0),
         }
     }
 
-    pub(crate) fn view(&mut self, protected_size: RawStackSlot) -> Option<StackView<'_, Value>> {
+    pub(crate) fn view(&mut self, protected_size: RawStackSlot) -> Option<StackView<'_, Ty>> {
         if self.stack.len() < protected_size.0 {
             return None;
         }
@@ -343,11 +373,11 @@ impl<'a, Value> StackView<'a, Value> {
         Some(r)
     }
 
-    pub fn as_slice(&self) -> &TiSlice<StackSlot, Value> {
+    pub fn as_slice(&self) -> &TiSlice<StackSlot, StrongValue<Ty>> {
         self.deref()
     }
 
-    pub fn push(&mut self, value: Value) {
+    pub fn push(&mut self, value: StrongValue<Ty>) {
         self.stack.push(value);
     }
 
@@ -364,25 +394,25 @@ impl<'a, Value> StackView<'a, Value> {
         StackSlot(val)
     }
 
-    pub fn get(&self, slot: StackSlot) -> Option<&Value> {
+    pub fn get(&self, slot: StackSlot) -> Option<&StrongValue<Ty>> {
         let index = self.boundary + slot;
         self.stack.get(index)
     }
 
-    pub fn get_mut(&mut self, slot: StackSlot) -> Option<&mut Value> {
+    pub fn get_mut(&mut self, slot: StackSlot) -> Option<&mut StrongValue<Ty>> {
         let index = self.boundary + slot;
         self.stack.get_mut(index)
     }
 
-    pub fn fresh_upvalue(&mut self, value: Value) -> UpvalueId {
+    pub fn fresh_upvalue(&mut self, value: StrongValue<Ty>) -> UpvalueId {
         self.stack.fresh_upvalue(value)
     }
 
-    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&Value> {
+    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&StrongValue<Ty>> {
         self.stack.get_upvalue(upvalue)
     }
 
-    pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut Value> {
+    pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut StrongValue<Ty>> {
         self.stack.get_upvalue_mut(upvalue)
     }
 
@@ -391,7 +421,7 @@ impl<'a, Value> StackView<'a, Value> {
         self.stack.mark_as_upvalue(slot)
     }
 
-    pub fn insert(&mut self, slot: StackSlot, value: Value) {
+    pub fn insert(&mut self, slot: StackSlot, value: StrongValue<Ty>) {
         let slot = self.boundary + slot;
         self.stack.insert(slot, value)
     }
@@ -417,11 +447,12 @@ impl<'a, Value> StackView<'a, Value> {
     }
 }
 
-impl<'a, Value> StackView<'a, Value>
+impl<'a, Ty> StackView<'a, Ty>
 where
-    Value: Clone,
+    Ty: CoreTypes,
+    StrongValue<Ty>: Clone,
 {
-    pub(crate) fn take1(&mut self) -> Result<[Value; 1], MissingArgsError> {
+    pub(crate) fn take1(&mut self) -> Result<[StrongValue<Ty>; 1], MissingArgsError> {
         let v0 = self.pop().ok_or_else(|| MissingArgsError {
             stack_len: self.stack.len(),
             expected_args: 1,
@@ -429,7 +460,7 @@ where
         Ok([v0])
     }
 
-    pub(crate) fn take2(&mut self) -> Result<[Value; 2], MissingArgsError> {
+    pub(crate) fn take2(&mut self) -> Result<[StrongValue<Ty>; 2], MissingArgsError> {
         if self.len() < 2 {
             return Err(MissingArgsError {
                 expected_args: 2,
@@ -443,7 +474,7 @@ where
         Ok([v0, v1])
     }
 
-    pub(crate) fn take3(&mut self) -> Result<[Value; 3], MissingArgsError> {
+    pub(crate) fn take3(&mut self) -> Result<[StrongValue<Ty>; 3], MissingArgsError> {
         if self.len() < 3 {
             return Err(MissingArgsError {
                 expected_args: 3,
@@ -458,7 +489,7 @@ where
         Ok([v0, v1, v2])
     }
 
-    pub fn pop(&mut self) -> Option<Value> {
+    pub fn pop(&mut self) -> Option<StrongValue<Ty>> {
         if self.stack.len() <= self.boundary.0 {
             return None;
         }
@@ -466,15 +497,16 @@ where
         self.stack.pop()
     }
 
-    pub fn remove(&mut self, slot: StackSlot) -> Option<Value> {
+    pub fn remove(&mut self, slot: StackSlot) -> Option<StrongValue<Ty>> {
         let slot = self.boundary + slot;
         self.stack.remove(slot)
     }
 }
 
-impl<'a, Value> StackView<'a, Value>
+impl<'a, Ty> StackView<'a, Ty>
 where
-    Value: Default + Clone,
+    Ty: CoreTypes,
+    StrongValue<Ty>: Default + Clone,
 {
     /// Set stack to specified height.
     ///
@@ -492,16 +524,17 @@ where
     /// If `len < height` it will get filled with default values.
     /// If `len > height` extra values will be removed from the stack and returned.
     /// Otherwise function returns empty vec.
-    pub fn adjust_height_and_collect(&mut self, height: StackSlot) -> Vec<Value> {
+    pub fn adjust_height_and_collect(&mut self, height: StackSlot) -> Vec<StrongValue<Ty>> {
         let requested_height = self.boundary + height;
 
         self.stack.adjust_height_with_variadics(requested_height)
     }
 }
 
-impl<'a, Value> StackView<'a, Value>
+impl<'a, Ty> StackView<'a, Ty>
 where
-    Value: Display,
+    Ty: CoreTypes,
+    StrongValue<Ty>: Display,
 {
     pub fn emit_pretty(&self, writer: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
         if self.is_empty() {
@@ -535,10 +568,10 @@ where
     }
 }
 
-impl<'a, Gc> StackView<'a, Value<Gc>>
+impl<'a, Ty> StackView<'a, Ty>
 where
-    Gc: Types,
-    Value<Gc>: Clone,
+    Ty: CoreTypes,
+    StrongValue<Ty>: Clone,
 {
     pub(crate) fn adjust_event_returns(&mut self, event: Event) {
         use Event::*;
@@ -575,22 +608,44 @@ where
     }
 }
 
-impl<'a, Value> Deref for StackView<'a, Value> {
-    type Target = TiSlice<StackSlot, Value>;
+impl<'a, Ty> Deref for StackView<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    type Target = TiSlice<StackSlot, StrongValue<Ty>>;
 
     fn deref(&self) -> &Self::Target {
         self.stack.temporaries[self.boundary..].raw.as_ref()
     }
 }
 
-impl<'a, Value> DerefMut for StackView<'a, Value> {
+impl<'a, Ty> DerefMut for StackView<'a, Ty>
+where
+    Ty: CoreTypes,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.stack.temporaries[self.boundary..].raw.as_mut()
     }
 }
 
-impl<'a, Value> Extend<Value> for StackView<'a, Value> {
-    fn extend<T: IntoIterator<Item = Value>>(&mut self, iter: T) {
+impl<'a, Ty> Extend<StrongValue<Ty>> for StackView<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    fn extend<T: IntoIterator<Item = StrongValue<Ty>>>(&mut self, iter: T) {
         self.stack.temporaries.extend(iter)
+    }
+}
+
+impl<'a, Ty> Debug for StackView<'a, Ty>
+where
+    Ty: CoreTypes,
+    StrongValue<Ty>: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StackView")
+            .field("stack", &self.stack)
+            .field("boundary", &self.boundary)
+            .finish()
     }
 }

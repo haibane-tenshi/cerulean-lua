@@ -62,7 +62,7 @@ where
     pub core: Core<Ty>,
     pub chunk_cache: C,
     frames: FrameStack<StrongValue<Ty>>,
-    stack: Stack<StrongValue<Ty>>,
+    stack: Stack<Ty>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
@@ -119,7 +119,7 @@ where
     pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
     frames: FrameStackView<'rt, StrongValue<Ty>>,
-    pub stack: StackView<'rt, StrongValue<Ty>>,
+    pub stack: StackView<'rt, Ty>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
