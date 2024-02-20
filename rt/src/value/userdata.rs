@@ -367,14 +367,12 @@ where
 pub fn new_full_userdata<T, Ty>(
     value: T,
     metatable: Option<GcTable<Ty::Table>>,
-) -> Box<dyn FullUserdata<Ty>>
+) -> impl FullUserdata<Ty>
 where
     Ty: CoreTypes,
     T: Userdata<Ty>,
 {
-    let value = UserdataValue { value, metatable };
-
-    Box::new(value)
+    UserdataValue { value, metatable }
 }
 
 #[doc(hidden)]
