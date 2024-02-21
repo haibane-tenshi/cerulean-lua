@@ -8,7 +8,7 @@ use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce, LuaFfiPtr};
 use crate::gc::TryFromWithGc;
 
-use super::{CoreTypes, Strong, StrongValue, TypeMismatchError, Types, Value, Weak};
+use super::{CoreTypes, Strong, TypeMismatchError, Types, Value, Weak, WeakValue};
 
 pub use crate::runtime::Closure as LuaClosure;
 
@@ -381,7 +381,7 @@ impl<Ty, Closure> LuaFfiOnce<Ty> for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
     Closure: LuaFfiOnce<Ty>,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     fn call_once(
         self,
@@ -545,7 +545,7 @@ impl<Ty> LuaFfiOnce<Ty> for Callable<Strong<Ty>>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     fn call_once(
         self,

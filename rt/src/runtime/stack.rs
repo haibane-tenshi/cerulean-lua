@@ -2,12 +2,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Display};
 use std::ops::{Add, Bound, Deref, DerefMut, RangeBounds};
 
+use gc::{Heap, Root};
 use repr::index::StackSlot;
 use repr::tivec::{TiSlice, TiVec};
 
 use super::{Event, MapBound};
 use crate::error::opcode::MissingArgsError;
-use crate::value::{CoreTypes, StrongValue, Value};
+use crate::value::{CoreTypes, StrongValue, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct RawStackSlot(usize);
@@ -56,13 +57,50 @@ enum UpvaluePlace<Value> {
     Place(Value),
 }
 
+pub(super) enum Source<T> {
+    StackSlot(T),
+    TrustedIsRooted(bool),
+}
+
+impl<T> Source<T> {
+    fn map<U>(self, f: impl FnOnce(T) -> U) -> Source<U> {
+        match self {
+            Source::StackSlot(t) => Source::StackSlot(f(t)),
+            Source::TrustedIsRooted(t) => Source::TrustedIsRooted(t),
+        }
+    }
+}
+
+impl<T> Default for Source<T> {
+    fn default() -> Self {
+        Source::TrustedIsRooted(false)
+    }
+}
+
 /// Backing storage for stack of temporaries.
 pub struct Stack<Ty>
 where
     Ty: CoreTypes,
 {
     /// Values contained on the stack.
-    temporaries: TiVec<RawStackSlot, StrongValue<Ty>>,
+    ///
+    /// Note that we operate with `WeakValue`s!
+    /// Contained references can be gced without us knowing.
+    main: TiVec<RawStackSlot, WeakValue<Ty>>,
+
+    /// Rooted mirror of the stack.
+    ///
+    /// Contents of this vec should be syncronized with `main` field.
+    /// Its purpose is to keep on-stack references alive.
+    root: Root<Vec<WeakValue<Ty>>>,
+
+    /// Index of first value known to be not in sync between `main` and `root`.
+    sync_point: RawStackSlot,
+
+    /// Index of first value known to be *not* rooted.
+    ///
+    /// It implies that all values below it are rooted.
+    first_transient: Option<RawStackSlot>,
 
     /// Indices of upvalues which are currently being hosted on stack.
     ///
@@ -72,7 +110,11 @@ where
     on_stack_upvalues: BTreeMap<RawStackSlot, UpvalueId>,
 
     /// Upvalues that were evicted from the stack.
-    evicted_upvalues: HashMap<UpvalueId, UpvaluePlace<StrongValue<Ty>>>,
+    ///
+    /// Those values are weak.
+    /// As a transition measure to a different setup we ensure to drop roots
+    /// to prevent those from being gced.
+    evicted_upvalues: HashMap<UpvalueId, UpvaluePlace<WeakValue<Ty>>>,
 
     /// Upvalue id counter.
     next_upvalue_id: UpvalueId,
@@ -82,24 +124,60 @@ impl<Ty> Stack<Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(heap: &mut Heap) -> Self {
+        Stack {
+            main: Default::default(),
+            root: heap.alloc(Default::default()),
+            sync_point: RawStackSlot(0),
+            first_transient: Default::default(),
+            on_stack_upvalues: Default::default(),
+            evicted_upvalues: Default::default(),
+            next_upvalue_id: Default::default(),
+        }
     }
 
-    pub fn view(&mut self) -> StackView<Ty> {
-        StackView::new(self)
+    pub fn guard(&mut self) -> StackGuard<Ty> {
+        StackGuard::new(self)
     }
 
-    fn push(&mut self, value: StrongValue<Ty>) -> RawStackSlot {
-        self.temporaries.push_and_get_key(value)
+    fn is_transient_source(&self, source: Source<RawStackSlot>) -> bool {
+        match source {
+            Source::StackSlot(slot) => self.first_transient.map(|tr| slot < tr).unwrap_or(true),
+            Source::TrustedIsRooted(is_rooted) => !is_rooted,
+        }
     }
 
-    fn get(&self, slot: RawStackSlot) -> Option<&StrongValue<Ty>> {
-        self.temporaries.get(slot)
+    fn mark_transient(&mut self, slot: RawStackSlot) {
+        let value = match self.first_transient {
+            Some(tr) => tr.min(slot),
+            None => slot,
+        };
+
+        self.first_transient = Some(value)
     }
 
-    fn get_mut(&mut self, slot: RawStackSlot) -> Option<&mut StrongValue<Ty>> {
-        self.temporaries.get_mut(slot)
+    fn mark_unsync(&mut self, slot: RawStackSlot) {
+        self.sync_point = self.sync_point.min(slot);
+    }
+
+    fn push(&mut self, value: WeakValue<Ty>, source: Source<RawStackSlot>) -> RawStackSlot {
+        let slot = self.main.next_key();
+        if value.is_transient() && self.is_transient_source(source) {
+            self.mark_transient(slot);
+        }
+        self.mark_unsync(slot);
+
+        self.main.push_and_get_key(value)
+    }
+
+    fn set(&mut self, slot: RawStackSlot, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
+        if value.is_transient() && self.is_transient_source(source) {
+            self.mark_transient(slot);
+        }
+        self.mark_unsync(slot);
+        if let Some(place) = self.main.get_mut(slot) {
+            *place = value;
+        }
     }
 
     /// Create a new upvalue.
@@ -109,15 +187,20 @@ where
     fn fresh_upvalue(&mut self, value: StrongValue<Ty>) -> UpvalueId {
         let id = self.next_upvalue_id.increment();
 
-        self.evicted_upvalues.insert(id, UpvaluePlace::Place(value));
+        let t = value.downgrade();
+        self.evicted_upvalues.insert(id, UpvaluePlace::Place(t));
+
+        // This will prevent value's references from being dropped.
+        // This is a bit ugly, but works as a transition measure.
+        std::mem::forget(value);
 
         id
     }
 
-    fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&StrongValue<Ty>> {
+    fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&WeakValue<Ty>> {
         let value = match self.evicted_upvalues.get(&upvalue)? {
             UpvaluePlace::Stack(slot) => self
-                .temporaries
+                .main
                 .get(*slot)
                 .expect("on-stack upvalue should point to an existing stack slot"),
             UpvaluePlace::Place(value) => value,
@@ -126,16 +209,13 @@ where
         Some(value)
     }
 
-    fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut StrongValue<Ty>> {
-        let value = match self.evicted_upvalues.get_mut(&upvalue)? {
-            UpvaluePlace::Stack(slot) => self
-                .temporaries
-                .get_mut(*slot)
-                .expect("on-stack upvalue should point to an existing stack slot"),
-            UpvaluePlace::Place(value) => value,
-        };
-
-        Some(value)
+    fn set_upvalue(
+        &mut self,
+        upvalue: UpvalueId,
+        value: WeakValue<Ty>,
+        source: Source<RawStackSlot>,
+    ) {
+        todo!()
     }
 
     fn mark_as_upvalue(&mut self, slot: RawStackSlot) -> Option<UpvalueId> {
@@ -153,16 +233,24 @@ where
     }
 
     fn len(&self) -> usize {
-        self.temporaries.len()
+        self.main.len()
     }
 
-    fn insert(&mut self, slot: RawStackSlot, value: StrongValue<Ty>) {
+    fn insert(&mut self, slot: RawStackSlot, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
         // Construct tail iterator before any modifications.
-        let tail = (slot.0..self.temporaries.len())
+        let tail = (slot.0..self.main.len())
             .rev()
             .map(|i| (RawStackSlot(i), RawStackSlot(i + 1)));
 
-        self.temporaries.insert(slot, value);
+        if value.is_transient() && self.is_transient_source(source) {
+            self.mark_transient(slot);
+        } else if let Some(tr) = &mut self.first_transient {
+            // Non-transient insertion shifts the boundary up.
+            tr.0 += 1;
+        }
+        self.mark_unsync(slot);
+
+        self.main.insert(slot, value);
 
         // Shift slots for on-stack upvalues above insertion point.
         self.reassociate(tail);
@@ -176,8 +264,12 @@ where
             .checked_sub(start.0)
             .expect("starting point of range should not be grater than ending point");
 
+        if len == 0 {
+            return;
+        }
+
         let tail_start = end;
-        let tail_end = self.temporaries.next_key();
+        let tail_end = self.main.next_key();
 
         // Construct tail iterator before any modifications.
         let tail = (tail_start.0..tail_end.0).map(|i| (RawStackSlot(i), RawStackSlot(i - len)));
@@ -189,6 +281,30 @@ where
         // Second, we need to adjust any upvalues that reside above removal region
         // since their stack slots will get shifted.
         self.reassociate(tail);
+
+        // Lastly adjust root bookkeeping.
+        // We know range is non-empty here.
+        self.mark_unsync(start);
+
+        match &mut self.first_transient {
+            None => (),
+            Some(slot) if *slot < start => (),
+            Some(slot) if end <= *slot => {
+                slot.0 -= len;
+            }
+            // When transient marker points to somewhere inside removed range
+            // we can only do some approximations.
+            // Any values above marker can also be transient.
+            Some(slot) => {
+                if start < self.main.next_key() {
+                    *slot = start;
+                } else {
+                    // But if there are no values above removal point left
+                    // reset the marker.
+                    self.first_transient = None;
+                }
+            }
+        }
     }
 
     /// Reassociate upvalue ids using `(old_slot, new_slot)` pairs.
@@ -221,7 +337,7 @@ where
         let (start, end) = self.transform_range(range);
 
         let iter = self
-            .temporaries
+            .main
             .drain(start..end)
             .zip((start.0..end.0).map(RawStackSlot));
 
@@ -257,21 +373,34 @@ where
         let end = match range.end_bound().cloned() {
             Bound::Excluded(slot) => slot,
             Bound::Included(RawStackSlot(slot)) => RawStackSlot(slot + 1),
-            Bound::Unbounded => self.temporaries.next_key(),
+            Bound::Unbounded => self.main.next_key(),
         };
 
         (start, end)
+    }
+
+    fn sync(&mut self, heap: &mut Heap) {
+        if self.sync_point == self.main.next_key() {
+            return;
+        }
+
+        let mirror = &mut heap[&self.root];
+        mirror.truncate(self.sync_point.0);
+        mirror.extend(self.main[self.sync_point..].iter().cloned());
+
+        self.sync_point = self.main.next_key();
+        self.first_transient = None;
     }
 }
 
 impl<Ty> Stack<Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Clone,
+    WeakValue<Ty>: Clone,
 {
-    fn remove(&mut self, slot: RawStackSlot) -> Option<StrongValue<Ty>> {
-        if slot < self.temporaries.next_key() {
-            let r = self.temporaries.get(slot).cloned();
+    fn remove(&mut self, slot: RawStackSlot) -> Option<WeakValue<Ty>> {
+        if slot < self.main.next_key() {
+            let r = self.main.get(slot).cloned();
             self.remove_range(slot..=slot);
             r
         } else {
@@ -279,10 +408,10 @@ where
         }
     }
 
-    fn pop(&mut self) -> Option<StrongValue<Ty>> {
-        let r = self.temporaries.last().cloned();
+    fn pop(&mut self) -> Option<WeakValue<Ty>> {
+        let r = self.main.last().cloned();
 
-        if let Some(id) = self.temporaries.last_key() {
+        if let Some(id) = self.main.last_key() {
             self.truncate(id);
         }
 
@@ -293,18 +422,18 @@ where
 impl<Ty> Stack<Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Default + Clone,
+    WeakValue<Ty>: Default + Clone,
 {
-    fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<StrongValue<Ty>> {
-        match height.0.checked_sub(self.temporaries.len()) {
+    fn adjust_height_with_variadics(&mut self, height: RawStackSlot) -> Vec<WeakValue<Ty>> {
+        match height.0.checked_sub(self.main.len()) {
             None => {
-                let r = self.temporaries[height..].to_vec().into();
+                let r = self.main[height..].to_vec().into();
                 self.truncate(height);
                 r
             }
             Some(0) => Default::default(),
             Some(n) => {
-                self.temporaries
+                self.main
                     .extend(std::iter::repeat_with(Default::default).take(n));
                 Default::default()
             }
@@ -312,36 +441,22 @@ where
     }
 }
 
-impl<Ty> Default for Stack<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn default() -> Self {
-        Self {
-            temporaries: Default::default(),
-            on_stack_upvalues: Default::default(),
-            evicted_upvalues: Default::default(),
-            next_upvalue_id: Default::default(),
-        }
-    }
-}
-
 impl<Ty> Debug for Stack<Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Debug,
+    WeakValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Stack")
-            .field("temporaries", &self.temporaries)
+            .field("main", &self.main)
             .field("on_stack_upvalues", &self.on_stack_upvalues)
             .field("evicted_upvalues", &self.evicted_upvalues)
             .field("next_upvalue_id", &self.next_upvalue_id)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
-pub struct StackView<'a, Ty>
+pub struct StackGuard<'a, Ty>
 where
     Ty: CoreTypes,
 {
@@ -349,23 +464,23 @@ where
     boundary: RawStackSlot,
 }
 
-impl<'a, Ty> StackView<'a, Ty>
+impl<'a, Ty> StackGuard<'a, Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn new(stack: &'a mut Stack<Ty>) -> Self {
-        StackView {
+    pub(crate) fn new(stack: &'a mut Stack<Ty>) -> Self {
+        StackGuard {
             stack,
             boundary: RawStackSlot(0),
         }
     }
 
-    pub(crate) fn view(&mut self, protected_size: RawStackSlot) -> Option<StackView<'_, Ty>> {
+    pub(super) fn guard(&mut self, protected_size: RawStackSlot) -> Option<StackGuard<'_, Ty>> {
         if self.stack.len() < protected_size.0 {
             return None;
         }
 
-        let r = StackView {
+        let r = StackGuard {
             stack: self.stack,
             boundary: protected_size,
         };
@@ -373,20 +488,53 @@ where
         Some(r)
     }
 
-    pub fn as_slice(&self) -> &TiSlice<StackSlot, StrongValue<Ty>> {
-        self.deref()
+    fn reborrow(&mut self) -> StackGuard<'_, Ty> {
+        let StackGuard { stack, boundary } = self;
+
+        StackGuard {
+            stack,
+            boundary: *boundary,
+        }
     }
 
-    pub fn push(&mut self, value: StrongValue<Ty>) {
-        self.stack.push(value);
+    pub(super) fn lua_frame(&mut self) -> LuaStackFrame<'_, Ty> {
+        LuaStackFrame(self.reborrow())
     }
 
-    pub fn len(&self) -> usize {
-        self.stack.len() - self.boundary().0
+    // pub fn transient_frame(&mut self) -> TransientStackFrame<'_, Ty> {
+    //     self.mark_unsync(StackSlot(0));
+    //     self.mark_transient(StackSlot(0));
+
+    //     TransientStackFrame(self.reborrow())
+    // }
+
+    pub fn as_slice(&self) -> &TiSlice<StackSlot, WeakValue<Ty>> {
+        self.stack.main[self.boundary..].raw.as_ref()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn as_mut_slice(&mut self) -> &mut TiSlice<StackSlot, WeakValue<Ty>> {
+        self.stack.main[self.boundary..].raw.as_mut()
+    }
+
+    fn mark_unsync(&mut self, slot: StackSlot) {
+        let slot = self.boundary + slot;
+        self.stack.mark_unsync(slot);
+    }
+
+    fn mark_transient(&mut self, slot: StackSlot) {
+        let slot = self.boundary + slot;
+        self.stack.mark_transient(slot);
+    }
+
+    fn push(&mut self, value: WeakValue<Ty>, source: Source<StackSlot>) {
+        let source = source.map(|slot| self.boundary + slot);
+        self.stack.push(value, source);
+    }
+
+    fn set(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
+        let slot = self.boundary + slot;
+        let source = source.map(|slot| self.boundary + slot);
+        self.stack.set(slot, value, source)
     }
 
     pub fn next_slot(&self) -> StackSlot {
@@ -394,102 +542,55 @@ where
         StackSlot(val)
     }
 
-    pub fn get(&self, slot: StackSlot) -> Option<&StrongValue<Ty>> {
-        let index = self.boundary + slot;
-        self.stack.get(index)
-    }
-
-    pub fn get_mut(&mut self, slot: StackSlot) -> Option<&mut StrongValue<Ty>> {
-        let index = self.boundary + slot;
-        self.stack.get_mut(index)
-    }
-
-    pub fn fresh_upvalue(&mut self, value: StrongValue<Ty>) -> UpvalueId {
+    fn fresh_upvalue(&mut self, value: StrongValue<Ty>) -> UpvalueId {
         self.stack.fresh_upvalue(value)
     }
 
-    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&StrongValue<Ty>> {
+    pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&WeakValue<Ty>> {
         self.stack.get_upvalue(upvalue)
     }
 
-    pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut StrongValue<Ty>> {
-        self.stack.get_upvalue_mut(upvalue)
+    fn set_upvalue(&mut self, upvalue: UpvalueId, value: WeakValue<Ty>, source: Source<StackSlot>) {
+        let source = source.map(|slot| self.boundary + slot);
+        self.stack.set_upvalue(upvalue, value, source)
     }
 
-    pub fn mark_as_upvalue(&mut self, slot: StackSlot) -> Option<UpvalueId> {
+    fn mark_as_upvalue(&mut self, slot: StackSlot) -> Option<UpvalueId> {
         let slot = self.boundary + slot;
         self.stack.mark_as_upvalue(slot)
     }
 
-    pub fn insert(&mut self, slot: StackSlot, value: StrongValue<Ty>) {
+    fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
         let slot = self.boundary + slot;
-        self.stack.insert(slot, value)
+        let source = source.map(|slot| self.boundary + slot);
+        self.stack.insert(slot, value, source)
     }
 
-    pub fn remove_range(&mut self, range: impl RangeBounds<StackSlot>) {
+    fn remove_range(&mut self, range: impl RangeBounds<StackSlot>) {
         let start = range.start_bound().mapb(|slot| self.boundary + *slot);
         let end = range.end_bound().mapb(|slot| self.boundary + *slot);
 
         self.stack.remove_range((start, end))
     }
 
-    pub fn truncate(&mut self, new_len: StackSlot) {
+    fn truncate(&mut self, new_len: StackSlot) {
         let new_len = self.boundary + new_len;
         self.stack.truncate(new_len)
     }
 
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.truncate(StackSlot(0))
     }
 
-    pub(crate) fn boundary(&self) -> RawStackSlot {
+    fn sync(&mut self, heap: &mut Heap) {
+        self.stack.sync(heap);
+    }
+
+    pub(super) fn boundary(&self) -> RawStackSlot {
         self.boundary
     }
-}
 
-impl<'a, Ty> StackView<'a, Ty>
-where
-    Ty: CoreTypes,
-    StrongValue<Ty>: Clone,
-{
-    pub(crate) fn take1(&mut self) -> Result<[StrongValue<Ty>; 1], MissingArgsError> {
-        let v0 = self.pop().ok_or_else(|| MissingArgsError {
-            stack_len: self.stack.len(),
-            expected_args: 1,
-        })?;
-        Ok([v0])
-    }
-
-    pub(crate) fn take2(&mut self) -> Result<[StrongValue<Ty>; 2], MissingArgsError> {
-        if self.len() < 2 {
-            return Err(MissingArgsError {
-                expected_args: 2,
-                stack_len: self.len(),
-            });
-        }
-
-        let v1 = self.pop().unwrap();
-        let v0 = self.pop().unwrap();
-
-        Ok([v0, v1])
-    }
-
-    pub(crate) fn take3(&mut self) -> Result<[StrongValue<Ty>; 3], MissingArgsError> {
-        if self.len() < 3 {
-            return Err(MissingArgsError {
-                expected_args: 3,
-                stack_len: self.len(),
-            });
-        }
-
-        let v2 = self.pop().unwrap();
-        let v1 = self.pop().unwrap();
-        let v0 = self.pop().unwrap();
-
-        Ok([v0, v1, v2])
-    }
-
-    pub fn pop(&mut self) -> Option<StrongValue<Ty>> {
+    fn pop(&mut self) -> Option<WeakValue<Ty>> {
         if self.stack.len() <= self.boundary.0 {
             return None;
         }
@@ -497,17 +598,11 @@ where
         self.stack.pop()
     }
 
-    pub fn remove(&mut self, slot: StackSlot) -> Option<StrongValue<Ty>> {
+    fn remove(&mut self, slot: StackSlot) -> Option<WeakValue<Ty>> {
         let slot = self.boundary + slot;
         self.stack.remove(slot)
     }
-}
 
-impl<'a, Ty> StackView<'a, Ty>
-where
-    Ty: CoreTypes,
-    StrongValue<Ty>: Default + Clone,
-{
     /// Set stack to specified height.
     ///
     /// If `len < height` it will get filled with default values.
@@ -515,7 +610,7 @@ where
     ///
     /// If you want to obtain extraneous values use
     /// [`adjust_height_and_collect`](Self::adjust_height_and_collect).
-    pub fn adjust_height(&mut self, height: StackSlot) {
+    fn adjust_height(&mut self, height: StackSlot) {
         self.adjust_height_and_collect(height);
     }
 
@@ -524,17 +619,17 @@ where
     /// If `len < height` it will get filled with default values.
     /// If `len > height` extra values will be removed from the stack and returned.
     /// Otherwise function returns empty vec.
-    pub fn adjust_height_and_collect(&mut self, height: StackSlot) -> Vec<StrongValue<Ty>> {
+    fn adjust_height_and_collect(&mut self, height: StackSlot) -> Vec<WeakValue<Ty>> {
         let requested_height = self.boundary + height;
 
         self.stack.adjust_height_with_variadics(requested_height)
     }
 }
 
-impl<'a, Ty> StackView<'a, Ty>
+impl<'a, Ty> StackGuard<'a, Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     pub fn emit_pretty(&self, writer: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
         if self.is_empty() {
@@ -568,11 +663,306 @@ where
     }
 }
 
-impl<'a, Ty> StackView<'a, Ty>
+impl<'a, Ty> Deref for StackGuard<'a, Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Clone,
 {
+    type Target = TiSlice<StackSlot, WeakValue<Ty>>;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl<'a, Ty> Debug for StackGuard<'a, Ty>
+where
+    Ty: CoreTypes,
+    WeakValue<Ty>: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StackView")
+            .field("stack", &self.stack)
+            .field("boundary", &self.boundary)
+            .finish()
+    }
+}
+
+// pub struct TransientStackFrame<'a, Ty>(StackGuard<'a, Ty>)
+// where
+//     Ty: CoreTypes;
+
+// impl<'a, Ty> TransientStackFrame<'a, Ty>
+// where
+//     Ty: CoreTypes
+// {
+//     pub fn as_slice(&self) -> &TiSlice<StackSlot, WeakValue<Ty>> {
+//         self.0.as_slice()
+//     }
+
+//     pub fn as_mut_slice(&mut self) -> &mut TiSlice<StackSlot, WeakValue<Ty>> {
+//         self.0.as_mut_slice()
+//     }
+
+//     pub fn next_slot(&self) -> StackSlot {
+//         self.0.next_slot()
+//     }
+
+//     pub(super) fn push_with_source(&mut self, value: WeakValue<Ty>, source: Source<StackSlot>) {
+//         self.0.push(value, source)
+//     }
+
+//     pub fn push(&mut self, value: WeakValue<Ty>) {
+//         self.push_with_source(value, Default::default())
+//     }
+
+//     pub fn pop(&mut self) -> Option<WeakValue<Ty>> {
+//         self.0.pop()
+//     }
+
+//     pub(super) fn fresh_upvalue(&mut self, value: StrongValue<Ty>) -> UpvalueId {
+//         self.0.fresh_upvalue(value)
+//     }
+
+//     pub fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&WeakValue<Ty>> {
+//         self.0.get_upvalue(upvalue)
+//     }
+
+//     pub fn get_upvalue_mut(&mut self, upvalue: UpvalueId) -> Option<&mut WeakValue<Ty>> {
+//         // self.0.get_upvalue_mut(upvalue)
+//         todo!()
+//     }
+
+//     pub(super) fn mark_as_upvalue(&mut self, slot: StackSlot) -> Option<UpvalueId> {
+//         self.0.mark_as_upvalue(slot)
+//     }
+
+//     pub(super) fn insert_with_source(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
+//         self.0.insert(slot, value, source)
+//     }
+
+//     pub fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
+//         self.insert_with_source(slot, value, Default::default())
+//     }
+
+//     pub fn remove(&mut self, slot: StackSlot) -> Option<WeakValue<Ty>> {
+//         self.0.remove(slot)
+//     }
+
+//     pub fn remove_range(&mut self, range: impl RangeBounds<StackSlot>) {
+//         self.0.remove_range(range)
+//     }
+
+//     pub fn truncate(&mut self, new_len: StackSlot) {
+//         self.0.truncate(new_len)
+//     }
+
+//     pub fn clear(&mut self) {
+//         self.0.clear()
+//     }
+
+//     pub fn adjust_height(&mut self, height: StackSlot) {
+//         self.0.adjust_height(height)
+//     }
+
+//     pub fn adjust_height_and_collect(&mut self, height: StackSlot) -> Vec<WeakValue<Ty>> {
+//         self.0.adjust_height_and_collect(height)
+//     }
+
+//     pub fn sync(&mut self, heap: &mut Heap) {
+//         self.0.sync(heap)
+//     }
+
+//     pub(super) fn boundary(&self) -> RawStackSlot {
+//         self.0.boundary()
+//     }
+// }
+
+// impl<'a, Ty> Deref for TransientStackFrame<'a, Ty>
+// where
+//     Ty: CoreTypes
+// {
+//     type Target = TiSlice<StackSlot, WeakValue<Ty>>;
+
+//     fn deref(&self) -> &Self::Target {
+//         self.as_slice()
+//     }
+// }
+
+// impl<'a, Ty> DerefMut for TransientStackFrame<'a, Ty>
+// where
+//     Ty: CoreTypes
+// {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         self.as_mut_slice()
+//     }
+// }
+
+// impl<'a, Ty> Extend<WeakValue<Ty>> for TransientStackFrame<'a, Ty>
+// where
+//     Ty: CoreTypes
+// {
+//     fn extend<T: IntoIterator<Item = WeakValue<Ty>>>(&mut self, iter: T) {
+//         self.0.stack.main.extend(iter)
+//     }
+// }
+
+// impl<'a, Ty> Debug for TransientStackFrame<'a, Ty>
+// where
+//     Ty: CoreTypes,
+//     WeakValue<Ty>: Debug,
+// {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_tuple("TransientStackFrame").field(&self.0).finish()
+//     }
+// }
+
+pub(super) struct LuaStackFrame<'a, Ty>(StackGuard<'a, Ty>)
+where
+    Ty: CoreTypes;
+
+impl<'a, Ty> LuaStackFrame<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(super) fn as_slice(&self) -> &TiSlice<StackSlot, WeakValue<Ty>> {
+        self.0.as_slice()
+    }
+
+    pub(super) fn push(&mut self, value: WeakValue<Ty>, source: Source<StackSlot>) {
+        self.0.push(value, source)
+    }
+
+    pub(super) fn set(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
+        self.0.set(slot, value, source)
+    }
+
+    pub(super) fn next_slot(&self) -> StackSlot {
+        self.0.next_slot()
+    }
+
+    pub(super) fn fresh_upvalue(&mut self, value: StrongValue<Ty>) -> UpvalueId {
+        self.0.fresh_upvalue(value)
+    }
+
+    pub(super) fn get_upvalue(&self, upvalue: UpvalueId) -> Option<&WeakValue<Ty>> {
+        self.0.get_upvalue(upvalue)
+    }
+
+    pub(super) fn set_upvalue(
+        &mut self,
+        upvalue: UpvalueId,
+        value: WeakValue<Ty>,
+        source: Source<StackSlot>,
+    ) {
+        self.0.set_upvalue(upvalue, value, source)
+    }
+
+    pub(super) fn mark_as_upvalue(&mut self, slot: StackSlot) -> Option<UpvalueId> {
+        self.0.mark_as_upvalue(slot)
+    }
+
+    pub(super) fn insert(
+        &mut self,
+        slot: StackSlot,
+        value: WeakValue<Ty>,
+        source: Source<StackSlot>,
+    ) {
+        self.0.insert(slot, value, source)
+    }
+
+    pub(super) fn remove_range(&mut self, range: impl RangeBounds<StackSlot>) {
+        self.0.remove_range(range)
+    }
+
+    pub(super) fn truncate(&mut self, new_len: StackSlot) {
+        self.0.truncate(new_len)
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.0.clear()
+    }
+
+    pub(super) fn sync(&mut self, heap: &mut Heap) {
+        self.0.sync(heap);
+    }
+
+    pub(super) fn boundary(&self) -> RawStackSlot {
+        self.0.boundary()
+    }
+
+    pub(super) fn pop(&mut self) -> Option<WeakValue<Ty>> {
+        self.0.pop()
+    }
+
+    pub(super) fn remove(&mut self, slot: StackSlot) -> Option<WeakValue<Ty>> {
+        self.0.remove(slot)
+    }
+
+    /// Set stack to specified height.
+    ///
+    /// If `len < height` it will get filled with default values.
+    /// If `len > height` extra values will be removed.
+    ///
+    /// If you want to obtain extraneous values use
+    /// [`adjust_height_and_collect`](Self::adjust_height_and_collect).
+    pub(super) fn adjust_height(&mut self, height: StackSlot) {
+        self.0.adjust_height_and_collect(height);
+    }
+
+    /// Set stack to specified height and obtain extraneous values if any.
+    ///
+    /// If `len < height` it will get filled with default values.
+    /// If `len > height` extra values will be removed from the stack and returned.
+    /// Otherwise function returns empty vec.
+    pub(super) fn adjust_height_and_collect(&mut self, height: StackSlot) -> Vec<WeakValue<Ty>> {
+        self.0.adjust_height_and_collect(height)
+    }
+
+    pub(super) fn extend(
+        &mut self,
+        iter: impl IntoIterator<Item = WeakValue<Ty>>,
+        is_rooted: bool,
+    ) {
+        todo!()
+    }
+
+    pub(super) fn take1(&mut self) -> Result<[WeakValue<Ty>; 1], MissingArgsError> {
+        let v0 = self.pop().ok_or_else(|| MissingArgsError {
+            stack_len: self.len(),
+            expected_args: 1,
+        })?;
+        Ok([v0])
+    }
+
+    pub(super) fn take2(&mut self) -> Result<[WeakValue<Ty>; 2], MissingArgsError> {
+        if self.len() < 2 {
+            return Err(MissingArgsError {
+                expected_args: 2,
+                stack_len: self.len(),
+            });
+        }
+
+        let v1 = self.pop().unwrap();
+        let v0 = self.pop().unwrap();
+
+        Ok([v0, v1])
+    }
+
+    pub(super) fn take3(&mut self) -> Result<[WeakValue<Ty>; 3], MissingArgsError> {
+        if self.len() < 3 {
+            return Err(MissingArgsError {
+                expected_args: 3,
+                stack_len: self.len(),
+            });
+        }
+
+        let v2 = self.pop().unwrap();
+        let v1 = self.pop().unwrap();
+        let v0 = self.pop().unwrap();
+
+        Ok([v0, v1, v2])
+    }
+
     pub(crate) fn adjust_event_returns(&mut self, event: Event) {
         use Event::*;
 
@@ -585,14 +975,17 @@ where
             // Ops resulting in single value + coercion to bool.
             Eq | Lt | LtEq => {
                 self.adjust_height(StackSlot(1));
-                let value = self.stack.pop().unwrap();
-                self.push(Value::Bool(value.to_bool()));
+                let value = self.pop().unwrap();
+                self.push(Value::Bool(value.to_bool()), Source::TrustedIsRooted(false));
             }
             // Not-equal additionally needs to inverse the resulting boolean.
             Neq => {
                 self.adjust_height(StackSlot(1));
-                let value = self.stack.pop().unwrap();
-                self.push(Value::Bool(!value.to_bool()));
+                let value = self.pop().unwrap();
+                self.push(
+                    Value::Bool(!value.to_bool()),
+                    Source::TrustedIsRooted(false),
+                );
             }
             // Index getter results in single value.
             Index => {
@@ -608,44 +1001,13 @@ where
     }
 }
 
-impl<'a, Ty> Deref for StackView<'a, Ty>
+impl<'a, Ty> Deref for LuaStackFrame<'a, Ty>
 where
     Ty: CoreTypes,
 {
-    type Target = TiSlice<StackSlot, StrongValue<Ty>>;
+    type Target = TiSlice<StackSlot, WeakValue<Ty>>;
 
     fn deref(&self) -> &Self::Target {
-        self.stack.temporaries[self.boundary..].raw.as_ref()
-    }
-}
-
-impl<'a, Ty> DerefMut for StackView<'a, Ty>
-where
-    Ty: CoreTypes,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.stack.temporaries[self.boundary..].raw.as_mut()
-    }
-}
-
-impl<'a, Ty> Extend<StrongValue<Ty>> for StackView<'a, Ty>
-where
-    Ty: CoreTypes,
-{
-    fn extend<T: IntoIterator<Item = StrongValue<Ty>>>(&mut self, iter: T) {
-        self.stack.temporaries.extend(iter)
-    }
-}
-
-impl<'a, Ty> Debug for StackView<'a, Ty>
-where
-    Ty: CoreTypes,
-    StrongValue<Ty>: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StackView")
-            .field("stack", &self.stack)
-            .field("boundary", &self.boundary)
-            .finish()
+        self.as_slice()
     }
 }

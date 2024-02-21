@@ -11,7 +11,7 @@ use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinO
 use repr::tivec::{TiSlice, TiVec};
 
 use super::stack::UpvalueId;
-use super::stack::{RawStackSlot, StackView};
+use super::stack::{RawStackSlot, StackGuard};
 use super::{Core, RuntimeView};
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::{ChunkCache, ChunkId};
@@ -22,7 +22,9 @@ use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RuntimeErro
 use crate::gc::{FromWithGc, IntoWithGc, TryIntoWithGc};
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
-use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Types, Value, Weak};
+use crate::value::{
+    Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Types, Value, Weak, WeakValue,
+};
 
 pub(crate) enum ChangeFrame<Ty>
 where
@@ -91,11 +93,12 @@ impl Closure {
             .ok_or(MissingFunction(fn_ptr))?
             .signature;
 
+        let mut stack = rt.stack.lua_frame();
         let upvalues = upvalues
             .into_iter()
             .chain(std::iter::repeat_with(|| Value::Nil))
             .take(signature.upvalue_count)
-            .map(|value| rt.stack.fresh_upvalue(value))
+            .map(|value| stack.fresh_upvalue(value))
             .collect();
 
         let closure = Closure { fn_ptr, upvalues };
@@ -128,7 +131,7 @@ where
 {
     pub(crate) fn new(
         closure: Root<Closure>,
-        rt: RuntimeView<Ty>,
+        mut rt: RuntimeView<Ty>,
         event: Option<Event>,
     ) -> Result<Self, RuntimeError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
@@ -157,12 +160,16 @@ where
         }
 
         // Adjust stack, move varargs into register if needed.
-        let mut stack = rt.stack;
+        let mut stack = rt.stack.lua_frame();
         let call_height = StackSlot(0) + signature.arg_count;
         let stack_start = stack.boundary();
 
         let register_variadic = if signature.is_variadic {
-            stack.adjust_height_and_collect(call_height)
+            stack
+                .adjust_height_and_collect(call_height)
+                .into_iter()
+                .map(|value| value.try_into_with_gc(&mut rt.core.gc))
+                .collect::<Result<_, _>>()?
         } else {
             stack.adjust_height(call_height);
             Default::default()
@@ -189,7 +196,7 @@ impl<Value> Frame<Value> {
 impl<Ty> Frame<StrongValue<Ty>>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     pub(crate) fn activate<'a>(
         self,
@@ -223,7 +230,7 @@ where
 
         let constants = &chunk.constants;
         let opcodes = &function.opcodes;
-        let stack = stack.view(stack_start).unwrap();
+        let stack = stack.guard(stack_start).unwrap();
 
         tracing::trace!(stack = stack.to_pretty_string(), "activated Lua frame");
 
@@ -308,7 +315,7 @@ where
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackView<'rt, Ty>,
+    stack: StackGuard<'rt, Ty>,
     register_variadic: Vec<StrongValue<Ty>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
@@ -325,38 +332,18 @@ where
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
-    fn get_upvalue(&self, index: UpvalueSlot) -> Result<&StrongValue<Ty>, MissingUpvalue> {
+    fn upvalue(&self, index: UpvalueSlot) -> Result<UpvalueId, MissingUpvalue> {
         let closure = &self.core.gc[&self.closure];
 
         closure
             .upvalues
             .get(index)
-            .and_then(|upvalue_id| self.stack.get_upvalue(*upvalue_id))
+            .copied()
             .ok_or(MissingUpvalue(index))
     }
 
-    fn get_upvalue_mut(
-        &mut self,
-        index: UpvalueSlot,
-    ) -> Result<&mut StrongValue<Ty>, MissingUpvalue> {
-        let closure = &self.core.gc[&self.closure];
-
-        closure
-            .upvalues
-            .get(index)
-            .and_then(|upvalue_id| self.stack.get_upvalue_mut(*upvalue_id))
-            .ok_or(MissingUpvalue(index))
-    }
-
-    fn get_stack(&self, index: StackSlot) -> Result<&StrongValue<Ty>, MissingStackSlot> {
+    fn get_stack(&self, index: StackSlot) -> Result<&WeakValue<Ty>, MissingStackSlot> {
         self.stack.get(index).ok_or(MissingStackSlot(index))
-    }
-
-    fn get_stack_mut(
-        &mut self,
-        index: StackSlot,
-    ) -> Result<&mut StrongValue<Ty>, MissingStackSlot> {
-        self.stack.get_mut(index).ok_or(MissingStackSlot(index))
     }
 
     fn increment_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
@@ -382,14 +369,14 @@ where
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     pub(super) fn step(
         &mut self,
     ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Error>> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
-                self.stack.next_slot(),
+                self.stack.lua_frame().next_slot(),
             )));
         };
 
@@ -406,6 +393,7 @@ where
         &mut self,
         opcode: OpCode,
     ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Cause>> {
+        use super::stack::Source;
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -420,7 +408,11 @@ where
                 // (single-value register doesn't work due to nested calls)
                 // and make fn invocation into two instructions: StoreCallable + Invoke.
                 // Not sure if it will work better.
-                let value = self.stack.remove(slot).ok_or(MissingStackSlot(slot))?;
+                let value = self
+                    .stack
+                    .lua_frame()
+                    .remove(slot)
+                    .ok_or(MissingStackSlot(slot))?;
                 let type_ = value.type_();
 
                 let callable = self
@@ -434,59 +426,78 @@ where
             Return(slot) => ControlFlow::Break(ChangeFrame::Return(slot)),
             MakeClosure(fn_id) => {
                 let closure = self.construct_closure(fn_id)?;
-                let closure = self.core.gc.alloc(closure);
-                self.stack
-                    .push(Value::Function(Callable::Lua(closure.into())));
+
+                // Ensure that stack is synced before alloc happens.
+                self.stack.lua_frame().sync(&mut self.core.gc);
+                let closure = self.core.gc.alloc(closure).downgrade();
+
+                self.stack.lua_frame().push(
+                    Value::Function(Callable::Lua(closure.into())),
+                    Source::TrustedIsRooted(false),
+                );
 
                 ControlFlow::Continue(())
             }
             LoadConstant(index) => {
                 let constant = self.get_constant(index)?.clone();
-                let value = constant.into_with_gc(&mut self.core.gc);
-                self.stack.push(value);
+                let value: StrongValue<_> = constant.into_with_gc(&mut self.core.gc);
+                self.stack
+                    .lua_frame()
+                    .push(value.downgrade(), Source::TrustedIsRooted(false));
 
                 ControlFlow::Continue(())
             }
             LoadVariadic => {
-                self.stack.extend(self.register_variadic.iter().cloned());
+                self.stack.lua_frame().extend(
+                    self.register_variadic.iter().map(|value| value.downgrade()),
+                    true,
+                );
 
                 ControlFlow::Continue(())
             }
             LoadStack(slot) => {
                 let value = self.get_stack(slot)?.clone();
-                self.stack.push(value);
+                self.stack.lua_frame().push(value, Source::StackSlot(slot));
 
                 ControlFlow::Continue(())
             }
             StoreStack(slot) => {
-                let [value] = self.stack.take1()?;
-                let place = self.get_stack_mut(slot)?;
-
-                *place = value;
+                let mut stack = self.stack.lua_frame();
+                let [value] = stack.take1()?;
+                stack.set(slot, value, Source::StackSlot(slot));
 
                 ControlFlow::Continue(())
             }
             AdjustStack(height) => {
-                self.stack.adjust_height(height);
+                self.stack.lua_frame().adjust_height(height);
 
                 ControlFlow::Continue(())
             }
             LoadUpvalue(slot) => {
-                let value = self.get_upvalue(slot)?.clone();
-                self.stack.push(value);
+                let upvalue = self.upvalue(slot)?;
+                let value = self
+                    .stack
+                    .get_upvalue(upvalue)
+                    .ok_or(MissingUpvalue(slot))?
+                    .clone();
+                // This is pessimistic source designation, but will hold until refactor.
+                self.stack
+                    .lua_frame()
+                    .push(value, Source::TrustedIsRooted(false));
 
                 ControlFlow::Continue(())
             }
             StoreUpvalue(slot) => {
-                let [value] = self.stack.take1()?;
-                let place = self.get_upvalue_mut(slot)?;
+                let mut stack = self.stack.lua_frame();
+                let [value] = stack.take1()?;
+                let upvalue = self.upvalue(slot)?;
 
-                *place = value;
+                stack.set_upvalue(upvalue, value, Source::StackSlot(stack.next_slot()));
 
                 ControlFlow::Continue(())
             }
             UnaOp(op) => {
-                let args = self.stack.take1()?;
+                let args = self.stack.lua_frame().take1()?;
                 self.exec_una_op(args, op)
                     .map_err(|err| err.map_other(Into::into))?
                     .map_br(|(event, callable, start)| {
@@ -495,7 +506,7 @@ where
                     })
             }
             BinOp(op) => {
-                let args = self.stack.take2()?;
+                let args = self.stack.lua_frame().take2()?;
                 self.exec_bin_op(args, op)
                     .map_err(|err| err.map_other(Into::into))?
                     .map_br(|(event, callable, start)| {
@@ -510,7 +521,7 @@ where
                 ControlFlow::Continue(())
             }
             JumpIf { cond, offset } => {
-                let [value] = self.stack.take1()?;
+                let [value] = self.stack.lua_frame().take1()?;
 
                 if value.to_bool() == cond {
                     self.ip -= InstrOffset(1);
@@ -526,14 +537,17 @@ where
                 ControlFlow::Continue(())
             }
             TabCreate => {
-                let value = self.core.gc.alloc(Default::default());
+                self.stack.lua_frame().sync(&mut self.core.gc);
+                let value = self.core.gc.alloc(Default::default()).downgrade();
 
-                self.stack.push(Value::Table(value.into()));
+                self.stack
+                    .lua_frame()
+                    .push(Value::Table(value.into()), Source::TrustedIsRooted(false));
 
                 ControlFlow::Continue(())
             }
             TabGet => {
-                let args = self.stack.take2()?;
+                let args = self.stack.lua_frame().take2()?;
                 self.exec_tab_get(args)
                     .map_err(|err| err.map_other(Cause::TabGet))?
                     .map_br(|(callable, start)| {
@@ -542,7 +556,7 @@ where
                     })
             }
             TabSet => {
-                let args = self.stack.take3()?;
+                let args = self.stack.lua_frame().take3()?;
                 self.exec_tab_set(args)
                     .map_err(|err| err.map_other(Cause::TabSet))?
                     .map_br(|(callable, start)| {
@@ -559,12 +573,13 @@ where
 
     fn exec_una_op(
         &mut self,
-        args: [StrongValue<Ty>; 1],
+        args: [WeakValue<Ty>; 1],
         op: UnaOp,
     ) -> Result<
         ControlFlow<(Event, Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::UnaOpCause>,
     > {
+        use super::stack::Source;
         use crate::value::{Float, Int};
         use ControlFlow::*;
 
@@ -602,7 +617,9 @@ where
             UnaOp::LogNot => {
                 let [arg] = args;
                 let r = Value::Bool(!arg.to_bool());
-                self.stack.push(r);
+                self.stack
+                    .lua_frame()
+                    .push(r, Source::TrustedIsRooted(false));
 
                 return Ok(Continue(()));
             }
@@ -610,7 +627,10 @@ where
 
         match eval {
             Continue(value) => {
-                self.stack.push(value);
+                // Value contains no reference in this case.
+                self.stack
+                    .lua_frame()
+                    .push(value, Source::TrustedIsRooted(false));
                 Ok(Continue(()))
             }
             Break((event, args)) => {
@@ -618,18 +638,25 @@ where
 
                 let heap = &mut self.core.gc;
 
-                let metatable = arg
-                    .metatable(heap, &self.core.primitive_metatables)
-                    .ok_or(AlreadyDroppedError)?;
+                let metatable = arg.metatable(heap, &self.core.primitive_metatables)?;
                 let key = event.into_with_gc(heap);
-                let metavalue = heap[&metatable].get(&key);
+                let metavalue = metatable
+                    .map(|mt| {
+                        heap.get(mt.into())
+                            .ok_or(AlreadyDroppedError)
+                            .map(|table| table.get(&key))
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
 
                 match metavalue {
                     Value::Nil => match (op, args) {
                         // Trigger table len builtin on failed metamethod lookup.
                         (UnaOp::StrLen, [Value::Table(tab)]) => {
-                            let border = heap[&tab].border();
-                            self.stack.push(Value::Int(border));
+                            let border = heap.get(tab.into()).ok_or(AlreadyDroppedError)?.border();
+                            self.stack
+                                .lua_frame()
+                                .push(Value::Int(border), Source::TrustedIsRooted(false));
 
                             Ok(Continue(()))
                         }
@@ -638,8 +665,9 @@ where
                     metavalue => {
                         let start = self.stack.next_slot();
 
-                        self.stack.extend(args);
-                        let callable = metavalue.try_into_with_gc(heap)?;
+                        let mut stack = self.stack.lua_frame();
+                        stack.push(args[0], Source::StackSlot(stack.next_slot()));
+                        let callable = metavalue;
                         let callable = self
                             .prepare_invoke(callable, start)
                             .map_err(|e| e.map_other(|_| err))?;
@@ -653,12 +681,14 @@ where
 
     fn exec_bin_op(
         &mut self,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         op: BinOp,
     ) -> Result<
         std::ops::ControlFlow<(Event, Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::BinOpCause>,
     > {
+        use super::stack::Source;
+
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
             rhs: args[1].type_(),
@@ -674,7 +704,10 @@ where
 
         match eval {
             ControlFlow::Continue(Some(value)) => {
-                self.stack.push(value);
+                // Value contains no reference in this case.
+                self.stack
+                    .lua_frame()
+                    .push(value, Source::TrustedIsRooted(false));
                 Ok(ControlFlow::Continue(()))
             }
             ControlFlow::Continue(None) => Err(err.into()),
@@ -694,15 +727,22 @@ where
                 };
 
                 let key = event.into_with_gc(heap);
-                let lookup_event = |value: &StrongValue<Ty>| {
-                    value
-                        .metatable(heap, &self.core.primitive_metatables)
-                        .map(|mt| heap[&mt].get(&key))
-                        .unwrap_or_default()
+                let lookup_event = |value: &WeakValue<Ty>| -> Result<_, AlreadyDroppedError> {
+                    let r = value
+                        .metatable(heap, &self.core.primitive_metatables)?
+                        .map(|mt| {
+                            heap.get(mt.into())
+                                .ok_or(AlreadyDroppedError)
+                                .map(|table| table.get(&key))
+                        })
+                        .transpose()?
+                        .unwrap_or_default();
+
+                    Ok(r)
                 };
 
-                let metavalue = match lookup_event(&lhs) {
-                    Value::Nil => lookup_event(&rhs),
+                let metavalue = match lookup_event(&lhs)? {
+                    Value::Nil => lookup_event(&rhs)?,
                     value => value,
                 };
 
@@ -718,7 +758,9 @@ where
                         };
 
                         if let Some(r) = fallback_result {
-                            self.stack.push(r);
+                            self.stack
+                                .lua_frame()
+                                .push(r, Source::TrustedIsRooted(false));
                             Ok(ControlFlow::Continue(()))
                         } else {
                             Err(err.into())
@@ -726,8 +768,11 @@ where
                     }
                     metavalue => {
                         let start = self.stack.next_slot();
-                        self.stack.extend([lhs, rhs]);
-                        let callable = metavalue.try_into_with_gc(heap)?;
+                        let mut stack = self.stack.lua_frame();
+                        stack.push(lhs, Source::StackSlot(stack.next_slot()));
+                        stack.push(rhs, Source::StackSlot(stack.next_slot() + 1));
+
+                        let callable = metavalue;
                         let callable = self
                             .prepare_invoke(callable, start)
                             .map_err(|e| e.map_other(|_| err))?;
@@ -741,9 +786,9 @@ where
 
     fn exec_bin_op_str(
         &mut self,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         op: StrBinOp,
-    ) -> Result<ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>>, RefAccessError> {
+    ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
         use super::CoerceArgs;
 
         let args = self
@@ -770,14 +815,14 @@ where
 
     fn exec_bin_op_eq(
         &mut self,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         op: EqBinOp,
-    ) -> ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>> {
+    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
-        let cmp = <_ as CoerceArgs<Strong<Ty>>>::cmp_float_and_int(&self.core.dialect);
+        let cmp = <_ as CoerceArgs<Weak<Ty>>>::cmp_float_and_int(&self.core.dialect);
 
         let equal = match args {
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
@@ -801,15 +846,15 @@ where
 
     fn exec_bin_op_rel(
         &mut self,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         op: RelBinOp,
-    ) -> Result<ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>>, RefAccessError> {
+    ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
         use super::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
         use Value::*;
 
-        let cmp = <_ as CoerceArgs<Strong<Ty>>>::cmp_float_and_int(&self.core.dialect);
+        let cmp = <_ as CoerceArgs<Weak<Ty>>>::cmp_float_and_int(&self.core.dialect);
 
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
@@ -840,9 +885,9 @@ where
 
     fn exec_bin_op_bit(
         &mut self,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         op: BitBinOp,
-    ) -> ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>> {
+    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::Int;
 
@@ -864,9 +909,9 @@ where
 
     fn exec_bin_op_ari(
         &mut self,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         op: AriBinOp,
-    ) -> ControlFlow<[StrongValue<Ty>; 2], Option<StrongValue<Ty>>> {
+    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
@@ -902,11 +947,12 @@ where
 
     fn exec_tab_get(
         &mut self,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
     ) -> Result<
         ControlFlow<(Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
+        use super::stack::Source;
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -920,13 +966,16 @@ where
             if let Value::Table(table) = &table {
                 let index = self.core.dialect.coerce_tab_get(index.clone());
 
-                let key = index.downgrade().try_into().map_err(InvalidKey)?;
-                let value = heap[&table].get(&key);
+                let key = index.try_into().map_err(InvalidKey)?;
+                let table = *table;
+                let value = heap.get(table.into()).ok_or(AlreadyDroppedError)?.get(&key);
 
                 // It succeeds if any non-nil value is produced.
                 if value != Value::Nil {
-                    let value = value.try_into_with_gc(heap)?;
-                    self.stack.push(value);
+                    // We know that the value originated from the table in this slot.
+                    self.stack
+                        .lua_frame()
+                        .push(value, Source::StackSlot(self.stack.next_slot()));
                     return Ok(Continue(()));
                 }
             };
@@ -936,8 +985,13 @@ where
 
             loop {
                 let metavalue = table
-                    .metatable(heap, &self.core.primitive_metatables)
-                    .map(|mt| heap[&mt].get(&key))
+                    .metatable(heap, &self.core.primitive_metatables)?
+                    .map(|mt| {
+                        heap.get(mt.into())
+                            .ok_or(AlreadyDroppedError)
+                            .map(|table| table.get(&key))
+                    })
+                    .transpose()?
                     .unwrap_or_default();
 
                 match metavalue {
@@ -947,7 +1001,9 @@ where
                             // Third: Fallback to producing nil.
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
-                            self.stack.push(Value::Nil);
+                            self.stack
+                                .lua_frame()
+                                .push(Value::Nil, Source::TrustedIsRooted(false));
                             return Ok(Continue(()));
                         } else {
                             return Err(TableTypeMismatch(table.type_()).into());
@@ -955,7 +1011,7 @@ where
                     }
                     // Table simply goes on another spin of recursive table lookup.
                     tab @ Value::Table(_) => {
-                        table = tab.try_into_with_gc(heap)?;
+                        table = tab;
                         continue 'outer;
                     }
                     // Function is invoked with table and *original* (before coercions!) index.
@@ -963,13 +1019,16 @@ where
                     Value::Function(callable) => {
                         let callable = callable.try_into_with_gc(heap)?;
                         let start = self.stack.next_slot();
-                        self.stack.extend([table, index]);
+                        let mut stack = self.stack.lua_frame();
+                        stack.push(table, Source::StackSlot(stack.next_slot()));
+                        stack.push(index, Source::StackSlot(stack.next_slot() + 1));
+
                         return Ok(Break((callable, start)));
                     }
                     // If everything fails, try to recursively lookup metamethod in the new value.
                     // Lua affirms to ignore function-like (e.g. with __call metamethod) objects in table indexing.
                     value => {
-                        table = value.try_into_with_gc(heap)?;
+                        table = value;
                     }
                 }
             }
@@ -978,11 +1037,12 @@ where
 
     fn exec_tab_set(
         &mut self,
-        args: [StrongValue<Ty>; 3],
+        args: [WeakValue<Ty>; 3],
     ) -> Result<
         ControlFlow<(Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
+        use super::stack::Source;
         use super::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -995,18 +1055,19 @@ where
             // First: try raw table access.
             if let Value::Table(table) = &table {
                 let index = self.core.dialect.coerce_tab_set(index.clone());
-                let key = index.downgrade().try_into().map_err(InvalidKey)?;
+                let key = index.try_into().map_err(InvalidKey)?;
+                let table = *table;
+                let table = heap.get_mut(table.into()).ok_or(AlreadyDroppedError)?;
 
                 // It succeeds if key is already populated.
-                let r = if heap[&table].contains_key(&key) {
+                let r = if table.contains_key(&key) {
                     Break(())
                 } else {
                     Continue(())
                 };
 
                 if matches!(r, Break(())) {
-                    let value = value.into();
-                    heap[&table].set(key, value);
+                    table.set(key, value);
                     return Ok(Continue(()));
                 }
             };
@@ -1015,8 +1076,13 @@ where
             let key = Event::NewIndex.into_with_gc(heap);
             loop {
                 let metavalue = table
-                    .metatable(heap, &self.core.primitive_metatables)
-                    .map(|mt| heap[&mt].get(&key))
+                    .metatable(heap, &self.core.primitive_metatables)?
+                    .map(|mt| {
+                        heap.get(mt.into())
+                            .ok_or(AlreadyDroppedError)
+                            .map(|table| table.get(&key))
+                    })
+                    .transpose()?
                     .unwrap_or_default();
 
                 match metavalue {
@@ -1027,10 +1093,12 @@ where
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
                             let index = self.core.dialect.coerce_tab_set(index);
-                            let key = index.downgrade().try_into().map_err(InvalidKey)?;
+                            let key = index.try_into().map_err(InvalidKey)?;
                             let value = value.into();
 
-                            heap[&table].set(key, value);
+                            heap.get_mut(table.into())
+                                .ok_or(AlreadyDroppedError)?
+                                .set(key, value);
 
                             return Ok(Continue(()));
                         } else {
@@ -1039,7 +1107,7 @@ where
                     }
                     // Table simply goes on another spin of recursive table assignment.
                     tab @ Value::Table(_) => {
-                        table = tab.try_into_with_gc(heap)?;
+                        table = tab;
                         continue 'outer;
                     }
                     // Function is invoked with table, *original* (before coercions!) index and value.
@@ -1047,13 +1115,17 @@ where
                     Value::Function(callable) => {
                         let callable = callable.try_into_with_gc(heap)?;
                         let start = self.stack.next_slot();
-                        self.stack.extend([table, index, value]);
+                        let mut stack = self.stack.lua_frame();
+                        stack.push(table, Source::StackSlot(stack.next_slot()));
+                        stack.push(index, Source::StackSlot(stack.next_slot() + 1));
+                        stack.push(value, Source::StackSlot(stack.next_slot() + 2));
+
                         return Ok(Break((callable, start)));
                     }
                     // If everything fails, try to recursively lookup metamethod in the new value.
                     // Lua affirms to ignore function-like (e.g. with __call metamethod) objects in table indexing.
                     value => {
-                        table = value.try_into_with_gc(heap)?;
+                        table = value;
                     }
                 }
             }
@@ -1062,23 +1134,28 @@ where
 
     fn prepare_invoke(
         &mut self,
-        mut callable: StrongValue<Ty>,
+        mut callable: WeakValue<Ty>,
         start: StackSlot,
     ) -> Result<Callable<Strong<Ty>>, RefAccessOrError<NotCallableError>> {
+        use super::stack::Source;
+
         let heap = &mut self.core.gc;
 
         loop {
             callable = match callable {
-                Value::Function(r) => return Ok(r),
+                Value::Function(r) => return Ok(r.try_into_with_gc(heap)?),
                 t => t,
             };
 
             let new_callable = callable
-                .metatable(heap, &self.core.primitive_metatables)
+                .metatable(heap, &self.core.primitive_metatables)?
                 .map(|mt| {
                     let key = Event::Call.into_with_gc(heap);
-                    heap[&mt].get(&key)
+                    heap.get(mt.into())
+                        .ok_or(AlreadyDroppedError)
+                        .map(|table| table.get(&key))
                 })
+                .transpose()?
                 .unwrap_or_default();
 
             // Keys associated with nil are not considered part of the table.
@@ -1086,8 +1163,10 @@ where
                 return Err(RefAccessOrError::Other(NotCallableError));
             }
 
-            self.stack.insert(start, callable);
-            callable = new_callable.try_into_with_gc(heap)?;
+            self.stack
+                .lua_frame()
+                .insert(start, callable, Source::StackSlot(start));
+            callable = new_callable;
         }
     }
 
@@ -1144,6 +1223,7 @@ where
                 match source {
                     UpvalueSource::Temporary(slot) => self
                         .stack
+                        .lua_frame()
                         .mark_as_upvalue(slot)
                         .ok_or(opcode_err::MissingStackSlot(slot).into()),
                     UpvalueSource::Upvalue(slot) => {
@@ -1186,10 +1266,12 @@ where
     }
 
     pub(crate) fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Ty>> {
-        self.stack.remove_range(StackSlot(0)..drop_under);
+        self.stack
+            .lua_frame()
+            .remove_range(StackSlot(0)..drop_under);
 
         if let Some(event) = self.event {
-            self.stack.adjust_event_returns(event);
+            self.stack.lua_frame().adjust_event_returns(event);
         }
 
         Ok(())
@@ -1199,6 +1281,7 @@ where
 impl<'rt, Ty> Debug for ActiveFrame<'rt, Ty>
 where
     Ty: Debug + CoreTypes,
+    WeakValue<Ty>: Debug,
     StrongValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

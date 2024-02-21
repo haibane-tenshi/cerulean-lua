@@ -1,4 +1,4 @@
-use crate::value::{CoreTypes, Strong, StrongValue, Types, Value};
+use crate::value::{CoreTypes, Types, Value, Weak, WeakValue};
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
 /// Define fine aspects of runtime behavior.
@@ -326,14 +326,14 @@ pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
     fn cmp_float_and_int(&self) -> bool;
 }
 
-impl<Ty> CoerceArgs<Strong<Ty>> for DialectBuilder
+impl<Ty> CoerceArgs<Weak<Ty>> for DialectBuilder
 where
     Ty: CoreTypes,
     Ty::String: From<String>,
 {
     type Gc = gc::Heap;
 
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [StrongValue<Ty>; 2]) -> [StrongValue<Ty>; 2] {
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
         use crate::value::{Float, Int};
 
         match (op, args) {
@@ -357,10 +357,10 @@ where
         }
     }
 
-    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [StrongValue<Ty>; 2]) -> [StrongValue<Ty>; 2] {
+    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
         use crate::value::{Float, Int};
 
-        let try_into = |value: f64| -> StrongValue<Ty> {
+        let try_into = |value: f64| -> WeakValue<Ty> {
             if let Ok(value) = Int::try_from(Float(value)) {
                 value.into()
             } else {
@@ -388,9 +388,9 @@ where
     fn coerce_bin_op_str(
         &self,
         op: StrBinOp,
-        args: [StrongValue<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         gc: &mut Self::Gc,
-    ) -> [StrongValue<Ty>; 2] {
+    ) -> [WeakValue<Ty>; 2] {
         match op {
             StrBinOp::Concat => {
                 use crate::gc::StringRef;
@@ -421,7 +421,7 @@ where
         }
     }
 
-    fn coerce_una_op_bit(&self, args: [StrongValue<Ty>; 1]) -> [StrongValue<Ty>; 1] {
+    fn coerce_una_op_bit(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1] {
         use crate::value::{Float, Int};
 
         match args {
@@ -436,7 +436,7 @@ where
         }
     }
 
-    fn coerce_tab_set(&self, key: StrongValue<Ty>) -> StrongValue<Ty> {
+    fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_set_float_to_int {
@@ -455,7 +455,7 @@ where
         }
     }
 
-    fn coerce_tab_get(&self, key: StrongValue<Ty>) -> StrongValue<Ty> {
+    fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_get_float_to_int {

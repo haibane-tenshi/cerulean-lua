@@ -47,7 +47,7 @@ where
 }
 
 pub trait CoreTypes: Sized {
-    type String: Concat + Len + Clone + PartialOrd + From<String> + From<&'static str>;
+    type String: Trace + Concat + Len + Clone + PartialOrd + From<String> + From<&'static str>;
     type RustClosure: Clone + PartialEq + Trace;
     type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcTable<Self::Table>>;
     type FullUserdata: Trace + Metatable<GcTable<Self::Table>>;

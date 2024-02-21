@@ -15,6 +15,7 @@ use enumoid::{EnumMap, Enumoid};
 use gc::{Heap, Trace};
 use repr::literal::Literal;
 
+use crate::error::AlreadyDroppedError;
 use crate::gc::TryFromWithGc;
 
 pub use boolean::Boolean;
@@ -226,8 +227,9 @@ where
 }
 
 type RootTable<Ty> = <Strong<Ty> as Types>::Table;
+type GcTable<Ty> = <Weak<Ty> as Types>::Table;
 
-impl<Ty> StrongValue<Ty>
+impl<Ty> WeakValue<Ty>
 where
     Ty: CoreTypes,
 {
@@ -235,22 +237,56 @@ where
         &'a self,
         heap: &Heap,
         primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<RootTable<Ty>>>,
-    ) -> Option<RootTable<Ty>> {
-        use crate::gc::RootTable;
+    ) -> Result<Option<GcTable<Ty>>, AlreadyDroppedError> {
+        let r = match self {
+            Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].map(|t| t.downgrade()),
+            Value::Bool(_) => {
+                primitive_metatables[TypeWithoutMetatable::Bool].map(|t| t.downgrade())
+            }
+            Value::Int(_) => primitive_metatables[TypeWithoutMetatable::Int].map(|t| t.downgrade()),
+            Value::Float(_) => {
+                primitive_metatables[TypeWithoutMetatable::Float].map(|t| t.downgrade())
+            }
+            Value::String(_) => {
+                primitive_metatables[TypeWithoutMetatable::String].map(|t| t.downgrade())
+            }
+            Value::Function(_) => {
+                primitive_metatables[TypeWithoutMetatable::Function].map(|t| t.downgrade())
+            }
+            Value::Table(t) => heap
+                .get((*t).into())
+                .ok_or(AlreadyDroppedError)?
+                .metatable(),
+            Value::Userdata(t) => heap
+                .get((*t).into())
+                .ok_or(AlreadyDroppedError)?
+                .metatable(),
+        };
+
+        Ok(r)
+    }
+}
+
+impl<Ty> WeakValue<Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(crate) fn is_transient(&self) -> bool {
+        use callable::RustCallable;
+        use Value::*;
 
         match self {
-            Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].clone(),
-            Value::Bool(_) => primitive_metatables[TypeWithoutMetatable::Bool].clone(),
-            Value::Int(_) => primitive_metatables[TypeWithoutMetatable::Int].clone(),
-            Value::Float(_) => primitive_metatables[TypeWithoutMetatable::Float].clone(),
-            Value::String(_) => primitive_metatables[TypeWithoutMetatable::String].clone(),
-            Value::Function(_) => primitive_metatables[TypeWithoutMetatable::Function].clone(),
-            Value::Table(t) => heap[&t]
-                .metatable()
-                .and_then(|table| Some(RootTable(heap.upgrade(table.0)?))),
-            Value::Userdata(t) => heap[&t]
-                .metatable()
-                .and_then(|table| Some(RootTable(heap.upgrade(table.0)?))),
+            Nil | Bool(_) | Int(_) | Float(_) => false,
+            // In current impl strings are not gc allocated.
+            // Will need to be adjusted when that changes.
+            String(_) => false,
+            // Pointers are curently passed by-value.
+            // Will need to be adjusted if that changes.
+            Function(Callable::Rust(RustCallable::Ptr(_))) => false,
+            Function(Callable::Rust(RustCallable::Ref(_)))
+            | Function(Callable::Lua(_))
+            | Table(_)
+            | Userdata(_) => true,
         }
     }
 }

@@ -18,7 +18,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::{LuaFfi, LuaFfiOnce};
-use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value};
+use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value, WeakValue};
 use frame::{ChangeFrame, Event};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
@@ -27,7 +27,7 @@ use stack::{RawStackSlot, Stack};
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, FunctionPtr};
-pub use stack::StackView;
+pub use stack::StackGuard;
 
 pub struct Core<Ty>
 where
@@ -71,14 +71,16 @@ where
     Ty: CoreTypes,
     C: Debug,
 {
-    pub fn new(chunk_cache: C, core: Core<Ty>) -> Self {
+    pub fn new(chunk_cache: C, mut core: Core<Ty>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
+
+        let stack = Stack::new(&mut core.gc);
 
         Runtime {
             core,
             chunk_cache,
             frames: Default::default(),
-            stack: Default::default(),
+            stack,
             rust_backtrace_stack: Default::default(),
         }
     }
@@ -97,7 +99,7 @@ where
         } = self;
 
         let frames = frames.view();
-        let stack = stack.view();
+        let stack = stack.guard();
         // let upvalue_stack = upvalue_stack.view();
         let rust_backtrace_stack = rust_backtrace_stack.view();
 
@@ -119,7 +121,7 @@ where
     pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
     frames: FrameStackView<'rt, StrongValue<Ty>>,
-    pub stack: StackView<'rt, Ty>,
+    pub stack: StackGuard<'rt, Ty>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
@@ -146,7 +148,7 @@ where
         } = self;
 
         let frames = frames.view();
-        let stack = stack.view(start)?;
+        let stack = stack.guard(start)?;
         let rust_backtrace_stack = rust_backtrace_stack.view_over();
 
         let r = RuntimeView {
@@ -164,7 +166,7 @@ where
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     pub fn invoke(&mut self, f: impl LuaFfiOnce<Ty>) -> Result<(), RuntimeError<Ty>> {
         self.invoke_at(f, StackSlot(0))
@@ -255,7 +257,7 @@ where
     /// In case this presents an issue,
     /// the best course of action is to discard the runtime and construct a fresh one.
     pub fn reset(&mut self) {
-        self.stack.clear();
+        self.stack.lua_frame().clear();
         self.soft_reset();
     }
 }
@@ -264,7 +266,7 @@ impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     pub fn enter(
         &mut self,
@@ -303,13 +305,14 @@ where
                             active_frame = frame.activate(self)?;
                         }
                         Callable::Rust(closure) => {
+                            self.stack.lua_frame().sync(&mut self.core.gc);
                             self.invoke_at_raw(closure, start)?;
 
                             if let Some(event) = event {
-                                let mut stack = self.stack.view(start).expect(
+                                let mut stack = self.stack.guard(start).expect(
                                     "stack space below invocation bound should be untouched",
                                 );
-                                stack.adjust_event_returns(event);
+                                stack.lua_frame().adjust_event_returns(event);
                             }
 
                             let frame = self
