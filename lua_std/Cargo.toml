@@ -1,0 +1,11 @@
+[package]
+name = "lua_std"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gc = { version = "0.1.0", path = "../gc" }
+repr = { version = "0.1.0", path = "../repr" }
+rt = { version = "0.1.0", path = "../rt" }

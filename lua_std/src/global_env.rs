@@ -6,16 +6,16 @@ use gc::{Heap, Trace};
 use repr::chunk::{ChunkExtension, ClosureRecipe, Function};
 use repr::literal::Literal;
 
-use crate::chunk_cache::ChunkId;
-use crate::ffi::{LuaFfi, LuaFfiOnce};
-use crate::gc::{StringRef, TryIntoWithGc};
-use crate::runtime::RuntimeView;
-use crate::value::{
+use rt::chunk_cache::ChunkId;
+use rt::ffi::{LuaFfi, LuaFfiOnce};
+use rt::gc::{StringRef, TryIntoWithGc};
+use rt::runtime::RuntimeView;
+use rt::value::{
     Callable, CoreTypes, KeyValue, LuaString, Strong, StrongValue, TableIndex, Types, Value, Weak,
+    WeakValue,
 };
-use crate::value_builder::{ChunkRange, Part, ValueBuilder};
-
-use crate::error::RuntimeError;
+use rt::value_builder::{ChunkRange, Part, ValueBuilder};
+use rt::error::RuntimeError;
 
 type RootTable<Ty> = <Strong<Ty> as Types>::Table;
 
@@ -27,12 +27,12 @@ where
     StrongValue<Ty>: Clone,
     Ty::Table: Default + Trace,
 {
-    use crate::value_builder;
+    use rt::value_builder;
 
     let chunk_part = Part {
         chunk_ext: ChunkExtension::empty(),
         builder: |mut rt: RuntimeView<'_, Ty>, _, _| -> Result<RootTable<Ty>, RuntimeError<Ty>> {
-            use crate::gc::RootTable;
+            use rt::gc::RootTable;
 
             rt.stack.clear();
 
@@ -84,7 +84,7 @@ where
     Ty::String: AsRef<[u8]> + From<&'static str>,
     Ty::RustClosure: LuaFfi<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
@@ -113,7 +113,7 @@ where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + From<&'static str>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 

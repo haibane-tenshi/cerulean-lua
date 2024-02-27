@@ -5,13 +5,14 @@ use std::path::PathBuf;
 
 use gc::Heap;
 
-use crate::error::{RefAccessError, RuntimeError};
-use crate::ffi::{self, LuaFfi, LuaFfiOnce, LuaFfiPtr, Maybe, Opts};
-use crate::gc::{StringRef, TryIntoWithGc};
-use crate::runtime::RuntimeView;
-use crate::value::table::KeyValue;
-use crate::value::{
+use rt::error::{RefAccessError, RuntimeError};
+use rt::ffi::{self, LuaFfi, LuaFfiOnce, LuaFfiPtr, Maybe, Opts};
+use rt::gc::{StringRef, TryIntoWithGc};
+use rt::runtime::RuntimeView;
+use rt::value::table::KeyValue;
+use rt::value::{
     Callable, CoreTypes, LuaString, LuaTable, NilOr, StrongValue, TypeMismatchError, Types, Value,
+    WeakValue,
 };
 
 pub fn assert<Ty>() -> LuaFfiPtr<Ty>
@@ -31,7 +32,7 @@ where
                 let msg = StringRef::new("assertion failed!".into());
                 Value::String(msg)
             });
-            Err(err.into())
+            Err(err.try_into_with_gc(&mut rt.core.gc)?)
         }
     };
 
@@ -41,7 +42,7 @@ where
 pub fn print<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     let f = |mut rt: RuntimeView<'_, Ty>| {
         for value in rt.stack.iter() {
@@ -56,14 +57,14 @@ where
     LuaFfiPtr::new(f, "lua_std::print")
 }
 
-pub fn pcall<Gc>() -> LuaFfiPtr<Gc>
+pub fn pcall<Ty>() -> LuaFfiPtr<Ty>
 where
-    Gc: CoreTypes,
-    Gc::String: AsRef<[u8]>,
-    Gc::RustClosure: LuaFfi<Gc>,
-    StrongValue<Gc>: Display,
+    Ty: CoreTypes,
+    Ty::String: AsRef<[u8]>,
+    Ty::RustClosure: LuaFfi<Ty>,
+    WeakValue<Ty>: Display,
 {
-    let f = |mut rt: RuntimeView<'_, Gc>| {
+    let f = |mut rt: RuntimeView<'_, Ty>| {
         let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
             let msg = StringRef::new("pcall expects at least one argument".into());
             return Err(Value::String(msg).into());
@@ -97,8 +98,9 @@ where
                 let msg = StringRef::new(string.into());
 
                 rt.reset();
-                rt.stack.push(Value::Bool(false));
-                rt.stack.push(Value::String(msg));
+                // rt.stack.push(Value::Bool(false));
+                // rt.stack.push(Value::String(msg));
+                todo!()
             }
         }
 
