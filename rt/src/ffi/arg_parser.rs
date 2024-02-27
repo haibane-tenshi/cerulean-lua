@@ -189,7 +189,7 @@ where
 
     fn parse(self, gc: &mut Gc) -> Result<Values, ParseError<Self::Error>> {
         match self.extract(gc) {
-            Ok((view, args)) if view.is_empty() => Ok(args),
+            Ok(([], args)) => Ok(args),
             Ok((view, _)) => {
                 let expected = self.len() - view.len();
                 let found = self.len();
