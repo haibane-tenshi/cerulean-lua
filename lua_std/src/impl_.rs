@@ -20,7 +20,7 @@ where
     Ty: CoreTypes,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
-        let Some(cond) = rt.stack.get(StackSlot(0)) else {
+        let Some(cond) = rt.stack.get_slot(StackSlot(0)) else {
             let msg = StringRef::new("assert expects at least one argument".into());
             return Err(Value::String(msg).into());
         };
@@ -28,11 +28,12 @@ where
         if cond.to_bool() {
             Ok(())
         } else {
-            let err = rt.stack.get(StackSlot(1)).cloned().unwrap_or_else(|| {
+            let err = rt.stack.get_slot(StackSlot(1)).cloned().unwrap_or_else(|| {
                 let msg = StringRef::new("assertion failed!".into());
                 Value::String(msg)
             });
-            Err(err.try_into_with_gc(&mut rt.core.gc)?)
+            let err: StrongValue<_> = err.try_into_with_gc(&mut rt.core.gc)?;
+            Err(err.into())
         }
     };
 
@@ -60,27 +61,34 @@ where
 pub fn pcall<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
-    Ty::String: AsRef<[u8]>,
+    Ty::String: AsRef<[u8]> + Display,
     Ty::RustClosure: LuaFfi<Ty>,
     WeakValue<Ty>: Display,
 {
     let f = |mut rt: RuntimeView<'_, Ty>| {
-        let Some(value) = rt.stack.get_mut(StackSlot(0)) else {
-            let msg = StringRef::new("pcall expects at least one argument".into());
-            return Err(Value::String(msg).into());
-        };
+        let func = {
+            let mut stack = rt.stack.frame(&mut rt.core.gc);
+            let Some(mut value) = stack.get_mut(StackSlot(0)) else {
+                let msg = StringRef::new("pcall expects at least one argument".into());
+                return Err(Value::String(msg).into());
+            };
 
-        let Value::Function(func) = value.take() else {
-            let msg = StringRef::new("pcall expects the first argument to be a function".into());
-            return Err(Value::String(msg).into());
+            let Value::Function(func) = value.take() else {
+                let msg =
+                    StringRef::new("pcall expects the first argument to be a function".into());
+                return Err(Value::String(msg).into());
+            };
+
+            func
         };
 
         match rt.invoke_at(func, StackSlot(1)) {
             Ok(()) => {
-                let place = rt
-                    .stack
+                let mut stack = rt.stack.frame(&mut rt.core.gc);
+                let mut place = stack
                     .get_mut(StackSlot(0))
                     .expect("stack space below invocation point should be untouched");
+
                 *place = Value::Bool(true);
             }
             Err(err) => {
@@ -98,9 +106,10 @@ where
                 let msg = StringRef::new(string.into());
 
                 rt.reset();
-                // rt.stack.push(Value::Bool(false));
-                // rt.stack.push(Value::String(msg));
-                todo!()
+                let mut stack = rt.stack.transient_frame();
+                stack.push(Value::Bool(false));
+                stack.push(Value::String(msg));
+                stack.sync(&mut rt.core.gc);
             }
         }
 
@@ -129,15 +138,15 @@ impl Display for InvalidModeError {
 
 impl Error for InvalidModeError {}
 
-impl<Ty> TryFrom<StrongValue<Ty>> for Mode
+impl<Ty> TryFrom<WeakValue<Ty>> for Mode
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
 {
     type Error = ModeError;
 
-    fn try_from(value: StrongValue<Ty>) -> Result<Self, Self::Error> {
-        use crate::value::Type;
+    fn try_from(value: WeakValue<Ty>) -> Result<Self, Self::Error> {
+        use rt::value::Type;
 
         let s = match value {
             Value::String(s) => s,
@@ -202,12 +211,12 @@ impl From<TypeMismatchError> for ModeError {
 pub fn load<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
-    Ty::String: AsRef<[u8]>,
+    Ty::String: AsRef<[u8]> + Display,
     Ty::RustClosure: LuaFfiOnce<Ty>,
-    StrongValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
-    <StrongValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
+    WeakValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
+    <WeakValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
 {
-    use crate::value::{Strong, Type};
+    use rt::value::{Type, Weak};
 
     enum ChunkSource<Ty: Types> {
         String(Ty::String),
@@ -259,12 +268,12 @@ where
         ffi::try_invoke_with_rt(
             rt,
             |mut rt: RuntimeView<'_, Ty>,
-             source: ChunkSource<Strong<Ty>>,
-             opts: Opts<(LuaString<String>, Mode, StrongValue<Ty>)>|
+             source: ChunkSource<Weak<Ty>>,
+             opts: Opts<(LuaString<String>, Mode, WeakValue<Ty>)>|
              -> Result<_, RuntimeError<Ty>> {
-                use crate::ffi::Split;
-                use crate::runtime::FunctionPtr;
                 use repr::index::FunctionId;
+                use rt::ffi::Split;
+                use rt::runtime::FunctionPtr;
 
                 let (_name, mode, env) = opts.split();
 
@@ -290,11 +299,10 @@ where
                                 chunk_id,
                                 function_id: FunctionId(0),
                             };
-                            let env = env.unwrap_or_else(|| rt.core.global_env.clone());
-                            let closure = rt.construct_closure(ptr, [env])?;
-                            let closure_ref = rt.core.gc.alloc(closure).into();
+                            let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
+                            let closure = rt.construct_closure(ptr, [env])?.downgrade();
 
-                            Ok((NilOr::Some(Callable::Lua(closure_ref)), Maybe::None))
+                            Ok((NilOr::Some(Callable::Lua(closure)), Maybe::None))
                         }
                         Err(err) => {
                             let msg = rt.into_diagnostic(err.into()).emit_to_string();
@@ -314,20 +322,20 @@ where
 pub fn loadfile<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
-    Ty::String: TryInto<String> + AsRef<[u8]>,
+    Ty::String: TryInto<String> + AsRef<[u8]> + Display,
     Ty::RustClosure: LuaFfiOnce<Ty>,
-    StrongValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
-    <StrongValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
+    WeakValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    <WeakValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(
             rt,
             |mut rt: RuntimeView<'_, Ty>,
-             opts: Opts<(LuaString<PathBuf>, Mode, StrongValue<Ty>)>|
+             opts: Opts<(LuaString<PathBuf>, Mode, WeakValue<Ty>)>|
              -> Result<_, RuntimeError<Ty>> {
-                use crate::ffi::Split;
-                use crate::runtime::FunctionPtr;
                 use repr::index::FunctionId;
+                use rt::ffi::Split;
+                use rt::runtime::FunctionPtr;
 
                 let (filename, mode, env) = opts.split();
                 let _mode = mode.unwrap_or_default();
@@ -345,11 +353,10 @@ where
                             chunk_id,
                             function_id: FunctionId(0),
                         };
-                        let env = env.unwrap_or_else(|| rt.core.global_env.clone());
-                        let closure = rt.construct_closure(ptr, [env])?;
-                        let closure_ref = rt.core.gc.alloc(closure).into();
+                        let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
+                        let closure = rt.construct_closure(ptr, [env])?.downgrade();
 
-                        Ok((NilOr::Some(Callable::Lua(closure_ref)), Maybe::None))
+                        Ok((NilOr::Some(Callable::Lua(closure)), Maybe::None))
                     }
                     Err(err) => {
                         let msg = rt.into_diagnostic(err).emit_to_string();
@@ -371,21 +378,27 @@ where
     // Value<Gc>: Debug + Display,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
-        ffi::try_invoke_with_rt(rt, |rt: RuntimeView<'_, Ty>, value: StrongValue<Ty>| {
-            let r = value
-                .metatable(&rt.core.gc, &rt.core.primitive_metatables)
-                .map(|metatable| -> Result<StrongValue<Ty>, RefAccessError> {
-                    use crate::value::TableIndex;
+        ffi::try_invoke_with_rt(rt, |rt: RuntimeView<'_, Ty>, value: WeakValue<Ty>| {
+            let r = rt
+                .core
+                .metatable_of(&value)?
+                .map(|metatable| -> Result<WeakValue<Ty>, RefAccessError> {
+                    use rt::error::AlreadyDroppedError;
+                    use rt::value::TableIndex;
 
                     let __metatable = {
                         let key = StringRef::new("__metatable".into());
-                        rt.core.gc[&metatable].get(&KeyValue::String(key))
+                        rt.core
+                            .gc
+                            .get(metatable.into())
+                            .ok_or(AlreadyDroppedError)?
+                            .get(&KeyValue::String(key))
                     };
 
                     let r = if let Value::Nil = __metatable {
                         Value::Table(metatable)
                     } else {
-                        __metatable.try_into_with_gc(&mut rt.core.gc)?
+                        __metatable
                     };
 
                     Ok(r)
@@ -405,21 +418,28 @@ where
     Ty: CoreTypes,
     // Value<Gc>: Debug + Display,
 {
-    use crate::gc::RootTable;
+    use rt::gc::GcTable;
 
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(
             rt,
             |rt: RuntimeView<'_, Ty>,
-             table: LuaTable<RootTable<Ty::Table>>,
-             metatable: NilOr<LuaTable<RootTable<Ty::Table>>>| {
-                use crate::error::AlreadyDroppedError;
-                use crate::value::{Metatable, TableIndex};
+             table: LuaTable<GcTable<Ty::Table>>,
+             metatable: NilOr<LuaTable<GcTable<Ty::Table>>>| {
+                use rt::error::AlreadyDroppedError;
+                use rt::value::{Metatable, TableIndex};
 
                 let LuaTable(table) = table;
                 let metatable = metatable.into_option().map(|LuaTable(t)| t);
 
-                let has_meta_field = match rt.core.gc[&table].metatable() {
+                let old_metatable = rt
+                    .core
+                    .gc
+                    .get(table.into())
+                    .ok_or(AlreadyDroppedError)?
+                    .metatable();
+
+                let has_meta_field = match old_metatable {
                     Some(metatable) => {
                         let key = StringRef::new("__metatable".into());
                         rt.core
@@ -438,8 +458,11 @@ where
                     return Err(Value::String(msg).into());
                 }
 
-                rt.core.gc[&table]
-                    .set_metatable(metatable.as_ref().map(RootTable::downgrade).map(Into::into));
+                rt.core
+                    .gc
+                    .get_mut(table.into())
+                    .ok_or(AlreadyDroppedError)?
+                    .set_metatable(metatable);
 
                 Ok(LuaTable(table))
             },
