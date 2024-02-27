@@ -1,20 +1,18 @@
 [package]
-name = "rt"
+name = "interp"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[features]
-trace = ["tracing/max_level_trace"]
-
 [dependencies]
-bitvec = "1.0.1"
+anyhow = "1.0.70"
+clap = { version = "4.2.2", features = ["derive"] }
 codespan-reporting = "0.11.1"
-enumoid = "0.3.0"
 gc = { version = "0.1.0", path = "../gc" }
-logos = "0.13.0"
-ordered-float = "4.1.1"
+lua_std = { version = "0.1.0", path = "../lua_std" }
 parser = { version = "0.1.0", path = "../parser" }
 repr = { version = "0.1.0", path = "../repr" }
-tracing = "0.1.37"
+rt = { version = "0.1.0", path = "../rt" }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.16"

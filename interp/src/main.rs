@@ -20,8 +20,7 @@ enum Command {
 }
 
 fn load_from_file(path: &Path) -> Result<(Chunk, String)> {
-    use logos::Logos;
-    use parser::lex::Token;
+    use parser::lex::{Logos, Token};
 
     let data = std::fs::read_to_string(path)?;
     let lexer = Token::lexer(&data);
@@ -58,20 +57,21 @@ fn main() -> Result<()> {
     match command {
         Command::Run { path } => {
             use gc::Heap;
+            use lua_std::global_env;
             use rt::chunk_cache::ChunkId;
             use rt::chunk_cache::{MainCache, SingleChunk, VecCache};
             use rt::runtime::{Core, DialectBuilder, Runtime};
             use rt::value::traits::DefaultTypes;
             use rt::value::Value;
 
-            let (env_chunk, builder) = rt::global_env::empty()
-                .include(rt::global_env::assert())
-                .include(rt::global_env::pcall())
-                .include(rt::global_env::print())
-                .include(rt::global_env::load())
-                .include(rt::global_env::loadfile())
-                .include(rt::global_env::setmetatable())
-                .include(rt::global_env::getmetatable())
+            let (env_chunk, builder) = global_env::empty()
+                .include(global_env::assert())
+                .include(global_env::pcall())
+                .include(global_env::print())
+                .include(global_env::load())
+                .include(global_env::loadfile())
+                .include(global_env::setmetatable())
+                .include(global_env::getmetatable())
                 .finish();
 
             let chunk_cache = {

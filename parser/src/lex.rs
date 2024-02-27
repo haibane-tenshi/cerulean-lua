@@ -2,8 +2,9 @@ use std::borrow::Cow;
 use std::str::FromStr;
 
 use decorum::Finite;
-use logos::Logos;
 use thiserror::Error;
+
+pub use logos::Logos;
 
 pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 
