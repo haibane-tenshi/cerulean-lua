@@ -707,9 +707,9 @@ where
             Break((event, args)) => {
                 let [arg] = &args;
 
+                let metatable = self.core.metatable_of(arg)?;
                 let heap = &mut self.core.gc;
 
-                let metatable = arg.metatable(heap, &self.core.primitive_metatables)?;
                 let key = event.into_with_gc(heap);
                 let metavalue = metatable
                     .map(|mt| {
@@ -784,8 +784,6 @@ where
             }
             ControlFlow::Continue(None) => Err(err.into()),
             ControlFlow::Break(args) => {
-                let heap = &mut self.core.gc;
-
                 let event: Event = op.into();
 
                 // Swap arguments for greater/greater-or-eq comparisons.
@@ -798,12 +796,15 @@ where
                     _ => args,
                 };
 
-                let key = event.into_with_gc(heap);
+                let key = event.into_with_gc(&mut self.core.gc);
                 let lookup_event = |value: &WeakValue<Ty>| -> Result<_, AlreadyDroppedError> {
-                    let r = value
-                        .metatable(heap, &self.core.primitive_metatables)?
+                    let r = self
+                        .core
+                        .metatable_of(value)?
                         .map(|mt| {
-                            heap.get(mt.into())
+                            self.core
+                                .gc
+                                .get(mt.into())
                                 .ok_or(AlreadyDroppedError)
                                 .map(|table| table.get(&key))
                         })
@@ -1029,8 +1030,6 @@ where
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 
-        let heap = &mut self.core.gc;
-
         let [mut table, index] = args;
 
         'outer: loop {
@@ -1040,7 +1039,12 @@ where
 
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = *table;
-                let value = heap.get(table.into()).ok_or(AlreadyDroppedError)?.get(&key);
+                let value = self
+                    .core
+                    .gc
+                    .get(table.into())
+                    .ok_or(AlreadyDroppedError)?
+                    .get(&key);
 
                 // It succeeds if any non-nil value is produced.
                 if value != Value::Nil {
@@ -1052,13 +1056,16 @@ where
             };
 
             // Second: try detecting compatible metavalue
-            let key = Event::Index.into_with_gc(heap);
+            let key = Event::Index.into_with_gc(&mut self.core.gc);
 
             loop {
-                let metavalue = table
-                    .metatable(heap, &self.core.primitive_metatables)?
+                let metavalue = self
+                    .core
+                    .metatable_of(&table)?
                     .map(|mt| {
-                        heap.get(mt.into())
+                        self.core
+                            .gc
+                            .get(mt.into())
                             .ok_or(AlreadyDroppedError)
                             .map(|table| table.get(&key))
                     })
@@ -1088,7 +1095,7 @@ where
                     // Function is invoked with table and *original* (before coercions!) index.
                     // It only picks up the latest "table" value which metamethod we tried to look up.
                     Value::Function(callable) => {
-                        let callable = callable.try_into_with_gc(heap)?;
+                        let callable = callable.try_into_with_gc(&mut self.core.gc)?;
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
                         stack.push(table, Source::StackSlot(stack.next_slot()));
@@ -1118,8 +1125,6 @@ where
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 
-        let heap = &mut self.core.gc;
-
         let [mut table, index, value] = args;
 
         'outer: loop {
@@ -1128,7 +1133,11 @@ where
                 let index = self.core.dialect.coerce_tab_set(index.clone());
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = *table;
-                let table = heap.get_mut(table.into()).ok_or(AlreadyDroppedError)?;
+                let table = self
+                    .core
+                    .gc
+                    .get_mut(table.into())
+                    .ok_or(AlreadyDroppedError)?;
 
                 // It succeeds if key is already populated.
                 let r = if table.contains_key(&key) {
@@ -1144,12 +1153,15 @@ where
             };
 
             // Second: try detecting compatible metavalue
-            let key = Event::NewIndex.into_with_gc(heap);
+            let key = Event::NewIndex.into_with_gc(&mut self.core.gc);
             loop {
-                let metavalue = table
-                    .metatable(heap, &self.core.primitive_metatables)?
+                let metavalue = self
+                    .core
+                    .metatable_of(&table)?
                     .map(|mt| {
-                        heap.get(mt.into())
+                        self.core
+                            .gc
+                            .get(mt.into())
                             .ok_or(AlreadyDroppedError)
                             .map(|table| table.get(&key))
                     })
@@ -1167,7 +1179,9 @@ where
                             let key = index.try_into().map_err(InvalidKey)?;
                             let value = value.into();
 
-                            heap.get_mut(table.into())
+                            self.core
+                                .gc
+                                .get_mut(table.into())
                                 .ok_or(AlreadyDroppedError)?
                                 .set(key, value);
 
@@ -1184,7 +1198,7 @@ where
                     // Function is invoked with table, *original* (before coercions!) index and value.
                     // It only picks up the latest "table" value which metamethod we tried to look up.
                     Value::Function(callable) => {
-                        let callable = callable.try_into_with_gc(heap)?;
+                        let callable = callable.try_into_with_gc(&mut self.core.gc)?;
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
                         stack.push(table, Source::StackSlot(stack.next_slot()));
@@ -1210,19 +1224,20 @@ where
     ) -> Result<Callable<Strong<Ty>>, RefAccessOrError<NotCallableError>> {
         use super::stack::Source;
 
-        let heap = &mut self.core.gc;
-
         loop {
             callable = match callable {
-                Value::Function(r) => return Ok(r.try_into_with_gc(heap)?),
+                Value::Function(r) => return Ok(r.try_into_with_gc(&mut self.core.gc)?),
                 t => t,
             };
 
-            let new_callable = callable
-                .metatable(heap, &self.core.primitive_metatables)?
+            let new_callable = self
+                .core
+                .metatable_of(&callable)?
                 .map(|mt| {
-                    let key = Event::Call.into_with_gc(heap);
-                    heap.get(mt.into())
+                    let key = Event::Call.into_with_gc(&mut self.core.gc);
+                    self.core
+                        .gc
+                        .get(mt.into())
                         .ok_or(AlreadyDroppedError)
                         .map(|table| table.get(&key))
                 })

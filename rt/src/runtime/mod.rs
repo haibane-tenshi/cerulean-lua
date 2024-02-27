@@ -16,7 +16,7 @@ use repr::index::StackSlot;
 use crate::backtrace::{Backtrace, Location};
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
-use crate::error::RuntimeError;
+use crate::error::{AlreadyDroppedError, RuntimeError};
 use crate::ffi::{LuaFfi, LuaFfiOnce};
 use crate::gc::RootLuaClosure;
 use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value, WeakValue};
@@ -37,6 +37,48 @@ where
     pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<<Strong<Ty> as Types>::Table>>,
     pub dialect: DialectBuilder,
     pub gc: Heap,
+}
+
+type GcTable<Ty> = <crate::value::Weak<Ty> as Types>::Table;
+
+impl<Ty> Core<Ty>
+where
+    Ty: CoreTypes,
+{
+    pub fn metatable_of(
+        &self,
+        value: &WeakValue<Ty>,
+    ) -> Result<Option<GcTable<Ty>>, AlreadyDroppedError> {
+        use crate::value::Metatable;
+        use TypeWithoutMetatable::*;
+
+        let Core {
+            primitive_metatables,
+            gc: heap,
+            ..
+        } = self;
+
+        let r = match value {
+            Value::Nil => primitive_metatables[Nil].as_ref().map(|t| t.downgrade()),
+            Value::Bool(_) => primitive_metatables[Bool].as_ref().map(|t| t.downgrade()),
+            Value::Int(_) => primitive_metatables[Int].as_ref().map(|t| t.downgrade()),
+            Value::Float(_) => primitive_metatables[Float].as_ref().map(|t| t.downgrade()),
+            Value::String(_) => primitive_metatables[String].as_ref().map(|t| t.downgrade()),
+            Value::Function(_) => primitive_metatables[Function]
+                .as_ref()
+                .map(|t| t.downgrade()),
+            Value::Table(t) => heap
+                .get((*t).into())
+                .ok_or(AlreadyDroppedError)?
+                .metatable(),
+            Value::Userdata(t) => heap
+                .get((*t).into())
+                .ok_or(AlreadyDroppedError)?
+                .metatable(),
+        };
+
+        Ok(r)
+    }
 }
 
 impl<Ty> Debug for Core<Ty>

@@ -11,11 +11,10 @@ pub mod userdata;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use enumoid::{EnumMap, Enumoid};
+use enumoid::Enumoid;
 use gc::{Heap, Trace};
 use repr::literal::Literal;
 
-use crate::error::AlreadyDroppedError;
 use crate::gc::TryFromWithGc;
 
 pub use boolean::Boolean;
@@ -228,40 +227,6 @@ where
 
 type RootTable<Ty> = <Strong<Ty> as Types>::Table;
 type GcTable<Ty> = <Weak<Ty> as Types>::Table;
-
-impl<Ty> WeakValue<Ty>
-where
-    Ty: CoreTypes,
-{
-    pub(crate) fn metatable<'a>(
-        &'a self,
-        heap: &Heap,
-        primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<RootTable<Ty>>>,
-    ) -> Result<Option<GcTable<Ty>>, AlreadyDroppedError> {
-        use TypeWithoutMetatable::*;
-
-        let r = match self {
-            Value::Nil => primitive_metatables[Nil].as_ref().map(|t| t.downgrade()),
-            Value::Bool(_) => primitive_metatables[Bool].as_ref().map(|t| t.downgrade()),
-            Value::Int(_) => primitive_metatables[Int].as_ref().map(|t| t.downgrade()),
-            Value::Float(_) => primitive_metatables[Float].as_ref().map(|t| t.downgrade()),
-            Value::String(_) => primitive_metatables[String].as_ref().map(|t| t.downgrade()),
-            Value::Function(_) => primitive_metatables[Function]
-                .as_ref()
-                .map(|t| t.downgrade()),
-            Value::Table(t) => heap
-                .get((*t).into())
-                .ok_or(AlreadyDroppedError)?
-                .metatable(),
-            Value::Userdata(t) => heap
-                .get((*t).into())
-                .ok_or(AlreadyDroppedError)?
-                .metatable(),
-        };
-
-        Ok(r)
-    }
-}
 
 impl<Ty> WeakValue<Ty>
 where
