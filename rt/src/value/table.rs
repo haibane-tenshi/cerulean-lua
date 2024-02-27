@@ -122,7 +122,7 @@ where
 
 impl<Ty> Trace for Table<Weak<Ty>>
 where
-    Ty: CoreTypes + 'static,
+    Ty: CoreTypes,
     Ty::String: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {

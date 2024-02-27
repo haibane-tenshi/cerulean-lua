@@ -11,8 +11,8 @@ use gc::{Heap, Trace};
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
 use crate::gc::StringRef;
-use crate::runtime::{RuntimeView, StackView};
-use crate::value::{CoreTypes, NilOr, Strong, StrongValue, Value};
+use crate::runtime::{RuntimeView, StackGuard};
+use crate::value::{CoreTypes, NilOr, Value, Weak, WeakValue};
 
 use arg_parser::{FormatReturns, ParseArgs};
 use signature::{Signature, SignatureWithFirst};
@@ -86,12 +86,12 @@ pub fn invoke<'rt, Ty, F, Args>(mut rt: RuntimeView<'rt, Ty>, f: F) -> Result<()
 where
     Ty: CoreTypes,
     F: Signature<Args>,
-    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, Ty>: FormatReturns<Strong<Ty>, Heap, <F as Signature<Args>>::Output>,
+    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackGuard<'a, Ty>: FormatReturns<Weak<Ty>, Heap, <F as Signature<Args>>::Output>,
 {
     let heap = &mut rt.core.gc;
 
-    let args = rt.stack.raw.parse(heap).map_err(|err| {
+    let args = rt.stack.parse(heap).map_err(|err| {
         let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
@@ -100,7 +100,7 @@ where
 
     let ret = f.call(args);
 
-    rt.stack.format(heap, ret);
+    heap.pause(|heap| rt.stack.format(heap, ret));
 
     Ok(())
 }
@@ -112,12 +112,12 @@ pub fn try_invoke<'rt, Ty, F, Args, R>(
 where
     Ty: CoreTypes,
     F: Signature<Args, Output = Result<R, RuntimeError<Ty>>>,
-    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, Ty>: FormatReturns<Strong<Ty>, Heap, R>,
+    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackGuard<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
-    let args = rt.stack.raw.parse(heap).map_err(|err| {
+    let args = rt.stack.parse(heap).map_err(|err| {
         let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
@@ -126,7 +126,9 @@ where
 
     let ret = f.call(args)?;
 
-    rt.stack.format(heap, ret);
+    heap.pause(|heap| {
+        rt.stack.format(heap, ret);
+    });
 
     Ok(())
 }
@@ -139,16 +141,13 @@ where
     Ty: CoreTypes,
     // Value<Ty>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
-    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, Ty>: FormatReturns<
-        Strong<Ty>,
-        Heap,
-        <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output,
-    >,
+    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackGuard<'a, Ty>:
+        FormatReturns<Weak<Ty>, Heap, <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output>,
 {
     let heap = &mut rt.core.gc;
 
-    let args = rt.stack.raw.parse(heap).map_err(|err| {
+    let args = rt.stack.parse(heap).map_err(|err| {
         let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
@@ -157,7 +156,9 @@ where
 
     let ret = f.call(rt.view_full(), args);
 
-    rt.stack.format(&mut rt.core.gc, ret);
+    rt.core.gc.pause(|heap| {
+        rt.stack.format(heap, ret);
+    });
 
     Ok(())
 }
@@ -170,12 +171,12 @@ where
     Ty: CoreTypes,
     // Value<Ty>: Debug + Display,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = Result<R, RuntimeError<Ty>>>,
-    for<'a> &'a [StrongValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackView<'a, Ty>: FormatReturns<Strong<Ty>, Heap, R>,
+    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
+    for<'a> StackGuard<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
-    let args = rt.stack.raw.parse(heap).map_err(|err| {
+    let args = rt.stack.parse(heap).map_err(|err| {
         let msg = StringRef::new(err.to_string().into());
         Value::String(msg)
     })?;
@@ -184,7 +185,9 @@ where
 
     let ret = f.call(rt.view_full(), args)?;
 
-    rt.stack.format(&mut rt.core.gc, ret);
+    rt.core.gc.pause(|heap| {
+        rt.stack.format(heap, ret);
+    });
 
     Ok(())
 }
@@ -311,7 +314,7 @@ where
 
 impl<Ty> Trace for LuaFfiPtr<Ty>
 where
-    Ty: CoreTypes + 'static,
+    Ty: CoreTypes,
 {
     fn trace(&self, _collector: &mut gc::Collector) {}
 }
@@ -426,7 +429,7 @@ pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     let f = move |mut rt: RuntimeView<'_, Ty>| {
         use crate::runtime::FunctionPtr;
@@ -437,10 +440,9 @@ where
             function_id: FunctionId(0),
         };
 
-        let closure = rt.construct_closure(ptr, [rt.core.global_env.clone()])?;
-        let closure = rt.core.gc.alloc(closure);
+        let closure = rt.construct_closure(ptr, [rt.core.global_env.downgrade()])?;
 
-        rt.enter(closure, StackSlot(0))
+        rt.enter(closure.0, StackSlot(0))
     };
 
     f.with_name("rt::ffi::call_chunk")
@@ -450,7 +452,7 @@ pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: Display,
 {
     let f = move |mut rt: RuntimeView<Ty>| {
         let script = script.as_ref();

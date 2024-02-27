@@ -254,7 +254,7 @@ where
 impl<T, Ty> Trace for Dispatchable<T, Ty>
 where
     T: Trace,
-    Ty: CoreTypes + 'static,
+    Ty: CoreTypes,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         let Dispatchable {
@@ -269,7 +269,7 @@ where
 impl<T, Ty> Userdata<Ty> for Dispatchable<T, Ty>
 where
     T: Trace,
-    Ty: CoreTypes + 'static,
+    Ty: CoreTypes,
 {
     fn method(
         &self,

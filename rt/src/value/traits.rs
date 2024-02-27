@@ -27,7 +27,7 @@ where
     Ty: CoreTypes,
 {
     type String = StringRef<<Ty as CoreTypes>::String>;
-    type LuaCallable = RootLuaClosure<Closure>;
+    type LuaCallable = RootLuaClosure<Closure<Ty>>;
     type RustCallable = RustCallable<Ty, RootRustClosure<<Ty as CoreTypes>::RustClosure>>;
     type Table = RootTable<<Ty as CoreTypes>::Table>;
     type FullUserdata = RootFullUserdata<<Ty as CoreTypes>::FullUserdata>;
@@ -40,13 +40,13 @@ where
     Ty: CoreTypes,
 {
     type String = StringRef<<Ty as CoreTypes>::String>;
-    type LuaCallable = GcLuaClosure<Closure>;
+    type LuaCallable = GcLuaClosure<Closure<Ty>>;
     type RustCallable = RustCallable<Ty, GcRustClosure<<Ty as CoreTypes>::RustClosure>>;
     type Table = GcTable<<Ty as CoreTypes>::Table>;
     type FullUserdata = GcFullUserdata<<Ty as CoreTypes>::FullUserdata>;
 }
 
-pub trait CoreTypes: Sized {
+pub trait CoreTypes: Sized + 'static {
     type String: Trace + Concat + Len + Clone + PartialOrd + From<String> + From<&'static str>;
     type RustClosure: Clone + PartialEq + Trace;
     type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcTable<Self::Table>>;

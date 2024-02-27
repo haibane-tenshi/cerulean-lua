@@ -3,7 +3,6 @@ use std::ops::RangeBounds;
 
 use std::fmt::Debug;
 
-use super::frame::Frame;
 use super::MapBound;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -25,12 +24,12 @@ impl From<RawFrameId> for usize {
 pub(crate) struct FrameId(usize);
 
 #[derive(Debug)]
-pub(crate) struct FrameStack<Value> {
-    stack: TiVec<RawFrameId, Frame<Value>>,
+pub(crate) struct FrameStack<Frame> {
+    stack: TiVec<RawFrameId, Frame>,
 }
 
-impl<Value> FrameStack<Value> {
-    pub(crate) fn view(&mut self) -> FrameStackView<Value> {
+impl<Frame> FrameStack<Frame> {
+    pub(crate) fn view(&mut self) -> FrameStackView<Frame> {
         FrameStackView::new(self)
     }
 
@@ -38,11 +37,11 @@ impl<Value> FrameStack<Value> {
         self.stack.next_key()
     }
 
-    fn push(&mut self, frame: Frame<Value>) {
+    fn push(&mut self, frame: Frame) {
         self.stack.push(frame)
     }
 
-    fn pop(&mut self) -> Option<Frame<Value>> {
+    fn pop(&mut self) -> Option<Frame> {
         self.stack.pop()
     }
 
@@ -59,20 +58,20 @@ impl<C> Default for FrameStack<C> {
     }
 }
 
-pub(crate) struct FrameStackView<'a, Value> {
-    stack: &'a mut FrameStack<Value>,
+pub(crate) struct FrameStackView<'a, Frame> {
+    stack: &'a mut FrameStack<Frame>,
     boundary: RawFrameId,
 }
 
-impl<'a, Value> FrameStackView<'a, Value> {
-    pub(crate) fn new(frames: &'a mut FrameStack<Value>) -> Self {
+impl<'a, Frame> FrameStackView<'a, Frame> {
+    pub(crate) fn new(frames: &'a mut FrameStack<Frame>) -> Self {
         FrameStackView {
             stack: frames,
             boundary: RawFrameId(0),
         }
     }
 
-    pub(crate) fn view(&mut self) -> FrameStackView<Value> {
+    pub(crate) fn view(&mut self) -> FrameStackView<Frame> {
         let boundary = self.stack.next_id();
 
         FrameStackView {
@@ -81,7 +80,7 @@ impl<'a, Value> FrameStackView<'a, Value> {
         }
     }
 
-    pub(crate) fn last(&self) -> Option<&Frame<Value>> {
+    pub(crate) fn last(&self) -> Option<&Frame> {
         self.stack.stack.last()
     }
 
@@ -89,7 +88,7 @@ impl<'a, Value> FrameStackView<'a, Value> {
         self.stack.next_id()
     }
 
-    pub(crate) fn pop(&mut self) -> Option<Frame<Value>> {
+    pub(crate) fn pop(&mut self) -> Option<Frame> {
         if self.stack.next_id() <= self.boundary {
             return None;
         }
@@ -97,7 +96,7 @@ impl<'a, Value> FrameStackView<'a, Value> {
         self.stack.pop()
     }
 
-    pub(crate) fn push(&mut self, frame: Frame<Value>) {
+    pub(crate) fn push(&mut self, frame: Frame) {
         self.stack.push(frame)
     }
 
@@ -109,7 +108,7 @@ impl<'a, Value> FrameStackView<'a, Value> {
         self.boundary
     }
 
-    pub(crate) fn range(&self, range: impl RangeBounds<RawFrameId>) -> Option<&[Frame<Value>]> {
+    pub(crate) fn range(&self, range: impl RangeBounds<RawFrameId>) -> Option<&[Frame]> {
         let start = range.start_bound().mapb(|id| id.0);
         let end = range.end_bound().mapb(|id| id.0);
 

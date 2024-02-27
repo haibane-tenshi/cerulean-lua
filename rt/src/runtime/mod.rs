@@ -18,12 +18,12 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::RuntimeError;
 use crate::ffi::{LuaFfi, LuaFfiOnce};
+use crate::gc::RootLuaClosure;
 use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value, WeakValue};
-use frame::{ChangeFrame, Event};
+use frame::{ChangeFrame, Event, Frame};
 use frame_stack::{FrameStack, FrameStackView};
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
 use stack::{RawStackSlot, Stack};
-// use upvalue_stack::{UpvalueStack, UpvalueStackView};
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, FunctionPtr};
@@ -61,7 +61,7 @@ where
 {
     pub core: Core<Ty>,
     pub chunk_cache: C,
-    frames: FrameStack<StrongValue<Ty>>,
+    frames: FrameStack<Frame<Ty>>,
     stack: Stack<Ty>,
     rust_backtrace_stack: RustBacktraceStack,
 }
@@ -84,11 +84,14 @@ where
             rust_backtrace_stack: Default::default(),
         }
     }
+}
 
-    pub fn view(&mut self) -> RuntimeView<Ty>
-    where
-        C: ChunkCache,
-    {
+impl<Ty, C> Runtime<Ty, C>
+where
+    Ty: CoreTypes,
+    C: ChunkCache,
+{
+    pub fn view(&mut self) -> RuntimeView<Ty> {
         let Runtime {
             core,
             chunk_cache,
@@ -120,7 +123,7 @@ where
 {
     pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
-    frames: FrameStackView<'rt, StrongValue<Ty>>,
+    frames: FrameStackView<'rt, Frame<Ty>>,
     pub stack: StackGuard<'rt, Ty>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
@@ -270,16 +273,15 @@ where
 {
     pub fn enter(
         &mut self,
-        closure: Root<Closure>,
+        closure: Root<Closure<Ty>>,
         start: StackSlot,
     ) -> Result<(), RuntimeError<Ty>> {
         use crate::error::OutOfBoundsStack;
         use crate::value::callable::Callable;
-        use frame::Frame;
 
         let start = self.stack.boundary() + start;
         let rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
-        let frame = Frame::new(closure, rt, None)?;
+        let frame = Frame::new(rt, closure, None)?;
 
         let mut active_frame = frame.activate(self)?;
 
@@ -301,11 +303,11 @@ where
                     match callable {
                         Callable::Lua(closure) => {
                             let rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
-                            let frame = Frame::new(closure.into(), rt, event)?;
+                            let frame = Frame::new(rt, closure.into(), event)?;
                             active_frame = frame.activate(self)?;
                         }
                         Callable::Rust(closure) => {
-                            self.stack.lua_frame().sync(&mut self.core.gc);
+                            self.stack.lua_frame().sync_full(&mut self.core.gc);
                             self.invoke_at_raw(closure, start)?;
 
                             if let Some(event) = event {
@@ -319,6 +321,7 @@ where
                                 .frames
                                 .pop()
                                 .expect("suspended frame should still exist");
+
                             active_frame = frame.activate(self)?;
                         }
                     }
@@ -343,9 +346,9 @@ where
     pub fn construct_closure(
         &mut self,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = StrongValue<Ty>>,
-    ) -> Result<Closure, RuntimeError<Ty>> {
-        Closure::new(self, fn_ptr, upvalues)
+        upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
+    ) -> Result<RootLuaClosure<Closure<Ty>>, RuntimeError<Ty>> {
+        Ok(RootLuaClosure(Closure::new(self, fn_ptr, upvalues)?))
     }
 
     pub fn chunk_cache(&self) -> &dyn ChunkCache {

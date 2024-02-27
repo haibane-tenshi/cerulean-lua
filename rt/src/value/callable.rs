@@ -269,7 +269,7 @@ where
 
 impl<Ty> Trace for RustClosureRef<Ty>
 where
-    Ty: CoreTypes + 'static,
+    Ty: CoreTypes,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         self.0.trace(collector)
@@ -286,7 +286,7 @@ where
 
 impl<Ty, Closure> Trace for RustCallable<Ty, Closure>
 where
-    Ty: CoreTypes + 'static,
+    Ty: CoreTypes,
     Closure: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {

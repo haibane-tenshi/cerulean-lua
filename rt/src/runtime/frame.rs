@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::ControlFlow;
 
-use gc::{Collector, Heap, Root, Trace};
+use gc::{Collector, Gc, Heap, Root, Trace};
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
@@ -10,7 +10,6 @@ use repr::literal::Literal;
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
 use repr::tivec::{TiSlice, TiVec};
 
-use super::stack::UpvalueId;
 use super::stack::{RawStackSlot, StackGuard};
 use super::{Core, RuntimeView};
 use crate::backtrace::BacktraceFrame;
@@ -23,7 +22,7 @@ use crate::gc::{FromWithGc, IntoWithGc, TryIntoWithGc};
 use crate::value::callable::Callable;
 use crate::value::table::KeyValue;
 use crate::value::{
-    Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Types, Value, Weak, WeakValue,
+    Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, Weak, WeakValue,
 };
 
 pub(crate) enum ChangeFrame<Ty>
@@ -64,44 +63,67 @@ impl Trace for FunctionPtr {
     fn trace(&self, _collector: &mut Collector) {}
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum UpvaluePlace<Value> {
+    Stack(RawStackSlot),
+    Place(Value),
+}
+
 #[derive(Debug, Clone)]
-pub struct Closure {
+pub struct Closure<Ty>
+where
+    Ty: CoreTypes,
+{
     fn_ptr: FunctionPtr,
-    upvalues: TiVec<UpvalueSlot, UpvalueId>,
+    upvalues: TiVec<UpvalueSlot, UpvaluePlace<Gc<WeakValue<Ty>>>>,
 }
 
-impl Trace for Closure {
-    fn trace(&self, _collector: &mut Collector) {}
+impl<Ty> Trace for Closure<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn trace(&self, collector: &mut Collector) {
+        for upvalue in &self.upvalues {
+            match upvalue {
+                UpvaluePlace::Place(value) => value.trace(collector),
+                UpvaluePlace::Stack(_) => (),
+            }
+        }
+    }
 }
 
-impl Closure {
-    pub(crate) fn new<Ty>(
+impl<Ty> Closure<Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(crate) fn new(
         rt: &mut RuntimeView<Ty>,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = StrongValue<Ty>>,
-    ) -> Result<Self, RuntimeError<Ty>>
-    where
-        Ty: CoreTypes,
-    {
+        upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
+    ) -> Result<Root<Self>, RuntimeError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction};
 
-        let signature = &rt
+        let upvalue_count = rt
             .chunk_cache
             .chunk(fn_ptr.chunk_id)
             .ok_or(MissingChunk(fn_ptr.chunk_id))?
             .get_function(fn_ptr.function_id)
             .ok_or(MissingFunction(fn_ptr))?
-            .signature;
+            .signature
+            .upvalue_count;
 
-        let mut stack = rt.stack.lua_frame();
-        let upvalues = upvalues
-            .into_iter()
-            .chain(std::iter::repeat_with(|| Value::Nil))
-            .take(signature.upvalue_count)
-            .map(|value| stack.fresh_upvalue(value))
-            .collect();
+        let closure = rt.core.gc.pause(|heap| {
+            let upvalues = upvalues
+                .into_iter()
+                .chain(std::iter::repeat_with(|| Value::Nil))
+                .take(upvalue_count)
+                .map(|value| heap.alloc(value).downgrade())
+                .map(UpvaluePlace::Place)
+                .collect();
 
-        let closure = Closure { fn_ptr, upvalues };
+            let closure = Closure { fn_ptr, upvalues };
+            heap.alloc(closure)
+        });
 
         Ok(closure)
     }
@@ -109,14 +131,26 @@ impl Closure {
     pub(crate) fn fn_ptr(&self) -> FunctionPtr {
         self.fn_ptr
     }
+
+    pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<Gc<WeakValue<Ty>>>> {
+        &self.upvalues
+    }
+
+    pub(crate) fn upvalues_mut(
+        &mut self,
+    ) -> &mut TiSlice<UpvalueSlot, UpvaluePlace<Gc<WeakValue<Ty>>>> {
+        &mut self.upvalues
+    }
 }
 
-#[derive(Debug)]
-pub(crate) struct Frame<Value> {
-    closure: Root<Closure>,
+pub(crate) struct Frame<Ty>
+where
+    Ty: CoreTypes,
+{
+    closure: Root<Closure<Ty>>,
     ip: InstrId,
     stack_start: RawStackSlot,
-    register_variadic: Vec<Value>,
+    register_variadic: Vec<StrongValue<Ty>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -124,14 +158,14 @@ pub(crate) struct Frame<Value> {
     event: Option<Event>,
 }
 
-impl<Ty> Frame<StrongValue<Ty>>
+impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
     StrongValue<Ty>: Clone,
 {
     pub(crate) fn new(
-        closure: Root<Closure>,
         mut rt: RuntimeView<Ty>,
+        closure: Root<Closure<Ty>>,
         event: Option<Event>,
     ) -> Result<Self, RuntimeError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
@@ -166,12 +200,11 @@ where
 
         let register_variadic = if signature.is_variadic {
             stack
-                .adjust_height_and_collect(call_height)
-                .into_iter()
+                .adjust_height(call_height)
                 .map(|value| value.try_into_with_gc(&mut rt.core.gc))
                 .collect::<Result<_, _>>()?
         } else {
-            stack.adjust_height(call_height);
+            let _ = stack.adjust_height(call_height);
             Default::default()
         };
 
@@ -187,13 +220,16 @@ where
     }
 }
 
-impl<Value> Frame<Value> {
-    pub(crate) fn closure(&self) -> &Root<Closure> {
+impl<Ty> Frame<Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(crate) fn closure(&self) -> &Root<Closure<Ty>> {
         &self.closure
     }
 }
 
-impl<Ty> Frame<StrongValue<Ty>>
+impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
     WeakValue<Ty>: Display,
@@ -250,9 +286,9 @@ where
     }
 }
 
-impl<Ty> Frame<Value<Ty>>
+impl<Ty> Frame<Ty>
 where
-    Ty: Types,
+    Ty: CoreTypes,
 {
     pub(crate) fn backtrace(&self, heap: &Heap, chunk_cache: &dyn ChunkCache) -> BacktraceFrame {
         use crate::backtrace::{FrameSource, Location};
@@ -305,12 +341,28 @@ where
     }
 }
 
+impl<Ty> Debug for Frame<Ty>
+where
+    Ty: CoreTypes,
+    StrongValue<Ty>: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Frame")
+            .field("closure", &self.closure)
+            .field("ip", &self.ip)
+            .field("stack_start", &self.stack_start)
+            .field("register_variadic", &self.register_variadic)
+            .field("event", &self.event)
+            .finish()
+    }
+}
+
 pub struct ActiveFrame<'rt, Ty>
 where
     Ty: CoreTypes,
 {
+    closure: Root<Closure<Ty>>,
     core: &'rt mut Core<Ty>,
-    closure: Root<Closure>,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
@@ -332,18 +384,21 @@ where
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
-    fn upvalue(&self, index: UpvalueSlot) -> Result<UpvalueId, MissingUpvalue> {
+    fn get_stack(&self, index: StackSlot) -> Result<&WeakValue<Ty>, MissingStackSlot> {
+        self.stack.get_slot(index).ok_or(MissingStackSlot(index))
+    }
+
+    fn upvalue(
+        &self,
+        index: UpvalueSlot,
+    ) -> Result<UpvaluePlace<Gc<WeakValue<Ty>>>, MissingUpvalue> {
         let closure = &self.core.gc[&self.closure];
 
         closure
-            .upvalues
+            .upvalues()
             .get(index)
-            .copied()
             .ok_or(MissingUpvalue(index))
-    }
-
-    fn get_stack(&self, index: StackSlot) -> Result<&WeakValue<Ty>, MissingStackSlot> {
-        self.stack.get(index).ok_or(MissingStackSlot(index))
+            .cloned()
     }
 
     fn increment_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
@@ -427,12 +482,8 @@ where
             MakeClosure(fn_id) => {
                 let closure = self.construct_closure(fn_id)?;
 
-                // Ensure that stack is synced before alloc happens.
-                self.stack.lua_frame().sync(&mut self.core.gc);
-                let closure = self.core.gc.alloc(closure).downgrade();
-
                 self.stack.lua_frame().push(
-                    Value::Function(Callable::Lua(closure.into())),
+                    Value::Function(Callable::Lua(closure.downgrade().into())),
                     Source::TrustedIsRooted(false),
                 );
 
@@ -469,30 +520,50 @@ where
                 ControlFlow::Continue(())
             }
             AdjustStack(height) => {
-                self.stack.lua_frame().adjust_height(height);
+                let _ = self.stack.lua_frame().adjust_height(height);
 
                 ControlFlow::Continue(())
             }
             LoadUpvalue(slot) => {
                 let upvalue = self.upvalue(slot)?;
-                let value = self
-                    .stack
-                    .get_upvalue(upvalue)
-                    .ok_or(MissingUpvalue(slot))?
-                    .clone();
-                // This is pessimistic source designation, but will hold until refactor.
-                self.stack
-                    .lua_frame()
-                    .push(value, Source::TrustedIsRooted(false));
+
+                let mut stack = self.stack.lua_frame();
+
+                let (value, source) = match upvalue {
+                    UpvaluePlace::Place(place) => {
+                        let value = self.core.gc.get(place).ok_or(AlreadyDroppedError)?.clone();
+
+                        (value, Source::TrustedIsRooted(true))
+                    }
+                    UpvaluePlace::Stack(slot) => {
+                        let value = stack
+                            .get_raw_slot(slot)
+                            .unwrap() // fixme: turn into proper error
+                            .clone();
+
+                        (value, Source::StackSlot(slot))
+                    }
+                };
+
+                stack.push_raw(value, source);
 
                 ControlFlow::Continue(())
             }
             StoreUpvalue(slot) => {
+                let upvalue = self.upvalue(slot)?;
                 let mut stack = self.stack.lua_frame();
                 let [value] = stack.take1()?;
-                let upvalue = self.upvalue(slot)?;
 
-                stack.set_upvalue(upvalue, value, Source::StackSlot(stack.next_slot()));
+                match upvalue {
+                    UpvaluePlace::Place(place) => {
+                        let place = self.core.gc.get_mut(place).ok_or(AlreadyDroppedError)?;
+
+                        *place = value;
+                    }
+                    UpvaluePlace::Stack(slot) => {
+                        stack.set_raw(slot, value, Source::StackSlot(stack.next_slot()));
+                    }
+                }
 
                 ControlFlow::Continue(())
             }
@@ -537,7 +608,7 @@ where
                 ControlFlow::Continue(())
             }
             TabCreate => {
-                self.stack.lua_frame().sync(&mut self.core.gc);
+                self.stack.lua_frame().sync_transient(&mut self.core.gc);
                 let value = self.core.gc.alloc(Default::default()).downgrade();
 
                 self.stack
@@ -665,8 +736,9 @@ where
                     metavalue => {
                         let start = self.stack.next_slot();
 
+                        let [arg] = args;
                         let mut stack = self.stack.lua_frame();
-                        stack.push(args[0], Source::StackSlot(stack.next_slot()));
+                        stack.push(arg, Source::StackSlot(stack.next_slot()));
                         let callable = metavalue;
                         let callable = self
                             .prepare_invoke(callable, start)
@@ -973,9 +1045,8 @@ where
                 // It succeeds if any non-nil value is produced.
                 if value != Value::Nil {
                     // We know that the value originated from the table in this slot.
-                    self.stack
-                        .lua_frame()
-                        .push(value, Source::StackSlot(self.stack.next_slot()));
+                    let mut stack = self.stack.lua_frame();
+                    stack.push(value, Source::StackSlot(stack.next_slot()));
                     return Ok(Continue(()));
                 }
             };
@@ -1197,7 +1268,7 @@ where
     pub(crate) fn construct_closure(
         &mut self,
         recipe_id: RecipeId,
-    ) -> Result<Closure, opcode_err::Cause> {
+    ) -> Result<Root<Closure<Ty>>, opcode_err::Cause> {
         let recipe = self
             .chunk
             .get_recipe(recipe_id)
@@ -1215,46 +1286,66 @@ where
             function_id: *function_id,
         };
 
+        let stack = self.stack.lua_frame();
+        let closure = &self.core.gc[&self.closure];
         let upvalues = upvalues
             .iter()
             .map(|&source| -> Result<_, opcode_err::Cause> {
                 use repr::chunk::UpvalueSource;
 
                 match source {
-                    UpvalueSource::Temporary(slot) => self
-                        .stack
-                        .lua_frame()
-                        .mark_as_upvalue(slot)
-                        .ok_or(opcode_err::MissingStackSlot(slot).into()),
-                    UpvalueSource::Upvalue(slot) => {
-                        let closure = &self.core.gc[&self.closure];
-
-                        closure
-                            .upvalues
-                            .get(slot)
-                            .copied()
-                            .ok_or(opcode_err::MissingUpvalue(slot).into())
+                    UpvalueSource::Temporary(slot) => {
+                        let _ = stack.get_slot(slot).ok_or(MissingStackSlot(slot));
+                        Ok(UpvaluePlace::Stack(stack.boundary() + slot))
                     }
+                    UpvalueSource::Upvalue(slot) => closure
+                        .upvalues
+                        .get(slot)
+                        .copied()
+                        .ok_or(opcode_err::MissingUpvalue(slot).into()),
                 }
             })
             .collect::<Result<_, _>>()?;
 
-        let r = Closure { fn_ptr, upvalues };
+        let closure = Closure { fn_ptr, upvalues };
 
-        Ok(r)
+        // Make sure to sync the stack before allocating.
+        // Sync itself may allocate, but there is no need to pause.
+        // All Gc references inside the closure are copies of upvalues of current frame
+        // which are definitely rooted.
+        self.stack.lua_frame().sync_transient(&mut self.core.gc);
+        let closure = self.core.gc.alloc(closure);
+
+        self.stack
+            .lua_frame()
+            .register_closure(&closure, &self.core.gc);
+
+        Ok(closure)
     }
 
-    pub(crate) fn suspend(self) -> Frame<StrongValue<Ty>> {
+    pub(crate) fn suspend(self) -> Frame<Ty> {
         let ActiveFrame {
             closure,
             ip,
-            stack,
+            mut stack,
             register_variadic,
             event,
+            core,
             ..
         } = self;
 
         let stack_start = stack.boundary();
+
+        // Sync on frame suspension.
+        // Frames are suspended when a new frame is about to be entered.
+        // If that is a Rust frame we must sync unconditionally.
+        // If that is a Lua frame, unfortunately, we also need to do it.
+        // It is possible that we are trying to enter a closure that was just created
+        // but some of its upvalues got evicted and stuck in the cache.
+        // This is bad - active frames expects all of its upvalues to be correctly placed.
+        // We might be able to relax this to an extent
+        // (e.g. if there are no evicted upvalues no sync is necessary).
+        stack.lua_frame().sync_upvalues(&mut core.gc);
 
         Frame {
             closure,
@@ -1265,14 +1356,23 @@ where
         }
     }
 
-    pub(crate) fn exit(mut self, drop_under: StackSlot) -> Result<(), RuntimeError<Ty>> {
-        self.stack
-            .lua_frame()
-            .remove_range(StackSlot(0)..drop_under);
+    pub(crate) fn exit(mut self, returns: StackSlot) -> Result<(), RuntimeError<Ty>> {
+        let mut stack = self.stack.lua_frame();
+
+        // All upvalues need to be gone.
+        stack.evict_upvalues(..);
+        stack.drain(StackSlot(0)..returns);
 
         if let Some(event) = self.event {
-            self.stack.lua_frame().adjust_event_returns(event);
+            stack.adjust_event_returns(event);
         }
+
+        // Sync on exit.
+        // If some values were rooted by current frame
+        // (e.g. originated from upvalues or variadics)
+        // it is possible that its last root is going to get dropped right now.
+        // Currently we don't track value origins with sufficient precision to avoid this scenario.
+        stack.sync_full(&mut self.core.gc);
 
         Ok(())
     }
@@ -1363,7 +1463,7 @@ where
     Ty: CoreTypes,
     Ty::String: From<&'static str>,
 {
-    fn from_with_gc(value: Event, gc: &mut Heap) -> Self {
+    fn from_with_gc(value: Event, _gc: &mut Heap) -> Self {
         let s = crate::gc::StringRef::new(value.to_str().into());
         KeyValue::String(s)
     }

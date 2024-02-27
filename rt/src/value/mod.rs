@@ -238,21 +238,17 @@ where
         heap: &Heap,
         primitive_metatables: &'a EnumMap<TypeWithoutMetatable, Option<RootTable<Ty>>>,
     ) -> Result<Option<GcTable<Ty>>, AlreadyDroppedError> {
+        use TypeWithoutMetatable::*;
+
         let r = match self {
-            Value::Nil => primitive_metatables[TypeWithoutMetatable::Nil].map(|t| t.downgrade()),
-            Value::Bool(_) => {
-                primitive_metatables[TypeWithoutMetatable::Bool].map(|t| t.downgrade())
-            }
-            Value::Int(_) => primitive_metatables[TypeWithoutMetatable::Int].map(|t| t.downgrade()),
-            Value::Float(_) => {
-                primitive_metatables[TypeWithoutMetatable::Float].map(|t| t.downgrade())
-            }
-            Value::String(_) => {
-                primitive_metatables[TypeWithoutMetatable::String].map(|t| t.downgrade())
-            }
-            Value::Function(_) => {
-                primitive_metatables[TypeWithoutMetatable::Function].map(|t| t.downgrade())
-            }
+            Value::Nil => primitive_metatables[Nil].as_ref().map(|t| t.downgrade()),
+            Value::Bool(_) => primitive_metatables[Bool].as_ref().map(|t| t.downgrade()),
+            Value::Int(_) => primitive_metatables[Int].as_ref().map(|t| t.downgrade()),
+            Value::Float(_) => primitive_metatables[Float].as_ref().map(|t| t.downgrade()),
+            Value::String(_) => primitive_metatables[String].as_ref().map(|t| t.downgrade()),
+            Value::Function(_) => primitive_metatables[Function]
+                .as_ref()
+                .map(|t| t.downgrade()),
             Value::Table(t) => heap
                 .get((*t).into())
                 .ok_or(AlreadyDroppedError)?
