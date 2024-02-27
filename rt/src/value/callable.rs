@@ -566,6 +566,35 @@ where
     }
 }
 
+impl<Ty> LuaFfiOnce<Ty> for Callable<Weak<Ty>>
+where
+    Ty: CoreTypes,
+    Ty::RustClosure: LuaFfi<Ty>,
+    WeakValue<Ty>: Display,
+{
+    fn call_once(
+        self,
+        mut rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), RuntimeError<Ty>> {
+        use crate::gc::{RootLuaClosure, TryIntoWithGc};
+        use repr::index::StackSlot;
+
+        match self {
+            Callable::Lua(f) => {
+                let f: RootLuaClosure<_> = f.try_into_with_gc(&mut rt.core.gc)?;
+                rt.enter(f.into(), StackSlot(0))
+            }
+            Callable::Rust(f) => rt.invoke(f),
+        }
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "{generic callable wrapper}".to_string(),
+        }
+    }
+}
+
 impl<Ty> TryFrom<Value<Ty>> for Callable<Ty>
 where
     Ty: Types,

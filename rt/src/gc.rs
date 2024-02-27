@@ -240,6 +240,55 @@ impl<T> Display for RootRustClosure<T> {
     }
 }
 
+impl<Ty, T> LuaFfiOnce<Ty> for GcRustClosure<T>
+where
+    Ty: CoreTypes,
+    T: LuaFfi<Ty> + Clone + Trace,
+    WeakValue<Ty>: Display,
+{
+    fn call_once(
+        self,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), crate::error::RuntimeError<Ty>> {
+        self.call(rt)
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "<transient ref to rust closure>".to_string(),
+        }
+    }
+}
+
+impl<Ty, T> LuaFfiMut<Ty> for GcRustClosure<T>
+where
+    Ty: CoreTypes,
+    T: LuaFfi<Ty> + Clone + Trace,
+    WeakValue<Ty>: Display,
+{
+    fn call_mut(
+        &mut self,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), crate::error::RuntimeError<Ty>> {
+        self.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfi<Ty> for GcRustClosure<T>
+where
+    Ty: CoreTypes,
+    T: LuaFfi<Ty> + Clone + Trace,
+    WeakValue<Ty>: Display,
+{
+    fn call(
+        &self,
+        mut rt: crate::runtime::RuntimeView<'_, Ty>,
+    ) -> Result<(), crate::error::RuntimeError<Ty>> {
+        let func = rt.core.gc.get(self.0).ok_or(AlreadyDroppedError)?.clone();
+        rt.invoke(func)
+    }
+}
+
 impl<Ty, T> LuaFfiOnce<Ty> for RootRustClosure<T>
 where
     Ty: CoreTypes,

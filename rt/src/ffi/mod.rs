@@ -11,7 +11,7 @@ use gc::{Heap, Trace};
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
 use crate::gc::StringRef;
-use crate::runtime::{RuntimeView, StackGuard};
+use crate::runtime::{RuntimeView, TransientStackFrame};
 use crate::value::{CoreTypes, NilOr, Value, Weak, WeakValue};
 
 use arg_parser::{FormatReturns, ParseArgs};
@@ -87,7 +87,8 @@ where
     Ty: CoreTypes,
     F: Signature<Args>,
     for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackGuard<'a, Ty>: FormatReturns<Weak<Ty>, Heap, <F as Signature<Args>>::Output>,
+    for<'a> TransientStackFrame<'a, Ty>:
+        FormatReturns<Weak<Ty>, Heap, <F as Signature<Args>>::Output>,
 {
     let heap = &mut rt.core.gc;
 
@@ -100,7 +101,11 @@ where
 
     let ret = f.call(args);
 
-    heap.pause(|heap| rt.stack.format(heap, ret));
+    heap.pause(|heap| {
+        let mut stack = rt.stack.transient_frame();
+        stack.format(heap, ret);
+        stack.sync(heap);
+    });
 
     Ok(())
 }
@@ -113,7 +118,7 @@ where
     Ty: CoreTypes,
     F: Signature<Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackGuard<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
+    for<'a> TransientStackFrame<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
@@ -127,7 +132,9 @@ where
     let ret = f.call(args)?;
 
     heap.pause(|heap| {
-        rt.stack.format(heap, ret);
+        let mut stack = rt.stack.transient_frame();
+        stack.format(heap, ret);
+        stack.sync(heap);
     });
 
     Ok(())
@@ -142,7 +149,7 @@ where
     // Value<Ty>: Display + Debug,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
     for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackGuard<'a, Ty>:
+    for<'a> TransientStackFrame<'a, Ty>:
         FormatReturns<Weak<Ty>, Heap, <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output>,
 {
     let heap = &mut rt.core.gc;
@@ -157,7 +164,9 @@ where
     let ret = f.call(rt.view_full(), args);
 
     rt.core.gc.pause(|heap| {
-        rt.stack.format(heap, ret);
+        let mut stack = rt.stack.transient_frame();
+        stack.format(heap, ret);
+        stack.sync(heap);
     });
 
     Ok(())
@@ -172,7 +181,7 @@ where
     // Value<Ty>: Debug + Display,
     for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = Result<R, RuntimeError<Ty>>>,
     for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> StackGuard<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
+    for<'a> TransientStackFrame<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
@@ -186,7 +195,9 @@ where
     let ret = f.call(rt.view_full(), args)?;
 
     rt.core.gc.pause(|heap| {
-        rt.stack.format(heap, ret);
+        let mut stack = rt.stack.transient_frame();
+        stack.format(heap, ret);
+        stack.sync(heap);
     });
 
     Ok(())

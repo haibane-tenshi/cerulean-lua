@@ -27,7 +27,7 @@ use stack::{RawStackSlot, Stack};
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, FunctionPtr};
-pub use stack::StackGuard;
+pub use stack::{StackFrame, StackGuard, TransientStackFrame};
 
 pub struct Core<Ty>
 where
@@ -307,6 +307,7 @@ where
                             active_frame = frame.activate(self)?;
                         }
                         Callable::Rust(closure) => {
+                            // evict upvalues on the caller side?
                             self.stack.lua_frame().sync_full(&mut self.core.gc);
                             self.invoke_at_raw(closure, start)?;
 
