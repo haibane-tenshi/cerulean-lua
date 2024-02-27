@@ -171,7 +171,6 @@ where
             let reallocated: HashMap<_, _> = evicted_upvalues
                 .into_iter()
                 .map(|(slot, value)| {
-                    self.upvalue_mark.set(slot.0, false);
                     let value = heap.alloc(value).downgrade();
 
                     (slot, value)
@@ -249,6 +248,7 @@ where
         let Some(max_slot) = iter.clone().max() else {
             return;
         };
+        let max_slot = RawStackSlot(max_slot.0 + 1);
 
         self.closures.push(closure_ref.downgrade());
 
@@ -337,7 +337,9 @@ where
             debug_assert!(old_value.is_none());
         }
 
-        marks.fill(false);
+        if start.0 < self.upvalue_mark.len() {
+            self.upvalue_mark.truncate(start.0);
+        }
     }
 
     fn insert(&mut self, slot: RawStackSlot, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
@@ -395,8 +397,6 @@ where
 
         self.evict_upvalues(start..);
 
-        // All values in range are already `false`;
-        self.upvalue_mark.truncate(self.upvalue_mark.len() - len);
         self.main.drain(start..end)
     }
 
@@ -441,7 +441,6 @@ where
         match height.0.checked_sub(self.main.len()) {
             None | Some(0) => (),
             Some(n) => {
-                self.upvalue_mark.extend(std::iter::repeat(false).take(n));
                 self.main.extend(std::iter::repeat(Value::Nil).take(n));
             }
         }
