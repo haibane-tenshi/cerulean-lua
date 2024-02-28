@@ -32,19 +32,20 @@ use super::{Collector, Gc, GcCell};
 /// garbage collector uses no unsafe code.
 /// However, failure to provide correct implementation will likely cause
 /// some objects to be collected earlier than expected,
-/// leaving *dangling* [`GcCell`](GcCell) *references* behind.
+/// leaving *dangling* [`GcCell`]/[`Gc`] *references* behind.
 /// Any attempt to dereference such reference is *safe*
 /// but will fail returning `None`.
 ///
 /// The trait is implemented for most useful types in `std`.
 /// Still there is a number of types that intentionally don't provide an implementation:
 ///
-/// * [`RootCell<T>`](crate::RootCell) - comitting strong reference to garbage collector potentially
-///     allows circular references that effectively leak memory similarly to [`Rc`].
+/// * [`RootCell<T>`](crate::RootCell)/[`Root<T>`](crate::Root) -
+///     comitting strong references to garbage collector allows creation of circular references
+///     that leak memory similarly to [`Rc`] cycles.
 /// * Raw pointers - it isn't clear if and when those should be followed through.
 /// * Cells - correctly handling internal mutability requires additional knoweledge about how the value is used.
 ///
-/// In case you have a type that cannot/should not implement `Trace`
+/// In case you want to allocate a type that cannot/should not implement `Trace`
 /// consider wrapping it in [`Untrace`].
 /// [`Untrace`] provides trivial trait implementation that doesn't propagate tracing to wrapped value.
 pub trait Trace: 'static {
@@ -777,12 +778,12 @@ impl Trace for SystemTime {
 /// Prevent tracing into wrapped value.
 ///
 /// This struct is useful when you want to put into garbage collector a value that *doesn't* implement [`Trace`].
-/// While in most situations it is advisable that you do so (providing a noop implementation when necessary),
+/// While in most situations it is advisable that you provide an implementation
 /// sometimes that can be difficult to achieve.
 ///
 /// One example is trait objects: most traits don't have [`Trace`] as supertrait
 /// (which is a perfectly understandable sentiment).
-/// Something like `Box<dyn Write>` simply cannot implement [`Trace`],
+/// Something like `Box<dyn Write>` cannot implement [`Trace`] (as `Box` delegates implementation to inner value),
 /// so you can wrap it in `Untrace<Box<dyn Write>>` or `Box<Untrace<dyn Write>>`
 /// to indicate to garbage collector that there is no need to trace references through this value.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]

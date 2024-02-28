@@ -834,17 +834,17 @@ impl<T> From<Root<T>> for Gc<T> {
 /// * `Eq` implementation, such that
 ///
 ///     `lhs == rhs` <=> both pointers are pointing to the same object
-///     or in other words trace to the same `Heap::alloc` call.
+///     or in other words trace to the same `Heap::alloc`/`Heap::alloc_cell` call.
 ///
 /// * `Ord` implementation
 ///
-///     Actual order is unspecified but consistent with `Eq` implementation.
+///     Actual order is unspecified but deterministic and consistent with `Eq` implementation.
 ///
 /// * `Hash` implementation
 ///
 /// Lastly, besides provided functionality `Location` is opaque
 /// (as it contains implementation-specific details)
-/// and there is no way to reconstruct [`GcCell`] out of it.
+/// and there is no way to reconstruct [`GcCell`]/[`Gc`] out of it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Location {
     index: usize,
