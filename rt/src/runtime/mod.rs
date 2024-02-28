@@ -500,12 +500,51 @@ where
             RuntimeError::Borrow(err) => err.into_diagnostic(),
             RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
             RuntimeError::Immutable(err) => err.into_diagnostic(),
-            RuntimeError::Diagnostic(diag) => return diag,
+            RuntimeError::Diagnostic(diag) => return *diag,
             RuntimeError::MissingChunk(err) => err.into_diagnostic(),
             RuntimeError::MissingFunction(err) => err.into_diagnostic(),
             RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
             RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
-            RuntimeError::OpCode(err) => err.into_diagnostic(()),
+            RuntimeError::OpCode(err) => {
+                if let Some(frame) = self.frames.last() {
+                    let ip = frame.current_ip();
+                    let fn_ptr = self.core.gc[frame.closure()].fn_ptr();
+                    let chunk = self
+                        .chunk_cache
+                        .chunk(fn_ptr.chunk_id)
+                        .expect("closure should be constructed out of existing chunk");
+                    let function = chunk
+                        .get_function(fn_ptr.function_id)
+                        .expect("closure should be constructed out of existing function");
+
+                    let opcode = *function
+                        .opcodes
+                        .get(ip)
+                        .expect("error should be constructed out of existing opcode");
+
+                    let debug_info = chunk
+                        .debug_info
+                        .as_ref()
+                        .and_then(|info| info.functions.get(fn_ptr.function_id))
+                        .and_then(|info| info.opcodes.get(ip))
+                        .cloned();
+
+                    err.into_diagnostic((), opcode, debug_info)
+                } else {
+                    use crate::error::ExtraDiagnostic;
+                    use codespan_reporting::diagnostic::Diagnostic;
+
+                    let mut diag = Diagnostic::error()
+                        .with_message("opcode error failed to generate diagnostic");
+
+                    diag.with_help([
+                        "opcode-related errors only carry the cause of failure, all additional information is left inside runtime",
+                        "if you see this error, most likely runtime was reset before diagnostic was generated"
+                    ]);
+
+                    diag
+                }
+            }
         };
 
         let (name, source) = self
@@ -581,7 +620,7 @@ where
     fn from(value: LoadError) -> Self {
         match value {
             LoadError::Immutable(err) => RuntimeError::Immutable(err),
-            LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(diag),
+            LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(Box::new(diag)),
         }
     }
 }

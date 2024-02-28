@@ -33,7 +33,7 @@ where
     Borrow(BorrowError),
     AlreadyDropped(AlreadyDroppedError),
     Immutable(ImmutableCacheError),
-    Diagnostic(Diagnostic),
+    Diagnostic(Box<Diagnostic>),
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
     OutOfBoundsStack(OutOfBoundsStack),
@@ -173,7 +173,7 @@ where
     }
 }
 
-trait ExtraDiagnostic<FileId> {
+pub(crate) trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);
     fn with_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
     fn with_help(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);

@@ -230,6 +230,10 @@ where
     pub(crate) fn closure(&self) -> &Root<Closure<Ty>> {
         &self.closure
     }
+
+    pub(crate) fn current_ip(&self) -> InstrId {
+        self.ip - 1
+    }
 }
 
 impl<Ty> Frame<Ty>
@@ -438,13 +442,8 @@ where
             )));
         };
 
-        self.exec(opcode).map_err(|cause| {
-            cause.map_other(|cause| opcode_err::Error {
-                opcode,
-                debug_info: self.opcode_debug_info(self.ip - 1),
-                cause,
-            })
-        })
+        self.exec(opcode)
+            .map_err(|cause| cause.map_other(|cause| opcode_err::Error { cause }))
     }
 
     fn exec(

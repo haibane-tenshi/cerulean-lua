@@ -31,8 +31,6 @@ pub use una_op::Cause as UnaOpCause;
 
 #[derive(Debug, Clone)]
 pub struct Error {
-    pub opcode: OpCode,
-    pub debug_info: Option<opcode::DebugInfo>,
     pub cause: Cause,
 }
 
@@ -53,18 +51,19 @@ pub enum Cause {
 }
 
 impl Error {
-    pub fn into_diagnostic<FileId>(self, file_id: FileId) -> Diagnostic<FileId>
+    pub fn into_diagnostic<FileId>(
+        self,
+        file_id: FileId,
+        opcode: OpCode,
+        debug_info: Option<opcode::DebugInfo>,
+    ) -> Diagnostic<FileId>
     where
         FileId: Clone,
     {
         use table::TabDebugInfo;
         use Cause::*;
 
-        let Error {
-            opcode,
-            debug_info,
-            cause,
-        } = self;
+        let Error { cause } = self;
 
         let malformed_diagnostic = || Diagnostic::error().with_message("malformed diagnostic");
 
