@@ -342,14 +342,16 @@ where
                     let frame = active_frame.suspend();
                     self.frames.push(frame);
 
+                    let mut rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
+                    // Ensure that stack space passed to another function no longer hosts upvalues.
+                    rt.stack.lua_frame().evict_upvalues();
+
                     match callable {
                         Callable::Lua(closure) => {
-                            let rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
                             let frame = Frame::new(rt, closure.into(), event)?;
                             active_frame = frame.activate(self)?;
                         }
                         Callable::Rust(closure) => {
-                            // evict upvalues on the caller side?
                             self.stack.lua_frame().sync_transient(&mut self.core.gc);
                             self.invoke_at_raw(closure, start)?;
 

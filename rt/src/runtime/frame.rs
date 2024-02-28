@@ -1366,7 +1366,7 @@ where
         let mut stack = self.stack.lua_frame();
 
         // All upvalues need to be gone.
-        stack.evict_upvalues(..);
+        stack.evict_upvalues();
         let _ = stack.drain(StackSlot(0)..returns);
 
         if let Some(event) = self.event {

@@ -846,8 +846,8 @@ where
         self.0.remove(slot)
     }
 
-    pub(super) fn evict_upvalues(&mut self, range: impl RangeBounds<StackSlot>) {
-        self.0.evict_upvalues(range)
+    pub(super) fn evict_upvalues(&mut self) {
+        self.0.evict_upvalues(..)
     }
 
     /// Set stack to specified height.
