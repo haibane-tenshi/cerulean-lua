@@ -1,13 +1,38 @@
 use std::collections::HashMap;
 
+use ordered_float::NotNan;
+
 use repr::index::ConstId;
 use repr::literal::Literal;
 use repr::tivec::TiVec;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum HashLiteral {
+    Nil,
+    Bool(bool),
+    Int(i64),
+    Float(NotNan<f64>),
+    String(String),
+}
+
+impl HashLiteral {
+    fn new(literal: Literal) -> Option<Self> {
+        let r = match literal {
+            Literal::Nil => HashLiteral::Nil,
+            Literal::Bool(t) => HashLiteral::Bool(t),
+            Literal::Int(t) => HashLiteral::Int(t),
+            Literal::Float(t) => HashLiteral::Float(NotNan::new(t).ok()?),
+            Literal::String(t) => HashLiteral::String(t),
+        };
+
+        Some(r)
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ConstTable {
     constants: TiVec<ConstId, Literal>,
-    backlinks: HashMap<Literal, ConstId>,
+    backlinks: HashMap<HashLiteral, ConstId>,
 }
 
 impl ConstTable {
@@ -22,15 +47,18 @@ impl ConstTable {
     pub fn insert(&mut self, value: Literal) -> ConstId {
         use std::collections::hash_map::Entry;
 
-        match self.backlinks.entry(value) {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => {
-                let value = entry.key().clone();
-                let id = self.constants.push_and_get_key(value);
-                entry.insert(id);
+        if let Some(key) = HashLiteral::new(value.clone()) {
+            match self.backlinks.entry(key) {
+                Entry::Occupied(entry) => *entry.get(),
+                Entry::Vacant(entry) => {
+                    let id = self.constants.push_and_get_key(value);
+                    entry.insert(id);
 
-                id
+                    id
+                }
             }
+        } else {
+            self.constants.push_and_get_key(value)
         }
     }
 
@@ -48,7 +76,9 @@ impl ConstTable {
         let InnerState { constants } = state;
 
         for literal in self.constants.drain(constants..) {
-            self.backlinks.remove(&literal);
+            if let Some(key) = HashLiteral::new(literal) {
+                self.backlinks.remove(&key);
+            }
         }
     }
 }

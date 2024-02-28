@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-decorum = { version = "0.3.1", default-features = false }
 rle_vec = "0.4.1"
 thiserror = "1.0.40"
 typed-index-collections = "3.1.0"

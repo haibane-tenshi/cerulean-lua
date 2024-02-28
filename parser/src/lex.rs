@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use decorum::Finite;
 use thiserror::Error;
 
 pub use logos::Logos;
@@ -358,7 +357,7 @@ impl<'s> RawNumber<'s> {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Number {
     Int(i64),
-    Float(Finite<f64>),
+    Float(f64),
 }
 
 impl FromStr for Number {
@@ -442,9 +441,9 @@ impl FromStr for Number {
                 if let Ok(value) = parse_with_options::<_, _, BASE_16>(s, &INT) {
                     Number::Int(value)
                 } else if let Ok(value) = parse_with_options::<f64, _, BASE_16>(s, &FLOAT_P) {
-                    Number::Float(value.try_into().unwrap())
+                    Number::Float(value)
                 } else if let Ok(value) = parse_with_options::<f64, _, BASE_16>(s, &FLOAT_P2) {
-                    Number::Float(value.try_into().unwrap())
+                    Number::Float(value)
                 } else {
                     return Err(UnknownNumberFormatError);
                 }
@@ -453,9 +452,9 @@ impl FromStr for Number {
                 if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &INT) {
                     Number::Int(value)
                 } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &FLOAT_E) {
-                    Number::Float(value.try_into().unwrap())
+                    Number::Float(value)
                 } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &FLOAT_E2) {
-                    Number::Float(value.try_into().unwrap())
+                    Number::Float(value)
                 } else {
                     return Err(UnknownNumberFormatError);
                 }

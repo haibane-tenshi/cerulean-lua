@@ -287,7 +287,7 @@ where
             Literal::Nil => Ok(Value::Nil),
             Literal::Bool(t) => Ok(Value::Bool(t)),
             Literal::Int(t) => Ok(Value::Int(t)),
-            Literal::Float(t) => Ok(Value::Float(t.into_inner())),
+            Literal::Float(t) => Ok(Value::Float(t)),
             Literal::String(t) => {
                 let t = crate::gc::StringRef::new(t.into());
                 Ok(Value::String(t))

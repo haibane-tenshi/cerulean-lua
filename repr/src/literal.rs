@@ -1,13 +1,11 @@
 use std::fmt::Display;
 
-use decorum::Finite;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Nil,
     Bool(bool),
     Int(i64),
-    Float(Finite<f64>),
+    Float(f64),
     String(String),
 }
 

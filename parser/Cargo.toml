@@ -7,10 +7,10 @@ edition = "2021"
 
 [dependencies]
 codespan-reporting = "0.11.1"
-decorum = { version = "0.3.1", default-features = false }
 either = "1.8.1"
 lexical = { version = "6.1.1", default-features = false, features = ["parse", "parse-floats", "parse-integers", "format", "power-of-two"] }
 logos = "0.13.0"
+ordered-float = "4.1.1"
 repr = { version = "0.1.0", path = "../repr" }
 static_assertions = "1.1.0"
 thiserror = "1.0.40"
