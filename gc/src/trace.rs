@@ -18,7 +18,7 @@ use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
-use super::{Collector, Gc};
+use super::{Collector, GcCell};
 
 /// Track transitive reference dependencies.
 ///
@@ -32,14 +32,14 @@ use super::{Collector, Gc};
 /// garbage collector uses no unsafe code.
 /// However, failure to provide correct implementation will likely cause
 /// some objects to be collected earlier than expected,
-/// leaving *dangling* [`Gc`](Gc) *references* behind.
+/// leaving *dangling* [`GcCell`](GcCell) *references* behind.
 /// Any attempt to dereference such reference is *safe*
 /// but will fail returning `None`.
 ///
 /// The trait is implemented for most useful types in `std`.
 /// Still there is a number of types that intentionally don't provide an implementation:
 ///
-/// * [`Root<T>`](crate::Root) - comitting strong reference to garbage collector potentially
+/// * [`RootCell<T>`](crate::RootCell) - comitting strong reference to garbage collector potentially
 ///     allows circular references that effectively leak memory similarly to [`Rc`].
 /// * Raw pointers - it isn't clear if and when those should be followed through.
 /// * Cells - correctly handling internal mutability requires additional knoweledge about how the value is used.
@@ -51,7 +51,7 @@ pub trait Trace: 'static {
     fn trace(&self, collector: &mut Collector);
 }
 
-impl<T> Trace for Gc<T>
+impl<T> Trace for GcCell<T>
 where
     T: Trace,
 {

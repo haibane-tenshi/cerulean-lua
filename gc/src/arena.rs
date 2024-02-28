@@ -5,7 +5,7 @@ use std::rc::Rc;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
-use super::{Collector, Gc, Location, Root, Trace};
+use super::{Collector, GcCell, Location, RootCell, Trace};
 use crate::vec_list::VecList;
 
 pub(crate) trait Arena {
@@ -52,10 +52,10 @@ impl<T> ArenaStore<T> {
         self.values.get(index).map(|place| &place.value)
     }
 
-    pub(crate) fn upgrade(&self, ptr: Gc<T>) -> Option<Root<T>> {
+    pub(crate) fn upgrade(&self, ptr: GcCell<T>) -> Option<RootCell<T>> {
         use std::marker::PhantomData;
 
-        let Gc { addr, _marker } = ptr;
+        let GcCell { addr, _marker } = ptr;
 
         let Place {
             counter: counter_place,
@@ -74,7 +74,7 @@ impl<T> ArenaStore<T> {
             }
         };
 
-        let r = Root {
+        let r = RootCell {
             addr,
             counter,
             strong_counters: self.strong_counters.clone(),
@@ -84,13 +84,13 @@ impl<T> ArenaStore<T> {
         Some(r)
     }
 
-    fn insert_weak(&mut self, value: T) -> Result<Gc<T>, T> {
+    fn insert_weak(&mut self, value: T) -> Result<GcCell<T>, T> {
         self.values
             .try_insert(Place::new(value, self.gen))
             .map(|index| {
                 use std::marker::PhantomData;
 
-                Gc {
+                GcCell {
                     addr: Location {
                         index,
                         gen: self.gen,
@@ -101,12 +101,12 @@ impl<T> ArenaStore<T> {
             .map_err(|place| place.value)
     }
 
-    pub(crate) fn try_insert(&mut self, value: T) -> Result<Root<T>, T> {
+    pub(crate) fn try_insert(&mut self, value: T) -> Result<RootCell<T>, T> {
         self.insert_weak(value)
             .map(|ptr| self.upgrade(ptr).unwrap())
     }
 
-    pub(crate) fn insert(&mut self, value: T) -> Root<T> {
+    pub(crate) fn insert(&mut self, value: T) -> RootCell<T> {
         self.values.grow();
 
         let Ok(ptr) = self.try_insert(value) else {

@@ -13,20 +13,20 @@
 //!
 //! There are two reference types:
 //!
-//! * [`Root<T>`](Root) is a *strong* reference which keeps the pointed-to object alive.
+//! * [`RootCell<T>`](RootCell) is a *strong* reference which keeps the pointed-to object alive.
 //!
-//!     Internally `Root`s are counted which makes them similar to [`Rc`].
+//!     Internally `RootCell`s are counted which makes them similar to [`Rc`].
 //!     Because of this roots implement `Clone` but not `Copy`.
 //!
 //!     You are expected to keep roots outside of the heap so it doesn't implement [`Trace`].
 //!
-//! * [`Gc<T>`](Gc) is a *weak* reference.
+//! * [`GcCell<T>`](GcCell) is a *weak* reference.
 //!     It doesn't prevent pointed-to object from being deallocated unless it can trace to a root.
 //!
-//!     `Gc` is implemented as a lightweight index and is `Copy`able
+//!     `GcCell` is implemented as a lightweight index and is `Copy`able
 //!     which makes it different from [`Weak`](std::rc::Weak) references.
 //!
-//!     To keep behavior consistent `Gc`s also contain *generation* tag,
+//!     To keep behavior consistent `GcCell`s also contain *generation* tag,
 //!     so weak reference will dangle once the object is deallocated
 //!     even if another object is later placed in exact same memory.
 //!
@@ -43,16 +43,16 @@
 //! Dereferencing our pointers *requires access to heap*:
 //!
 //! ```
-//! # gc::{Heap};
+//! # use gc::{Heap};
 //! # let mut heap = Heap::new();
-//! let ptr = heap.alloc(3_usize);
+//! let ptr = heap.alloc_cell(3_usize);
 //!
 //! // Need heap to dereference
 //! assert_eq!(heap[&ptr], 3);
 //! ```
 //!
 //! With this it might be better to imagine `Heap` as a sort of map (analogous to `HashMap` or `BTreeMap`)
-//! of reference-counted `(Gc<T>, T)` pairs.
+//! of reference-counted `(GcCell<T>, T)` pairs.
 //!
 //! ## Differences from `safe-rs`
 //!
@@ -67,12 +67,12 @@
 //! You need to implement [`Trace`] trait for your type so that gc can traverse it:
 //!
 //! ```
-//! use gc::{Gc, Trace, Collector};
+//! use gc::{GcCell, Trace, Collector};
 //!
 //! #[derive(Default)]
 //! struct BinaryTree {
-//!     left: Option<Gc<Self>>,
-//!     right: Option<Gc<Self>>,
+//!     left: Option<GcCell<Self>>,
+//!     right: Option<GcCell<Self>>,
 //! }
 //!
 //! impl Trace for BinaryTree {
@@ -93,12 +93,12 @@
 //! Now objects of this type can be allocated:
 //!
 //! ```
-//! # use gc::{Gc, Trace, Collector};
+//! # use gc::{GcCell, Trace, Collector};
 //! #
 //! # #[derive(Default)]
 //! # struct BinaryTree {
-//! #     left: Option<Gc<Self>>,
-//! #     right: Option<Gc<Self>>,
+//! #     left: Option<GcCell<Self>>,
+//! #     right: Option<GcCell<Self>>,
 //! # }
 //! #
 //! # impl Trace for BinaryTree {
@@ -116,8 +116,8 @@
 //!
 //! let mut heap = Heap::new();
 //!
-//! let a = heap.alloc(BinaryTree::default());
-//! let b = heap.alloc(BinaryTree::default());
+//! let a = heap.alloc_cell(BinaryTree::default());
+//! let b = heap.alloc_cell(BinaryTree::default());
 //!
 //! heap[&a].left = Some(b.downgrade());
 //! heap[&b].right = Some(b.downgrade());
@@ -126,18 +126,18 @@
 //! heap[&b].left = Some(a.downgrade());
 //! ```
 //!
-//! [`Heap::alloc`] returns a [`Root`] - a strong reference that prevents object from being deallocated.
-//! You can downgrade them into weak references - [`Gc`],
+//! [`Heap::alloc_cell`] returns a [`RootCell`] - a strong reference that prevents object from being deallocated.
+//! You can downgrade them into weak references - [`GcCell`],
 //! but if an object is not reachable from one of the roots it will be considered garbage and collected:
 //!
 //! ```
-//! # use gc::{Heap, Gc};
+//! # use gc::{Heap, GcCell};
 //! # let mut heap = Heap::new();
-//! # let a = heap.alloc(3_usize);
-//! # let b = heap.alloc(3_usize);
+//! # let a = heap.alloc_cell(3_usize);
+//! # let b = heap.alloc_cell(3_usize);
 //! // Drop strong references leaving only weak ones.
-//! let weak_a: Gc<_> = a.downgrade();
-//! let weak_b: Gc<_> = b.downgrade();
+//! let weak_a: GcCell<_> = a.downgrade();
+//! let weak_b: GcCell<_> = b.downgrade();
 //!
 //! drop(a);
 //! drop(b);
@@ -153,17 +153,17 @@
 //!
 //! # Common pitfalls: constructing complex objects
 //!
-//! Garbage collection triggered by [`Heap::alloc`] may happen during construction
+//! Garbage collection triggered by [`Heap::alloc_cell`] may happen during construction
 //! of a complex object.
-//! Any non-rooted `Gc`s inside such an object may be spuriously deallocated
+//! Any non-rooted `GcCell`s inside such an object may be spuriously deallocated
 //! before the object is placed into heap.
 //!
 //! ```rust,should_panic
-//! # use gc::{Heap, Trace, Collector, Gc};
+//! # use gc::{Heap, Trace, Collector, GcCell};
 //! #
 //! struct Complex {
-//!     a: Gc<u64>,
-//!     b: Gc<i64>,
+//!     a: GcCell<u64>,
+//!     b: GcCell<i64>,
 //! }
 //!
 //! # impl Trace for Complex {
@@ -176,14 +176,14 @@
 //! #
 //! # let mut heap = Heap::new();
 //! #
-//! let a = heap.alloc(3).downgrade();
+//! let a = heap.alloc_cell(3).downgrade();
 //!
 //! // Oops, this allocation happened to trigger garbage collection.
 //! // `a` is not rooted and will be deallocated.
 //! # heap.gc();
-//! let b = heap.alloc(-3).downgrade();
+//! let b = heap.alloc_cell(-3).downgrade();
 //!
-//! let complex = heap.alloc(Complex {
+//! let complex = heap.alloc_cell(Complex {
 //!     a,
 //!     b,
 //! });
@@ -194,11 +194,11 @@
 //! To avoid this issue you can temporarily pause garbage collection using [`Heap::pause`]:
 //!
 //! ```
-//! # use gc::{Heap, Trace, Collector, Gc};
+//! # use gc::{Heap, Trace, Collector, GcCell};
 //! #
 //! # struct Complex {
-//! #     a: Gc<u64>,
-//! #     b: Gc<i64>,
+//! #     a: GcCell<u64>,
+//! #     b: GcCell<i64>,
 //! # }
 //! #
 //! # impl Trace for Complex {
@@ -211,17 +211,17 @@
 //! #
 //! # let mut heap = Heap::new();
 //! #
-//! let weak = heap.alloc('a').downgrade();
+//! let weak = heap.alloc_cell('a').downgrade();
 //!
 //! // Garbage allocation will be paused inside the closure.
 //! let complex = heap.pause(|heap| {
-//!     let a = heap.alloc(3).downgrade();
+//!     let a = heap.alloc_cell(3).downgrade();
 //!  
 //!     // Even manual triggers are paused.   
 //!     heap.gc();
-//!     let b = heap.alloc(-3).downgrade();
+//!     let b = heap.alloc_cell(-3).downgrade();
 //!
-//!     heap.alloc(Complex {
+//!     heap.alloc_cell(Complex {
 //!         a,
 //!         b,
 //!     })
@@ -233,7 +233,7 @@
 //! assert_eq!(heap.get(weak), None);
 //! ```
 //!
-//! Also [`Heap::alloc`] immediately roots the object it allocates so you don't need to worry
+//! Also [`Heap::alloc_cell`] immediately roots the object it allocates so you don't need to worry
 //! that inner references will get dropped if gc is triggered as part of the call.
 
 #![forbid(unsafe_code)]
@@ -264,17 +264,17 @@ pub use trace::{Trace, Untrace};
 /// ```
 /// # use gc::{Heap};
 /// let mut heap = Heap::new();
-/// let a = heap.alloc(3_usize);
+/// let a = heap.alloc_cell(3_usize);
 ///
 /// assert_eq!(heap[&a], 3);
 /// ```
 ///
-/// Garbage collection can be triggered automatically on [`Heap::alloc`]
+/// Garbage collection can be triggered automatically on [`Heap::alloc_cell`]
 /// or manually via [`Heap::gc`].
 /// We are using standard mark-and-sweep strategy.
 ///
-/// Newely allocated objects return [`Root<T>`](Root) which is a strong reference,
-/// but can be downgraded into [`Gc<T>`](Gc) which is a weak reference.
+/// Newely allocated objects return [`RootCell<T>`](RootCell) which is a strong reference,
+/// but can be downgraded into [`GcCell<T>`](GcCell) which is a weak reference.
 ///
 /// Result of dereferencing a pointer constructed in a different heap is unspecified,
 /// but guaranteed to be *safe*.
@@ -328,7 +328,7 @@ impl Heap {
     ///
     /// The function immediately roots the object it allocates so you don't need to worry
     /// that inner references will get dropped if gc is triggered as part of the call.
-    pub fn alloc<T>(&mut self, value: T) -> Root<T>
+    pub fn alloc_cell<T>(&mut self, value: T) -> RootCell<T>
     where
         T: Trace,
     {
@@ -340,7 +340,7 @@ impl Heap {
     }
 
     #[inline(never)]
-    fn alloc_slow<T>(&mut self, value: T) -> Root<T>
+    fn alloc_slow<T>(&mut self, value: T) -> RootCell<T>
     where
         T: Trace,
     {
@@ -350,8 +350,8 @@ impl Heap {
 
     /// Get `&T` out of weak reference.
     ///
-    /// [`Gc`] is a weak reference so it is possible that the object since was deallocated.
-    pub fn get<T>(&self, ptr: Gc<T>) -> Option<&T>
+    /// [`GcCell`] is a weak reference so it is possible that the object since was deallocated.
+    pub fn get<T>(&self, ptr: GcCell<T>) -> Option<&T>
     where
         T: Trace,
     {
@@ -360,8 +360,8 @@ impl Heap {
 
     /// Get `&mut T` out of weak reference.
     ///
-    /// [`Gc`] is a weak reference so it is possible that the object since was deallocated.
-    pub fn get_mut<T>(&mut self, ptr: Gc<T>) -> Option<&mut T>
+    /// [`GcCell`] is a weak reference so it is possible that the object since was deallocated.
+    pub fn get_mut<T>(&mut self, ptr: GcCell<T>) -> Option<&mut T>
     where
         T: Trace,
     {
@@ -370,8 +370,8 @@ impl Heap {
 
     /// Get `&T` out of strong reference.
     ///
-    /// [`Root`] is a strong reference and prevents objects from being deallocated.
-    pub fn get_root<T>(&self, ptr: &Root<T>) -> &T
+    /// [`RootCell`] is a strong reference and prevents objects from being deallocated.
+    pub fn get_root<T>(&self, ptr: &RootCell<T>) -> &T
     where
         T: Trace,
     {
@@ -382,8 +382,8 @@ impl Heap {
 
     /// Get `&T` out of strong reference.
     ///
-    /// [`Root`] is a strong reference and prevents objects from being deallocated.
-    pub fn get_root_mut<T>(&mut self, ptr: &Root<T>) -> &mut T
+    /// [`RootCell`] is a strong reference and prevents objects from being deallocated.
+    pub fn get_root_mut<T>(&mut self, ptr: &RootCell<T>) -> &mut T
     where
         T: Trace,
     {
@@ -395,7 +395,7 @@ impl Heap {
     /// Upgrade weak reference into strong reference.
     ///
     /// The function will return `None` if object was since deallocated.
-    pub fn upgrade<T>(&self, ptr: Gc<T>) -> Option<Root<T>>
+    pub fn upgrade<T>(&self, ptr: GcCell<T>) -> Option<RootCell<T>>
     where
         T: Trace,
     {
@@ -512,22 +512,22 @@ impl Debug for Heap {
     }
 }
 
-impl<T> Index<&Root<T>> for Heap
+impl<T> Index<&RootCell<T>> for Heap
 where
     T: Trace,
 {
     type Output = T;
 
-    fn index(&self, index: &Root<T>) -> &Self::Output {
+    fn index(&self, index: &RootCell<T>) -> &Self::Output {
         self.get_root(index)
     }
 }
 
-impl<T> IndexMut<&Root<T>> for Heap
+impl<T> IndexMut<&RootCell<T>> for Heap
 where
     T: Trace,
 {
-    fn index_mut(&mut self, index: &Root<T>) -> &mut Self::Output {
+    fn index_mut(&mut self, index: &RootCell<T>) -> &mut Self::Output {
         self.get_root_mut(index)
     }
 }
@@ -604,7 +604,7 @@ pub struct Collector {
 
 impl Collector {
     /// Mark an object as reachable.
-    pub fn mark<T>(&mut self, ptr: Gc<T>)
+    pub fn mark<T>(&mut self, ptr: GcCell<T>)
     where
         T: Trace,
     {
@@ -633,52 +633,61 @@ impl Collector {
 
 /// A weak reference to gc-allocated value.
 ///
-/// This reference is *weak* as in it alone won't prevent value from being dropped.
-/// However when part of certainly alive object
-/// it will indicate that referencee is also alive through [`Trace`] trait.
+/// This reference is an equivalent of `Weak<RefCell<T>>`:
 ///
-/// Unlike [`Root`] this type implements [`Copy`].
+/// * The reference is *weak* as in it alone won't prevent value from being dropped.
+///     However when part of certainly alive object
+///     it will indicate that referencee is also alive through [`Trace`] trait.
+///
+/// * Internal value can be mutated through any existing reference.
+///     In this regard it behaves as if it was wrapped in `RefCell` - hence `Cell` in the name.
+///
+///     Note that there is no actual internal mutability involved:
+///     to acquire `&T` or `&mut T` you need to borrow from heap
+///     so normal borrow checker rules ensure that aliasing rules are not violated.
+///
+/// Unlike [`RootCell`] this type implements [`Copy`].
 ///
 /// Even though it claims to be a reference type there is no way to [dereference](#dereference)
-/// `Gc` directly into `&T`.
+/// `GcCell` directly into `&T`.
 /// As such it provides none of the related traits that you might expect like
 /// `Deref<Target = T>` or `AsRef<T>`.
-/// Also `Gc` doesn't implement `PartialEq`, `PartialOrd` or `Hash` to avoid ambiguity.
+/// Also `GcCell` doesn't implement `PartialEq`, `PartialOrd` or `Hash` to avoid ambiguity.
 /// Normal references and smart pointers defer implementations of those traits to referenced value
 /// which is not possible for the type.
 ///
 /// If you are looking for a way to provide equivalents of `Eq`, `Ord` or `Hash`
-/// as if applied to an underlying pointer consider using [`Gc::addr`].
+/// as if applied to an underlying pointer consider using [`GcCell::addr`].
 ///
 /// # Construct
 ///
-/// Common way to construct [`Gc`] is to downgrade [`Root`]:
+/// Common way to construct [`GcCell`] is to downgrade [`RootCell`]:
 ///
 /// ```
-/// # use gc::{Heap, Gc, Root};
+/// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// let strong = heap.alloc(3);
-/// let weak: Gc<usize> = strong.downgrade();
+/// let strong = heap.alloc_cell(3);
+/// let weak: GcCell<usize> = strong.downgrade();
 /// ```
 ///
-/// Converting `Gc` back to `Root` requires access to heap:
+/// Converting `GcCell` back to `RootCell` requires access to heap:
 ///
 /// ```
-/// # use gc::{Heap, Gc, Root};
+/// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// # let weak: Gc<usize> = heap.alloc(3).downgrade();
-/// let strong: Root<usize> = heap.upgrade(weak).expect("object is still alive");
+/// # let weak: GcCell<usize> = heap.alloc_cell(3).downgrade();
+/// let strong: RootCell<usize> = heap.upgrade(weak).expect("object is still alive");
 /// ```
 ///
 /// # Dereference
 ///
 /// Recovering reference to allocated object requires access to heap.
-/// Since `Gc` doesn't guarantee that an object stays alive dereference returns `Option`:
+/// Since `GcCell` doesn't guarantee that an object stays alive dereference returns `Option`:
 ///
 /// ```
-/// # use gc::{Heap, Gc, Root};
+/// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// let weak = heap.alloc(3_usize).downgrade();
+/// let weak = heap.alloc_cell(3_usize).downgrade();
 /// assert_eq!(heap.get(weak), Some(&3));
 ///
 /// // Object have no strong references left so it will be collected.
@@ -689,21 +698,21 @@ impl Collector {
 /// You can also recover mutable reference although it requires *mutable* access to heap:
 ///
 /// ```
-/// # use gc::{Heap, Gc, Root};
+/// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// let weak = heap.alloc(3_usize).downgrade();
+/// let weak = heap.alloc_cell(3_usize).downgrade();
 /// assert_eq!(heap.get(weak), Some(&3));
 ///
 /// let ref_mut: &mut usize = heap.get_mut(weak).expect("object is still alive");
 /// *ref_mut = 4;
 /// assert_eq!(heap.get(weak), Some(&4));
 /// ```
-pub struct Gc<T> {
+pub struct GcCell<T> {
     addr: Location,
     _marker: PhantomData<T>,
 }
 
-impl<T> Gc<T> {
+impl<T> GcCell<T> {
     /// Return location of referenced object.
     ///
     /// See [`Location`] struct for more information.
@@ -716,18 +725,18 @@ impl<T> Gc<T> {
     /// This is equivalent to comparing their locations for equality:
     ///
     /// ```
-    /// # use gc::{Heap, Gc};
+    /// # use gc::{Heap, GcCell};
     /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc(1_usize).downgrade();
-    /// # let b = heap.alloc(2_usize).downgrade();
-    /// assert_eq!(Gc::ptr_eq(a, b), a.addr() == b.addr());
+    /// # let a = heap.alloc_cell(1_usize).downgrade();
+    /// # let b = heap.alloc_cell(2_usize).downgrade();
+    /// assert_eq!(GcCell::ptr_eq(a, b), a.addr() == b.addr());
     /// ```
     pub fn ptr_eq(self, other: Self) -> bool {
         self.addr == other.addr
     }
 }
 
-impl<T> Debug for Gc<T> {
+impl<T> Debug for GcCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Gc")
             .field("addr", &self.addr)
@@ -735,54 +744,63 @@ impl<T> Debug for Gc<T> {
     }
 }
 
-impl<T> Pointer for Gc<T> {
+impl<T> Pointer for GcCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.addr)
     }
 }
 
-impl<T> Clone for Gc<T> {
+impl<T> Clone for GcCell<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for Gc<T> {}
+impl<T> Copy for GcCell<T> {}
 
 /// A strong reference to gc-allocated value.
 ///
-/// This reference is *strong* as in it will prevent the value from being dropped
-/// while the reference exists.
-/// Internally it is implemented through reference counting which makes it similar to [`Rc`].
-/// However unlike `Rc` we don't count weak references which allows [`Gc`] to be copyable.
+/// This reference is an equivalent of `Rc<RefCell<T>>`:
+///
+/// * The reference is *strong* as in it will prevent the value from being dropped
+///     while the reference exists.
+///     Internally it is implemented through reference counting which makes it similar to [`Rc`].
+///     However unlike `Rc` we don't count weak references which allows [`GcCell`] to be copyable.
+///
+/// * Internal value can be mutated through any existing reference.
+///     In this regard it behaves as if it was wrapped in `RefCell` - hence `Cell` in the name.
+///
+///     Note that there is no actual internal mutability involved:
+///     to acquire `&T` or `&mut T` you need to borrow from heap
+///     so normal borrow checker rules ensure that aliasing rules are not violated.
 ///
 /// Even though it claims to be a reference type there is no way to [dereference](#dereference)
-/// `Root` directly into `&T`.
+/// `RootCell` directly into `&T`.
 /// As such it provides none of the related traits that you might expect like
 /// `Deref<Target = T>` or `AsRef<T>`.
-/// Also `Root` doesn't implement `PartialEq`, `PartialOrd` or `Hash` to avoid ambiguity.
+/// Also `RootCell` doesn't implement `PartialEq`, `PartialOrd` or `Hash` to avoid ambiguity.
 /// Normal references and smart pointers defer implementations of those traits to referenced value
 /// which is not possible for the type.
 ///
 /// If you are looking for a way to provide equivalents of `Eq`, `Ord` or `Hash`
-/// as if applied to an underlying pointer consider using [`Root::addr`].
+/// as if applied to an underlying pointer consider using [`RootCell::addr`].
 ///
 /// # Construct
 ///
-/// [`Heap`] naturally returns [`Root`] after allocating a value:
+/// [`Heap`] naturally returns [`RootCell`] after allocating a value:
 ///
 /// ```
-/// # use gc::{Heap, Root};
+/// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// let strong: Root<usize> = heap.alloc(3);
+/// let strong: RootCell<usize> = heap.alloc_cell(3);
 /// ```
 ///
 /// You can also clone already existing roots or upgrade weak references:
 ///
 /// ```
-/// # use gc::{Heap, Root};
+/// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// # let strong: Root<usize> = heap.alloc(3_usize);
+/// # let strong: RootCell<usize> = heap.alloc_cell(3_usize);
 /// let weak = strong.downgrade();
 /// let strong = heap.upgrade(weak).expect("object is still alive");
 /// ```
@@ -790,12 +808,12 @@ impl<T> Copy for Gc<T> {}
 /// # Dereference
 ///
 /// Recovering reference to allocated object requires access to heap.
-/// Since [`Root`] guarantees that object stays alive methods return reference directly:
+/// Since [`RootCell`] guarantees that object stays alive methods return reference directly:
 ///
 /// ```
-/// # use gc::{Heap, Root};
+/// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// let strong = heap.alloc(3_usize);
+/// let strong = heap.alloc_cell(3_usize);
 /// assert_eq!(heap.get_root(&strong), &3);
 ///
 /// // Root prevents object from being collected.
@@ -806,35 +824,35 @@ impl<T> Copy for Gc<T> {}
 /// assert_eq!(heap.get_root(&strong), &4);
 /// ```
 ///
-/// Alternatively [`Heap`] can be indexed using `&Root<T>`:
+/// Alternatively [`Heap`] can be indexed using `&RootCell<T>`:
 ///
 /// ```
-/// # use gc::{Heap, Root};
+/// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// # let strong = heap.alloc(4_usize);
+/// # let strong = heap.alloc_cell(4_usize);
 /// assert_eq!(heap[&strong], 4);
 ///
 /// heap[&strong] = 3;
 /// assert_eq!(heap[&strong], 3);
 /// ```
-pub struct Root<T> {
+pub struct RootCell<T> {
     addr: Location,
     counter: Counter,
     strong_counters: Rc<RefCell<StrongCounters>>,
     _marker: PhantomData<T>,
 }
 
-impl<T> Root<T> {
+impl<T> RootCell<T> {
     /// Downgrade into weak reference.
-    pub fn downgrade(&self) -> Gc<T> {
-        let Root {
+    pub fn downgrade(&self) -> GcCell<T> {
+        let RootCell {
             addr,
             counter: _,
             strong_counters: _,
             _marker,
         } = self;
 
-        Gc {
+        GcCell {
             addr: *addr,
             _marker: PhantomData,
         }
@@ -852,18 +870,18 @@ impl<T> Root<T> {
     /// This is equivalent to comparing their locations for equality:
     ///
     /// ```
-    /// # use gc::{Heap, Root};
+    /// # use gc::{Heap, RootCell};
     /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc(1_usize);
-    /// # let b = heap.alloc(2_usize);
-    /// assert_eq!(Root::ptr_eq(&a, &b), a.addr() == b.addr());
+    /// # let a = heap.alloc_cell(1_usize);
+    /// # let b = heap.alloc_cell(2_usize);
+    /// assert_eq!(RootCell::ptr_eq(&a, &b), a.addr() == b.addr());
     /// ```
     pub fn ptr_eq(&self, other: &Self) -> bool {
         self.addr == other.addr
     }
 }
 
-impl<T> Debug for Root<T> {
+impl<T> Debug for RootCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Root")
             .field("addr", &self.addr)
@@ -871,15 +889,15 @@ impl<T> Debug for Root<T> {
     }
 }
 
-impl<T> Pointer for Root<T> {
+impl<T> Pointer for RootCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.addr())
     }
 }
 
-impl<T> Clone for Root<T> {
+impl<T> Clone for RootCell<T> {
     fn clone(&self) -> Self {
-        let Root {
+        let RootCell {
             addr,
             counter,
             strong_counters,
@@ -888,7 +906,7 @@ impl<T> Clone for Root<T> {
 
         strong_counters.borrow_mut().increment(*counter);
 
-        Root {
+        RootCell {
             addr: *addr,
             counter: *counter,
             strong_counters: strong_counters.clone(),
@@ -897,14 +915,14 @@ impl<T> Clone for Root<T> {
     }
 }
 
-impl<T> Drop for Root<T> {
+impl<T> Drop for RootCell<T> {
     fn drop(&mut self) {
         self.strong_counters.borrow_mut().decrement(self.counter);
     }
 }
 
-impl<T> From<Root<T>> for Gc<T> {
-    fn from(value: Root<T>) -> Self {
+impl<T> From<RootCell<T>> for GcCell<T> {
+    fn from(value: RootCell<T>) -> Self {
         value.downgrade()
     }
 }
@@ -916,7 +934,7 @@ impl<T> From<Root<T>> for Gc<T> {
 /// we need some means to compare memory locations for gc-allocated entities.
 /// This type provides such functionality.
 ///
-/// The struct relates to [`Gc<T>`](Gc) and [`Root<T>`](Root)
+/// The struct relates to [`GcCell<T>`](GcCell) and [`RootCell<T>`](RootCell)
 /// as `usize` address to `*const T`.
 /// It uniquely (with some caveats) identifies allocated object.
 /// However unlike `usize`,
@@ -944,7 +962,7 @@ impl<T> From<Root<T>> for Gc<T> {
 ///
 /// Lastly, besides provided functionality `Location` is opaque
 /// (as it contains implementation-specific details)
-/// and there is no way to reconstruct [`Gc`] out of it.
+/// and there is no way to reconstruct [`GcCell`] out of it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Location {
     index: usize,
