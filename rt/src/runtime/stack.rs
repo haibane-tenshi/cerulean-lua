@@ -12,7 +12,7 @@ use super::Event;
 use crate::error::opcode::MissingArgsError;
 use crate::value::{CoreTypes, Value, WeakValue};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub(crate) struct RawStackSlot(usize);
 
 impl RawStackSlot {
@@ -73,6 +73,75 @@ impl<T> Default for Source<T> {
     }
 }
 
+/// Struct tracking change between main portion of the stack and rooted mirror.
+///
+/// # Invariants
+///
+/// ```ignore
+/// assert!(unsync <= transient);
+/// ```
+#[derive(Debug, Default)]
+struct Diff {
+    /// Index of first non-rooted value on main stack.
+    ///
+    /// It can point past the last element to indicate that there are no transient values.
+    transient: RawStackSlot,
+
+    /// Index of first unsynchronized value on main stack.
+    ///
+    /// It can point past the last element to indicate that there are no unsync values.
+    unsync: RawStackSlot,
+}
+
+impl Diff {
+    fn modify(&mut self, slot: RawStackSlot, is_transient: bool) {
+        self.unsync = self.unsync.min(slot);
+
+        if is_transient {
+            self.transient = self.transient.min(slot);
+        }
+    }
+
+    fn insert(&mut self, slot: RawStackSlot, is_transient: bool) {
+        self.unsync = self.unsync.min(slot);
+
+        if is_transient {
+            self.transient = self.transient.min(slot);
+        } else if slot <= self.transient {
+            self.transient.0 += 1;
+        }
+    }
+
+    fn remove_range(&mut self, range: Range<RawStackSlot>) {
+        debug_assert!(range.start <= range.end);
+
+        self.unsync = range.start;
+
+        if self.transient < range.start {
+        } else if self.transient < range.end {
+            self.transient = range.start;
+        } else {
+            self.transient.0 -= range.end.0 - range.start.0;
+        }
+    }
+
+    fn sync_on(&mut self, slot: RawStackSlot) {
+        self.transient = slot;
+        self.unsync = slot;
+    }
+
+    fn has_transient(&self, len: RawStackSlot) -> bool {
+        self.transient < len
+    }
+
+    fn is_transient(&self, source: Source<RawStackSlot>) -> bool {
+        match source {
+            Source::StackSlot(slot) => self.transient <= slot,
+            Source::TrustedIsRooted(is_rooted) => !is_rooted,
+        }
+    }
+}
+
 /// Backing storage for stack of temporaries.
 pub struct Stack<Ty>
 where
@@ -83,6 +152,23 @@ where
     /// Note that we operate with `WeakValue`s!
     /// Contained references can be gced without us knowing.
     main: TiVec<RawStackSlot, WeakValue<Ty>>,
+
+    /// Rooted mirror of the stack.
+    ///
+    /// Contents of this vec should be syncronized with `main` field.
+    /// Its purpose is to keep on-stack references alive.
+    root: Root<Vec<WeakValue<Ty>>>,
+
+    /// Diff between main and rooted mirror.
+    ///
+    /// # Invariants
+    ///
+    /// ```ignore
+    /// assert!(diff.unsync <= diff.transient);
+    /// assert!(diff.transient <= main.len());
+    /// assert!(diff.unsync <= root.len());
+    /// ```
+    diff: Diff,
 
     /// Marker set `true` for on-stack upvalues.
     ///
@@ -105,20 +191,6 @@ where
     ///    so most of the time it will boil down to shuffling `false` on and off.
     /// * It simplifies implementation of `TransientStackFrame` as it doesn't need to care about markers anymore.
     upvalue_mark: BitVec,
-
-    /// Index of first value known to be *not* rooted.
-    ///
-    /// It implies that all values below it are rooted.
-    first_transient: Option<RawStackSlot>,
-
-    /// Rooted mirror of the stack.
-    ///
-    /// Contents of this vec should be syncronized with `main` field.
-    /// Its purpose is to keep on-stack references alive.
-    root: Root<Vec<WeakValue<Ty>>>,
-
-    /// Index of first value known to be not in sync between `main` and `root`.
-    sync_point: RawStackSlot,
 
     /// Closures that keep upvalues on the stack.
     ///
@@ -146,10 +218,9 @@ where
     pub fn new(heap: &mut Heap) -> Self {
         Stack {
             main: Default::default(),
-            upvalue_mark: Default::default(),
-            first_transient: Default::default(),
             root: heap.alloc(Default::default()),
-            sync_point: RawStackSlot(0),
+            diff: Default::default(),
+            upvalue_mark: Default::default(),
             closures: Default::default(),
             evicted_upvalues: Default::default(),
         }
@@ -157,11 +228,10 @@ where
 
     fn sync_stack_cache(&mut self, heap: &mut Heap) {
         let mirror = &mut heap[&self.root];
-        mirror.truncate(self.sync_point.0);
-        mirror.extend(self.main[self.sync_point..].iter().cloned());
+        mirror.truncate(self.diff.unsync.0);
+        mirror.extend(self.main[self.diff.unsync..].iter().cloned());
 
-        self.sync_point = self.main.next_key();
-        self.first_transient = None;
+        self.diff.sync_on(self.main.next_key());
     }
 
     fn sync_upvalue_cache(&mut self, heap: &mut Heap) {
@@ -207,7 +277,7 @@ where
     }
 
     fn sync_transient(&mut self, heap: &mut Heap) {
-        if self.first_transient.is_some() {
+        if self.diff.has_transient(self.main.next_key()) {
             self.sync_stack_cache(heap);
         }
 
@@ -225,7 +295,7 @@ where
             return;
         }
 
-        if self.first_transient.is_some() {
+        if self.diff.has_transient(self.main.next_key()) {
             self.sync_stack_cache(heap);
         }
 
@@ -265,48 +335,21 @@ where
         StackGuard::new(self)
     }
 
-    fn is_transient(&self, source: Source<RawStackSlot>) -> bool {
-        match source {
-            Source::StackSlot(slot) => self.first_transient.map(|tr| slot < tr).unwrap_or(true),
-            Source::TrustedIsRooted(is_rooted) => !is_rooted,
-        }
-    }
-
-    fn mark_transient(&mut self, slot: RawStackSlot) {
-        let value = match self.first_transient {
-            Some(tr) => tr.min(slot),
-            None => slot,
-        };
-
-        self.first_transient = Some(value)
-    }
-
-    fn mark_unsync(&mut self, slot: RawStackSlot) {
-        self.sync_point = self.sync_point.min(slot);
-    }
-
     fn push(&mut self, value: WeakValue<Ty>, source: Source<RawStackSlot>) -> RawStackSlot {
         debug_assert!(self.upvalue_mark.len() <= self.main.len());
 
         let slot = self.main.next_key();
-        if value.is_transient() && self.is_transient(source) {
-            self.mark_transient(slot);
-        }
-
-        debug_assert!(self.sync_point <= self.main.next_key());
+        let is_transient = value.is_transient() && self.diff.is_transient(source);
+        self.diff.modify(slot, is_transient);
 
         self.main.push_and_get_key(value)
     }
 
     fn set(&mut self, slot: RawStackSlot, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
-        if self.main.get(slot).is_some() {
-            if value.is_transient() && self.is_transient(source) {
-                self.mark_transient(slot);
-            }
-            self.mark_unsync(slot);
-        }
-
         if let Some(place) = self.main.get_mut(slot) {
+            let is_transient = value.is_transient() && self.diff.is_transient(source);
+            self.diff.modify(slot, is_transient);
+
             *place = value;
         }
     }
@@ -343,13 +386,8 @@ where
     }
 
     fn insert(&mut self, slot: RawStackSlot, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
-        if value.is_transient() && self.is_transient(source) {
-            self.mark_transient(slot);
-        } else if let Some(tr) = &mut self.first_transient {
-            // Non-transient insertion shifts the boundary up.
-            tr.0 += 1;
-        }
-        self.mark_unsync(slot);
+        let is_transient = value.is_transient() && self.diff.is_transient(source);
+        self.diff.insert(slot, is_transient);
 
         // Internally inserting happens only in one case:
         // when invoked value have `__call` metamethod and needs to be passed in.
@@ -374,29 +412,8 @@ where
             return self.main.raw.drain(0..0);
         }
 
-        self.mark_unsync(start);
-
-        match &mut self.first_transient {
-            None => (),
-            Some(slot) if *slot < start => (),
-            Some(slot) if end <= *slot => {
-                slot.0 -= len;
-            }
-            // When transient marker points to somewhere inside removed range
-            // we can only do some approximations.
-            // Any values above marker can also be transient.
-            Some(slot) => {
-                if start < self.main.next_key() {
-                    *slot = start;
-                } else {
-                    // But if there are no values left above removal point reset the marker.
-                    self.first_transient = None;
-                }
-            }
-        }
-
         self.evict_upvalues(start..);
-
+        self.diff.remove_range(start..end);
         self.main.drain(start..end)
     }
 
@@ -450,10 +467,7 @@ where
 
     fn extend(&mut self, iter: impl IntoIterator<Item = WeakValue<Ty>>, is_rooted: bool) {
         let start = self.main.next_key();
-        if !is_rooted {
-            self.mark_transient(start);
-        }
-        self.mark_unsync(start);
+        self.diff.modify(start, !is_rooted);
 
         self.main.extend(iter);
     }
@@ -467,9 +481,9 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Stack")
             .field("main", &self.main)
-            .field("first_transient", &self.first_transient)
             .field("root", &self.root)
-            .field("sync_point", &self.sync_point)
+            .field("diff", &self.diff)
+            .field("upvalue_mark", &self.upvalue_mark)
             .field("closures", &self.closures)
             .field("evicted_upvalues", &self.evicted_upvalues)
             .finish()
@@ -533,8 +547,8 @@ where
         );
         self.stack.upvalue_mark.truncate(self.boundary.0);
 
-        self.mark_unsync(StackSlot(0));
-        self.mark_transient(StackSlot(0));
+        // Reset diff to boundary.
+        self.stack.diff.modify(self.boundary, true);
 
         let StackGuard { stack, boundary } = self;
 
@@ -553,16 +567,6 @@ where
 
     pub fn as_slice(&self) -> &[WeakValue<Ty>] {
         self.stack.main[self.boundary..].raw.as_ref()
-    }
-
-    fn mark_unsync(&mut self, slot: StackSlot) {
-        let slot = self.boundary + slot;
-        self.stack.mark_unsync(slot);
-    }
-
-    fn mark_transient(&mut self, slot: StackSlot) {
-        let slot = self.boundary + slot;
-        self.stack.mark_transient(slot);
     }
 
     pub fn get_slot(&self, slot: StackSlot) -> Option<&WeakValue<Ty>> {
