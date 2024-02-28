@@ -7,7 +7,7 @@ use bitvec::vec::BitVec;
 
 use crate::arena::{Arena, ArenaStore};
 use crate::trace::Trace;
-use crate::{GcCell, RootCell};
+use crate::{GcCell, MutAccess, RefAccess, RootCell, Rooted};
 
 /// Backing store for garbage-collected objects.
 ///
@@ -101,47 +101,51 @@ impl Heap {
         self.arena_mut().unwrap().insert(value)
     }
 
-    /// Get `&T` out of weak reference.
+    /// Get `&T` out of weak reference such as [`GcCell`].
     ///
-    /// [`GcCell`] is a weak reference so it is possible that the object since was deallocated.
-    pub fn get<T>(&self, ptr: GcCell<T>) -> Option<&T>
+    /// Returned reference is wrapped in `Option`
+    /// because it is possible that the object since was deallocated.
+    pub fn get<T>(&self, ptr: impl RefAccess<T>) -> Option<&T>
     where
         T: Trace,
     {
-        self.arena()?.get(ptr.addr)
+        self.arena()?.get(ptr.addr())
     }
 
-    /// Get `&mut T` out of weak reference.
+    /// Get `&mut T` out of weak reference such as [`GcCell`].
     ///
-    /// [`GcCell`] is a weak reference so it is possible that the object since was deallocated.
-    pub fn get_mut<T>(&mut self, ptr: GcCell<T>) -> Option<&mut T>
+    /// Returned reference is wrapped in `Option`
+    /// because it is possible that the object since was deallocated.
+    pub fn get_mut<T>(&mut self, ptr: impl MutAccess<T>) -> Option<&mut T>
     where
         T: Trace,
     {
-        self.arena_mut()?.get_mut(ptr.addr)
+        self.arena_mut()?.get_mut(ptr.addr())
     }
 
-    /// Get `&T` out of strong reference.
+    /// Get `&T` out of strong reference such as [`RootCell`].
     ///
-    /// [`RootCell`] is a strong reference and prevents objects from being deallocated.
-    pub fn get_root<T>(&self, ptr: &RootCell<T>) -> &T
+    /// Method returnes reference directly
+    /// because strong references prevent object from being deallocated.
+    pub fn get_root<T>(&self, ptr: &(impl RefAccess<T> + Rooted)) -> &T
     where
         T: Trace,
     {
         self.arena()
-            .and_then(|arena| arena.get(ptr.addr))
+            .and_then(|arena| arena.get(ptr.addr()))
             .expect("rooted object was deallocated")
     }
 
-    /// Get `&T` out of strong reference.
+    /// Get `&mut T` out of strong reference such as [`RootCell`].
     ///
-    /// [`RootCell`] is a strong reference and prevents objects from being deallocated.
-    pub fn get_root_mut<T>(&mut self, ptr: &RootCell<T>) -> &mut T
+    /// Method returnes reference directly
+    /// because strong references prevent object from being deallocated.
+    pub fn get_root_mut<T>(&mut self, ptr: &(impl MutAccess<T> + Rooted)) -> &mut T
     where
         T: Trace,
     {
         self.arena_mut()
-            .and_then(|arena| arena.get_mut(ptr.addr))
+            .and_then(|arena| arena.get_mut(ptr.addr()))
             .expect("rooted object was deallocated")
     }
 

@@ -590,3 +590,48 @@ impl Pointer for Location {
         write!(f, "{:p}", self.index as *const ())
     }
 }
+
+mod sealed {
+    use super::{GcCell, Location, RootCell};
+
+    pub trait Sealed {
+        fn addr(&self) -> Location;
+    }
+
+    impl<T> Sealed for GcCell<T> {
+        fn addr(&self) -> Location {
+            self.addr
+        }
+    }
+
+    impl<T> Sealed for RootCell<T> {
+        fn addr(&self) -> Location {
+            self.addr
+        }
+    }
+}
+
+/// Marker trait permitting by-reference (`&T`) access.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait RefAccess<T>: sealed::Sealed {}
+
+/// Marker trait permitting by-mut-reference (`&mut T`) access.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait MutAccess<T>: RefAccess<T> {}
+
+/// Marker trait for strong references.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait Rooted: sealed::Sealed {}
+
+impl<T> RefAccess<T> for GcCell<T> {}
+impl<T> MutAccess<T> for GcCell<T> {}
+
+impl<T> RefAccess<T> for RootCell<T> {}
+impl<T> MutAccess<T> for RootCell<T> {}
+impl<T> Rooted for RootCell<T> {}
