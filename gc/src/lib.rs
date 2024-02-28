@@ -243,16 +243,14 @@ mod trace;
 mod vec_list;
 
 use std::any::TypeId;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Pointer};
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
-use std::rc::Rc;
 
 use bitvec::vec::BitVec;
 
-use arena::{Arena, ArenaStore, Counter, StrongCounters};
+use arena::{Arena, ArenaStore, Counter};
 
 pub use trace::{Trace, Untrace};
 
@@ -838,7 +836,6 @@ impl<T> Copy for GcCell<T> {}
 pub struct RootCell<T> {
     addr: Location,
     counter: Counter,
-    strong_counters: Rc<RefCell<StrongCounters>>,
     _marker: PhantomData<T>,
 }
 
@@ -848,7 +845,6 @@ impl<T> RootCell<T> {
         let RootCell {
             addr,
             counter: _,
-            strong_counters: _,
             _marker,
         } = self;
 
@@ -900,24 +896,14 @@ impl<T> Clone for RootCell<T> {
         let RootCell {
             addr,
             counter,
-            strong_counters,
             _marker,
         } = self;
 
-        strong_counters.borrow_mut().increment(*counter);
-
-        RootCell {
+        Self {
             addr: *addr,
-            counter: *counter,
-            strong_counters: strong_counters.clone(),
+            counter: counter.clone(),
             _marker: PhantomData,
         }
-    }
-}
-
-impl<T> Drop for RootCell<T> {
-    fn drop(&mut self) {
-        self.strong_counters.borrow_mut().decrement(self.counter);
     }
 }
 

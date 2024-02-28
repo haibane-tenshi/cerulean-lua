@@ -62,22 +62,26 @@ impl<T> ArenaStore<T> {
             ..
         } = self.values.get(addr.index)?;
 
-        let counter = match counter_place.get() {
-            Some(counter) => {
-                self.strong_counters.borrow_mut().increment(counter);
-                counter
+        let index = match counter_place.get() {
+            Some(index) => {
+                self.strong_counters.borrow_mut().increment(index);
+                index
             }
             None => {
-                let counter = self.strong_counters.borrow_mut().insert(1);
-                counter_place.set(Some(counter));
-                counter
+                let index = self.strong_counters.borrow_mut().insert(1);
+                counter_place.set(Some(index));
+                index
             }
+        };
+
+        let counter = Counter {
+            index,
+            counters: self.strong_counters.clone(),
         };
 
         let r = RootCell {
             addr,
             counter,
-            strong_counters: self.strong_counters.clone(),
             _marker: PhantomData,
         };
 
@@ -179,7 +183,7 @@ where
 #[derive(Debug)]
 struct Place<T> {
     value: T,
-    counter: Cell<Option<Counter>>,
+    counter: Cell<Option<CounterIndex>>,
     gen: usize,
 }
 
@@ -194,33 +198,33 @@ impl<T> Place<T> {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct StrongCounters(VecList<usize>);
+struct StrongCounters(VecList<usize>);
 
 impl StrongCounters {
-    fn insert(&mut self, value: usize) -> Counter {
+    fn insert(&mut self, value: usize) -> CounterIndex {
         let index = self
             .0
             .try_insert(value)
             .unwrap_or_else(|_| self.0.insert(value));
 
-        Counter(index)
+        CounterIndex(index)
     }
 
-    fn remove(&mut self, index: Counter) {
+    fn remove(&mut self, index: CounterIndex) {
         self.0.remove(index.0);
     }
 
-    fn get(&self, index: Counter) -> Option<usize> {
+    fn get(&self, index: CounterIndex) -> Option<usize> {
         self.0.get(index.0).copied()
     }
 
-    pub(crate) fn increment(&mut self, index: Counter) {
+    fn increment(&mut self, index: CounterIndex) {
         if let Some(counter) = self.0.get_mut(index.0) {
             *counter += 1;
         }
     }
 
-    pub(crate) fn decrement(&mut self, index: Counter) {
+    fn decrement(&mut self, index: CounterIndex) {
         if let Some(counter) = self.0.get_mut(index.0) {
             *counter -= 1;
         }
@@ -228,4 +232,29 @@ impl StrongCounters {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Counter(usize);
+struct CounterIndex(usize);
+
+#[derive(Debug)]
+pub(crate) struct Counter {
+    index: CounterIndex,
+    counters: Rc<RefCell<StrongCounters>>,
+}
+
+impl Clone for Counter {
+    fn clone(&self) -> Self {
+        let Counter { index, counters } = self;
+
+        let index = *index;
+        let counters = counters.clone();
+
+        counters.borrow_mut().increment(index);
+
+        Counter { index, counters }
+    }
+}
+
+impl Drop for Counter {
+    fn drop(&mut self) {
+        self.counters.borrow_mut().decrement(self.index);
+    }
+}
