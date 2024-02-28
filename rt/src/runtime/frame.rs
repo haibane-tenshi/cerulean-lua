@@ -643,6 +643,7 @@ where
         Ok(r)
     }
 
+    #[allow(clippy::type_complexity)]
     fn exec_una_op(
         &mut self,
         args: [WeakValue<Ty>; 1],
@@ -752,6 +753,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn exec_bin_op(
         &mut self,
         args: [WeakValue<Ty>; 2],
@@ -858,6 +860,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn exec_bin_op_str(
         &mut self,
         args: [WeakValue<Ty>; 2],
@@ -918,6 +921,7 @@ where
         ControlFlow::Continue(Some(Value::Bool(r)))
     }
 
+    #[allow(clippy::type_complexity)]
     fn exec_bin_op_rel(
         &mut self,
         args: [WeakValue<Ty>; 2],
@@ -1019,6 +1023,7 @@ where
         ControlFlow::Continue(r)
     }
 
+    #[allow(clippy::type_complexity)]
     fn exec_tab_get(
         &mut self,
         args: [WeakValue<Ty>; 2],
@@ -1114,6 +1119,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn exec_tab_set(
         &mut self,
         args: [WeakValue<Ty>; 3],
