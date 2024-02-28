@@ -7,7 +7,7 @@ use bitvec::vec::BitVec;
 
 use crate::arena::{Arena, ArenaStore};
 use crate::trace::Trace;
-use crate::{GcCell, MutAccess, RefAccess, RootCell, Rooted};
+use crate::{Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted};
 
 /// Backing store for garbage-collected objects.
 ///
@@ -22,12 +22,12 @@ use crate::{GcCell, MutAccess, RefAccess, RootCell, Rooted};
 /// assert_eq!(heap[&a], 3);
 /// ```
 ///
-/// Garbage collection can be triggered automatically on [`Heap::alloc_cell`]
-/// or manually via [`Heap::gc`].
+/// Garbage collection can be triggered automatically on [`alloc_cell`](Heap::alloc_cell), [`alloc`](Heap::alloc)
+/// or manually via [`gc`](Heap::gc) method.
 /// We are using standard mark-and-sweep strategy.
 ///
-/// Newely allocated objects return [`RootCell<T>`](RootCell) which is a strong reference,
-/// but can be downgraded into [`GcCell<T>`](GcCell) which is a weak reference.
+/// Newely allocated objects return [`RootCell<T>`](RootCell)/[`Root<T>`](Root) which is a strong reference,
+/// but can be downgraded into [`GcCell<T>`](GcCell)/[`Gc<T>`](Gc) which is a weak reference.
 ///
 /// Result of dereferencing a pointer constructed in a different heap is unspecified,
 /// but guaranteed to be *safe*.
@@ -79,6 +79,9 @@ impl Heap {
     ///
     /// This function can potentially trigger a garbage collection phase.
     ///
+    /// The object can later be mutated through any reference as if it was wrapped in `RefCell`.
+    /// If this behavior is undesirable consider using [`alloc`](Heap::alloc) instead.
+    ///
     /// The function immediately roots the object it allocates so you don't need to worry
     /// that inner references will get dropped if gc is triggered as part of the call.
     pub fn alloc_cell<T>(&mut self, value: T) -> RootCell<T>
@@ -89,6 +92,33 @@ impl Heap {
         match arena.try_insert(value) {
             Ok(ptr) => ptr,
             Err(value) => self.alloc_slow(value),
+        }
+    }
+
+    /// Allocate an object.
+    ///
+    /// This function can potentially trigger a garbage collection phase.
+    ///
+    /// It is not possible to acquire mutable reference to the allocated object.
+    /// If you want to mutate the object later consider using [`alloc_cell`](Heap::alloc_cell)
+    /// instead of wrapping it in `Cell` or `RefCell`.
+    ///
+    /// The function immediately roots the object it allocates so you don't need to worry
+    /// that inner references will get dropped if gc is triggered as part of the call.
+    pub fn alloc<T>(&mut self, value: T) -> Root<T>
+    where
+        T: Trace,
+    {
+        let RootCell {
+            addr,
+            counter,
+            _marker,
+        } = self.alloc_cell(value);
+
+        Root {
+            addr,
+            counter,
+            _marker,
         }
     }
 
@@ -156,7 +186,37 @@ impl Heap {
     where
         T: Trace,
     {
-        self.arena()?.upgrade(ptr)
+        let GcCell { addr, _marker } = ptr;
+
+        let counter = self.arena::<T>()?.upgrade(addr)?;
+
+        let r = RootCell {
+            addr,
+            counter,
+            _marker,
+        };
+
+        Some(r)
+    }
+
+    /// Upgrade weak reference into strong reference.
+    ///
+    /// The function will return `None` if object was since deallocated.
+    pub fn upgrade<T>(&self, ptr: Gc<T>) -> Option<Root<T>>
+    where
+        T: Trace,
+    {
+        let Gc { addr, _marker } = ptr;
+
+        let counter = self.arena::<T>()?.upgrade(addr)?;
+
+        let r = Root {
+            addr,
+            counter,
+            _marker,
+        };
+
+        Some(r)
     }
 
     fn collector(&self) -> (Collector, Collector) {
@@ -280,6 +340,17 @@ where
     }
 }
 
+impl<T> Index<&Root<T>> for Heap
+where
+    T: Trace,
+{
+    type Output = T;
+
+    fn index(&self, index: &Root<T>) -> &Self::Output {
+        self.get_root(index)
+    }
+}
+
 impl<T> IndexMut<&RootCell<T>> for Heap
 where
     T: Trace,
@@ -361,7 +432,25 @@ pub struct Collector {
 
 impl Collector {
     /// Mark an object as reachable.
-    pub fn mark<T>(&mut self, ptr: GcCell<T>)
+    pub fn mark_cell<T>(&mut self, ptr: GcCell<T>)
+    where
+        T: Trace,
+    {
+        let id = TypeId::of::<T>();
+
+        let Some(mask) = self.masks.get_mut(&id) else {
+            return;
+        };
+
+        let Some(mut bit) = mask.get_mut(ptr.addr.index) else {
+            return;
+        };
+
+        *bit = true;
+    }
+
+    /// Mark an object as reachable.
+    pub fn mark<T>(&mut self, ptr: Gc<T>)
     where
         T: Trace,
     {

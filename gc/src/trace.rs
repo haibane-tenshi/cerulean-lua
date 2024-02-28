@@ -18,7 +18,7 @@ use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
-use super::{Collector, GcCell};
+use super::{Collector, Gc, GcCell};
 
 /// Track transitive reference dependencies.
 ///
@@ -52,6 +52,15 @@ pub trait Trace: 'static {
 }
 
 impl<T> Trace for GcCell<T>
+where
+    T: Trace,
+{
+    fn trace(&self, collector: &mut Collector) {
+        collector.mark_cell(*self)
+    }
+}
+
+impl<T> Trace for Gc<T>
 where
     T: Trace,
 {

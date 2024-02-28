@@ -52,11 +52,7 @@ impl<T> ArenaStore<T> {
         self.values.get(index).map(|place| &place.value)
     }
 
-    pub(crate) fn upgrade(&self, ptr: GcCell<T>) -> Option<RootCell<T>> {
-        use std::marker::PhantomData;
-
-        let GcCell { addr, _marker } = ptr;
-
+    pub(crate) fn upgrade(&self, addr: Location) -> Option<Counter> {
         let Place {
             counter: counter_place,
             ..
@@ -79,13 +75,7 @@ impl<T> ArenaStore<T> {
             counters: self.strong_counters.clone(),
         };
 
-        let r = RootCell {
-            addr,
-            counter,
-            _marker: PhantomData,
-        };
-
-        Some(r)
+        Some(counter)
     }
 
     fn insert_weak(&mut self, value: T) -> Result<GcCell<T>, T> {
@@ -106,8 +96,17 @@ impl<T> ArenaStore<T> {
     }
 
     pub(crate) fn try_insert(&mut self, value: T) -> Result<RootCell<T>, T> {
-        self.insert_weak(value)
-            .map(|ptr| self.upgrade(ptr).unwrap())
+        self.insert_weak(value).map(|ptr| {
+            let GcCell { addr, _marker } = ptr;
+
+            let counter = self.upgrade(addr).unwrap();
+
+            RootCell {
+                addr,
+                counter,
+                _marker,
+            }
+        })
     }
 
     pub(crate) fn insert(&mut self, value: T) -> RootCell<T> {
