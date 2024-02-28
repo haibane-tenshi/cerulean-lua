@@ -738,27 +738,40 @@ impl<'a, Ty> LuaStackFrame<'a, Ty>
 where
     Ty: CoreTypes,
 {
+    /// Ensure that all values on the stack are rooted.
     pub(super) fn sync_transient(&mut self, heap: &mut Heap) {
         self.0.stack.sync_transient(heap)
     }
 
+    /// Move disassociated upvalues to heap.
+    ///
+    /// Internally when a slot associated with upvalue is removed from stack
+    /// it is not moved to heap immediately but placed into special cache.
+    /// This function ensures that any upvalues stuck in this cache make their way to heap
+    /// and are properly reassociated.
+    ///
+    /// When it comes to upvalue handling there is one invariant that we need to enforce:
+    ///
+    /// * Upvalues on *existing* frames report correct memory locations.
+    ///
+    /// A nice part about this rule that after a frame is constructed,
+    /// for that specific frame invariant will stay true as long as the frame exists.
+    /// This is because any on-stack upvalues will be positioned somewhere on the stack above
+    /// that frame's stack therefore are impossible to remove, ergo cannot be disassociated.
+    /// So, travelling up the call stack cannot violate the invariant.
+    ///
+    /// However, entering new frames needs to be done with caution:
+    /// closure used to construct the frame might have some of its upvalues disassociated and stuck in the cache.
+    ///
+    /// Therefore, the only place where we must sync upvalue cache is inside [`Frame::new`](super::Frame::new).
     pub(super) fn sync_upvalues(&mut self, heap: &mut Heap) {
         self.0.stack.sync_upvalues(heap)
-    }
-
-    pub(super) fn sync_full(&mut self, heap: &mut Heap) {
-        self.0.stack.sync_full(heap);
     }
 
     pub(super) fn register_closure(&mut self, closure_ref: &Root<Closure<Ty>>, heap: &Heap) {
         self.0.stack.register_closure(closure_ref, heap)
     }
-}
 
-impl<'a, Ty> LuaStackFrame<'a, Ty>
-where
-    Ty: CoreTypes,
-{
     pub(super) fn as_slice(&self) -> &[WeakValue<Ty>] {
         self.0.as_slice()
     }

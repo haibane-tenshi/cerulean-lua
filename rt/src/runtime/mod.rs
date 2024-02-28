@@ -350,7 +350,7 @@ where
                         }
                         Callable::Rust(closure) => {
                             // evict upvalues on the caller side?
-                            self.stack.lua_frame().sync_full(&mut self.core.gc);
+                            self.stack.lua_frame().sync_transient(&mut self.core.gc);
                             self.invoke_at_raw(closure, start)?;
 
                             if let Some(event) = event {

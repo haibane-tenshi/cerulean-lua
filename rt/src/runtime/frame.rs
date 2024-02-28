@@ -208,6 +208,9 @@ where
             Default::default()
         };
 
+        // Ensure that disassociated upvalues are properly reassociated.
+        stack.sync_upvalues(&mut rt.core.gc);
+
         let r = Frame {
             closure,
             ip: Default::default(),
@@ -535,13 +538,13 @@ where
 
                         (value, Source::TrustedIsRooted(true))
                     }
-                    UpvaluePlace::Stack(slot) => {
+                    UpvaluePlace::Stack(stack_slot) => {
                         let value = stack
-                            .get_raw_slot(slot)
-                            .unwrap() // fixme: turn into proper error
+                            .get_raw_slot(stack_slot)
+                            .ok_or(MissingUpvalue(slot))?
                             .clone();
 
-                        (value, Source::StackSlot(slot))
+                        (value, Source::StackSlot(stack_slot))
                     }
                 };
 
@@ -1342,25 +1345,13 @@ where
         let ActiveFrame {
             closure,
             ip,
-            mut stack,
+            stack,
             register_variadic,
             event,
-            core,
             ..
         } = self;
 
         let stack_start = stack.boundary();
-
-        // Sync on frame suspension.
-        // Frames are suspended when a new frame is about to be entered.
-        // If that is a Rust frame we must sync unconditionally.
-        // If that is a Lua frame, unfortunately, we also need to do it.
-        // It is possible that we are trying to enter a closure that was just created
-        // but some of its upvalues got evicted and stuck in the cache.
-        // This is bad - active frames expects all of its upvalues to be correctly placed.
-        // We might be able to relax this to an extent
-        // (e.g. if there are no evicted upvalues no sync is necessary).
-        stack.lua_frame().sync_upvalues(&mut core.gc);
 
         Frame {
             closure,
@@ -1376,7 +1367,7 @@ where
 
         // All upvalues need to be gone.
         stack.evict_upvalues(..);
-        stack.drain(StackSlot(0)..returns);
+        let _ = stack.drain(StackSlot(0)..returns);
 
         if let Some(event) = self.event {
             stack.adjust_event_returns(event);
@@ -1387,7 +1378,7 @@ where
         // (e.g. originated from upvalues or variadics)
         // it is possible that its last root is going to get dropped right now.
         // Currently we don't track value origins with sufficient precision to avoid this scenario.
-        stack.sync_full(&mut self.core.gc);
+        stack.sync_transient(&mut self.core.gc);
 
         Ok(())
     }
