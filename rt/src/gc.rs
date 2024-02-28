@@ -5,7 +5,7 @@ use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
-use gc::{Collector, Gc, Heap, Root, Trace};
+use gc::{Collector, GcCell, Heap, RootCell, Trace};
 
 use crate::error::AlreadyDroppedError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce};
@@ -13,34 +13,34 @@ use crate::value::{CoreTypes, WeakValue};
 
 macro_rules! ref_pair {
     ($gc_name:ident, $root_name:ident) => {
-        pub struct $gc_name<T>(pub Gc<T>);
+        pub struct $gc_name<T>(pub GcCell<T>);
 
-        impl<T> From<Gc<T>> for $gc_name<T> {
-            fn from(value: Gc<T>) -> Self {
+        impl<T> From<GcCell<T>> for $gc_name<T> {
+            fn from(value: GcCell<T>) -> Self {
                 Self(value)
             }
         }
 
-        impl<T> From<$gc_name<T>> for Gc<T> {
+        impl<T> From<$gc_name<T>> for GcCell<T> {
             fn from(value: $gc_name<T>) -> Self {
                 value.0
             }
         }
 
-        impl<T> AsRef<Gc<T>> for $gc_name<T> {
-            fn as_ref(&self) -> &Gc<T> {
+        impl<T> AsRef<GcCell<T>> for $gc_name<T> {
+            fn as_ref(&self) -> &GcCell<T> {
                 &self.0
             }
         }
 
-        impl<T> AsMut<Gc<T>> for $gc_name<T> {
-            fn as_mut(&mut self) -> &mut Gc<T> {
+        impl<T> AsMut<GcCell<T>> for $gc_name<T> {
+            fn as_mut(&mut self) -> &mut GcCell<T> {
                 &mut self.0
             }
         }
 
         impl<T> Deref for $gc_name<T> {
-            type Target = Gc<T>;
+            type Target = GcCell<T>;
 
             fn deref(&self) -> &Self::Target {
                 self.as_ref()
@@ -96,7 +96,7 @@ macro_rules! ref_pair {
             }
         }
 
-        pub struct $root_name<T>(pub Root<T>);
+        pub struct $root_name<T>(pub RootCell<T>);
 
         impl<T> $root_name<T> {
             pub fn downgrade(&self) -> $gc_name<T> {
@@ -104,32 +104,32 @@ macro_rules! ref_pair {
             }
         }
 
-        impl<T> From<Root<T>> for $root_name<T> {
-            fn from(value: Root<T>) -> Self {
+        impl<T> From<RootCell<T>> for $root_name<T> {
+            fn from(value: RootCell<T>) -> Self {
                 Self(value)
             }
         }
 
-        impl<T> From<$root_name<T>> for Root<T> {
+        impl<T> From<$root_name<T>> for RootCell<T> {
             fn from(value: $root_name<T>) -> Self {
                 value.0
             }
         }
 
-        impl<T> AsRef<Root<T>> for $root_name<T> {
-            fn as_ref(&self) -> &Root<T> {
+        impl<T> AsRef<RootCell<T>> for $root_name<T> {
+            fn as_ref(&self) -> &RootCell<T> {
                 &self.0
             }
         }
 
-        impl<T> AsMut<Root<T>> for $root_name<T> {
-            fn as_mut(&mut self) -> &mut Root<T> {
+        impl<T> AsMut<RootCell<T>> for $root_name<T> {
+            fn as_mut(&mut self) -> &mut RootCell<T> {
                 &mut self.0
             }
         }
 
         impl<T> Deref for $root_name<T> {
-            type Target = Root<T>;
+            type Target = RootCell<T>;
 
             fn deref(&self) -> &Self::Target {
                 self.as_ref()

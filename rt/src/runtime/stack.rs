@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display};
 use std::ops::{Add, Bound, Deref, DerefMut, Range, RangeBounds, Sub};
 
 use bitvec::vec::BitVec;
-use gc::{Gc, Heap, Root};
+use gc::{GcCell, Heap, RootCell};
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
@@ -177,7 +177,7 @@ where
     ///
     /// Contents of this vec should be syncronized with `main` field.
     /// Its purpose is to keep on-stack references alive.
-    root: Root<Vec<WeakValue<Ty>>>,
+    root: RootCell<Vec<WeakValue<Ty>>>,
 
     /// Diff between main and rooted mirror.
     ///
@@ -219,7 +219,7 @@ where
     /// so it doesn't matter whether closure is dropped or not.
     ///
     /// Upvalues referencing stack slots need to be updated when those are dissociated.
-    closures: Vec<Gc<Closure<Ty>>>,
+    closures: Vec<GcCell<Closure<Ty>>>,
 
     /// Upvalues that got dissociated from the stack,
     /// but that change was not yet propagated to affected closures.
@@ -238,7 +238,7 @@ where
     pub fn new(heap: &mut Heap) -> Self {
         Stack {
             main: Default::default(),
-            root: heap.alloc(Default::default()),
+            root: heap.alloc_cell(Default::default()),
             diff: Default::default(),
             upvalue_mark: Default::default(),
             closures: Default::default(),
@@ -261,7 +261,7 @@ where
             let reallocated: HashMap<_, _> = evicted_upvalues
                 .into_iter()
                 .map(|(slot, value)| {
-                    let value = heap.alloc(value).downgrade();
+                    let value = heap.alloc_cell(value).downgrade();
 
                     (slot, value)
                 })
@@ -322,7 +322,7 @@ where
         self.sync_upvalue_cache(heap);
     }
 
-    fn register_closure(&mut self, closure_ref: &Root<Closure<Ty>>, heap: &Heap) {
+    fn register_closure(&mut self, closure_ref: &RootCell<Closure<Ty>>, heap: &Heap) {
         let closure = &heap[closure_ref];
 
         let iter = closure.upvalues().iter().filter_map(|place| match place {
@@ -763,7 +763,7 @@ where
         self.0.stack.sync_upvalues(heap)
     }
 
-    pub(super) fn register_closure(&mut self, closure_ref: &Root<Closure<Ty>>, heap: &Heap) {
+    pub(super) fn register_closure(&mut self, closure_ref: &RootCell<Closure<Ty>>, heap: &Heap) {
         self.0.stack.register_closure(closure_ref, heap)
     }
 

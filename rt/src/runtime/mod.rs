@@ -10,7 +10,7 @@ use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 
 use enumoid::EnumMap;
-use gc::{Heap, Root};
+use gc::{Heap, RootCell};
 use repr::index::StackSlot;
 
 use crate::backtrace::{Backtrace, Location};
@@ -310,7 +310,7 @@ where
     Ty::RustClosure: LuaFfi<Ty>,
     WeakValue<Ty>: Display,
 {
-    pub fn enter(mut self, closure: Root<Closure<Ty>>) -> Result<(), RuntimeError<Ty>> {
+    pub fn enter(mut self, closure: RootCell<Closure<Ty>>) -> Result<(), RuntimeError<Ty>> {
         use crate::error::OutOfBoundsStack;
         use crate::value::callable::Callable;
 

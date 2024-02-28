@@ -36,7 +36,7 @@ where
 
             rt.stack.clear();
 
-            let value = rt.core.gc.alloc(Default::default());
+            let value = rt.core.gc.alloc_cell(Default::default());
 
             Ok(RootTable(value))
         },

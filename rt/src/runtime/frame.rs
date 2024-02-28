@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::ControlFlow;
 
-use gc::{Collector, Gc, Heap, Root, Trace};
+use gc::{Collector, GcCell, Heap, RootCell, Trace};
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
@@ -74,7 +74,7 @@ where
     Ty: CoreTypes,
 {
     fn_ptr: FunctionPtr,
-    upvalues: TiVec<UpvalueSlot, UpvaluePlace<Gc<WeakValue<Ty>>>>,
+    upvalues: TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>,
 }
 
 impl<Ty> Trace for Closure<Ty>
@@ -99,7 +99,7 @@ where
         rt: &mut RuntimeView<Ty>,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<Root<Self>, RuntimeError<Ty>> {
+    ) -> Result<RootCell<Self>, RuntimeError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let upvalue_count = rt
@@ -116,12 +116,12 @@ where
                 .into_iter()
                 .chain(std::iter::repeat_with(|| Value::Nil))
                 .take(upvalue_count)
-                .map(|value| heap.alloc(value).downgrade())
+                .map(|value| heap.alloc_cell(value).downgrade())
                 .map(UpvaluePlace::Place)
                 .collect();
 
             let closure = Closure { fn_ptr, upvalues };
-            heap.alloc(closure)
+            heap.alloc_cell(closure)
         });
 
         Ok(closure)
@@ -131,13 +131,13 @@ where
         self.fn_ptr
     }
 
-    pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<Gc<WeakValue<Ty>>>> {
+    pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
         &self.upvalues
     }
 
     pub(crate) fn upvalues_mut(
         &mut self,
-    ) -> &mut TiSlice<UpvalueSlot, UpvaluePlace<Gc<WeakValue<Ty>>>> {
+    ) -> &mut TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
         &mut self.upvalues
     }
 }
@@ -146,7 +146,7 @@ pub(crate) struct Frame<Ty>
 where
     Ty: CoreTypes,
 {
-    closure: Root<Closure<Ty>>,
+    closure: RootCell<Closure<Ty>>,
     ip: InstrId,
     stack_start: RawStackSlot,
     register_variadic: Vec<StrongValue<Ty>>,
@@ -164,7 +164,7 @@ where
 {
     pub(crate) fn new(
         rt: &mut RuntimeView<Ty>,
-        closure: Root<Closure<Ty>>,
+        closure: RootCell<Closure<Ty>>,
         event: Option<Event>,
     ) -> Result<Self, RuntimeError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
@@ -226,7 +226,7 @@ impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
 {
-    pub(crate) fn closure(&self) -> &Root<Closure<Ty>> {
+    pub(crate) fn closure(&self) -> &RootCell<Closure<Ty>> {
         &self.closure
     }
 
@@ -367,7 +367,7 @@ pub struct ActiveFrame<'rt, Ty>
 where
     Ty: CoreTypes,
 {
-    closure: Root<Closure<Ty>>,
+    closure: RootCell<Closure<Ty>>,
     core: &'rt mut Core<Ty>,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
@@ -397,7 +397,7 @@ where
     fn upvalue(
         &self,
         index: UpvalueSlot,
-    ) -> Result<UpvaluePlace<Gc<WeakValue<Ty>>>, MissingUpvalue> {
+    ) -> Result<UpvaluePlace<GcCell<WeakValue<Ty>>>, MissingUpvalue> {
         let closure = &self.core.gc[&self.closure];
 
         closure
@@ -610,7 +610,7 @@ where
             }
             TabCreate => {
                 self.stack.lua_frame().sync_transient(&mut self.core.gc);
-                let value = self.core.gc.alloc(Default::default()).downgrade();
+                let value = self.core.gc.alloc_cell(Default::default()).downgrade();
 
                 self.stack
                     .lua_frame()
@@ -1275,7 +1275,7 @@ where
     pub(crate) fn construct_closure(
         &mut self,
         recipe_id: RecipeId,
-    ) -> Result<Root<Closure<Ty>>, opcode_err::Cause> {
+    ) -> Result<RootCell<Closure<Ty>>, opcode_err::Cause> {
         let recipe = self
             .chunk
             .get_recipe(recipe_id)
@@ -1321,7 +1321,7 @@ where
         // All Gc references inside the closure are copies of upvalues of current frame
         // which are definitely rooted.
         self.stack.lua_frame().sync_transient(&mut self.core.gc);
-        let closure = self.core.gc.alloc(closure);
+        let closure = self.core.gc.alloc_cell(closure);
 
         self.stack
             .lua_frame()
