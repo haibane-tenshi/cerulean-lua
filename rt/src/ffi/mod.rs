@@ -444,7 +444,7 @@ where
 {
     let f = move |mut rt: RuntimeView<'_, Ty>| {
         use crate::runtime::FunctionPtr;
-        use repr::index::{FunctionId, StackSlot};
+        use repr::index::FunctionId;
 
         let ptr = FunctionPtr {
             chunk_id,
@@ -453,7 +453,7 @@ where
 
         let closure = rt.construct_closure(ptr, [rt.core.global_env.downgrade()])?;
 
-        rt.enter(closure.0, StackSlot(0))
+        rt.enter(closure.0)
     };
 
     f.with_name("rt::ffi::call_chunk")

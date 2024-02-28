@@ -551,10 +551,8 @@ where
         self,
         mut rt: crate::runtime::RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<Ty>> {
-        use repr::index::StackSlot;
-
         match self {
-            Callable::Lua(f) => rt.enter(f.into(), StackSlot(0)),
+            Callable::Lua(f) => rt.enter(f.into()),
             Callable::Rust(f) => rt.invoke(f),
         }
     }
@@ -577,12 +575,10 @@ where
         mut rt: crate::runtime::RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<Ty>> {
         use crate::gc::{RootLuaClosure, TryIntoWithGc};
-        use repr::index::StackSlot;
-
         match self {
             Callable::Lua(f) => {
                 let f: RootLuaClosure<_> = f.try_into_with_gc(&mut rt.core.gc)?;
-                rt.enter(f.into(), StackSlot(0))
+                rt.enter(f.into())
             }
             Callable::Rust(f) => rt.invoke(f),
         }

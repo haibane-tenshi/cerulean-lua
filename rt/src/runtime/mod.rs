@@ -192,8 +192,8 @@ where
             rust_backtrace_stack,
         } = self;
 
-        let frames = frames.view();
         let stack = stack.guard(start)?;
+        let frames = frames.view();
         let rust_backtrace_stack = rust_backtrace_stack.view_over();
 
         let r = RuntimeView {
@@ -213,26 +213,19 @@ where
     Ty: CoreTypes,
     WeakValue<Ty>: Display,
 {
-    pub fn invoke(&mut self, f: impl LuaFfiOnce<Ty>) -> Result<(), RuntimeError<Ty>> {
-        self.invoke_at(f, StackSlot(0))
-    }
-
     pub fn invoke_at(
         &mut self,
         f: impl LuaFfiOnce<Ty>,
         start: StackSlot,
     ) -> Result<(), RuntimeError<Ty>> {
-        let start = self.stack.boundary() + start;
-        self.invoke_at_raw(f, start)
+        use crate::error::OutOfBoundsStack;
+
+        let mut rt = self.view(start).ok_or(OutOfBoundsStack)?;
+        rt.invoke(f)
     }
 
-    fn invoke_at_raw(
-        &mut self,
-        f: impl LuaFfiOnce<Ty>,
-        start: RawStackSlot,
-    ) -> Result<(), RuntimeError<Ty>> {
+    pub fn invoke(mut self, f: impl LuaFfiOnce<Ty>) -> Result<(), RuntimeError<Ty>> {
         use crate::backtrace::{BacktraceFrame, FrameSource};
-        use crate::error::OutOfBoundsStack;
         use rust_backtrace_stack::RustFrame;
 
         let rust_frame = RustFrame {
@@ -244,7 +237,11 @@ where
             },
         };
 
-        let mut view = self.view_raw(start).ok_or(OutOfBoundsStack)?;
+        // Do an extra protective view.
+        // We cannot reasonably expect `self` to be in consistent state
+        // because caller might have caught `RuntimeError` and immediately passed
+        // the runtime to us.
+        let mut view = self.view_full();
         view.rust_backtrace_stack.push(rust_frame);
 
         tracing::trace!(
@@ -313,19 +310,13 @@ where
     Ty::RustClosure: LuaFfi<Ty>,
     WeakValue<Ty>: Display,
 {
-    pub fn enter(
-        &mut self,
-        closure: Root<Closure<Ty>>,
-        start: StackSlot,
-    ) -> Result<(), RuntimeError<Ty>> {
+    pub fn enter(mut self, closure: Root<Closure<Ty>>) -> Result<(), RuntimeError<Ty>> {
         use crate::error::OutOfBoundsStack;
         use crate::value::callable::Callable;
 
-        let start = self.stack.boundary() + start;
-        let rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
-        let frame = Frame::new(rt, closure, None)?;
+        let frame = Frame::new(&mut self, closure, None)?;
 
-        let mut active_frame = frame.activate(self)?;
+        let mut active_frame = frame.activate(&mut self)?;
 
         loop {
             match active_frame.step() {
@@ -336,7 +327,7 @@ where
                         break Ok(());
                     };
 
-                    active_frame = frame.activate(self)?;
+                    active_frame = frame.activate(&mut self)?;
                 }
                 Ok(ControlFlow::Break(ChangeFrame::Invoke(event, callable, start))) => {
                     let frame = active_frame.suspend();
@@ -348,12 +339,12 @@ where
 
                     match callable {
                         Callable::Lua(closure) => {
-                            let frame = Frame::new(rt, closure.into(), event)?;
-                            active_frame = frame.activate(self)?;
+                            let frame = Frame::new(&mut rt, closure.into(), event)?;
+                            active_frame = frame.activate(&mut self)?;
                         }
                         Callable::Rust(closure) => {
-                            self.stack.lua_frame().sync_transient(&mut self.core.gc);
-                            self.invoke_at_raw(closure, start)?;
+                            rt.stack.lua_frame().sync_transient(&mut rt.core.gc);
+                            rt.invoke(closure)?;
 
                             if let Some(event) = event {
                                 let mut stack = self.stack.guard(start).expect(
@@ -367,7 +358,7 @@ where
                                 .pop()
                                 .expect("suspended frame should still exist");
 
-                            active_frame = frame.activate(self)?;
+                            active_frame = frame.activate(&mut self)?;
                         }
                     }
                 }

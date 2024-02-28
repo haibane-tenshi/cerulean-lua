@@ -164,7 +164,7 @@ where
     StrongValue<Ty>: Clone,
 {
     pub(crate) fn new(
-        mut rt: RuntimeView<Ty>,
+        rt: &mut RuntimeView<Ty>,
         closure: Root<Closure<Ty>>,
         event: Option<Event>,
     ) -> Result<Self, RuntimeError<Ty>> {
