@@ -598,7 +598,7 @@ where
 #[derive(Debug)]
 pub enum LoadError {
     Immutable(crate::chunk_cache::ImmutableCacheError),
-    CompilationFailure(Diagnostic),
+    CompilationFailure(Box<Diagnostic>),
 }
 
 impl From<crate::chunk_cache::ImmutableCacheError> for LoadError {
@@ -609,7 +609,7 @@ impl From<crate::chunk_cache::ImmutableCacheError> for LoadError {
 
 impl From<Diagnostic> for LoadError {
     fn from(value: Diagnostic) -> Self {
-        LoadError::CompilationFailure(value)
+        LoadError::CompilationFailure(Box::new(value))
     }
 }
 
@@ -620,7 +620,7 @@ where
     fn from(value: LoadError) -> Self {
         match value {
             LoadError::Immutable(err) => RuntimeError::Immutable(err),
-            LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(Box::new(diag)),
+            LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(diag),
         }
     }
 }
