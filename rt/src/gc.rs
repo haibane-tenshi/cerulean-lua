@@ -181,7 +181,7 @@ macro_rules! ref_pair {
             type Error = AlreadyDroppedError;
 
             fn try_from_with_gc(value: $gc_name<T>, gc: &mut Heap) -> Result<Self, Self::Error> {
-                let value = gc.upgrade(value.0).ok_or(AlreadyDroppedError)?;
+                let value = gc.upgrade_cell(value.0).ok_or(AlreadyDroppedError)?;
                 Ok($root_name(value))
             }
         }

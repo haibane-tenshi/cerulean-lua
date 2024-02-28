@@ -152,7 +152,7 @@ impl Heap {
     /// Upgrade weak reference into strong reference.
     ///
     /// The function will return `None` if object was since deallocated.
-    pub fn upgrade<T>(&self, ptr: GcCell<T>) -> Option<RootCell<T>>
+    pub fn upgrade_cell<T>(&self, ptr: GcCell<T>) -> Option<RootCell<T>>
     where
         T: Trace,
     {
