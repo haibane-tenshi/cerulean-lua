@@ -232,6 +232,7 @@ where
 // https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
 pub struct Dispatchable<T, Ty: CoreTypes> {
     value: T,
+    #[allow(clippy::type_complexity)]
     dispatcher: fn(&T, &str, &str, RuntimeView<'_, Ty>) -> Option<Result<(), RuntimeError<Ty>>>,
 }
 
