@@ -102,6 +102,15 @@ impl Diff {
         }
     }
 
+    fn push(&mut self, slot: RawStackSlot, is_transient: bool) {
+        self.unsync = self.unsync.min(slot);
+
+        // Update transient if it was pointing past the main.
+        if !is_transient && self.transient == slot {
+            self.transient.0 += 1;
+        }
+    }
+
     fn insert(&mut self, slot: RawStackSlot, is_transient: bool) {
         self.unsync = self.unsync.min(slot);
 
@@ -109,6 +118,17 @@ impl Diff {
             self.transient = self.transient.min(slot);
         } else if slot <= self.transient {
             self.transient.0 += 1;
+        }
+    }
+
+    fn extend(&mut self, range: Range<RawStackSlot>, is_transient: bool) {
+        debug_assert!(range.start <= range.end);
+        debug_assert!(self.transient <= range.start);
+
+        self.unsync = self.unsync.min(range.start);
+
+        if !is_transient && self.transient == range.start {
+            self.transient = range.end;
         }
     }
 
@@ -340,7 +360,7 @@ where
 
         let slot = self.main.next_key();
         let is_transient = value.is_transient() && self.diff.is_transient(source);
-        self.diff.modify(slot, is_transient);
+        self.diff.push(slot, is_transient);
 
         self.main.push_and_get_key(value)
     }
@@ -467,9 +487,10 @@ where
 
     fn extend(&mut self, iter: impl IntoIterator<Item = WeakValue<Ty>>, is_rooted: bool) {
         let start = self.main.next_key();
-        self.diff.modify(start, !is_rooted);
-
         self.main.extend(iter);
+        let end = self.main.next_key();
+
+        self.diff.extend(start..end, !is_rooted);
     }
 }
 
