@@ -4,7 +4,6 @@ use std::ops::ControlFlow;
 
 use gc::{Collector, Gc, Heap, Root, Trace};
 use repr::chunk::{Chunk, ClosureRecipe};
-use repr::debug_info::OpCodeDebugInfo;
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
@@ -1179,7 +1178,6 @@ where
 
                             let index = self.core.dialect.coerce_tab_set(index);
                             let key = index.try_into().map_err(InvalidKey)?;
-                            let value = value.into();
 
                             self.core
                                 .gc
@@ -1256,20 +1254,6 @@ where
                 .insert(start, callable, Source::StackSlot(start));
             callable = new_callable;
         }
-    }
-
-    fn opcode_debug_info(&self, ip: InstrId) -> Option<OpCodeDebugInfo> {
-        let heap = &self.core.gc;
-
-        self.chunk
-            .debug_info
-            .as_ref()
-            .and_then(|debug_info| {
-                let fn_id = heap[&self.closure].fn_ptr.function_id;
-                debug_info.functions.get(fn_id)
-            })
-            .and_then(|fn_debug_info| fn_debug_info.opcodes.get(ip))
-            .cloned()
     }
 
     pub fn next_opcode(&mut self) -> Option<OpCode> {

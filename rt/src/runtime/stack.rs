@@ -322,11 +322,6 @@ where
         self.sync_upvalue_cache(heap);
     }
 
-    fn sync_full(&mut self, heap: &mut Heap) {
-        self.sync_stack_cache(heap);
-        self.sync_upvalue_cache(heap);
-    }
-
     fn register_closure(&mut self, closure_ref: &Root<Closure<Ty>>, heap: &Heap) {
         let closure = &heap[closure_ref];
 

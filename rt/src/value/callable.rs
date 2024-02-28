@@ -383,10 +383,7 @@ where
     Closure: LuaFfiOnce<Ty>,
     WeakValue<Ty>: Display,
 {
-    fn call_once(
-        self,
-        mut rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         match self {
             Self::Ref(f) => rt.invoke(f),
             Self::Ptr(f) => rt.invoke(f),
@@ -547,10 +544,7 @@ where
     Ty::RustClosure: LuaFfi<Ty>,
     WeakValue<Ty>: Display,
 {
-    fn call_once(
-        self,
-        mut rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         match self {
             Callable::Lua(f) => rt.enter(f.into()),
             Callable::Rust(f) => rt.invoke(f),
@@ -570,10 +564,7 @@ where
     Ty::RustClosure: LuaFfi<Ty>,
     WeakValue<Ty>: Display,
 {
-    fn call_once(
-        self,
-        mut rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         use crate::gc::{RootLuaClosure, TryIntoWithGc};
         match self {
             Callable::Lua(f) => {

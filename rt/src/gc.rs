@@ -282,7 +282,7 @@ where
 {
     fn call(
         &self,
-        mut rt: crate::runtime::RuntimeView<'_, Ty>,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
     ) -> Result<(), crate::error::RuntimeError<Ty>> {
         let func = rt.core.gc.get(self.0).ok_or(AlreadyDroppedError)?.clone();
         rt.invoke(func)
@@ -331,7 +331,7 @@ where
 {
     fn call(
         &self,
-        mut rt: crate::runtime::RuntimeView<'_, Ty>,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
     ) -> Result<(), crate::error::RuntimeError<Ty>> {
         let func = rt.core.gc[&self].clone();
         rt.invoke(func)

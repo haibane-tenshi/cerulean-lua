@@ -225,9 +225,6 @@ where
     }
 }
 
-type RootTable<Ty> = <Strong<Ty> as Types>::Table;
-type GcTable<Ty> = <Weak<Ty> as Types>::Table;
-
 impl<Ty> WeakValue<Ty>
 where
     Ty: CoreTypes,

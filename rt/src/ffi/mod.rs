@@ -335,10 +335,7 @@ where
     Ty: CoreTypes,
 {
     fn clone(&self) -> Self {
-        Self {
-            func: self.func,
-            name: self.name,
-        }
+        *self
     }
 }
 
@@ -381,7 +378,7 @@ where
     Ty: CoreTypes,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.func.partial_cmp(&other.func)
+        Some(self.func.cmp(&other.func))
     }
 }
 

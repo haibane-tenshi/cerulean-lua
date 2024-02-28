@@ -288,7 +288,7 @@ where
                 };
 
                 {
-                    let source = std::str::from_utf8(source.as_ref().as_ref()).map_err(|_| {
+                    let source = std::str::from_utf8(source.as_ref()).map_err(|_| {
                         let msg = StringRef::new("string does not contain valid utf8".into());
                         Value::String(msg)
                     })?;

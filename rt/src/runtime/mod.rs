@@ -220,7 +220,7 @@ where
     ) -> Result<(), RuntimeError<Ty>> {
         use crate::error::OutOfBoundsStack;
 
-        let mut rt = self.view(start).ok_or(OutOfBoundsStack)?;
+        let rt = self.view(start).ok_or(OutOfBoundsStack)?;
         rt.invoke(f)
     }
 
