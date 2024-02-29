@@ -1,13 +1,12 @@
 use std::marker::PhantomData;
 
+use gc::{GcCell, RootCell};
+
 use super::callable::{RustCallable, RustClosureRef};
 use super::string::PossiblyUtf8Vec;
 use super::userdata::FullUserdata;
 use super::{KeyValue, Value};
-use crate::gc::{
-    GcFullUserdata, GcLuaClosure, GcRustClosure, GcTable, RootFullUserdata, RootLuaClosure,
-    RootRustClosure, RootTable, StringRef,
-};
+use crate::gc::StringRef;
 use crate::runtime::Closure;
 
 use gc::Trace;
@@ -27,10 +26,10 @@ where
     Ty: CoreTypes,
 {
     type String = StringRef<<Ty as CoreTypes>::String>;
-    type LuaCallable = RootLuaClosure<Closure<Ty>>;
-    type RustCallable = RustCallable<Ty, RootRustClosure<<Ty as CoreTypes>::RustClosure>>;
-    type Table = RootTable<<Ty as CoreTypes>::Table>;
-    type FullUserdata = RootFullUserdata<<Ty as CoreTypes>::FullUserdata>;
+    type LuaCallable = RootCell<Closure<Ty>>;
+    type RustCallable = RustCallable<Ty, RootCell<<Ty as CoreTypes>::RustClosure>>;
+    type Table = RootCell<<Ty as CoreTypes>::Table>;
+    type FullUserdata = RootCell<<Ty as CoreTypes>::FullUserdata>;
 }
 
 pub struct Weak<Ty>(PhantomData<(Ty,)>);
@@ -40,17 +39,17 @@ where
     Ty: CoreTypes,
 {
     type String = StringRef<<Ty as CoreTypes>::String>;
-    type LuaCallable = GcLuaClosure<Closure<Ty>>;
-    type RustCallable = RustCallable<Ty, GcRustClosure<<Ty as CoreTypes>::RustClosure>>;
-    type Table = GcTable<<Ty as CoreTypes>::Table>;
-    type FullUserdata = GcFullUserdata<<Ty as CoreTypes>::FullUserdata>;
+    type LuaCallable = GcCell<Closure<Ty>>;
+    type RustCallable = RustCallable<Ty, GcCell<<Ty as CoreTypes>::RustClosure>>;
+    type Table = GcCell<<Ty as CoreTypes>::Table>;
+    type FullUserdata = GcCell<<Ty as CoreTypes>::FullUserdata>;
 }
 
 pub trait CoreTypes: Sized + 'static {
     type String: Trace + Concat + Len + Clone + PartialOrd + From<String> + From<&'static str>;
     type RustClosure: Clone + PartialEq + Trace;
-    type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcTable<Self::Table>>;
-    type FullUserdata: Trace + Metatable<GcTable<Self::Table>>;
+    type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcCell<Self::Table>>;
+    type FullUserdata: Trace + Metatable<GcCell<Self::Table>>;
 }
 
 pub struct DefaultTypes;

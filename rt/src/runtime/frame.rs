@@ -484,7 +484,7 @@ where
                 let closure = self.construct_closure(fn_id)?;
 
                 self.stack.lua_frame().push(
-                    Value::Function(Callable::Lua(closure.downgrade().into())),
+                    Value::Function(Callable::Lua(closure.downgrade())),
                     Source::TrustedIsRooted(false),
                 );
 
@@ -614,7 +614,7 @@ where
 
                 self.stack
                     .lua_frame()
-                    .push(Value::Table(value.into()), Source::TrustedIsRooted(false));
+                    .push(Value::Table(value), Source::TrustedIsRooted(false));
 
                 ControlFlow::Continue(())
             }
@@ -715,7 +715,7 @@ where
                 let key = event.into_with_gc(heap);
                 let metavalue = metatable
                     .map(|mt| {
-                        heap.get(mt.into())
+                        heap.get(mt)
                             .ok_or(AlreadyDroppedError)
                             .map(|table| table.get(&key))
                     })
@@ -726,7 +726,7 @@ where
                     Value::Nil => match (op, args) {
                         // Trigger table len builtin on failed metamethod lookup.
                         (UnaOp::StrLen, [Value::Table(tab)]) => {
-                            let border = heap.get(tab.into()).ok_or(AlreadyDroppedError)?.border();
+                            let border = heap.get(tab).ok_or(AlreadyDroppedError)?.border();
                             self.stack
                                 .lua_frame()
                                 .push(Value::Int(border), Source::TrustedIsRooted(false));
@@ -807,7 +807,7 @@ where
                         .map(|mt| {
                             self.core
                                 .gc
-                                .get(mt.into())
+                                .get(mt)
                                 .ok_or(AlreadyDroppedError)
                                 .map(|table| table.get(&key))
                         })
@@ -905,7 +905,7 @@ where
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
             [Value::Float(lhs), Value::Int(rhs)] if cmp => Float(lhs) == Int(rhs),
 
-            [Value::Table(lhs), Value::Table(rhs)] if lhs != rhs => {
+            [Value::Table(lhs), Value::Table(rhs)] if lhs.addr() != rhs.addr() => {
                 let args = [Value::Table(lhs), Value::Table(rhs)];
                 return ControlFlow::Break(args);
             }
@@ -1048,7 +1048,7 @@ where
                 let value = self
                     .core
                     .gc
-                    .get(table.into())
+                    .get(table)
                     .ok_or(AlreadyDroppedError)?
                     .get(&key);
 
@@ -1071,7 +1071,7 @@ where
                     .map(|mt| {
                         self.core
                             .gc
-                            .get(mt.into())
+                            .get(mt)
                             .ok_or(AlreadyDroppedError)
                             .map(|table| table.get(&key))
                     })
@@ -1139,12 +1139,7 @@ where
             if let Value::Table(table) = &table {
                 let index = self.core.dialect.coerce_tab_set(index.clone());
                 let key = index.try_into().map_err(InvalidKey)?;
-                let table = *table;
-                let table = self
-                    .core
-                    .gc
-                    .get_mut(table.into())
-                    .ok_or(AlreadyDroppedError)?;
+                let table = self.core.gc.get_mut(*table).ok_or(AlreadyDroppedError)?;
 
                 // It succeeds if key is already populated.
                 let r = if table.contains_key(&key) {
@@ -1168,7 +1163,7 @@ where
                     .map(|mt| {
                         self.core
                             .gc
-                            .get(mt.into())
+                            .get(mt)
                             .ok_or(AlreadyDroppedError)
                             .map(|table| table.get(&key))
                     })
@@ -1187,7 +1182,7 @@ where
 
                             self.core
                                 .gc
-                                .get_mut(table.into())
+                                .get_mut(table)
                                 .ok_or(AlreadyDroppedError)?
                                 .set(key, value);
 
@@ -1243,7 +1238,7 @@ where
                     let key = Event::Call.into_with_gc(&mut self.core.gc);
                     self.core
                         .gc
-                        .get(mt.into())
+                        .get(mt)
                         .ok_or(AlreadyDroppedError)
                         .map(|table| table.get(&key))
                 })

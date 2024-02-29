@@ -6,7 +6,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::path::Path;
 
-use gc::{Heap, Trace};
+use gc::{Gc, GcCell, Heap, Root, RootCell, Trace};
 
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
@@ -79,6 +79,158 @@ where
 {
     fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         (self)(rt)
+    }
+}
+
+impl<Ty, T> LuaFfiOnce<Ty> for GcCell<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "{gc-allocated rust closure}".to_string(),
+        }
+    }
+}
+
+impl<Ty, T> LuaFfiMut<Ty> for GcCell<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfi<Ty> for GcCell<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        use crate::error::AlreadyDroppedError;
+
+        let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
+        f.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfiOnce<Ty> for RootCell<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "{gc-allocated rust closure}".to_string(),
+        }
+    }
+}
+
+impl<Ty, T> LuaFfiMut<Ty> for RootCell<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfi<Ty> for RootCell<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        let f = rt.core.gc.get_root(self).clone();
+        f.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfiOnce<Ty> for Gc<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "{gc-allocated rust closure}".to_string(),
+        }
+    }
+}
+
+impl<Ty, T> LuaFfiMut<Ty> for Gc<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfi<Ty> for Gc<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        use crate::error::AlreadyDroppedError;
+
+        let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
+        f.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfiOnce<Ty> for Root<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: "{gc-allocated rust closure}".to_string(),
+        }
+    }
+}
+
+impl<Ty, T> LuaFfiMut<Ty> for Root<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        self.call(rt)
+    }
+}
+
+impl<Ty, T> LuaFfi<Ty> for Root<T>
+where
+    Ty: CoreTypes,
+    T: Trace + LuaFfi<Ty> + Clone,
+{
+    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+        let f = rt.core.gc.get_root(self).clone();
+        f.call(rt)
     }
 }
 
@@ -450,7 +602,7 @@ where
 
         let closure = rt.construct_closure(ptr, [rt.core.global_env.downgrade()])?;
 
-        rt.enter(closure.0)
+        rt.enter(closure)
     };
 
     f.with_name("rt::ffi::call_chunk")

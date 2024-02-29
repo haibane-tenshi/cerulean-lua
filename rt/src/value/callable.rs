@@ -421,14 +421,18 @@ where
     type Error = crate::error::AlreadyDroppedError;
 
     fn try_from_with_gc(value: Callable<Weak<Ty>>, gc: &mut Heap) -> Result<Self, Self::Error> {
-        use crate::gc::TryIntoWithGc;
+        use crate::error::AlreadyDroppedError;
 
         let r = match value {
             Callable::Rust(RustCallable::Ptr(t)) => Callable::Rust(RustCallable::Ptr(t)),
             Callable::Rust(RustCallable::Ref(t)) => {
-                Callable::Rust(RustCallable::Ref(t.try_into_with_gc(gc)?))
+                let t = gc.upgrade_cell(t).ok_or(AlreadyDroppedError)?;
+                Callable::Rust(RustCallable::Ref(t))
             }
-            Callable::Lua(t) => Callable::Lua(t.try_into_with_gc(gc)?),
+            Callable::Lua(t) => {
+                let t = gc.upgrade_cell(t).ok_or(AlreadyDroppedError)?;
+                Callable::Lua(t)
+            }
         };
 
         Ok(r)
@@ -546,7 +550,7 @@ where
 {
     fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         match self {
-            Callable::Lua(f) => rt.enter(f.into()),
+            Callable::Lua(f) => rt.enter(f),
             Callable::Rust(f) => rt.invoke(f),
         }
     }
@@ -565,11 +569,12 @@ where
     WeakValue<Ty>: Display,
 {
     fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
-        use crate::gc::{RootLuaClosure, TryIntoWithGc};
+        use crate::error::AlreadyDroppedError;
+
         match self {
             Callable::Lua(f) => {
-                let f: RootLuaClosure<_> = f.try_into_with_gc(&mut rt.core.gc)?;
-                rt.enter(f.into())
+                let f = rt.core.gc.upgrade_cell(f).ok_or(AlreadyDroppedError)?;
+                rt.enter(f)
             }
             Callable::Rust(f) => rt.invoke(f),
         }

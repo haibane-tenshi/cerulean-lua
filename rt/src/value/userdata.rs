@@ -1,12 +1,11 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
 
-use gc::Trace;
+use gc::{GcCell, Trace};
 
 use super::Metatable;
 use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
-use crate::gc::GcTable;
 use crate::runtime::RuntimeView;
 use crate::value::{CoreTypes, Value};
 
@@ -324,7 +323,7 @@ where
     }
 }
 
-pub trait FullUserdata<Ty>: Userdata<Ty> + Metatable<GcTable<Ty::Table>>
+pub trait FullUserdata<Ty>: Userdata<Ty> + Metatable<GcCell<Ty::Table>>
 where
     Ty: CoreTypes,
 {
@@ -333,7 +332,7 @@ where
 impl<Ty, T> FullUserdata<Ty> for T
 where
     Ty: CoreTypes,
-    T: Userdata<Ty> + Metatable<GcTable<Ty::Table>>,
+    T: Userdata<Ty> + Metatable<GcCell<Ty::Table>>,
 {
 }
 
@@ -367,7 +366,7 @@ where
 
 pub fn new_full_userdata<T, Ty>(
     value: T,
-    metatable: Option<GcTable<Ty::Table>>,
+    metatable: Option<GcCell<Ty::Table>>,
 ) -> impl FullUserdata<Ty>
 where
     Ty: CoreTypes,

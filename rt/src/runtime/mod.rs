@@ -18,7 +18,6 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::{AlreadyDroppedError, RuntimeError};
 use crate::ffi::{LuaFfi, LuaFfiOnce};
-use crate::gc::RootLuaClosure;
 use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value, WeakValue};
 use frame::{ChangeFrame, Event, Frame};
 use frame_stack::{FrameStack, FrameStackView};
@@ -67,14 +66,8 @@ where
             Value::Function(_) => primitive_metatables[Function]
                 .as_ref()
                 .map(|t| t.downgrade()),
-            Value::Table(t) => heap
-                .get((*t).into())
-                .ok_or(AlreadyDroppedError)?
-                .metatable(),
-            Value::Userdata(t) => heap
-                .get((*t).into())
-                .ok_or(AlreadyDroppedError)?
-                .metatable(),
+            Value::Table(t) => heap.get(*t).ok_or(AlreadyDroppedError)?.metatable(),
+            Value::Userdata(t) => heap.get(*t).ok_or(AlreadyDroppedError)?.metatable(),
         };
 
         Ok(r)
@@ -339,7 +332,7 @@ where
 
                     match callable {
                         Callable::Lua(closure) => {
-                            let frame = Frame::new(&mut rt, closure.into(), event)?;
+                            let frame = Frame::new(&mut rt, closure, event)?;
                             active_frame = frame.activate(&mut self)?;
                         }
                         Callable::Rust(closure) => {
@@ -383,8 +376,8 @@ where
         &mut self,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<RootLuaClosure<Closure<Ty>>, RuntimeError<Ty>> {
-        Ok(RootLuaClosure(Closure::new(self, fn_ptr, upvalues)?))
+    ) -> Result<RootCell<Closure<Ty>>, RuntimeError<Ty>> {
+        Closure::new(self, fn_ptr, upvalues)
     }
 
     pub fn chunk_cache(&self) -> &dyn ChunkCache {

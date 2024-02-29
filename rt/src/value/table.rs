@@ -7,7 +7,8 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::{
-    CoreTypes, Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, Types, Value, Weak,
+    CoreTypes, Metatable, Strong, TableIndex, TypeMismatchError, TypeMismatchOrError, Types, Value,
+    Weak,
 };
 
 pub struct Table<Ty: Types> {
@@ -15,17 +16,17 @@ pub struct Table<Ty: Types> {
     metatable: Option<Ty::Table>,
 }
 
-impl<Gc> TableIndex<Gc> for Table<Gc>
+impl<Ty> TableIndex<Ty> for Table<Ty>
 where
-    Gc: Types,
-    KeyValue<Gc>: Hash + Eq,
-    Value<Gc>: Clone,
+    Ty: Types,
+    KeyValue<Ty>: Hash + Eq,
+    Value<Ty>: Clone,
 {
-    fn get(&self, key: &KeyValue<Gc>) -> Value<Gc> {
+    fn get(&self, key: &KeyValue<Ty>) -> Value<Ty> {
         self.data.get(key).cloned().unwrap_or_default()
     }
 
-    fn set(&mut self, key: KeyValue<Gc>, value: Value<Gc>) {
+    fn set(&mut self, key: KeyValue<Ty>, value: Value<Ty>) {
         match value {
             Value::Nil => {
                 self.data.remove(&key);
@@ -40,32 +41,32 @@ where
         Table::border(self)
     }
 
-    fn contains_key(&self, key: &KeyValue<Gc>) -> bool {
+    fn contains_key(&self, key: &KeyValue<Ty>) -> bool {
         self.data.contains_key(key)
     }
 }
 
-impl<Gc> Table<Gc>
+impl<Ty> Table<Ty>
 where
-    Gc: Types,
-    KeyValue<Gc>: Hash + Eq,
-    Value<Gc>: Clone,
+    Ty: Types,
+    KeyValue<Ty>: Hash + Eq,
+    Value<Ty>: Clone,
 {
-    pub fn get(&self, key: &KeyValue<Gc>) -> Value<Gc> {
+    pub fn get(&self, key: &KeyValue<Ty>) -> Value<Ty> {
         self.data.get(key).cloned().unwrap_or_default()
     }
 }
 
-impl<Gc> Table<Gc>
+impl<Ty> Table<Ty>
 where
-    Gc: Types,
-    KeyValue<Gc>: Hash + Eq,
+    Ty: Types,
+    KeyValue<Ty>: Hash + Eq,
 {
-    pub fn get_ref<'s>(&'s self, key: &KeyValue<Gc>) -> Option<&'s Value<Gc>> {
+    pub fn get_ref<'s>(&'s self, key: &KeyValue<Ty>) -> Option<&'s Value<Ty>> {
         self.data.get(key)
     }
 
-    pub fn set(&mut self, key: KeyValue<Gc>, value: Value<Gc>) {
+    pub fn set(&mut self, key: KeyValue<Ty>, value: Value<Ty>) {
         match value {
             Value::Nil => {
                 self.data.remove(&key);
@@ -76,7 +77,7 @@ where
         }
     }
 
-    pub fn contains_key(&self, key: &KeyValue<Gc>) -> bool {
+    pub fn contains_key(&self, key: &KeyValue<Ty>) -> bool {
         self.data.contains_key(key)
     }
 
@@ -87,35 +88,35 @@ where
             .unwrap_or(i64::MAX)
     }
 }
-impl<Gc> Table<Gc>
+impl<Ty> Table<Ty>
 where
-    Gc: Types,
-    Gc::Table: Clone,
+    Ty: Types,
+    Ty::Table: Clone,
 {
-    pub fn metatable(&self) -> Option<Gc::Table> {
+    pub fn metatable(&self) -> Option<Ty::Table> {
         self.metatable.clone()
     }
 }
 
-impl<Gc> Table<Gc>
+impl<Ty> Table<Ty>
 where
-    Gc: Types,
+    Ty: Types,
 {
-    pub fn set_metatable(&mut self, metatable: Option<Gc::Table>) -> Option<Gc::Table> {
+    pub fn set_metatable(&mut self, metatable: Option<Ty::Table>) -> Option<Ty::Table> {
         std::mem::replace(&mut self.metatable, metatable)
     }
 }
 
-impl<Gc> Metatable<Gc::Table> for Table<Gc>
+impl<Ty> Metatable<Ty::Table> for Table<Ty>
 where
-    Gc: Types,
-    Gc::Table: Clone,
+    Ty: Types,
+    Ty::Table: Clone,
 {
-    fn metatable(&self) -> Option<Gc::Table> {
+    fn metatable(&self) -> Option<Ty::Table> {
         Table::metatable(self)
     }
 
-    fn set_metatable(&mut self, mt: Option<Gc::Table>) -> Option<Gc::Table> {
+    fn set_metatable(&mut self, mt: Option<Ty::Table>) -> Option<Ty::Table> {
         Table::set_metatable(self, mt)
     }
 }
@@ -135,12 +136,12 @@ where
     }
 }
 
-impl<Gc> Debug for Table<Gc>
+impl<Ty> Debug for Table<Ty>
 where
-    Gc: Types,
-    KeyValue<Gc>: Debug,
-    Value<Gc>: Debug,
-    Gc::Table: Debug,
+    Ty: Types,
+    KeyValue<Ty>: Debug,
+    Value<Ty>: Debug,
+    Ty::Table: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Table")
@@ -150,12 +151,12 @@ where
     }
 }
 
-impl<Gc> Clone for Table<Gc>
+impl<Ty> Clone for Table<Ty>
 where
-    Gc: Types,
-    KeyValue<Gc>: Clone,
-    Value<Gc>: Clone,
-    Gc::Table: Clone,
+    Ty: Types,
+    KeyValue<Ty>: Clone,
+    Value<Ty>: Clone,
+    Ty::Table: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -165,15 +166,26 @@ where
     }
 }
 
-impl<Gc> PartialEq for Table<Gc>
+impl<Ty> PartialEq for Table<Weak<Ty>>
 where
-    Gc: Types,
-    KeyValue<Gc>: Hash + Eq,
-    Value<Gc>: PartialEq,
-    Gc::Table: PartialEq,
+    Ty: CoreTypes,
+    Ty::String: Eq + Hash,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.data == other.data && self.metatable == other.metatable
+        self.data == other.data
+            && self.metatable.map(|t| t.addr()) == other.metatable.map(|t| t.addr())
+    }
+}
+
+impl<Ty> PartialEq for Table<Strong<Ty>>
+where
+    Ty: CoreTypes,
+    Ty::String: Eq + Hash,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+            && self.metatable.as_ref().map(|t| t.addr())
+                == other.metatable.as_ref().map(|t| t.addr())
     }
 }
 
@@ -243,14 +255,14 @@ where
     }
 }
 
-impl<Gc> Clone for KeyValue<Gc>
+impl<Ty> Clone for KeyValue<Ty>
 where
-    Gc: Types,
-    Gc::String: Clone,
-    Gc::LuaCallable: Clone,
-    Gc::RustCallable: Clone,
-    Gc::Table: Clone,
-    Gc::FullUserdata: Clone,
+    Ty: Types,
+    Ty::String: Clone,
+    Ty::LuaCallable: Clone,
+    Ty::RustCallable: Clone,
+    Ty::Table: Clone,
+    Ty::FullUserdata: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -266,50 +278,89 @@ where
     }
 }
 
-impl<Gc> PartialEq for KeyValue<Gc>
+impl<Ty> PartialEq for KeyValue<Weak<Ty>>
 where
-    Gc: Types,
-    Gc::String: PartialEq,
-    Gc::LuaCallable: PartialEq,
-    Gc::RustCallable: PartialEq,
-    Gc::Table: PartialEq,
-    Gc::FullUserdata: PartialEq,
+    Ty: CoreTypes,
+    Ty::String: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
+        use super::callable::RustCallable;
+
         match (self, other) {
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
             (Self::String(l0), Self::String(r0)) => l0 == r0,
-            (Self::Function(l0), Self::Function(r0)) => l0 == r0,
-            (Self::Table(l0), Self::Table(r0)) => l0 == r0,
-            (Self::Userdata(l0), Self::Userdata(r0)) => l0 == r0,
-            _ => false,
+            (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
+                l0.addr() == r0.addr()
+            }
+            (
+                Self::Function(Callable::Rust(RustCallable::Ref(l0))),
+                Self::Function(Callable::Rust(RustCallable::Ref(r0))),
+            ) => l0.addr() == r0.addr(),
+            (
+                Self::Function(Callable::Rust(RustCallable::Ptr(l0))),
+                Self::Function(Callable::Rust(RustCallable::Ptr(r0))),
+            ) => l0 == r0,
+            (Self::Table(l0), Self::Table(r0)) => l0.addr() == r0.addr(),
+            (Self::Userdata(l0), Self::Userdata(r0)) => l0.addr() == r0.addr(),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
 }
 
-impl<Gc> Eq for KeyValue<Gc>
+impl<Ty> PartialEq for KeyValue<Strong<Ty>>
 where
-    Gc: Types,
-    Gc::String: Eq,
-    Gc::LuaCallable: Eq,
-    Gc::RustCallable: Eq,
-    Gc::Table: Eq,
-    Gc::FullUserdata: Eq,
+    Ty: CoreTypes,
+    Ty::String: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        use super::callable::RustCallable;
+
+        match (self, other) {
+            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
+            (Self::Int(l0), Self::Int(r0)) => l0 == r0,
+            (Self::Float(l0), Self::Float(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
+                l0.addr() == r0.addr()
+            }
+            (
+                Self::Function(Callable::Rust(RustCallable::Ref(l0))),
+                Self::Function(Callable::Rust(RustCallable::Ref(r0))),
+            ) => l0.addr() == r0.addr(),
+            (
+                Self::Function(Callable::Rust(RustCallable::Ptr(l0))),
+                Self::Function(Callable::Rust(RustCallable::Ptr(r0))),
+            ) => l0 == r0,
+            (Self::Table(l0), Self::Table(r0)) => l0.addr() == r0.addr(),
+            (Self::Userdata(l0), Self::Userdata(r0)) => l0.addr() == r0.addr(),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl<Ty> Eq for KeyValue<Weak<Ty>>
+where
+    Ty: CoreTypes,
+    Ty::String: Eq,
 {
 }
 
-impl<Gc> Hash for KeyValue<Gc>
+impl<Ty> Eq for KeyValue<Strong<Ty>>
 where
-    Gc: Types,
-    Gc::String: Hash,
-    Gc::LuaCallable: Hash,
-    Gc::RustCallable: Hash,
-    Gc::Table: Hash,
-    Gc::FullUserdata: Hash,
+    Ty: CoreTypes,
+    Ty::String: Eq,
+{
+}
+
+impl<Ty> Hash for KeyValue<Weak<Ty>>
+where
+    Ty: CoreTypes,
+    Ty::String: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        use super::callable::RustCallable;
         use KeyValue::*;
 
         core::mem::discriminant(self).hash(state);
@@ -319,9 +370,36 @@ where
             Int(val) => val.hash(state),
             Float(val) => val.hash(state),
             String(val) => val.hash(state),
-            Function(val) => val.hash(state),
-            Table(val) => val.hash(state),
-            Userdata(val) => val.hash(state),
+            Function(Callable::Lua(val)) => val.addr().hash(state),
+            Function(Callable::Rust(RustCallable::Ref(val))) => val.addr().hash(state),
+            Function(Callable::Rust(RustCallable::Ptr(val))) => val.hash(state),
+            Table(val) => val.addr().hash(state),
+            Userdata(val) => val.addr().hash(state),
+        }
+    }
+}
+
+impl<Ty> Hash for KeyValue<Strong<Ty>>
+where
+    Ty: CoreTypes,
+    Ty::String: Hash,
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        use super::callable::RustCallable;
+        use KeyValue::*;
+
+        core::mem::discriminant(self).hash(state);
+
+        match self {
+            Bool(val) => val.hash(state),
+            Int(val) => val.hash(state),
+            Float(val) => val.hash(state),
+            String(val) => val.hash(state),
+            Function(Callable::Lua(val)) => val.addr().hash(state),
+            Function(Callable::Rust(RustCallable::Ref(val))) => val.addr().hash(state),
+            Function(Callable::Rust(RustCallable::Ptr(val))) => val.hash(state),
+            Table(val) => val.addr().hash(state),
+            Userdata(val) => val.addr().hash(state),
         }
     }
 }
