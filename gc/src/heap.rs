@@ -17,22 +17,22 @@ use crate::{Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted};
 /// ```
 /// # use gc::{Heap};
 /// let mut heap = Heap::new();
-/// let a = heap.alloc_cell(3_usize);
+/// let a = heap.alloc(3_usize);
 ///
 /// assert_eq!(heap[&a], 3);
 /// ```
 ///
+/// Allocated objects require to implement [`Trace`] trait
+/// which allows garbage collector to discover transitive references through an object.
+/// Note that `Trace` requires `'static`: this is due to internal use of [`Any`](std::any::Any)
+/// so unfortunately you cannot allocate objects containing non-static references.
+///
+/// # Garbage collection
+///
 /// Garbage collection can be triggered automatically on [`alloc_cell`](Heap::alloc_cell), [`alloc`](Heap::alloc)
 /// or manually via [`gc`](Heap::gc) method.
-/// We are using standard mark-and-sweep strategy.
 ///
-/// Newely allocated objects return [`RootCell<T>`](RootCell)/[`Root<T>`](Root) which is a strong reference,
-/// but can be downgraded into [`GcCell<T>`](GcCell)/[`Gc<T>`](Gc) which is a weak reference.
-///
-/// Result of dereferencing a pointer constructed in a different heap is unspecified,
-/// but guaranteed to be *safe*.
-/// It may or may not return a valid reference if an object is found at the location
-/// or invoke panic.
+/// Implementation uses standard mark-and-sweep strategy.
 #[derive(Default)]
 pub struct Heap {
     arenas: HashMap<TypeId, Box<dyn Arena>>,
@@ -131,10 +131,20 @@ impl Heap {
         self.arena_mut().unwrap().insert(value)
     }
 
-    /// Get `&T` out of weak reference such as [`GcCell`].
+    /// Get `&T` out of weak reference such as [`GcCell`] or [`Gc`].
+    ///
+    /// This function will also accept [`RootCell`] and [`Root`],
+    /// but you might want to use [`get_root`](Heap::get_root) method instead.
     ///
     /// Returned reference is wrapped in `Option`
-    /// because it is possible that the object since was deallocated.
+    /// because it is possible that the object behind weak reference was since deallocated.
+    ///
+    /// # Panic
+    ///
+    /// This function never panics.
+    ///
+    /// Result of dereferencing a reference created from a different heap is unspecified but *safe*.
+    /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get<T>(&self, ptr: impl RefAccess<T>) -> Option<&T>
     where
         T: Trace,
@@ -144,8 +154,18 @@ impl Heap {
 
     /// Get `&mut T` out of weak reference such as [`GcCell`].
     ///
+    /// This function will also accept [`RootCell`],
+    /// but you might want to use [`get_root_mut`](Heap::get_root_mut) method instead.
+    ///
     /// Returned reference is wrapped in `Option`
-    /// because it is possible that the object since was deallocated.
+    /// because it is possible that the object behind weak reference was since deallocated.
+    ///
+    /// # Panic
+    ///
+    /// This function never panics.
+    ///
+    /// Result of dereferencing a reference created from a different heap is unspecified but *safe*.
+    /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get_mut<T>(&mut self, ptr: impl MutAccess<T>) -> Option<&mut T>
     where
         T: Trace,
@@ -153,30 +173,50 @@ impl Heap {
         self.arena_mut()?.get_mut(ptr.addr())
     }
 
-    /// Get `&T` out of strong reference such as [`RootCell`].
+    /// Get `&T` out of strong reference such as [`RootCell`] or [`Root`].
     ///
     /// Method returnes reference directly
     /// because strong references prevent object from being deallocated.
+    ///
+    /// # Panic
+    ///
+    /// This function panics if `ptr` is created from a different heap
+    /// but otherwise it never will.
     pub fn get_root<T>(&self, ptr: &(impl RefAccess<T> + Rooted)) -> &T
     where
         T: Trace,
     {
-        self.arena()
-            .and_then(|arena| arena.get(ptr.addr()))
-            .expect("rooted object was deallocated")
+        let arena = match self.arena() {
+            Some(arena) if arena.validate_counter(ptr.counter()) => arena,
+            _ => panic!("attempt to dereference a pointer created from a different heap"),
+        };
+
+        arena
+            .get(ptr.addr())
+            .expect("rooted object should never be deallocated")
     }
 
     /// Get `&mut T` out of strong reference such as [`RootCell`].
     ///
     /// Method returnes reference directly
     /// because strong references prevent object from being deallocated.
+    ///
+    /// # Panic
+    ///
+    /// This function panics if `ptr` is created from a different heap
+    /// but otherwise it never will.
     pub fn get_root_mut<T>(&mut self, ptr: &(impl MutAccess<T> + Rooted)) -> &mut T
     where
         T: Trace,
     {
-        self.arena_mut()
-            .and_then(|arena| arena.get_mut(ptr.addr()))
-            .expect("rooted object was deallocated")
+        let arena = match self.arena_mut() {
+            Some(arena) if arena.validate_counter(ptr.counter()) => arena,
+            _ => panic!("attempt to dereference a pointer created from a different heap"),
+        };
+
+        arena
+            .get_mut(ptr.addr())
+            .expect("rooted object should never be deallocated")
     }
 
     /// Upgrade weak reference into strong reference.

@@ -897,6 +897,26 @@ mod sealed {
     }
 }
 
+mod sealed_root {
+    use super::{Counter, Root, RootCell};
+
+    pub trait Sealed {
+        fn counter(&self) -> &Counter;
+    }
+
+    impl<T> Sealed for RootCell<T> {
+        fn counter(&self) -> &Counter {
+            &self.counter
+        }
+    }
+
+    impl<T> Sealed for Root<T> {
+        fn counter(&self) -> &Counter {
+            &self.counter
+        }
+    }
+}
+
 /// Marker trait permitting by-reference (`&T`) access.
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
@@ -913,7 +933,7 @@ pub trait MutAccess<T>: RefAccess<T> {}
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait Rooted: sealed::Sealed {}
+pub trait Rooted: sealed_root::Sealed {}
 
 impl<T> RefAccess<T> for GcCell<T> {}
 impl<T> MutAccess<T> for GcCell<T> {}

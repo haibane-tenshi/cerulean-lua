@@ -118,6 +118,10 @@ impl<T> ArenaStore<T> {
 
         ptr
     }
+
+    pub(crate) fn validate_counter(&self, counter: &Counter) -> bool {
+        Rc::ptr_eq(&counter.counters, &self.strong_counters)
+    }
 }
 
 impl<T> Arena for ArenaStore<T>
