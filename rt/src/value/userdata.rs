@@ -212,7 +212,7 @@ where
                 let r = if let Method::Ref(f) = method {
                     T::call(self, f, rt)
                 } else {
-                    let msg = crate::gc::StringRef::new(
+                    let msg = rt.core.alloc_string(
                         "userdata can only dispatch on methods with `&self` receiver".into(),
                     );
                     Err(Value::String(msg).into())

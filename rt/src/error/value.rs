@@ -1,6 +1,8 @@
 use codespan_reporting::diagnostic::Diagnostic;
 use std::fmt::{Debug, Display};
 
+use gc::Heap;
+
 use crate::value::{CoreTypes as Types, StrongValue, Value};
 
 pub struct ValueError<Ty: Types>(pub StrongValue<Ty>);
@@ -11,7 +13,7 @@ where
     Ty::String: AsRef<[u8]>,
     StrongValue<Ty>: Display,
 {
-    pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
+    pub(crate) fn into_diagnostic<FileId>(self, heap: &Heap) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
         use Value::*;
 
@@ -20,7 +22,7 @@ where
         let mut diag = Diagnostic::error();
         let valid_utf8 = match &value {
             String(s) => {
-                if let Ok(s) = std::str::from_utf8(s.as_ref()) {
+                if let Ok(s) = std::str::from_utf8(heap.get_root(s).as_ref().as_ref()) {
                     diag.message = s.into();
                     true
                 } else {

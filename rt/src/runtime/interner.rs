@@ -1,10 +1,13 @@
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 
+use enumoid::EnumMap;
 use gc::{Gc, Heap, Root, Trace};
 use hashbrown::HashTable;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
+use super::Event;
+
+#[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Interned<T>(T);
 
 impl<T> Interned<T> {
@@ -48,17 +51,45 @@ impl<T> DerefMut for Interned<T> {
     }
 }
 
-pub(crate) struct Interner<T, H = std::hash::RandomState> {
+pub struct Interner<T, H = std::hash::RandomState> {
     hasher: H,
     hash_table: HashTable<Gc<Interned<T>>>,
+    events: EnumMap<Event, Root<Interned<T>>>,
+}
+
+impl<T> Interner<T, std::hash::RandomState>
+where
+    T: Trace + From<&'static str>,
+{
+    pub(crate) fn new(heap: &mut Heap) -> Self {
+        let events = EnumMap::new_with(|event: Event| heap.alloc(Interned(event.to_str().into())));
+
+        Interner {
+            hasher: Default::default(),
+            hash_table: Default::default(),
+            events,
+        }
+    }
 }
 
 impl<T, H> Interner<T, H>
 where
-    T: Trace + Hash + Eq,
+    T: Trace + Hash + Eq + AsRef<[u8]>,
     H: BuildHasher,
 {
     pub(crate) fn insert(&mut self, value: T, heap: &mut Heap) -> Root<Interned<T>> {
+        // All metamethods are prefixed with two underscores.
+        // Quick check to avoid going through events on every occasion.
+        if value.as_ref().strip_prefix(&[b'_', b'_']).is_some() {
+            let event = self.events.iter().find_map(|(event, ptr)| {
+                (event.to_str().as_bytes() == value.as_ref()).then(|| ptr.clone())
+            });
+
+            if let Some(event) = event {
+                return event;
+            }
+        }
+
         let hash = self.hasher.hash_one(&value);
 
         let found = self.hash_table.find(hash, |&ptr| {
@@ -84,16 +115,8 @@ where
             });
         value
     }
-}
 
-impl<T, H> Default for Interner<T, H>
-where
-    H: Default,
-{
-    fn default() -> Self {
-        Self {
-            hasher: Default::default(),
-            hash_table: Default::default(),
-        }
+    pub(crate) fn event(&self, event: Event) -> Gc<Interned<T>> {
+        self.events.get(event).downgrade()
     }
 }

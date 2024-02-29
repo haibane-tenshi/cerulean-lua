@@ -12,22 +12,24 @@ use std::path::Path;
 use enumoid::EnumMap;
 use gc::{Heap, Root, RootCell};
 use repr::index::StackSlot;
+use repr::literal::Literal;
 
 use crate::backtrace::{Backtrace, Location};
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::{AlreadyDroppedError, RuntimeError};
 use crate::ffi::{LuaFfi, LuaFfiOnce};
-use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value, WeakValue};
+use crate::value::{
+    CoreTypes, KeyValue, Strong, StrongValue, TypeWithoutMetatable, Types, Value, Weak, WeakValue,
+};
 use frame::{ChangeFrame, Event, Frame};
 use frame_stack::{FrameStack, FrameStackView};
-use interner::Interner;
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
 use stack::{RawStackSlot, Stack};
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, FunctionPtr};
-pub use interner::Interned;
+pub use interner::{Interned, Interner};
 pub use stack::{StackFrame, StackGuard, TransientStackFrame};
 
 pub struct Core<Ty>
@@ -38,6 +40,7 @@ where
     pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<<Strong<Ty> as Types>::Table>>,
     pub dialect: DialectBuilder,
     pub gc: Heap,
+    pub string_interner: Interner<Ty::String>,
 }
 
 type GcTable<Ty> = <crate::value::Weak<Ty> as Types>::Table;
@@ -46,6 +49,28 @@ impl<Ty> Core<Ty>
 where
     Ty: CoreTypes,
 {
+    pub fn alloc_string(&mut self, s: Ty::String) -> Root<Interned<Ty::String>> {
+        self.string_interner.insert(s, &mut self.gc)
+    }
+
+    pub fn alloc_literal(&mut self, literal: Literal) -> StrongValue<Ty> {
+        match literal {
+            Literal::Nil => Value::Nil,
+            Literal::Bool(t) => Value::Bool(t),
+            Literal::Int(t) => Value::Int(t),
+            Literal::Float(t) => Value::Float(t),
+            Literal::String(s) => {
+                let s = self.alloc_string(s.into());
+                Value::String(s)
+            }
+        }
+    }
+
+    fn lookup_event(&self, event: Event) -> KeyValue<Weak<Ty>> {
+        let s = self.string_interner.event(event);
+        KeyValue::String(s)
+    }
+
     pub fn metatable_of(
         &self,
         value: &WeakValue<Ty>,
@@ -101,7 +126,6 @@ where
     frames: FrameStack<Frame<Ty>>,
     stack: Stack<Ty>,
     rust_backtrace_stack: RustBacktraceStack,
-    string_interner: Interner<Ty::String>,
 }
 
 impl<Ty, C> Runtime<Ty, C>
@@ -120,7 +144,6 @@ where
             frames: Default::default(),
             stack,
             rust_backtrace_stack: Default::default(),
-            string_interner: Default::default(),
         }
     }
 }
@@ -138,7 +161,6 @@ where
             stack,
             // upvalue_stack,
             rust_backtrace_stack,
-            string_interner,
         } = self;
 
         let frames = frames.view();
@@ -153,7 +175,6 @@ where
             stack,
             // upvalue_stack,
             rust_backtrace_stack,
-            string_interner,
         }
     }
 }
@@ -167,7 +188,6 @@ where
     frames: FrameStackView<'rt, Frame<Ty>>,
     pub stack: StackGuard<'rt, Ty>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
-    string_interner: &'rt mut Interner<Ty::String>,
 }
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
@@ -190,7 +210,6 @@ where
             frames,
             stack,
             rust_backtrace_stack,
-            string_interner,
         } = self;
 
         let stack = stack.guard(start)?;
@@ -203,14 +222,9 @@ where
             frames,
             stack,
             rust_backtrace_stack,
-            string_interner,
         };
 
         Some(r)
-    }
-
-    pub fn alloc_string(&mut self, s: Ty::String) -> Root<Interned<Ty::String>> {
-        self.string_interner.insert(s, &mut self.core.gc)
     }
 }
 
@@ -436,12 +450,10 @@ where
     where
         Ty::String: From<String>,
     {
-        use crate::gc::StringRef;
-
         let path = path.as_ref();
 
         let source = std::fs::read_to_string(path).map_err(|err| {
-            let msg = StringRef::new(
+            let msg = self.core.alloc_string(
                 format!("failed to load file {}: {err}", path.to_string_lossy()).into(),
             );
             Value::String(msg)
@@ -502,7 +514,7 @@ where
         use codespan_reporting::files::SimpleFile;
 
         let message = match err {
-            RuntimeError::Value(err) => err.into_diagnostic(),
+            RuntimeError::Value(err) => err.into_diagnostic(&self.core.gc),
             RuntimeError::Borrow(err) => err.into_diagnostic(),
             RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
             RuntimeError::Immutable(err) => err.into_diagnostic(),

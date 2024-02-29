@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use gc::Trace;
 
 use super::{Concat, Len, TypeMismatchOrError, Types, Value};
-use crate::gc::{StringRef, TryFromWithGc, TryIntoWithGc};
+use crate::gc::{TryFromWithGc, TryIntoWithGc};
 
 pub struct LuaString<T>(pub T);
 
@@ -172,42 +172,6 @@ impl<'a> TryFrom<&'a PossiblyUtf8Vec> for PathBuf {
     fn try_from(value: &'a PossiblyUtf8Vec) -> Result<Self, Self::Error> {
         let s: String = value.try_into()?;
         Ok(s.into())
-    }
-}
-
-impl From<StringRef<PossiblyUtf8Vec>> for Vec<u8> {
-    fn from(value: StringRef<PossiblyUtf8Vec>) -> Self {
-        value.0 .0.clone()
-    }
-}
-
-impl TryFrom<StringRef<PossiblyUtf8Vec>> for String {
-    type Error = <String as TryFrom<PossiblyUtf8Vec>>::Error;
-
-    fn try_from(value: StringRef<PossiblyUtf8Vec>) -> Result<Self, Self::Error> {
-        use std::ops::Deref;
-
-        value.deref().try_into()
-    }
-}
-
-impl TryFrom<StringRef<PossiblyUtf8Vec>> for OsString {
-    type Error = <String as TryFrom<PossiblyUtf8Vec>>::Error;
-
-    fn try_from(value: StringRef<PossiblyUtf8Vec>) -> Result<Self, Self::Error> {
-        use std::ops::Deref;
-
-        value.deref().try_into()
-    }
-}
-
-impl TryFrom<StringRef<PossiblyUtf8Vec>> for PathBuf {
-    type Error = <String as TryFrom<PossiblyUtf8Vec>>::Error;
-
-    fn try_from(value: StringRef<PossiblyUtf8Vec>) -> Result<Self, Self::Error> {
-        use std::ops::Deref;
-
-        value.deref().try_into()
     }
 }
 

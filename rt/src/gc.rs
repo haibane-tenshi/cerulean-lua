@@ -1,57 +1,5 @@
 //! Utilities to deal with our garbage collector idiosyncracies.
 
-use std::fmt::{Debug, Display};
-use std::hash::Hash;
-use std::ops::Deref;
-use std::rc::Rc;
-
-use gc::{Collector, Trace};
-
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct StringRef<T>(pub Rc<T>);
-
-impl<T> StringRef<T> {
-    pub fn new(value: T) -> Self {
-        StringRef(Rc::new(value))
-    }
-}
-
-impl<T, U> AsRef<U> for StringRef<T>
-where
-    U: ?Sized,
-    T: AsRef<U>,
-{
-    fn as_ref(&self) -> &U {
-        self.0.as_ref().as_ref()
-    }
-}
-
-impl<T> Deref for StringRef<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.deref()
-    }
-}
-
-impl<T> Display for StringRef<T>
-where
-    T: Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<T> Trace for StringRef<T>
-where
-    T: Trace,
-{
-    fn trace(&self, collector: &mut Collector) {
-        self.deref().trace(collector)
-    }
-}
-
 pub trait TryFromWithGc<T, Gc>: Sized {
     type Error;
 

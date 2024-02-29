@@ -1,14 +1,13 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use gc::{GcCell, RootCell};
+use gc::{Gc, GcCell, Root, RootCell};
 
 use super::callable::{RustCallable, RustClosureRef};
 use super::string::PossiblyUtf8Vec;
 use super::userdata::FullUserdata;
 use super::{KeyValue, Value};
-use crate::gc::StringRef;
-use crate::runtime::Closure;
+use crate::runtime::{Closure, Interned};
 
 use gc::Trace;
 
@@ -26,7 +25,7 @@ impl<Ty> Types for Strong<Ty>
 where
     Ty: CoreTypes,
 {
-    type String = StringRef<<Ty as CoreTypes>::String>;
+    type String = Root<Interned<<Ty as CoreTypes>::String>>;
     type LuaCallable = RootCell<Closure<Ty>>;
     type RustCallable = RustCallable<Ty, RootCell<<Ty as CoreTypes>::RustClosure>>;
     type Table = RootCell<<Ty as CoreTypes>::Table>;
@@ -39,7 +38,7 @@ impl<Ty> Types for Weak<Ty>
 where
     Ty: CoreTypes,
 {
-    type String = StringRef<<Ty as CoreTypes>::String>;
+    type String = Gc<Interned<<Ty as CoreTypes>::String>>;
     type LuaCallable = GcCell<Closure<Ty>>;
     type RustCallable = RustCallable<Ty, GcCell<<Ty as CoreTypes>::RustClosure>>;
     type Table = GcCell<<Ty as CoreTypes>::Table>;
@@ -47,7 +46,15 @@ where
 }
 
 pub trait CoreTypes: Sized + 'static {
-    type String: Trace + Concat + Len + Clone + Ord + Hash + From<String> + From<&'static str>;
+    type String: Trace
+        + Concat
+        + Len
+        + Clone
+        + Ord
+        + Hash
+        + From<String>
+        + From<&'static str>
+        + AsRef<[u8]>;
     type RustClosure: Clone + PartialEq + Trace;
     type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcCell<Self::Table>>;
     type FullUserdata: Trace + Metatable<GcCell<Self::Table>>;

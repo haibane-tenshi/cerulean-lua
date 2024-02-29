@@ -2,6 +2,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::ControlFlow;
 
+use enumoid::Enumoid;
 use gc::{Collector, GcCell, Heap, RootCell, Trace};
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
@@ -17,9 +18,8 @@ use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RuntimeError};
-use crate::gc::{FromWithGc, IntoWithGc, TryIntoWithGc};
+use crate::gc::TryIntoWithGc;
 use crate::value::callable::Callable;
-use crate::value::table::KeyValue;
 use crate::value::{
     Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, Weak, WeakValue,
 };
@@ -492,7 +492,8 @@ where
             }
             LoadConstant(index) => {
                 let constant = self.get_constant(index)?.clone();
-                let value: StrongValue<_> = constant.into_with_gc(&mut self.core.gc);
+                self.stack.lua_frame().sync_transient(&mut self.core.gc);
+                let value = self.core.alloc_literal(constant);
                 self.stack
                     .lua_frame()
                     .push(value.downgrade(), Source::TrustedIsRooted(false));
@@ -679,6 +680,7 @@ where
             UnaOp::StrLen => {
                 match args {
                     [Value::String(val)] => {
+                        let val = self.core.gc.get(val).ok_or(AlreadyDroppedError)?;
                         let len = val.len().try_into().unwrap();
 
                         Continue(Value::Int(len))
@@ -710,9 +712,8 @@ where
                 let [arg] = &args;
 
                 let metatable = self.core.metatable_of(arg)?;
+                let key = self.core.lookup_event(event);
                 let heap = &mut self.core.gc;
-
-                let key = event.into_with_gc(heap);
                 let metavalue = metatable
                     .map(|mt| {
                         heap.get(mt)
@@ -799,7 +800,7 @@ where
                     _ => args,
                 };
 
-                let key = event.into_with_gc(&mut self.core.gc);
+                let key = self.core.lookup_event(event);
                 let lookup_event = |value: &WeakValue<Ty>| -> Result<_, AlreadyDroppedError> {
                     let r = self
                         .core
@@ -868,20 +869,25 @@ where
     ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
         use super::CoerceArgs;
 
-        let args = self
-            .core
-            .dialect
-            .coerce_bin_op_str(op, args, &mut self.core.gc);
+        self.stack.lua_frame().sync_transient(&mut self.core.gc);
+        let dialect = self.core.dialect.clone();
+        let args = dialect.coerce_bin_op_str(op, args, &mut self.core);
 
         match args {
             [Value::String(lhs), Value::String(rhs)] => match op {
                 StrBinOp::Concat => {
-                    use crate::gc::StringRef;
-                    use std::ops::Deref;
+                    let mut r = self
+                        .core
+                        .gc
+                        .get(lhs)
+                        .ok_or(AlreadyDroppedError)?
+                        .as_ref()
+                        .clone();
+                    let rhs = self.core.gc.get(rhs).ok_or(AlreadyDroppedError)?;
+                    r.concat(rhs.as_ref());
 
-                    let mut r = lhs.deref().clone();
-                    r.concat(rhs.deref());
-                    let s = StringRef::new(r);
+                    self.stack.lua_frame().sync_transient(&mut self.core.gc);
+                    let s = self.core.alloc_string(r).downgrade();
 
                     Ok(ControlFlow::Continue(Some(Value::String(s))))
                 }
@@ -937,7 +943,7 @@ where
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
             [Float(lhs), Float(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
-            [String(lhs), String(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
+            [String(lhs), String(rhs)] => PartialOrd::partial_cmp(&lhs.addr(), &rhs.addr()),
             [Int(lhs), Float(rhs)] if cmp => {
                 PartialOrd::partial_cmp(&value::Int(*lhs), &value::Float(*rhs))
             }
@@ -1062,7 +1068,7 @@ where
             };
 
             // Second: try detecting compatible metavalue
-            let key = Event::Index.into_with_gc(&mut self.core.gc);
+            let key = self.core.lookup_event(Event::Index);
 
             loop {
                 let metavalue = self
@@ -1155,7 +1161,7 @@ where
             };
 
             // Second: try detecting compatible metavalue
-            let key = Event::NewIndex.into_with_gc(&mut self.core.gc);
+            let key = self.core.lookup_event(Event::NewIndex);
             loop {
                 let metavalue = self
                     .core
@@ -1235,7 +1241,7 @@ where
                 .core
                 .metatable_of(&callable)?
                 .map(|mt| {
-                    let key = Event::Call.into_with_gc(&mut self.core.gc);
+                    let key = self.core.lookup_event(Event::Call);
                     self.core
                         .gc
                         .get(mt)
@@ -1389,7 +1395,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Enumoid)]
 pub(crate) enum Event {
     Neg,
     Add,
@@ -1445,17 +1451,6 @@ impl Event {
             NewIndex => "__newindex",
             Call => "__call",
         }
-    }
-}
-
-impl<Ty> FromWithGc<Event, Heap> for KeyValue<Weak<Ty>>
-where
-    Ty: CoreTypes,
-    Ty::String: From<&'static str>,
-{
-    fn from_with_gc(value: Event, _gc: &mut Heap) -> Self {
-        let s = crate::gc::StringRef::new(value.to_str().into());
-        KeyValue::String(s)
     }
 }
 

@@ -10,7 +10,6 @@ use gc::{Gc, GcCell, Heap, Root, RootCell, Trace};
 
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
-use crate::gc::StringRef;
 use crate::runtime::{RuntimeView, TransientStackFrame};
 use crate::value::{CoreTypes, NilOr, Value, Weak, WeakValue};
 
@@ -242,10 +241,8 @@ where
     for<'a> TransientStackFrame<'a, Ty>:
         FormatReturns<Weak<Ty>, Heap, <F as Signature<Args>>::Output>,
 {
-    let heap = &mut rt.core.gc;
-
-    let args = rt.stack.parse(heap).map_err(|err| {
-        let msg = StringRef::new(err.to_string().into());
+    let args = rt.stack.parse(&mut rt.core.gc).map_err(|err| {
+        let msg = rt.core.alloc_string(err.to_string().into());
         Value::String(msg)
     })?;
 
@@ -253,7 +250,7 @@ where
 
     let ret = f.call(args);
 
-    heap.pause(|heap| {
+    rt.core.gc.pause(|heap| {
         let mut stack = rt.stack.transient_frame();
         stack.format(heap, ret);
         stack.sync(heap);
@@ -272,10 +269,8 @@ where
     for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
     for<'a> TransientStackFrame<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
 {
-    let heap = &mut rt.core.gc;
-
-    let args = rt.stack.parse(heap).map_err(|err| {
-        let msg = StringRef::new(err.to_string().into());
+    let args = rt.stack.parse(&mut rt.core.gc).map_err(|err| {
+        let msg = rt.core.alloc_string(err.to_string().into());
         Value::String(msg)
     })?;
 
@@ -283,7 +278,7 @@ where
 
     let ret = f.call(args)?;
 
-    heap.pause(|heap| {
+    rt.core.gc.pause(|heap| {
         let mut stack = rt.stack.transient_frame();
         stack.format(heap, ret);
         stack.sync(heap);
@@ -307,7 +302,7 @@ where
     let heap = &mut rt.core.gc;
 
     let args = rt.stack.parse(heap).map_err(|err| {
-        let msg = StringRef::new(err.to_string().into());
+        let msg = rt.core.alloc_string(err.to_string().into());
         Value::String(msg)
     })?;
 
@@ -338,7 +333,7 @@ where
     let heap = &mut rt.core.gc;
 
     let args = rt.stack.parse(heap).map_err(|err| {
-        let msg = StringRef::new(err.to_string().into());
+        let msg = rt.core.alloc_string(err.to_string().into());
         Value::String(msg)
     })?;
 

@@ -290,7 +290,7 @@ where
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0.addr() == r0.addr(),
             (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
                 l0.addr() == r0.addr()
             }
@@ -321,7 +321,7 @@ where
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0.addr() == r0.addr(),
             (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
                 l0.addr() == r0.addr()
             }
@@ -369,7 +369,7 @@ where
             Bool(val) => val.hash(state),
             Int(val) => val.hash(state),
             Float(val) => val.hash(state),
-            String(val) => val.hash(state),
+            String(val) => val.addr().hash(state),
             Function(Callable::Lua(val)) => val.addr().hash(state),
             Function(Callable::Rust(RustCallable::Ref(val))) => val.addr().hash(state),
             Function(Callable::Rust(RustCallable::Ptr(val))) => val.hash(state),
@@ -394,7 +394,7 @@ where
             Bool(val) => val.hash(state),
             Int(val) => val.hash(state),
             Float(val) => val.hash(state),
-            String(val) => val.hash(state),
+            String(val) => val.addr().hash(state),
             Function(Callable::Lua(val)) => val.addr().hash(state),
             Function(Callable::Rust(RustCallable::Ref(val))) => val.addr().hash(state),
             Function(Callable::Rust(RustCallable::Ptr(val))) => val.hash(state),

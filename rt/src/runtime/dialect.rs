@@ -1,5 +1,7 @@
-use crate::value::{CoreTypes, Types, Value, Weak, WeakValue};
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
+
+use super::Core;
+use crate::value::{CoreTypes, Types, Value, Weak, WeakValue};
 
 /// Define fine aspects of runtime behavior.
 ///
@@ -310,7 +312,7 @@ impl DialectBuilder {
 }
 
 pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
-    type Gc;
+    type Core;
 
     fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
     fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
@@ -318,7 +320,7 @@ pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
         &self,
         op: StrBinOp,
         args: [Value<Ty>; 2],
-        gc: &mut Self::Gc,
+        gc: &mut Self::Core,
     ) -> [Value<Ty>; 2];
     fn coerce_una_op_bit(&self, args: [Value<Ty>; 1]) -> [Value<Ty>; 1];
     fn coerce_tab_set(&self, key: Value<Ty>) -> Value<Ty>;
@@ -331,7 +333,7 @@ where
     Ty: CoreTypes,
     Ty::String: From<String>,
 {
-    type Gc = gc::Heap;
+    type Core = Core<Ty>;
 
     fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
         use crate::value::{Float, Int};
@@ -389,32 +391,33 @@ where
         &self,
         op: StrBinOp,
         args: [WeakValue<Ty>; 2],
-        gc: &mut Self::Gc,
+        core: &mut Self::Core,
     ) -> [WeakValue<Ty>; 2] {
         match op {
             StrBinOp::Concat => {
-                use crate::gc::StringRef;
                 use Value::*;
 
-                let flt_to_string = |x: f64, _gc: &mut Self::Gc| {
-                    let value = StringRef::new(x.to_string().into());
+                let flt_to_string = |x: f64, core: &mut Self::Core| {
+                    let value = core.alloc_string(x.to_string().into()).downgrade();
                     Value::String(value)
                 };
 
-                let int_to_string = |x: i64, _gc: &mut Self::Gc| {
-                    let value = StringRef::new(x.to_string().into());
+                let int_to_string = |x: i64, core: &mut Self::Core| {
+                    let value = core.alloc_string(x.to_string().into()).downgrade();
                     Value::String(value)
                 };
 
                 match args {
-                    [Int(lhs), Int(rhs)] => [int_to_string(lhs, gc), int_to_string(rhs, gc)],
-                    [Int(lhs), Float(rhs)] => [int_to_string(lhs, gc), flt_to_string(rhs, gc)],
-                    [Int(lhs), String(rhs)] => [int_to_string(lhs, gc), String(rhs)],
-                    [Float(lhs), Int(rhs)] => [flt_to_string(lhs, gc), int_to_string(rhs, gc)],
-                    [Float(lhs), Float(rhs)] => [flt_to_string(lhs, gc), flt_to_string(rhs, gc)],
-                    [Float(lhs), String(rhs)] => [flt_to_string(lhs, gc), String(rhs)],
-                    [String(lhs), Int(rhs)] => [String(lhs), int_to_string(rhs, gc)],
-                    [String(lhs), Float(rhs)] => [String(lhs), flt_to_string(rhs, gc)],
+                    [Int(lhs), Int(rhs)] => [int_to_string(lhs, core), int_to_string(rhs, core)],
+                    [Int(lhs), Float(rhs)] => [int_to_string(lhs, core), flt_to_string(rhs, core)],
+                    [Int(lhs), String(rhs)] => [int_to_string(lhs, core), String(rhs)],
+                    [Float(lhs), Int(rhs)] => [flt_to_string(lhs, core), int_to_string(rhs, core)],
+                    [Float(lhs), Float(rhs)] => {
+                        [flt_to_string(lhs, core), flt_to_string(rhs, core)]
+                    }
+                    [Float(lhs), String(rhs)] => [flt_to_string(lhs, core), String(rhs)],
+                    [String(lhs), Int(rhs)] => [String(lhs), int_to_string(rhs, core)],
+                    [String(lhs), Float(rhs)] => [String(lhs), flt_to_string(rhs, core)],
                     args => args,
                 }
             }

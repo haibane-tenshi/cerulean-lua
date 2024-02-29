@@ -13,7 +13,6 @@ use std::fmt::{Debug, Display};
 
 use enumoid::Enumoid;
 use gc::{Heap, Trace};
-use repr::literal::Literal;
 
 use crate::gc::TryFromWithGc;
 
@@ -228,7 +227,7 @@ where
             Value::Bool(t) => Value::Bool(*t),
             Value::Int(t) => Value::Int(*t),
             Value::Float(t) => Value::Float(*t),
-            Value::String(t) => Value::String(t.clone()),
+            Value::String(t) => Value::String(t.downgrade()),
             Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade())),
             Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
                 Value::Function(Callable::Rust(RustCallable::Ptr(*t)))
@@ -254,7 +253,7 @@ where
             Value::Bool(t) => Value::Bool(t),
             Value::Int(t) => Value::Int(t),
             Value::Float(t) => Value::Float(t),
-            Value::String(t) => Value::String(t),
+            Value::String(t) => Value::String(heap.upgrade(t)?),
             Value::Function(Callable::Lua(t)) => {
                 Value::Function(Callable::Lua(heap.upgrade_cell(t)?))
             }
@@ -300,27 +299,6 @@ where
     }
 }
 
-impl<Ty> TryFromWithGc<Literal, Heap> for StrongValue<Ty>
-where
-    Ty: CoreTypes,
-    Ty::String: From<String>,
-{
-    type Error = std::convert::Infallible;
-
-    fn try_from_with_gc(value: Literal, _gc: &mut Heap) -> Result<Self, Self::Error> {
-        match value {
-            Literal::Nil => Ok(Value::Nil),
-            Literal::Bool(t) => Ok(Value::Bool(t)),
-            Literal::Int(t) => Ok(Value::Int(t)),
-            Literal::Float(t) => Ok(Value::Float(t)),
-            Literal::String(t) => {
-                let t = crate::gc::StringRef::new(t.into());
-                Ok(Value::String(t))
-            }
-        }
-    }
-}
-
 impl<Ty> TryFromWithGc<WeakValue<Ty>, Heap> for StrongValue<Ty>
 where
     Ty: CoreTypes,
@@ -338,7 +316,10 @@ where
             Value::Bool(t) => Value::Bool(t),
             Value::Int(t) => Value::Int(t),
             Value::Float(t) => Value::Float(t),
-            Value::String(t) => Value::String(t),
+            Value::String(t) => {
+                let t = heap.upgrade(t).ok_or(AlreadyDroppedError)?;
+                Value::String(t)
+            }
             Value::Function(Callable::Lua(t)) => {
                 let t = heap.upgrade_cell(t).ok_or(AlreadyDroppedError)?;
                 Value::Function(Callable::Lua(t))
@@ -456,7 +437,7 @@ where
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0.addr() == r0.addr(),
             (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
                 l0.addr() == r0.addr()
             }
@@ -487,7 +468,7 @@ where
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0.addr() == r0.addr(),
             (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
                 l0.addr() == r0.addr()
             }
