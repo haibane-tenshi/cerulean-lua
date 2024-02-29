@@ -1137,6 +1137,8 @@ where
     Ty: CoreTypes,
 {
     fn drop(&mut self) {
+        // Since frame holds mutable borrow to heap there are no possible gc passes that can happen.
+        // We only need to sync stack when `StackFrame` goes out of scope.
         self.guard.stack.sync_transient(self.heap);
     }
 }
