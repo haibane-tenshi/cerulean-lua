@@ -1,16 +1,16 @@
 mod dialect;
 mod frame;
 mod frame_stack;
+mod interner;
 mod rust_backtrace_stack;
 mod stack;
-// mod upvalue_stack;
 
 use std::fmt::{Debug, Display};
 use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 
 use enumoid::EnumMap;
-use gc::{Heap, RootCell};
+use gc::{Heap, Root, RootCell};
 use repr::index::StackSlot;
 
 use crate::backtrace::{Backtrace, Location};
@@ -21,11 +21,13 @@ use crate::ffi::{LuaFfi, LuaFfiOnce};
 use crate::value::{CoreTypes, Strong, StrongValue, TypeWithoutMetatable, Types, Value, WeakValue};
 use frame::{ChangeFrame, Event, Frame};
 use frame_stack::{FrameStack, FrameStackView};
+use interner::Interner;
 use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
 use stack::{RawStackSlot, Stack};
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, FunctionPtr};
+pub use interner::Interned;
 pub use stack::{StackFrame, StackGuard, TransientStackFrame};
 
 pub struct Core<Ty>
@@ -99,6 +101,7 @@ where
     frames: FrameStack<Frame<Ty>>,
     stack: Stack<Ty>,
     rust_backtrace_stack: RustBacktraceStack,
+    string_interner: Interner<Ty::String>,
 }
 
 impl<Ty, C> Runtime<Ty, C>
@@ -117,6 +120,7 @@ where
             frames: Default::default(),
             stack,
             rust_backtrace_stack: Default::default(),
+            string_interner: Default::default(),
         }
     }
 }
@@ -134,6 +138,7 @@ where
             stack,
             // upvalue_stack,
             rust_backtrace_stack,
+            string_interner,
         } = self;
 
         let frames = frames.view();
@@ -148,6 +153,7 @@ where
             stack,
             // upvalue_stack,
             rust_backtrace_stack,
+            string_interner,
         }
     }
 }
@@ -161,6 +167,7 @@ where
     frames: FrameStackView<'rt, Frame<Ty>>,
     pub stack: StackGuard<'rt, Ty>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
+    string_interner: &'rt mut Interner<Ty::String>,
 }
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
@@ -183,6 +190,7 @@ where
             frames,
             stack,
             rust_backtrace_stack,
+            string_interner,
         } = self;
 
         let stack = stack.guard(start)?;
@@ -195,9 +203,14 @@ where
             frames,
             stack,
             rust_backtrace_stack,
+            string_interner,
         };
 
         Some(r)
+    }
+
+    pub fn alloc_string(&mut self, s: Ty::String) -> Root<Interned<Ty::String>> {
+        self.string_interner.insert(s, &mut self.core.gc)
     }
 }
 

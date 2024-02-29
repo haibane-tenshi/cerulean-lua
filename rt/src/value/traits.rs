@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::marker::PhantomData;
 
 use gc::{GcCell, RootCell};
@@ -46,7 +47,7 @@ where
 }
 
 pub trait CoreTypes: Sized + 'static {
-    type String: Trace + Concat + Len + Clone + PartialOrd + From<String> + From<&'static str>;
+    type String: Trace + Concat + Len + Clone + Ord + Hash + From<String> + From<&'static str>;
     type RustClosure: Clone + PartialEq + Trace;
     type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcCell<Self::Table>>;
     type FullUserdata: Trace + Metatable<GcCell<Self::Table>>;
