@@ -512,7 +512,7 @@ where
                 ControlFlow::Continue(())
             }
             LoadStack(slot) => {
-                let value = self.get_stack(slot)?.clone();
+                let value = *self.get_stack(slot)?;
                 self.stack.lua_frame().push(value, Source::StackSlot(slot));
 
                 ControlFlow::Continue(())
@@ -536,15 +536,12 @@ where
 
                 let (value, source) = match upvalue {
                     UpvaluePlace::Place(place) => {
-                        let value = self.core.gc.get(place).ok_or(AlreadyDroppedError)?.clone();
+                        let value = *self.core.gc.get(place).ok_or(AlreadyDroppedError)?;
 
                         (value, Source::TrustedIsRooted(true))
                     }
                     UpvaluePlace::Stack(stack_slot) => {
-                        let value = stack
-                            .get_raw_slot(stack_slot)
-                            .ok_or(MissingUpvalue(slot))?
-                            .clone();
+                        let value = *stack.get_raw_slot(stack_slot).ok_or(MissingUpvalue(slot))?;
 
                         (value, Source::StackSlot(stack_slot))
                     }
@@ -876,8 +873,8 @@ where
         use super::CoerceArgs;
 
         self.stack.lua_frame().sync_transient(&mut self.core.gc);
-        let dialect = self.core.dialect.clone();
-        let args = dialect.coerce_bin_op_str(op, args, &mut self.core);
+        let dialect = self.core.dialect;
+        let args = dialect.coerce_bin_op_str(op, args, self.core);
 
         match args {
             [Value::String(lhs), Value::String(rhs)] => match op {
@@ -1053,7 +1050,7 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(table) = &table {
-                let index = self.core.dialect.coerce_tab_get(index.clone());
+                let index = self.core.dialect.coerce_tab_get(index);
 
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = *table;
@@ -1149,7 +1146,7 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(table) = &table {
-                let index = self.core.dialect.coerce_tab_set(index.clone());
+                let index = self.core.dialect.coerce_tab_set(index);
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = self.core.gc.get_mut(*table).ok_or(AlreadyDroppedError)?;
 

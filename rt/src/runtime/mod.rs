@@ -5,7 +5,7 @@ mod interner;
 mod rust_backtrace_stack;
 mod stack;
 
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 

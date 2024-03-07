@@ -389,10 +389,10 @@ where
         let iter = marks
             .iter_ones()
             .map(|i| RawStackSlot(start.0 + i))
-            .map(|slot| (slot, self.main[slot].clone()));
+            .map(|slot| (slot, self.main[slot]));
 
         for (slot, value) in iter {
-            let old_value = self.evicted_upvalues.insert(slot, value.clone());
+            let old_value = self.evicted_upvalues.insert(slot, value);
             debug_assert!(old_value.is_none());
         }
 
@@ -1099,7 +1099,7 @@ where
     Ty: CoreTypes,
 {
     pub fn get_mut(&mut self, slot: StackSlot) -> Option<SlotProxy<'_, Ty>> {
-        let value = self.get_slot(slot)?.clone();
+        let value = *self.get_slot(slot)?;
         let slot = self.boundary + slot;
 
         let r = SlotProxy {
