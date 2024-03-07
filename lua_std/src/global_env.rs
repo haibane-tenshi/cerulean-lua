@@ -9,7 +9,7 @@ use repr::literal::Literal;
 use rt::chunk_cache::ChunkId;
 use rt::error::RuntimeError;
 use rt::ffi::{LuaFfi, LuaFfiOnce};
-use rt::gc::TryIntoWithGc;
+use rt::gc::{DisplayWith, TryIntoWithGc};
 use rt::runtime::RuntimeView;
 use rt::value::{
     Callable, CoreTypes, KeyValue, LuaString, Strong, StrongValue, TableIndex, Types, Value, Weak,
@@ -79,11 +79,11 @@ pub fn pcall<Ty>() -> Part<
 >
 where
     Ty: CoreTypes,
-    Ty::String: AsRef<[u8]> + From<&'static str> + Display,
+    Ty::String: AsRef<[u8]> + From<&'static str>,
     Ty::RustClosure: LuaFfi<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    WeakValue<Ty>: Display,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     let chunk_ext = ChunkExtension::empty();
 
@@ -112,7 +112,7 @@ where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + From<&'static str>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     let chunk_ext = ChunkExtension::empty();
 
@@ -142,9 +142,9 @@ where
     Ty::String: AsRef<[u8]> + From<&'static str> + Display,
     Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    WeakValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
+    WeakValue<Ty>: DisplayWith<Heap> + TryIntoWithGc<LuaString<String>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
-    StrongValue<Ty>: Display,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     let chunk_ext = ChunkExtension::empty();
 
@@ -174,9 +174,9 @@ where
     Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str> + Display,
     Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
-    WeakValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    WeakValue<Ty>: DisplayWith<Heap> + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
-    StrongValue<Ty>: Display,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     let chunk_ext = ChunkExtension::empty();
 

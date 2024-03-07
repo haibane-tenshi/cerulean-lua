@@ -1,8 +1,9 @@
 use codespan_reporting::diagnostic::Diagnostic;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 
 use gc::Heap;
 
+use crate::gc::DisplayWith;
 use crate::value::{CoreTypes as Types, StrongValue, Value};
 
 pub struct ValueError<Ty: Types>(pub StrongValue<Ty>);
@@ -11,7 +12,7 @@ impl<Ty> ValueError<Ty>
 where
     Ty: Types,
     Ty::String: AsRef<[u8]>,
-    StrongValue<Ty>: Display,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     pub(crate) fn into_diagnostic<FileId>(self, heap: &Heap) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
@@ -33,7 +34,7 @@ where
         };
 
         if !valid_utf8 {
-            diag = diag.with_message(format!("panicked with value: {value}"));
+            diag = diag.with_message(format!("panicked with value: {}", value.display(heap)));
         }
 
         if let Table(_) = value {

@@ -6,7 +6,7 @@ use gc::{GcCell, Heap};
 use repr::index::StackSlot;
 use rt::error::{AlreadyDroppedError, RefAccessError, RuntimeError};
 use rt::ffi::{self, LuaFfi, LuaFfiOnce, LuaFfiPtr, Maybe, Opts};
-use rt::gc::{TryFromWithGc, TryIntoWithGc};
+use rt::gc::{DisplayWith, TryFromWithGc, TryIntoWithGc};
 use rt::runtime::RuntimeView;
 use rt::value::table::KeyValue;
 use rt::value::{
@@ -49,11 +49,11 @@ where
 pub fn print<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     let f = |mut rt: RuntimeView<'_, Ty>| {
         for value in rt.stack.iter() {
-            print!("{value}");
+            print!("{}", value.display(&rt.core.gc));
         }
 
         rt.stack.clear();
@@ -69,8 +69,8 @@ where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + Display,
     Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: Display,
-    StrongValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     let f = |mut rt: RuntimeView<'_, Ty>| {
         let func = {
@@ -236,9 +236,9 @@ where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]> + Display,
     Ty::RustClosure: LuaFfiOnce<Ty>,
-    WeakValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
+    WeakValue<Ty>: DisplayWith<Heap> + TryIntoWithGc<LuaString<String>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
-    StrongValue<Ty>: Display,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     use rt::value::{Type, Weak};
 
@@ -361,9 +361,9 @@ where
     Ty: CoreTypes,
     Ty::String: TryInto<String> + AsRef<[u8]> + Display,
     Ty::RustClosure: LuaFfiOnce<Ty>,
-    WeakValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
+    WeakValue<Ty>: DisplayWith<Heap> + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
-    StrongValue<Ty>: Display,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::ops::{Add, Bound, Deref, DerefMut, Range, RangeBounds, Sub};
 
 use bitvec::vec::BitVec;
@@ -10,6 +10,7 @@ use repr::tivec::TiVec;
 use super::frame::{Closure, UpvaluePlace};
 use super::Event;
 use crate::error::opcode::MissingArgsError;
+use crate::gc::DisplayWith;
 use crate::value::{CoreTypes, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -675,9 +676,13 @@ where
 impl<'a, Ty> StackGuard<'a, Ty>
 where
     Ty: CoreTypes,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
-    pub fn emit_pretty(&self, writer: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
+    pub fn emit_pretty(
+        &self,
+        writer: &mut impl std::fmt::Write,
+        heap: &Heap,
+    ) -> Result<(), std::fmt::Error> {
         if self.is_empty() {
             return write!(writer, "[]");
         }
@@ -686,7 +691,11 @@ where
         for (slot, value) in self.iter_enumerated() {
             let upvalue_mark = ' ';
 
-            writeln!(writer, "    {upvalue_mark}[{slot:>2}] {value:#}")?;
+            writeln!(
+                writer,
+                "    {upvalue_mark}[{slot:>2}] {value:#}",
+                value = value.display(heap)
+            )?;
         }
 
         writeln!(writer, "]")?;
@@ -694,9 +703,9 @@ where
         Ok(())
     }
 
-    pub fn to_pretty_string(&self) -> String {
+    pub fn to_pretty_string(&self, heap: &Heap) -> String {
         let mut r = String::new();
-        self.emit_pretty(&mut r).unwrap();
+        self.emit_pretty(&mut r, heap).unwrap();
         r
     }
 }

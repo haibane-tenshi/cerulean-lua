@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -52,6 +53,7 @@ pub trait CoreTypes: Sized + 'static {
         + Clone
         + Ord
         + Hash
+        + Display
         + From<String>
         + From<&'static str>
         + AsRef<[u8]>;

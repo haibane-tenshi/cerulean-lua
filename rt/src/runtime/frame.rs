@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::ControlFlow;
 
@@ -18,7 +18,7 @@ use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RuntimeError};
-use crate::gc::TryIntoWithGc;
+use crate::gc::{DisplayWith, TryIntoWithGc};
 use crate::value::callable::Callable;
 use crate::value::{
     Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, Weak, WeakValue,
@@ -238,7 +238,7 @@ where
 impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     pub(crate) fn activate<'a>(
         self,
@@ -274,7 +274,10 @@ where
         let opcodes = &function.opcodes;
         let stack = stack.guard(stack_start).unwrap();
 
-        tracing::trace!(stack = stack.to_pretty_string(), "activated Lua frame");
+        tracing::trace!(
+            stack = stack.to_pretty_string(&core.gc),
+            "activated Lua frame"
+        );
 
         let r = ActiveFrame {
             core,
@@ -430,7 +433,7 @@ where
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
     Ty: CoreTypes,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     pub(super) fn step(
         &mut self,
@@ -639,7 +642,10 @@ where
             }
         };
 
-        tracing::trace!(stack = self.stack.to_pretty_string(), "executed opcode");
+        tracing::trace!(
+            stack = self.stack.to_pretty_string(&self.core.gc),
+            "executed opcode"
+        );
 
         Ok(r)
     }

@@ -19,6 +19,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::{AlreadyDroppedError, RuntimeError};
 use crate::ffi::{LuaFfi, LuaFfiOnce};
+use crate::gc::DisplayWith;
 use crate::value::{
     CoreTypes, KeyValue, Strong, StrongValue, TypeWithoutMetatable, Types, Value, Weak, WeakValue,
 };
@@ -231,7 +232,7 @@ where
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     pub fn invoke_at(
         &mut self,
@@ -265,7 +266,7 @@ where
         view.rust_backtrace_stack.push(rust_frame);
 
         tracing::trace!(
-            stack = view.stack.to_pretty_string(),
+            stack = view.stack.to_pretty_string(&view.core.gc),
             "entering Rust function"
         );
 
@@ -328,7 +329,7 @@ impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     pub fn enter(mut self, closure: RootCell<Closure<Ty>>) -> Result<(), RuntimeError<Ty>> {
         use crate::error::OutOfBoundsStack;
@@ -509,7 +510,7 @@ where
     pub fn into_diagnostic(&self, err: RuntimeError<Ty>) -> Diagnostic
     where
         Ty::String: AsRef<[u8]>,
-        StrongValue<Ty>: Display,
+        StrongValue<Ty>: DisplayWith<Heap>,
     {
         use codespan_reporting::files::SimpleFile;
 

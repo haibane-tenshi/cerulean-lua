@@ -10,6 +10,7 @@ use gc::{Gc, GcCell, Heap, Root, RootCell, Trace};
 
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
+use crate::gc::DisplayWith;
 use crate::runtime::{RuntimeView, TransientStackFrame};
 use crate::value::{CoreTypes, NilOr, Value, Weak, WeakValue};
 
@@ -584,7 +585,7 @@ pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     let f = move |mut rt: RuntimeView<'_, Ty>| {
         use crate::runtime::FunctionPtr;
@@ -607,7 +608,7 @@ pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     let f = move |mut rt: RuntimeView<Ty>| {
         let script = script.as_ref();

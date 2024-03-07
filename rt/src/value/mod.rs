@@ -14,7 +14,7 @@ use std::fmt::{Debug, Display};
 use enumoid::Enumoid;
 use gc::{Heap, Trace};
 
-use crate::gc::TryFromWithGc;
+use crate::gc::{DisplayWith, TryFromWithGc};
 
 pub use boolean::Boolean;
 pub use callable::Callable;
@@ -495,6 +495,85 @@ where
 {
     fn default() -> Self {
         Value::Nil
+    }
+}
+
+pub struct ValueWith<'a, Value, Heap>(&'a Value, &'a Heap);
+
+impl<'a, Ty> Display for ValueWith<'a, WeakValue<Ty>, Heap>
+where
+    Ty: CoreTypes,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Value::*;
+
+        let ValueWith(value, heap) = self;
+
+        match value {
+            Nil => write!(f, "nil"),
+            Bool(t) => write!(f, "{t}"),
+            Int(t) => write!(f, "{t}"),
+            Float(t) => write!(f, "{t}"),
+            String(t) => {
+                if let Some(s) = heap.get(*t).map(AsRef::as_ref) {
+                    write!(f, "{s}")
+                } else {
+                    Ok(())
+                }
+            }
+            Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
+            Function(Callable::Rust(t)) => write!(f, "{t}"),
+            Table(t) => write!(f, "{{table <{t:p}>}}"),
+            Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
+        }
+    }
+}
+
+impl<'a, Ty> Display for ValueWith<'a, StrongValue<Ty>, Heap>
+where
+    Ty: CoreTypes,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Value::*;
+
+        let ValueWith(value, heap) = self;
+
+        match value {
+            Nil => write!(f, "nil"),
+            Bool(t) => write!(f, "{t}"),
+            Int(t) => write!(f, "{t}"),
+            Float(t) => write!(f, "{t}"),
+            String(t) => {
+                let s = heap.get_root(t).as_ref();
+                write!(f, "{s}")
+            }
+            Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
+            Function(Callable::Rust(t)) => write!(f, "{t}"),
+            Table(t) => write!(f, "{{table <{t:p}>}}"),
+            Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
+        }
+    }
+}
+
+impl<Ty> DisplayWith<Heap> for WeakValue<Ty>
+where
+    Ty: CoreTypes,
+{
+    type Output<'a> = ValueWith<'a, Self, Heap>;
+
+    fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
+        ValueWith(self, extra)
+    }
+}
+
+impl<Ty> DisplayWith<Heap> for StrongValue<Ty>
+where
+    Ty: CoreTypes,
+{
+    type Output<'a> = ValueWith<'a, Self, Heap>;
+
+    fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
+        ValueWith(self, extra)
     }
 }
 

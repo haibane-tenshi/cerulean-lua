@@ -1,5 +1,7 @@
 //! Utilities to deal with our garbage collector idiosyncracies.
 
+use std::fmt::Display;
+
 pub trait TryFromWithGc<T, Gc>: Sized {
     type Error;
 
@@ -61,4 +63,13 @@ where
     fn into_with_gc(self, gc: &mut Gc) -> T {
         T::from_with_gc(self, gc)
     }
+}
+
+pub trait DisplayWith<Gc> {
+    type Output<'a>: Display
+    where
+        Self: 'a,
+        Gc: 'a;
+
+    fn display<'a>(&'a self, extra: &'a Gc) -> Self::Output<'a>;
 }

@@ -6,7 +6,7 @@ use gc::{Heap, Trace};
 
 use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce, LuaFfiPtr};
-use crate::gc::TryFromWithGc;
+use crate::gc::{DisplayWith, TryFromWithGc};
 
 use super::{CoreTypes, Strong, TypeMismatchError, Types, Value, Weak, WeakValue};
 
@@ -381,7 +381,7 @@ impl<Ty, Closure> LuaFfiOnce<Ty> for RustCallable<Ty, Closure>
 where
     Ty: CoreTypes,
     Closure: LuaFfiOnce<Ty>,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         match self {
@@ -546,7 +546,7 @@ impl<Ty> LuaFfiOnce<Ty> for Callable<Strong<Ty>>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         match self {
@@ -566,7 +566,7 @@ impl<Ty> LuaFfiOnce<Ty> for Callable<Weak<Ty>>
 where
     Ty: CoreTypes,
     Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: Display,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     fn call_once(self, rt: crate::runtime::RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
         use crate::error::AlreadyDroppedError;
