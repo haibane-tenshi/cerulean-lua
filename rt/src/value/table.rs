@@ -315,24 +315,12 @@ where
     Ty::String: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        use super::callable::RustCallable;
-
         match (self, other) {
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
             (Self::String(l0), Self::String(r0)) => l0.addr() == r0.addr(),
-            (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
-                l0.addr() == r0.addr()
-            }
-            (
-                Self::Function(Callable::Rust(RustCallable::Ref(l0))),
-                Self::Function(Callable::Rust(RustCallable::Ref(r0))),
-            ) => l0.addr() == r0.addr(),
-            (
-                Self::Function(Callable::Rust(RustCallable::Ptr(l0))),
-                Self::Function(Callable::Rust(RustCallable::Ptr(r0))),
-            ) => l0 == r0,
+            (Self::Function(l0), Self::Function(r0)) => l0 == r0,
             (Self::Table(l0), Self::Table(r0)) => l0.addr() == r0.addr(),
             (Self::Userdata(l0), Self::Userdata(r0)) => l0.addr() == r0.addr(),
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
@@ -360,7 +348,6 @@ where
     Ty::String: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        use super::callable::RustCallable;
         use KeyValue::*;
 
         core::mem::discriminant(self).hash(state);
@@ -370,9 +357,7 @@ where
             Int(val) => val.hash(state),
             Float(val) => val.hash(state),
             String(val) => val.addr().hash(state),
-            Function(Callable::Lua(val)) => val.addr().hash(state),
-            Function(Callable::Rust(RustCallable::Ref(val))) => val.addr().hash(state),
-            Function(Callable::Rust(RustCallable::Ptr(val))) => val.hash(state),
+            Function(val) => val.hash(state),
             Table(val) => val.addr().hash(state),
             Userdata(val) => val.addr().hash(state),
         }
@@ -385,7 +370,6 @@ where
     Ty::String: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        use super::callable::RustCallable;
         use KeyValue::*;
 
         core::mem::discriminant(self).hash(state);
@@ -395,9 +379,7 @@ where
             Int(val) => val.hash(state),
             Float(val) => val.hash(state),
             String(val) => val.addr().hash(state),
-            Function(Callable::Lua(val)) => val.addr().hash(state),
-            Function(Callable::Rust(RustCallable::Ref(val))) => val.addr().hash(state),
-            Function(Callable::Rust(RustCallable::Ptr(val))) => val.hash(state),
+            Function(val) => val.hash(state),
             Table(val) => val.addr().hash(state),
             Userdata(val) => val.addr().hash(state),
         }

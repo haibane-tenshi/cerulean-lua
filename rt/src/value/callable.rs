@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::rc::Rc;
 
-use gc::{Heap, Trace};
+use gc::{GcCell, Heap, RootCell, Trace};
 
 use crate::error::RuntimeError;
 use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce, LuaFfiPtr};
@@ -341,37 +341,59 @@ where
 {
 }
 
-impl<Ty, Closure> PartialEq for RustCallable<Ty, Closure>
+impl<Ty> PartialEq for RustCallable<Ty, GcCell<<Ty as CoreTypes>::RustClosure>>
 where
     Ty: CoreTypes,
-    Closure: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Ref(l0), Self::Ref(r0)) => l0 == r0,
+            (Self::Ref(l0), Self::Ref(r0)) => l0.addr() == r0.addr(),
             (Self::Ptr(l0), Self::Ptr(r0)) => l0 == r0,
             _ => false,
         }
     }
 }
 
-impl<Ty, Closure> Eq for RustCallable<Ty, Closure>
+impl<Ty> PartialEq for RustCallable<Ty, RootCell<<Ty as CoreTypes>::RustClosure>>
 where
     Ty: CoreTypes,
-    Closure: Eq,
 {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Ref(l0), Self::Ref(r0)) => l0.addr() == r0.addr(),
+            (Self::Ptr(l0), Self::Ptr(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
 }
 
-impl<Ty, Closure> Hash for RustCallable<Ty, Closure>
+impl<Ty> Eq for RustCallable<Ty, GcCell<<Ty as CoreTypes>::RustClosure>> where Ty: CoreTypes {}
+
+impl<Ty> Eq for RustCallable<Ty, RootCell<<Ty as CoreTypes>::RustClosure>> where Ty: CoreTypes {}
+
+impl<Ty> Hash for RustCallable<Ty, GcCell<<Ty as CoreTypes>::RustClosure>>
 where
     Ty: CoreTypes,
-    Closure: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
 
         match self {
-            Self::Ref(t) => t.hash(state),
+            Self::Ref(t) => t.addr().hash(state),
+            Self::Ptr(t) => t.hash(state),
+        }
+    }
+}
+
+impl<Ty> Hash for RustCallable<Ty, RootCell<<Ty as CoreTypes>::RustClosure>>
+where
+    Ty: CoreTypes,
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+
+        match self {
+            Self::Ref(t) => t.addr().hash(state),
             Self::Ptr(t) => t.hash(state),
         }
     }
@@ -503,40 +525,59 @@ where
 {
 }
 
-impl<Ty> PartialEq for Callable<Ty>
+impl<Ty> PartialEq for Callable<Weak<Ty>>
 where
-    Ty: Types,
-    Ty::LuaCallable: PartialEq,
-    Ty::RustCallable: PartialEq,
+    Ty: CoreTypes,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Lua(l0), Self::Lua(r0)) => l0 == r0,
+            (Self::Lua(l0), Self::Lua(r0)) => l0.addr() == r0.addr(),
             (Self::Rust(l0), Self::Rust(r0)) => l0 == r0,
             _ => false,
         }
     }
 }
 
-impl<Ty> Eq for Callable<Ty>
+impl<Ty> PartialEq for Callable<Strong<Ty>>
 where
-    Ty: Types,
-    Ty::LuaCallable: Eq,
-    Ty::RustCallable: Eq,
+    Ty: CoreTypes,
 {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Lua(l0), Self::Lua(r0)) => l0.addr() == r0.addr(),
+            (Self::Rust(l0), Self::Rust(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
 }
 
-impl<Ty> Hash for Callable<Ty>
+impl<Ty> Eq for Callable<Weak<Ty>> where Ty: CoreTypes {}
+
+impl<Ty> Eq for Callable<Strong<Ty>> where Ty: CoreTypes {}
+
+impl<Ty> Hash for Callable<Weak<Ty>>
 where
-    Ty: Types,
-    Ty::LuaCallable: Hash,
-    Ty::RustCallable: Hash,
+    Ty: CoreTypes,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
 
         match self {
-            Callable::Lua(t) => t.hash(state),
+            Callable::Lua(t) => t.addr().hash(state),
+            Callable::Rust(t) => t.hash(state),
+        }
+    }
+}
+
+impl<Ty> Hash for Callable<Strong<Ty>>
+where
+    Ty: CoreTypes,
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+
+        match self {
+            Callable::Lua(t) => t.addr().hash(state),
             Callable::Rust(t) => t.hash(state),
         }
     }
