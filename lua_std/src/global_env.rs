@@ -9,7 +9,7 @@ use repr::literal::Literal;
 use rt::chunk_cache::ChunkId;
 use rt::error::RuntimeError;
 use rt::ffi::{LuaFfi, LuaFfiOnce};
-use rt::gc::{StringRef, TryIntoWithGc};
+use rt::gc::TryIntoWithGc;
 use rt::runtime::RuntimeView;
 use rt::value::{
     Callable, CoreTypes, KeyValue, LuaString, Strong, StrongValue, TableIndex, Types, Value, Weak,
@@ -32,13 +32,11 @@ where
     let chunk_part = Part {
         chunk_ext: ChunkExtension::empty(),
         builder: |mut rt: RuntimeView<'_, Ty>, _, _| -> Result<RootTable<Ty>, RuntimeError<Ty>> {
-            use rt::gc::RootTable;
-
             rt.stack.clear();
 
             let value = rt.core.gc.alloc_cell(Default::default());
 
-            Ok(RootTable(value))
+            Ok(value)
         },
     };
 
@@ -60,7 +58,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_assert = crate::impl_::assert();
-        let key = StringRef::new("assert".into());
+        let key = rt.core.alloc_string("assert".into()).downgrade();
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -85,12 +83,13 @@ where
     Ty::RustClosure: LuaFfi<Ty>,
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     WeakValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_pcall = crate::impl_::pcall();
-        let key = StringRef::new("pcall".into());
+        let key = rt.core.alloc_string("pcall".into()).downgrade();
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -119,7 +118,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_print = crate::impl_::print();
-        let key = StringRef::new("print".into());
+        let key = rt.core.alloc_string("print".into()).downgrade();
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -145,12 +144,13 @@ where
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     WeakValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_load = crate::impl_::load();
-        let key = StringRef::new("load".into());
+        let key = rt.core.alloc_string("load".into()).downgrade();
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -176,12 +176,13 @@ where
     Ty::Table: Trace + TableIndex<Weak<Ty>>,
     WeakValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display,
 {
     let chunk_ext = ChunkExtension::empty();
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let fn_loadfile = crate::impl_::loadfile();
-        let key = StringRef::new("loadfile".into());
+        let key = rt.core.alloc_string("loadfile".into()).downgrade();
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -209,7 +210,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let f = crate::impl_::setmetatable();
-        let key = StringRef::new("setmetatable".into());
+        let key = rt.core.alloc_string("setmetatable".into()).downgrade();
 
         rt.core.gc[&value].set(
             KeyValue::String(key),
@@ -237,7 +238,7 @@ where
 
     let builder = |rt: RuntimeView<Ty>, _: ChunkRange, value: RootTable<Ty>| {
         let f = crate::impl_::getmetatable();
-        let key = StringRef::new("getmetatable".into());
+        let key = rt.core.alloc_string("getmetatable".into()).downgrade();
 
         rt.core.gc[&value].set(
             KeyValue::String(key),

@@ -1,13 +1,12 @@
-use repr::index::StackSlot;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
-use gc::Heap;
-
-use rt::error::{RefAccessError, RuntimeError};
+use gc::{GcCell, Heap};
+use repr::index::StackSlot;
+use rt::error::{AlreadyDroppedError, RefAccessError, RuntimeError};
 use rt::ffi::{self, LuaFfi, LuaFfiOnce, LuaFfiPtr, Maybe, Opts};
-use rt::gc::{StringRef, TryIntoWithGc};
+use rt::gc::{TryFromWithGc, TryIntoWithGc};
 use rt::runtime::RuntimeView;
 use rt::value::table::KeyValue;
 use rt::value::{
@@ -21,18 +20,25 @@ where
 {
     let f = |rt: RuntimeView<'_, Ty>| {
         let Some(cond) = rt.stack.get_slot(StackSlot(0)) else {
-            let msg = StringRef::new("assert expects at least one argument".into());
+            let msg = rt
+                .core
+                .alloc_string("assert expects at least one argument".into());
             return Err(Value::String(msg).into());
         };
 
         if cond.to_bool() {
             Ok(())
         } else {
-            let err = rt.stack.get_slot(StackSlot(1)).cloned().unwrap_or_else(|| {
-                let msg = StringRef::new("assertion failed!".into());
-                Value::String(msg)
-            });
-            let err: StrongValue<_> = err.try_into_with_gc(&mut rt.core.gc)?;
+            let err = rt
+                .stack
+                .get_slot(StackSlot(1))
+                .cloned()
+                .map(|err| err.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
+                .transpose()?
+                .unwrap_or_else(|| {
+                    let msg = rt.core.alloc_string("assertion failed!".into());
+                    Value::String(msg)
+                });
             Err(err.into())
         }
     };
@@ -64,18 +70,27 @@ where
     Ty::String: AsRef<[u8]> + Display,
     Ty::RustClosure: LuaFfi<Ty>,
     WeakValue<Ty>: Display,
+    StrongValue<Ty>: Display,
 {
     let f = |mut rt: RuntimeView<'_, Ty>| {
         let func = {
             let mut stack = rt.stack.frame(&mut rt.core.gc);
             let Some(mut value) = stack.get_mut(StackSlot(0)) else {
-                let msg = StringRef::new("pcall expects at least one argument".into());
+                // Drop forces stack to stay alive until end of block (where its drop impl is called).
+                // Have to drop it manually on divergent branches.
+                drop(stack);
+                let msg = rt
+                    .core
+                    .alloc_string("pcall expects at least one argument".into());
                 return Err(Value::String(msg).into());
             };
 
             let Value::Function(func) = value.take() else {
-                let msg =
-                    StringRef::new("pcall expects the first argument to be a function".into());
+                drop(value);
+                drop(stack);
+                let msg = rt
+                    .core
+                    .alloc_string("pcall expects the first argument to be a function".into());
                 return Err(Value::String(msg).into());
             };
 
@@ -103,12 +118,12 @@ where
                     .into_diagnostic(err)
                     .emit(&mut NoColor::new(&mut s), &Default::default());
                 let string = String::from_utf8_lossy(&s).to_string();
-                let msg = StringRef::new(string.into());
+                let msg = rt.core.alloc_string(string.into());
 
                 rt.reset();
                 let mut stack = rt.stack.transient_frame();
                 stack.push(Value::Bool(false));
-                stack.push(Value::String(msg));
+                stack.push(Value::String(msg.downgrade()));
                 stack.sync(&mut rt.core.gc);
             }
         }
@@ -138,14 +153,14 @@ impl Display for InvalidModeError {
 
 impl Error for InvalidModeError {}
 
-impl<Ty> TryFrom<WeakValue<Ty>> for Mode
+impl<Ty> TryFromWithGc<WeakValue<Ty>, Heap> for Mode
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
 {
     type Error = ModeError;
 
-    fn try_from(value: WeakValue<Ty>) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: WeakValue<Ty>, gc: &mut Heap) -> Result<Self, Self::Error> {
         use rt::value::Type;
 
         let s = match value {
@@ -160,7 +175,9 @@ where
             }
         };
 
-        let r = match s.as_ref() {
+        let bytes = gc.get(s).ok_or(AlreadyDroppedError)?.as_ref().as_ref();
+
+        let r = match bytes {
             b"t" => Ok(Mode::Text),
             b"b" => Ok(Mode::Binary),
             b"bt" => Ok(Mode::BinaryOrText),
@@ -208,6 +225,12 @@ impl From<TypeMismatchError> for ModeError {
     }
 }
 
+impl From<AlreadyDroppedError> for ModeError {
+    fn from(value: AlreadyDroppedError) -> Self {
+        ModeError::DroppedOrBorrowed(value.into())
+    }
+}
+
 pub fn load<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes,
@@ -215,6 +238,7 @@ where
     Ty::RustClosure: LuaFfiOnce<Ty>,
     WeakValue<Ty>: Display + TryIntoWithGc<LuaString<String>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<String>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display,
 {
     use rt::value::{Type, Weak};
 
@@ -282,34 +306,47 @@ where
                 let source = match source {
                     ChunkSource::String(s) => s,
                     ChunkSource::Function(_) => {
-                        let msg = StringRef::new("source functions are not yet supported".into());
+                        let msg = rt
+                            .core
+                            .alloc_string("source functions are not yet supported".into());
                         return Err(Value::String(msg).into());
                     }
                 };
 
-                {
-                    let source = std::str::from_utf8(source.as_ref()).map_err(|_| {
-                        let msg = StringRef::new("string does not contain valid utf8".into());
-                        Value::String(msg)
-                    })?;
+                let source = rt
+                    .core
+                    .gc
+                    .get(source)
+                    .ok_or(AlreadyDroppedError)?
+                    .as_ref()
+                    .as_ref();
 
-                    match rt.load(source.to_string(), None) {
-                        Ok(chunk_id) => {
-                            let ptr = FunctionPtr {
-                                chunk_id,
-                                function_id: FunctionId(0),
-                            };
-                            let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
-                            let closure = rt.construct_closure(ptr, [env])?.downgrade();
+                let source = match std::str::from_utf8(source) {
+                    Ok(s) => s.to_string(),
+                    Err(_) => {
+                        let msg = rt
+                            .core
+                            .alloc_string("string does not contain valid utf8".into());
+                        return Err(Value::String(msg).into());
+                    }
+                };
 
-                            Ok((NilOr::Some(Callable::Lua(closure)), Maybe::None))
-                        }
-                        Err(err) => {
-                            let msg = rt.into_diagnostic(err.into()).emit_to_string();
-                            let msg = StringRef::new(msg.into());
+                match rt.load(source, None) {
+                    Ok(chunk_id) => {
+                        let ptr = FunctionPtr {
+                            chunk_id,
+                            function_id: FunctionId(0),
+                        };
+                        let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
+                        let closure = rt.construct_closure(ptr, [env])?.downgrade();
 
-                            Ok((NilOr::Nil, Maybe::Some(LuaString(msg))))
-                        }
+                        Ok((NilOr::Some(Callable::Lua(closure)), Maybe::None))
+                    }
+                    Err(err) => {
+                        let msg = rt.into_diagnostic(err.into()).emit_to_string();
+                        let msg = rt.core.alloc_string(msg.into());
+
+                        Ok((NilOr::Nil, Maybe::Some(LuaString(msg))))
                     }
                 }
             },
@@ -326,6 +363,7 @@ where
     Ty::RustClosure: LuaFfiOnce<Ty>,
     WeakValue<Ty>: Display + TryIntoWithGc<LuaString<PathBuf>, Heap>,
     <WeakValue<Ty> as TryIntoWithGc<LuaString<PathBuf>, Heap>>::Error: Error,
+    StrongValue<Ty>: Display,
 {
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(
@@ -341,7 +379,7 @@ where
                 let _mode = mode.unwrap_or_default();
 
                 let Some(LuaString(filename)) = filename else {
-                    let msg = StringRef::new(
+                    let msg = rt.core.alloc_string(
                         "loadfile doesn't yet support loading chunks from stdin".into(),
                     );
                     return Err(Value::String(msg).into());
@@ -360,7 +398,7 @@ where
                     }
                     Err(err) => {
                         let msg = rt.into_diagnostic(err).emit_to_string();
-                        let msg = StringRef::new(msg.into());
+                        let msg = rt.core.alloc_string(msg.into());
 
                         Ok((NilOr::Nil, Maybe::Some(LuaString(msg))))
                     }
@@ -383,14 +421,13 @@ where
                 .core
                 .metatable_of(&value)?
                 .map(|metatable| -> Result<WeakValue<Ty>, RefAccessError> {
-                    use rt::error::AlreadyDroppedError;
                     use rt::value::TableIndex;
 
                     let __metatable = {
-                        let key = StringRef::new("__metatable".into());
+                        let key = rt.core.alloc_string("__metatable".into()).downgrade();
                         rt.core
                             .gc
-                            .get(metatable.into())
+                            .get(metatable)
                             .ok_or(AlreadyDroppedError)?
                             .get(&KeyValue::String(key))
                     };
@@ -418,15 +455,12 @@ where
     Ty: CoreTypes,
     // Value<Gc>: Debug + Display,
 {
-    use rt::gc::GcTable;
-
     let f = |rt: RuntimeView<'_, Ty>| {
         ffi::try_invoke_with_rt(
             rt,
             |rt: RuntimeView<'_, Ty>,
-             table: LuaTable<GcTable<Ty::Table>>,
-             metatable: NilOr<LuaTable<GcTable<Ty::Table>>>| {
-                use rt::error::AlreadyDroppedError;
+             table: LuaTable<GcCell<Ty::Table>>,
+             metatable: NilOr<LuaTable<GcCell<Ty::Table>>>| {
                 use rt::value::{Metatable, TableIndex};
 
                 let LuaTable(table) = table;
@@ -435,16 +469,16 @@ where
                 let old_metatable = rt
                     .core
                     .gc
-                    .get(table.into())
+                    .get(table)
                     .ok_or(AlreadyDroppedError)?
                     .metatable();
 
                 let has_meta_field = match old_metatable {
                     Some(metatable) => {
-                        let key = StringRef::new("__metatable".into());
+                        let key = rt.core.alloc_string("__metatable".into()).downgrade();
                         rt.core
                             .gc
-                            .get(metatable.into())
+                            .get(metatable)
                             .ok_or(AlreadyDroppedError)?
                             .contains_key(&KeyValue::String(key))
                     }
@@ -452,7 +486,7 @@ where
                 };
 
                 if has_meta_field {
-                    let msg = StringRef::new(
+                    let msg = rt.core.alloc_string(
                         "table already has metatable with '__metatable' field".into(),
                     );
                     return Err(Value::String(msg).into());
@@ -460,7 +494,7 @@ where
 
                 rt.core
                     .gc
-                    .get_mut(table.into())
+                    .get_mut(table)
                     .ok_or(AlreadyDroppedError)?
                     .set_metatable(metatable);
 
