@@ -60,7 +60,7 @@ fn main() -> Result<()> {
             use lua_std::global_env;
             use rt::chunk_cache::ChunkId;
             use rt::chunk_cache::{MainCache, SingleChunk, VecCache};
-            use rt::runtime::{Core, DialectBuilder, Runtime};
+            use rt::runtime::{Core, DialectBuilder, Interner, Runtime};
             use rt::value::traits::DefaultTypes;
             use rt::value::Value;
 
@@ -68,8 +68,8 @@ fn main() -> Result<()> {
                 .include(global_env::assert())
                 .include(global_env::pcall())
                 .include(global_env::print())
-                .include(global_env::load())
-                .include(global_env::loadfile())
+                // .include(global_env::load())
+                // .include(global_env::loadfile())
                 .include(global_env::setmetatable())
                 .include(global_env::getmetatable())
                 .finish();
@@ -83,11 +83,13 @@ fn main() -> Result<()> {
                 MainCache::new(env, VecCache::new())
             };
 
+            let mut gc = Heap::new();
             let core = Core {
                 global_env: Value::Nil,
                 primitive_metatables: Default::default(),
                 dialect: DialectBuilder::lua_5_4(),
                 gc: Heap::new(),
+                string_interner: Interner::new(&mut gc),
             };
 
             let mut runtime = Runtime::<DefaultTypes, _>::new(chunk_cache, core);

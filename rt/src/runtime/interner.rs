@@ -61,7 +61,7 @@ impl<T> Interner<T, std::hash::RandomState>
 where
     T: Trace + From<&'static str>,
 {
-    pub(crate) fn new(heap: &mut Heap) -> Self {
+    pub fn new(heap: &mut Heap) -> Self {
         let events = EnumMap::new_with(|event: Event| heap.alloc(Interned(event.to_str().into())));
 
         Interner {
