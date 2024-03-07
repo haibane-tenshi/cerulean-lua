@@ -900,19 +900,21 @@ mod sealed {
 mod sealed_root {
     use super::{Counter, Root, RootCell};
 
+    pub struct Concealed<'a>(pub(crate) &'a Counter);
+
     pub trait Sealed {
-        fn counter(&self) -> &Counter;
+        fn counter(&self) -> Concealed;
     }
 
     impl<T> Sealed for RootCell<T> {
-        fn counter(&self) -> &Counter {
-            &self.counter
+        fn counter(&self) -> Concealed {
+            Concealed(&self.counter)
         }
     }
 
     impl<T> Sealed for Root<T> {
-        fn counter(&self) -> &Counter {
-            &self.counter
+        fn counter(&self) -> Concealed {
+            Concealed(&self.counter)
         }
     }
 }

@@ -187,7 +187,7 @@ impl Heap {
         T: Trace,
     {
         let arena = match self.arena() {
-            Some(arena) if arena.validate_counter(ptr.counter()) => arena,
+            Some(arena) if arena.validate_counter(ptr.counter().0) => arena,
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
@@ -210,7 +210,7 @@ impl Heap {
         T: Trace,
     {
         let arena = match self.arena_mut() {
-            Some(arena) if arena.validate_counter(ptr.counter()) => arena,
+            Some(arena) if arena.validate_counter(ptr.counter().0) => arena,
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
