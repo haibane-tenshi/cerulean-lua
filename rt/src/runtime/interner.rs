@@ -5,7 +5,7 @@ use enumoid::EnumMap;
 use gc::{Gc, Heap, Root, Trace};
 use hashbrown::HashTable;
 
-use super::Event;
+use super::frame::BuiltinMetamethod;
 
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Interned<T>(T);
@@ -54,7 +54,7 @@ impl<T> DerefMut for Interned<T> {
 pub struct Interner<T, H = std::hash::RandomState> {
     hasher: H,
     hash_table: HashTable<Gc<Interned<T>>>,
-    events: EnumMap<Event, Root<Interned<T>>>,
+    events: EnumMap<BuiltinMetamethod, Root<Interned<T>>>,
 }
 
 impl<T> Interner<T, std::hash::RandomState>
@@ -62,7 +62,9 @@ where
     T: Trace + From<&'static str>,
 {
     pub fn new(heap: &mut Heap) -> Self {
-        let events = EnumMap::new_with(|event: Event| heap.alloc(Interned(event.to_str().into())));
+        let events = EnumMap::new_with(|event: BuiltinMetamethod| {
+            heap.alloc(Interned(event.to_str().into()))
+        });
 
         Interner {
             hasher: Default::default(),
@@ -116,7 +118,7 @@ where
         value
     }
 
-    pub(crate) fn event(&self, event: Event) -> Gc<Interned<T>> {
-        self.events.get(event).downgrade()
+    pub(crate) fn event(&self, metamethod: BuiltinMetamethod) -> Gc<Interned<T>> {
+        self.events.get(metamethod).downgrade()
     }
 }

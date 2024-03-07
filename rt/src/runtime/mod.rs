@@ -68,7 +68,7 @@ where
     }
 
     fn lookup_event(&self, event: Event) -> KeyValue<Weak<Ty>> {
-        let s = self.string_interner.event(event);
+        let s = self.string_interner.event(event.to_metamethod());
         KeyValue::String(s)
     }
 

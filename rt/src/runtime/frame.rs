@@ -1426,33 +1426,34 @@ pub(crate) enum Event {
 }
 
 impl Event {
-    pub fn to_str(self) -> &'static str {
+    pub(crate) fn to_metamethod(self) -> BuiltinMetamethod {
+        use BuiltinMetamethod as M;
         use Event::*;
 
         match self {
-            Neg => "__unm",
-            Add => "__add",
-            Sub => "__sub",
-            Mul => "__mul",
-            Div => "__div",
-            FloorDiv => "__idiv",
-            Rem => "__mod",
-            Pow => "__pow",
-            BitNot => "__bnot",
-            BitAnd => "__band",
-            BitOr => "__bor",
-            BitXor => "__bxor",
-            ShL => "__shl",
-            ShR => "__shr",
-            Concat => "__concat",
-            Len => "__len",
-            Eq => "__eq",
-            Neq => "__eq",
-            Lt => "__lt",
-            LtEq => "__le",
-            Index => "__index",
-            NewIndex => "__newindex",
-            Call => "__call",
+            Neg => M::Neg,
+            Add => M::Add,
+            Sub => M::Sub,
+            Mul => M::Mul,
+            Div => M::Div,
+            FloorDiv => M::FloorDiv,
+            Rem => M::Rem,
+            Pow => M::Pow,
+            BitNot => M::BitNot,
+            BitAnd => M::BitAnd,
+            BitOr => M::BitOr,
+            BitXor => M::BitXor,
+            ShL => M::ShL,
+            ShR => M::ShR,
+            Concat => M::Concat,
+            Len => M::Len,
+            Eq => M::Eq,
+            Neq => M::Eq,
+            Lt => M::Lt,
+            LtEq => M::LtEq,
+            Index => M::Index,
+            NewIndex => M::NewIndex,
+            Call => M::Call,
         }
     }
 }
@@ -1517,6 +1518,63 @@ impl From<RelBinOp> for Event {
         match value {
             RelBinOp::Gt | RelBinOp::Lt => Event::Lt,
             RelBinOp::GtEq | RelBinOp::LtEq => Event::LtEq,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Enumoid)]
+pub(crate) enum BuiltinMetamethod {
+    Neg,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    FloorDiv,
+    Rem,
+    Pow,
+    BitNot,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShL,
+    ShR,
+    Concat,
+    Len,
+    Eq,
+    Lt,
+    LtEq,
+    Index,
+    NewIndex,
+    Call,
+}
+
+impl BuiltinMetamethod {
+    pub(crate) fn to_str(self) -> &'static str {
+        use BuiltinMetamethod::*;
+
+        match self {
+            Neg => "__unm",
+            Add => "__add",
+            Sub => "__sub",
+            Mul => "__mul",
+            Div => "__div",
+            FloorDiv => "__idiv",
+            Rem => "__mod",
+            Pow => "__pow",
+            BitNot => "__bnot",
+            BitAnd => "__band",
+            BitOr => "__bor",
+            BitXor => "__bxor",
+            ShL => "__shl",
+            ShR => "__shr",
+            Concat => "__concat",
+            Len => "__len",
+            Eq => "__eq",
+            Lt => "__lt",
+            LtEq => "__le",
+            Index => "__index",
+            NewIndex => "__newindex",
+            Call => "__call",
         }
     }
 }
