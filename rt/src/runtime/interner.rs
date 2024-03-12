@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 
@@ -120,5 +121,11 @@ where
 
     pub(crate) fn event(&self, metamethod: BuiltinMetamethod) -> Gc<Interned<T>> {
         self.events.get(metamethod).downgrade()
+    }
+}
+
+impl<T, H> Debug for Interner<T, H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Interner").finish_non_exhaustive()
     }
 }

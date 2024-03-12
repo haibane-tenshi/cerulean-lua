@@ -4,25 +4,26 @@ use std::fmt::Debug;
 use gc::Heap;
 
 use crate::gc::DisplayWith;
-use crate::value::{CoreTypes as Types, StrongValue, Value};
+use crate::value::{CoreTypes, StrongValue};
 
-pub struct ValueError<Ty: Types>(pub StrongValue<Ty>);
+pub struct ValueError<Value>(pub Value);
 
-impl<Ty> ValueError<Ty>
+impl<Ty, Conv> ValueError<StrongValue<Ty, Conv>>
 where
-    Ty: Types,
+    Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
-    StrongValue<Ty>: DisplayWith<Heap>,
+    StrongValue<Ty, Conv>: DisplayWith<Heap>,
 {
     pub(crate) fn into_diagnostic<FileId>(self, heap: &Heap) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
-        use Value::*;
+        use crate::gc::LuaPtr;
+        use crate::value::Value::*;
 
         let ValueError(value) = self;
 
         let mut diag = Diagnostic::error();
         let valid_utf8 = match &value {
-            String(s) => {
+            String(LuaPtr(s)) => {
                 if let Ok(s) = std::str::from_utf8(heap.get_root(s).as_ref().as_ref()) {
                     diag.message = s.into();
                     true
@@ -48,19 +49,15 @@ where
     }
 }
 
-impl<Ty> From<StrongValue<Ty>> for ValueError<Ty>
-where
-    Ty: Types,
-{
-    fn from(value: StrongValue<Ty>) -> Self {
+impl<Value> From<Value> for ValueError<Value> {
+    fn from(value: Value) -> Self {
         ValueError(value)
     }
 }
 
-impl<Ty> Debug for ValueError<Ty>
+impl<Value> Debug for ValueError<Value>
 where
-    Ty: Types,
-    StrongValue<Ty>: Debug,
+    Value: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Value").field(&self.0).finish()

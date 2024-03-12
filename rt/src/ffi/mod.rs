@@ -12,32 +12,39 @@ use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
 use crate::gc::DisplayWith;
 use crate::runtime::{RuntimeView, TransientStackFrame};
-use crate::value::{CoreTypes, NilOr, Value, Weak, WeakValue};
+use crate::value::{CoreTypes, NilOr, StrongValue, TableIndex, Weak, WeakValue};
 
 use arg_parser::{FormatReturns, ParseArgs};
 use signature::{Signature, SignatureWithFirst};
 use tuple::Tuple;
 
-pub trait LuaFfiOnce<Ty>
+pub trait LuaFfiOnce<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    fn call_once(self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>;
+    fn call_once(
+        self,
+        _: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
     fn debug_info(&self) -> DebugInfo;
 }
 
-pub trait LuaFfiMut<Ty>: LuaFfiOnce<Ty>
+pub trait LuaFfiMut<Ty, Conv>: LuaFfiOnce<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    fn call_mut(&mut self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>;
+    fn call_mut(
+        &mut self,
+        _: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
 }
 
-pub trait LuaFfi<Ty>: LuaFfiMut<Ty>
+pub trait LuaFfi<Ty, Conv>: LuaFfiMut<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    fn call(&self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>;
+    fn call(&self, _: RuntimeView<'_, Ty, Conv>)
+        -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
 }
 
 #[derive(Debug, Clone)]
@@ -46,12 +53,17 @@ pub struct DebugInfo {
     pub name: String,
 }
 
-impl<Ty, F> LuaFfiOnce<Ty> for F
+impl<Ty, Conv, F> LuaFfiOnce<Ty, Conv> for F
 where
     Ty: CoreTypes,
-    F: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<Ty>>,
+    F: for<'rt> FnOnce(
+        RuntimeView<'rt, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(
+        self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         (self)(rt)
     }
 
@@ -62,32 +74,43 @@ where
     }
 }
 
-impl<Ty, F> LuaFfiMut<Ty> for F
+impl<Ty, Conv, F> LuaFfiMut<Ty, Conv> for F
 where
     Ty: CoreTypes,
-    F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<Ty>>,
+    F: for<'rt> FnMut(
+        RuntimeView<'rt, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_mut(
+        &mut self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         (self)(rt)
     }
 }
 
-impl<Ty, F> LuaFfi<Ty> for F
+impl<Ty, Conv, F> LuaFfi<Ty, Conv> for F
 where
     Ty: CoreTypes,
-    F: for<'rt> Fn(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<Ty>>,
+    F: for<'rt> Fn(RuntimeView<'rt, Ty, Conv>) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call(
+        &self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         (self)(rt)
     }
 }
 
-impl<Ty, T> LuaFfiOnce<Ty> for GcCell<T>
+impl<Ty, Conv, T> LuaFfiOnce<Ty, Conv> for GcCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(
+        self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 
@@ -98,22 +121,28 @@ where
     }
 }
 
-impl<Ty, T> LuaFfiMut<Ty> for GcCell<T>
+impl<Ty, Conv, T> LuaFfiMut<Ty, Conv> for GcCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_mut(
+        &mut self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 }
 
-impl<Ty, T> LuaFfi<Ty> for GcCell<T>
+impl<Ty, Conv, T> LuaFfi<Ty, Conv> for GcCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call(
+        &self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         use crate::error::AlreadyDroppedError;
 
         let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
@@ -121,12 +150,15 @@ where
     }
 }
 
-impl<Ty, T> LuaFfiOnce<Ty> for RootCell<T>
+impl<Ty, Conv, T> LuaFfiOnce<Ty, Conv> for RootCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(
+        self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 
@@ -137,33 +169,42 @@ where
     }
 }
 
-impl<Ty, T> LuaFfiMut<Ty> for RootCell<T>
+impl<Ty, Conv, T> LuaFfiMut<Ty, Conv> for RootCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_mut(
+        &mut self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 }
 
-impl<Ty, T> LuaFfi<Ty> for RootCell<T>
+impl<Ty, Conv, T> LuaFfi<Ty, Conv> for RootCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call(
+        &self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         let f = rt.core.gc.get_root(self).clone();
         f.call(rt)
     }
 }
 
-impl<Ty, T> LuaFfiOnce<Ty> for Gc<T>
+impl<Ty, Conv, T> LuaFfiOnce<Ty, Conv> for Gc<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(
+        self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 
@@ -174,22 +215,28 @@ where
     }
 }
 
-impl<Ty, T> LuaFfiMut<Ty> for Gc<T>
+impl<Ty, Conv, T> LuaFfiMut<Ty, Conv> for Gc<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_mut(
+        &mut self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 }
 
-impl<Ty, T> LuaFfi<Ty> for Gc<T>
+impl<Ty, Conv, T> LuaFfi<Ty, Conv> for Gc<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call(
+        &self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         use crate::error::AlreadyDroppedError;
 
         let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
@@ -197,12 +244,15 @@ where
     }
 }
 
-impl<Ty, T> LuaFfiOnce<Ty> for Root<T>
+impl<Ty, Conv, T> LuaFfiOnce<Ty, Conv> for Root<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(
+        self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 
@@ -213,39 +263,49 @@ where
     }
 }
 
-impl<Ty, T> LuaFfiMut<Ty> for Root<T>
+impl<Ty, Conv, T> LuaFfiMut<Ty, Conv> for Root<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_mut(
+        &mut self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 }
 
-impl<Ty, T> LuaFfi<Ty> for Root<T>
+impl<Ty, Conv, T> LuaFfi<Ty, Conv> for Root<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfi<Ty, Conv> + Clone,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call(
+        &self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         let f = rt.core.gc.get_root(self).clone();
         f.call(rt)
     }
 }
 
-pub fn invoke<'rt, Ty, F, Args>(mut rt: RuntimeView<'rt, Ty>, f: F) -> Result<(), RuntimeError<Ty>>
+pub fn invoke<'rt, Ty, Conv, F, Args>(
+    mut rt: RuntimeView<'rt, Ty, Conv>,
+    f: F,
+) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>
 where
     Ty: CoreTypes,
+    Conv: 'static,
     F: Signature<Args>,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> TransientStackFrame<'a, Ty>:
-        FormatReturns<Weak<Ty>, Heap, <F as Signature<Args>>::Output>,
+    for<'a> &'a [WeakValue<Ty, Conv>]: ParseArgs<Args, Heap>,
+    for<'a> TransientStackFrame<'a, Ty, Conv>:
+        FormatReturns<Weak<Ty, Conv>, Heap, <F as Signature<Args>>::Output>,
 {
-    let args = rt.stack.parse(&mut rt.core.gc).map_err(|err| {
-        let msg = rt.core.alloc_string(err.to_string().into());
-        Value::String(msg)
-    })?;
+    let args = rt
+        .stack
+        .parse(&mut rt.core.gc)
+        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
 
     rt.stack.clear();
 
@@ -260,20 +320,21 @@ where
     Ok(())
 }
 
-pub fn try_invoke<'rt, Ty, F, Args, R>(
-    mut rt: RuntimeView<'rt, Ty>,
+pub fn try_invoke<'rt, Ty, Conv, F, Args, R>(
+    mut rt: RuntimeView<'rt, Ty, Conv>,
     f: F,
-) -> Result<(), RuntimeError<Ty>>
+) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>
 where
     Ty: CoreTypes,
-    F: Signature<Args, Output = Result<R, RuntimeError<Ty>>>,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> TransientStackFrame<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
+    Conv: 'static,
+    F: Signature<Args, Output = Result<R, RuntimeError<StrongValue<Ty, Conv>>>>,
+    for<'a> &'a [WeakValue<Ty, Conv>]: ParseArgs<Args, Heap>,
+    for<'a> TransientStackFrame<'a, Ty, Conv>: FormatReturns<Weak<Ty, Conv>, Heap, R>,
 {
-    let args = rt.stack.parse(&mut rt.core.gc).map_err(|err| {
-        let msg = rt.core.alloc_string(err.to_string().into());
-        Value::String(msg)
-    })?;
+    let args = rt
+        .stack
+        .parse(&mut rt.core.gc)
+        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
 
     rt.stack.clear();
 
@@ -288,24 +349,27 @@ where
     Ok(())
 }
 
-pub fn invoke_with_rt<'rt, Ty, F, Args, R>(
-    mut rt: RuntimeView<'rt, Ty>,
+pub fn invoke_with_rt<'rt, Ty, Conv, F, Args, R>(
+    mut rt: RuntimeView<'rt, Ty, Conv>,
     f: F,
-) -> Result<(), RuntimeError<Ty>>
+) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>
 where
     Ty: CoreTypes,
-    // Value<Ty>: Display + Debug,
-    for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> TransientStackFrame<'a, Ty>:
-        FormatReturns<Weak<Ty>, Heap, <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output>,
+    Conv: 'static,
+    for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty, Conv>, Args, Output = R>,
+    for<'a> &'a [WeakValue<Ty, Conv>]: ParseArgs<Args, Heap>,
+    for<'a> TransientStackFrame<'a, Ty, Conv>: FormatReturns<
+        Weak<Ty, Conv>,
+        Heap,
+        <F as SignatureWithFirst<RuntimeView<'a, Ty, Conv>, Args>>::Output,
+    >,
 {
     let heap = &mut rt.core.gc;
 
-    let args = rt.stack.parse(heap).map_err(|err| {
-        let msg = rt.core.alloc_string(err.to_string().into());
-        Value::String(msg)
-    })?;
+    let args = rt
+        .stack
+        .parse(heap)
+        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
 
     rt.stack.clear();
 
@@ -320,23 +384,27 @@ where
     Ok(())
 }
 
-pub fn try_invoke_with_rt<'rt, Ty, F, Args, R>(
-    mut rt: RuntimeView<'rt, Ty>,
+pub fn try_invoke_with_rt<'rt, Ty, Conv, F, Args, R>(
+    mut rt: RuntimeView<'rt, Ty, Conv>,
     f: F,
-) -> Result<(), RuntimeError<Ty>>
+) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>
 where
     Ty: CoreTypes,
-    // Value<Ty>: Debug + Display,
-    for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = Result<R, RuntimeError<Ty>>>,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap>,
-    for<'a> TransientStackFrame<'a, Ty>: FormatReturns<Weak<Ty>, Heap, R>,
+    Conv: 'static,
+    for<'a> F: SignatureWithFirst<
+        RuntimeView<'a, Ty, Conv>,
+        Args,
+        Output = Result<R, RuntimeError<StrongValue<Ty, Conv>>>,
+    >,
+    for<'a> &'a [WeakValue<Ty, Conv>]: ParseArgs<Args, Heap>,
+    for<'a> TransientStackFrame<'a, Ty, Conv>: FormatReturns<Weak<Ty, Conv>, Heap, R>,
 {
     let heap = &mut rt.core.gc;
 
-    let args = rt.stack.parse(heap).map_err(|err| {
-        let msg = rt.core.alloc_string(err.to_string().into());
-        Value::String(msg)
-    })?;
+    let args = rt
+        .stack
+        .parse(heap)
+        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
 
     rt.stack.clear();
 
@@ -392,14 +460,14 @@ impl<T> From<Maybe<T>> for Option<T> {
     }
 }
 
-pub trait WithName<Gc>: Sized {
+pub trait WithName<Ty, Conv>: Sized {
     fn with_name<N>(self, name: N) -> DebugInfoWrap<Self, N>;
 }
 
-impl<F, Ty> WithName<Ty> for F
+impl<F, Ty, Conv> WithName<Ty, Conv> for F
 where
     Ty: CoreTypes,
-    F: LuaFfiOnce<Ty>,
+    F: LuaFfiOnce<Ty, Conv>,
 {
     fn with_name<N>(self, name: N) -> DebugInfoWrap<Self, N> {
         DebugInfoWrap { func: self, name }
@@ -412,13 +480,16 @@ pub struct DebugInfoWrap<F, N> {
     name: N,
 }
 
-impl<Ty, F, N> LuaFfiOnce<Ty> for DebugInfoWrap<F, N>
+impl<Ty, Conv, F, N> LuaFfiOnce<Ty, Conv> for DebugInfoWrap<F, N>
 where
     Ty: CoreTypes,
-    F: LuaFfiOnce<Ty>,
+    F: LuaFfiOnce<Ty, Conv>,
     N: AsRef<str>,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(
+        self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.func.call_once(rt)
     }
 
@@ -429,56 +500,63 @@ where
     }
 }
 
-impl<Ty, F, N> LuaFfiMut<Ty> for DebugInfoWrap<F, N>
+impl<Ty, Conv, F, N> LuaFfiMut<Ty, Conv> for DebugInfoWrap<F, N>
 where
     Ty: CoreTypes,
-    F: LuaFfiMut<Ty>,
+    F: LuaFfiMut<Ty, Conv>,
     N: AsRef<str>,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_mut(
+        &mut self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.func.call_mut(rt)
     }
 }
 
-impl<Ty, F, N> LuaFfi<Ty> for DebugInfoWrap<F, N>
+impl<Ty, Conv, F, N> LuaFfi<Ty, Conv> for DebugInfoWrap<F, N>
 where
     Ty: CoreTypes,
-    F: LuaFfi<Ty>,
+    F: LuaFfi<Ty, Conv>,
     N: AsRef<str>,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call(
+        &self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.func.call(rt)
     }
 }
 
-pub struct LuaFfiPtr<Ty>
+pub struct LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    func: fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>,
+    func: fn(RuntimeView<'_, Ty, Conv>) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>,
     name: &'static str,
 }
 
-impl<Ty> LuaFfiPtr<Ty>
+impl<Ty, Conv> LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
     pub fn new(
-        fn_ptr: fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>>,
+        fn_ptr: fn(RuntimeView<'_, Ty, Conv>) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>,
         name: &'static str,
     ) -> Self {
         LuaFfiPtr { func: fn_ptr, name }
     }
 }
 
-impl<Ty> Trace for LuaFfiPtr<Ty>
+impl<Ty, Conv> Trace for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
+    Conv: 'static,
 {
     fn trace(&self, _collector: &mut gc::Collector) {}
 }
 
-impl<Ty> Clone for LuaFfiPtr<Ty>
+impl<Ty, Conv> Clone for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -487,9 +565,9 @@ where
     }
 }
 
-impl<Ty> Copy for LuaFfiPtr<Ty> where Ty: CoreTypes {}
+impl<Ty, Conv> Copy for LuaFfiPtr<Ty, Conv> where Ty: CoreTypes {}
 
-impl<Ty> Debug for LuaFfiPtr<Ty>
+impl<Ty, Conv> Debug for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -501,7 +579,7 @@ where
     }
 }
 
-impl<Ty> Display for LuaFfiPtr<Ty>
+impl<Ty, Conv> Display for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -510,7 +588,7 @@ where
     }
 }
 
-impl<Ty> PartialEq for LuaFfiPtr<Ty>
+impl<Ty, Conv> PartialEq for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -519,9 +597,9 @@ where
     }
 }
 
-impl<Ty> Eq for LuaFfiPtr<Ty> where Ty: CoreTypes {}
+impl<Ty, Conv> Eq for LuaFfiPtr<Ty, Conv> where Ty: CoreTypes {}
 
-impl<Ty> PartialOrd for LuaFfiPtr<Ty>
+impl<Ty, Conv> PartialOrd for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -530,7 +608,7 @@ where
     }
 }
 
-impl<Ty> Ord for LuaFfiPtr<Ty>
+impl<Ty, Conv> Ord for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -539,7 +617,7 @@ where
     }
 }
 
-impl<Ty> Hash for LuaFfiPtr<Ty>
+impl<Ty, Conv> Hash for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -548,11 +626,14 @@ where
     }
 }
 
-impl<Ty> LuaFfiOnce<Ty> for LuaFfiPtr<Ty>
+impl<Ty, Conv> LuaFfiOnce<Ty, Conv> for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_once(
+        self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 
@@ -563,31 +644,39 @@ where
     }
 }
 
-impl<Ty> LuaFfiMut<Ty> for LuaFfiPtr<Ty>
+impl<Ty, Conv> LuaFfiMut<Ty, Conv> for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call_mut(
+        &mut self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.call(rt)
     }
 }
 
-impl<Ty> LuaFfi<Ty> for LuaFfiPtr<Ty>
+impl<Ty, Conv> LuaFfi<Ty, Conv> for LuaFfiPtr<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<Ty>> {
+    fn call(
+        &self,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         (self.func)(rt)
     }
 }
 
-pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
+pub fn call_chunk<Ty, Conv>(chunk_id: ChunkId) -> impl LuaFfi<Ty, Conv> + Copy + Send + Sync
 where
     Ty: CoreTypes,
-    Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: DisplayWith<Heap>,
+    Conv: 'static,
+    Ty::Table: TableIndex<Weak<Ty, Conv>>,
+    Ty::RustClosure: LuaFfi<Ty, Conv>,
+    WeakValue<Ty, Conv>: DisplayWith<Heap>,
 {
-    let f = move |mut rt: RuntimeView<'_, Ty>| {
+    let f = move |mut rt: RuntimeView<'_, Ty, Conv>| {
         use crate::runtime::FunctionPtr;
         use repr::index::FunctionId;
 
@@ -604,13 +693,15 @@ where
     f.with_name("rt::ffi::call_chunk")
 }
 
-pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
+pub fn call_file<Ty, Conv>(script: impl AsRef<Path>) -> impl LuaFfi<Ty, Conv>
 where
     Ty: CoreTypes,
-    Ty::RustClosure: LuaFfi<Ty>,
-    WeakValue<Ty>: DisplayWith<Heap>,
+    Conv: 'static,
+    Ty::Table: TableIndex<Weak<Ty, Conv>>,
+    Ty::RustClosure: LuaFfi<Ty, Conv>,
+    WeakValue<Ty, Conv>: DisplayWith<Heap>,
 {
-    let f = move |mut rt: RuntimeView<Ty>| {
+    let f = move |mut rt: RuntimeView<Ty, Conv>| {
         let script = script.as_ref();
         let chunk_id = rt.load_from_file(script)?;
 

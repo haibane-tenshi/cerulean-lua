@@ -7,18 +7,18 @@ use super::Metatable;
 use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
-use crate::value::{CoreTypes, Value};
+use crate::value::{CoreTypes, StrongValue};
 
-pub trait Userdata<Gc>: Trace
+pub trait Userdata<Ty, Conv>: Trace
 where
-    Gc: CoreTypes,
+    Ty: CoreTypes,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Option<Result<(), RuntimeError<Gc>>>;
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>>;
 }
 
 pub enum Method<Ref, Mut, Val> {
@@ -27,9 +27,9 @@ pub enum Method<Ref, Mut, Val> {
     Val(Val),
 }
 
-pub trait DispatchMethod<Marker, Gc>: Sized
+pub trait DispatchMethod<Marker, Ty, Conv>: Sized
 where
-    Gc: CoreTypes,
+    Ty: CoreTypes,
 {
     const SCOPE_NAME: &'static str;
 
@@ -39,29 +39,37 @@ where
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>>;
 
-    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>;
+    fn call(
+        &self,
+        method: Self::Ref,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Result<(), RuntimeError<Gc>>;
-    fn call_once(self, method: Self::Val, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>>;
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
+    fn call_once(
+        self,
+        method: Self::Val,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
 }
 
-impl<Marker, Gc, T> DispatchMethod<Marker, Gc> for RefCell<T>
+impl<Marker, Ty, Conv, T> DispatchMethod<Marker, Ty, Conv> for RefCell<T>
 where
-    Gc: CoreTypes,
-    T: DispatchMethod<Marker, Gc>,
+    Ty: CoreTypes,
+    T: DispatchMethod<Marker, Ty, Conv>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Ty, Conv>>::SCOPE_NAME;
 
     type Ref = Method<
-        <T as DispatchMethod<Marker, Gc>>::Ref,
-        <T as DispatchMethod<Marker, Gc>>::Mut,
+        <T as DispatchMethod<Marker, Ty, Conv>>::Ref,
+        <T as DispatchMethod<Marker, Ty, Conv>>::Mut,
         std::convert::Infallible,
     >;
     type Mut = std::convert::Infallible;
-    type Val = <T as DispatchMethod<Marker, Gc>>::Val;
+    type Val = <T as DispatchMethod<Marker, Ty, Conv>>::Val;
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>> {
         let r = match T::dispatch_method(name)? {
@@ -73,7 +81,11 @@ where
         Some(r)
     }
 
-    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
+    fn call(
+        &self,
+        method: Self::Ref,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         match method {
             Method::Ref(m) => self.try_borrow().map_err(|_| BorrowError::Ref)?.call(m, rt),
             Method::Mut(m) => self
@@ -87,29 +99,33 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        _rt: RuntimeView<'_, Gc>,
-    ) -> Result<(), RuntimeError<Gc>> {
+        _rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         match method {}
     }
 
-    fn call_once(self, method: Self::Val, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
+    fn call_once(
+        self,
+        method: Self::Val,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         self.into_inner().call_once(method, rt)
     }
 }
 
-impl<Marker, Gc, T> DispatchMethod<Marker, Gc> for Option<T>
+impl<Marker, Ty, Conv, T> DispatchMethod<Marker, Ty, Conv> for Option<T>
 where
-    Gc: CoreTypes,
-    Gc::String: From<&'static str>,
-    T: DispatchMethod<Marker, Gc>,
+    Ty: CoreTypes,
+    Ty::String: From<&'static str>,
+    T: DispatchMethod<Marker, Ty, Conv>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Gc>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Ty, Conv>>::SCOPE_NAME;
 
-    type Ref = <T as DispatchMethod<Marker, Gc>>::Ref;
+    type Ref = <T as DispatchMethod<Marker, Ty, Conv>>::Ref;
     type Mut = Method<
         std::convert::Infallible,
-        <T as DispatchMethod<Marker, Gc>>::Mut,
-        <T as DispatchMethod<Marker, Gc>>::Val,
+        <T as DispatchMethod<Marker, Ty, Conv>>::Mut,
+        <T as DispatchMethod<Marker, Ty, Conv>>::Val,
     >;
     type Val = std::convert::Infallible;
 
@@ -123,7 +139,11 @@ where
         Some(r)
     }
 
-    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Gc>) -> Result<(), RuntimeError<Gc>> {
+    fn call(
+        &self,
+        method: Self::Ref,
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         use crate::error::AlreadyDroppedError;
 
         let Some(value) = self else {
@@ -136,8 +156,8 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Result<(), RuntimeError<Gc>> {
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         use crate::error::AlreadyDroppedError;
 
         match method {
@@ -162,98 +182,108 @@ where
     fn call_once(
         self,
         method: Self::Val,
-        _rt: RuntimeView<'_, Gc>,
-    ) -> Result<(), RuntimeError<Gc>> {
+        _rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
         match method {}
     }
 }
 
-pub trait DispatchTrait<Traits: Tuple, Gc>: Sized
+pub trait DispatchTrait<Traits, Ty, Conv>: Sized
 where
-    Gc: CoreTypes,
+    Traits: Tuple,
+    Ty: CoreTypes,
 {
     fn dispatch_trait(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Option<Result<(), RuntimeError<Gc>>>;
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>>;
 }
 
-impl<Gc, T> DispatchTrait<(), Gc> for T
+impl<Ty, Conv, T> DispatchTrait<(), Ty, Conv> for T
 where
-    Gc: CoreTypes,
+    Ty: CoreTypes,
 {
     fn dispatch_trait(
         &self,
         _scope: &str,
         _name: &str,
-        _rt: RuntimeView<'_, Gc>,
-    ) -> Option<Result<(), RuntimeError<Gc>>> {
+        _rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
         None
     }
 }
 
-impl<T, Tup, Gc> DispatchTrait<Tup, Gc> for T
+impl<T, Tup, Ty, Conv> DispatchTrait<Tup, Ty, Conv> for T
 where
-    Gc: CoreTypes,
+    Ty: CoreTypes,
     Tup: NonEmptyTuple,
-    T: DispatchMethod<TupleHead<Tup>, Gc>,
-    T: DispatchTrait<TupleTail<Tup>, Gc>,
+    T: DispatchMethod<TupleHead<Tup>, Ty, Conv>,
+    T: DispatchTrait<TupleTail<Tup>, Ty, Conv>,
 {
     fn dispatch_trait(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Option<Result<(), RuntimeError<Gc>>> {
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
         if scope == T::SCOPE_NAME {
             if let Some(method) = T::dispatch_method(name) {
                 let r = if let Method::Ref(f) = method {
                     T::call(self, f, rt)
                 } else {
-                    let msg = rt.core.alloc_string(
-                        "userdata can only dispatch on methods with `&self` receiver".into(),
+                    let err = rt.core.alloc_error_msg(
+                        "userdata can only dispatch on methods with `&self` receiver",
                     );
-                    Err(Value::String(msg).into())
+                    Err(err)
                 };
 
                 return Some(r);
             }
         }
 
-        <T as DispatchTrait<TupleTail<Tup>, Gc>>::dispatch_trait(self, scope, name, rt)
+        <T as DispatchTrait<TupleTail<Tup>, Ty, Conv>>::dispatch_trait(self, scope, name, rt)
     }
 }
 
 // Self: 'static requires Ty: 'static
 // see https://github.com/rust-lang/rust/issues/57325
 // https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
-pub struct Dispatchable<T, Ty: CoreTypes> {
+pub struct Dispatchable<T, Ty, Conv>
+where
+    Ty: CoreTypes,
+{
     value: T,
     #[allow(clippy::type_complexity)]
-    dispatcher: fn(&T, &str, &str, RuntimeView<'_, Ty>) -> Option<Result<(), RuntimeError<Ty>>>,
+    dispatcher: fn(
+        &T,
+        &str,
+        &str,
+        RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>>,
 }
 
-impl<T, Ty> Dispatchable<T, Ty>
+impl<T, Ty, Conv> Dispatchable<T, Ty, Conv>
 where
     Ty: CoreTypes,
 {
     pub fn new<Traits>(value: T) -> Self
     where
         Traits: Tuple,
-        T: DispatchTrait<Traits, Ty>,
+        T: DispatchTrait<Traits, Ty, Conv>,
     {
         Dispatchable {
             value,
-            dispatcher: <T as DispatchTrait<Traits, Ty>>::dispatch_trait,
+            dispatcher: <T as DispatchTrait<Traits, Ty, Conv>>::dispatch_trait,
         }
     }
 }
 
-impl<T, Ty> Trace for Dispatchable<T, Ty>
+impl<T, Ty, Conv> Trace for Dispatchable<T, Ty, Conv>
 where
     T: Trace,
+    Conv: 'static,
     Ty: CoreTypes,
 {
     fn trace(&self, collector: &mut gc::Collector) {
@@ -266,17 +296,18 @@ where
     }
 }
 
-impl<T, Ty> Userdata<Ty> for Dispatchable<T, Ty>
+impl<T, Ty, Conv> Userdata<Ty, Conv> for Dispatchable<T, Ty, Conv>
 where
     T: Trace,
+    Conv: 'static,
     Ty: CoreTypes,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Option<Result<(), RuntimeError<Ty>>> {
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
         (self.dispatcher)(&self.value, scope, name, rt)
     }
 }
@@ -307,46 +338,46 @@ where
     }
 }
 
-impl<T, Traits, Gc> Userdata<Gc> for DispatchableStatic<T, Traits>
+impl<T, Traits, Ty, Conv> Userdata<Ty, Conv> for DispatchableStatic<T, Traits>
 where
-    Gc: CoreTypes,
+    Ty: CoreTypes,
     Traits: Tuple + 'static,
-    T: DispatchTrait<Traits, Gc> + Trace,
+    T: DispatchTrait<Traits, Ty, Conv> + Trace,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Gc>,
-    ) -> Option<Result<(), RuntimeError<Gc>>> {
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
         self.value.dispatch_trait(scope, name, rt)
     }
 }
 
-pub trait FullUserdata<Ty>: Userdata<Ty> + Metatable<GcCell<Ty::Table>>
+pub trait FullUserdata<Ty, Conv>: Userdata<Ty, Conv> + Metatable<GcCell<Ty::Table>>
 where
     Ty: CoreTypes,
 {
 }
 
-impl<Ty, T> FullUserdata<Ty> for T
+impl<Ty, Conv, T> FullUserdata<Ty, Conv> for T
 where
     Ty: CoreTypes,
-    T: Userdata<Ty> + Metatable<GcCell<Ty::Table>>,
+    T: Userdata<Ty, Conv> + Metatable<GcCell<Ty::Table>>,
 {
 }
 
-impl<Ty, T> Userdata<Ty> for Box<T>
+impl<Ty, Conv, T> Userdata<Ty, Conv> for Box<T>
 where
     Ty: CoreTypes,
-    T: Userdata<Ty> + ?Sized,
+    T: Userdata<Ty, Conv> + ?Sized,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Option<Result<(), RuntimeError<Ty>>> {
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
         self.as_ref().method(scope, name, rt)
     }
 }
@@ -364,13 +395,13 @@ where
     }
 }
 
-pub fn new_full_userdata<T, Ty>(
+pub fn new_full_userdata<T, Ty, Conv>(
     value: T,
     metatable: Option<GcCell<Ty::Table>>,
-) -> impl FullUserdata<Ty>
+) -> impl FullUserdata<Ty, Conv>
 where
     Ty: CoreTypes,
-    T: Userdata<Ty>,
+    T: Userdata<Ty, Conv>,
 {
     UserdataValue { value, metatable }
 }
@@ -403,18 +434,18 @@ where
     }
 }
 
-impl<T, Ty, Table> Userdata<Ty> for UserdataValue<T, Table>
+impl<T, Ty, Conv, Table> Userdata<Ty, Conv> for UserdataValue<T, Table>
 where
     Ty: CoreTypes,
-    T: Userdata<Ty> + Trace + ?Sized,
+    T: Userdata<Ty, Conv> + Trace + ?Sized,
     Table: Trace,
 {
     fn method(
         &self,
         scope: &str,
         name: &str,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Option<Result<(), RuntimeError<Ty>>> {
+        rt: RuntimeView<'_, Ty, Conv>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
         self.as_ref().method(scope, name, rt)
     }
 }

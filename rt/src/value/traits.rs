@@ -2,15 +2,14 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use gc::{Gc, GcCell, Root, RootCell};
+use gc::{Gc, GcCell, Root, RootCell, Trace};
 
 use super::callable::{RustCallable, RustClosureRef};
 use super::string::PossiblyUtf8Vec;
 use super::userdata::FullUserdata;
 use super::{KeyValue, Value};
+use crate::gc::LuaPtr;
 use crate::runtime::{Closure, Interned};
-
-use gc::Trace;
 
 pub trait Types: Sized {
     type String;
@@ -20,30 +19,30 @@ pub trait Types: Sized {
     type FullUserdata;
 }
 
-pub struct Strong<Ty>(PhantomData<(Ty,)>);
+pub struct Strong<Ty, Conv>(PhantomData<(Ty, Conv)>);
 
-impl<Ty> Types for Strong<Ty>
+impl<Ty, Conv> Types for Strong<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    type String = Root<Interned<<Ty as CoreTypes>::String>>;
-    type LuaCallable = RootCell<Closure<Ty>>;
-    type RustCallable = RustCallable<Ty, RootCell<<Ty as CoreTypes>::RustClosure>>;
-    type Table = RootCell<<Ty as CoreTypes>::Table>;
-    type FullUserdata = RootCell<<Ty as CoreTypes>::FullUserdata>;
+    type String = LuaPtr<Root<Interned<<Ty as CoreTypes>::String>>>;
+    type LuaCallable = LuaPtr<RootCell<Closure<Ty, Conv>>>;
+    type RustCallable = RustCallable<Ty, Conv, LuaPtr<RootCell<<Ty as CoreTypes>::RustClosure>>>;
+    type Table = LuaPtr<RootCell<<Ty as CoreTypes>::Table>>;
+    type FullUserdata = LuaPtr<RootCell<<Ty as CoreTypes>::FullUserdata>>;
 }
 
-pub struct Weak<Ty>(PhantomData<(Ty,)>);
+pub struct Weak<Ty, Conv>(PhantomData<(Ty, Conv)>);
 
-impl<Ty> Types for Weak<Ty>
+impl<Ty, Conv> Types for Weak<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    type String = Gc<Interned<<Ty as CoreTypes>::String>>;
-    type LuaCallable = GcCell<Closure<Ty>>;
-    type RustCallable = RustCallable<Ty, GcCell<<Ty as CoreTypes>::RustClosure>>;
-    type Table = GcCell<<Ty as CoreTypes>::Table>;
-    type FullUserdata = GcCell<<Ty as CoreTypes>::FullUserdata>;
+    type String = LuaPtr<Gc<Interned<<Ty as CoreTypes>::String>>>;
+    type LuaCallable = LuaPtr<GcCell<Closure<Ty, Conv>>>;
+    type RustCallable = RustCallable<Ty, Conv, LuaPtr<GcCell<<Ty as CoreTypes>::RustClosure>>>;
+    type Table = LuaPtr<GcCell<<Ty as CoreTypes>::Table>>;
+    type FullUserdata = LuaPtr<GcCell<<Ty as CoreTypes>::FullUserdata>>;
 }
 
 pub trait CoreTypes: Sized + 'static {
@@ -58,17 +57,20 @@ pub trait CoreTypes: Sized + 'static {
         + From<&'static str>
         + AsRef<[u8]>;
     type RustClosure: Clone + PartialEq + Trace;
-    type Table: Default + Trace + TableIndex<Weak<Self>> + Metatable<GcCell<Self::Table>>;
+    type Table: Default + Trace + Metatable<LuaPtr<GcCell<Self::Table>>>;
     type FullUserdata: Trace + Metatable<GcCell<Self::Table>>;
 }
 
-pub struct DefaultTypes;
+pub struct DefaultTypes<Conv>(PhantomData<Conv>);
 
-impl CoreTypes for DefaultTypes {
+impl<Conv> CoreTypes for DefaultTypes<Conv>
+where
+    Conv: 'static,
+{
     type String = PossiblyUtf8Vec;
-    type RustClosure = RustClosureRef<Self>;
-    type Table = super::Table<Weak<Self>>;
-    type FullUserdata = Box<dyn FullUserdata<Self>>;
+    type RustClosure = RustClosureRef<Self, Conv>;
+    type Table = super::Table<Weak<Self, Conv>>;
+    type FullUserdata = Box<dyn FullUserdata<Self, Conv>>;
 }
 
 pub trait Metatable<TableRef> {

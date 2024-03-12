@@ -1,20 +1,20 @@
-use crate::value::Value;
+use crate::value::{CoreTypes, Nil, StrongValue, Value};
 
-pub trait Convert<T, C> {
-    type Error;
-    
-    fn convert(&self, gc: &mut (), value: T) -> Result<Value<C>, (T, Self::Error)>;
+pub trait Convert<Ty, Conv, Heap, T>
+where
+    Ty: CoreTypes,
+{
+    fn convert(&mut self, gc: &mut Heap, value: T) -> StrongValue<Ty, Conv>;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Default;
 
-impl<C> Convert<crate::value::Nil, C> for Default {
-    type Error = std::convert::Infallible;
-
-    fn convert(&self, gc: &mut (), value: crate::value::Nil) -> Result<Value<C>, (crate::value::Nil, Self::Error)> {
-        use crate::value::Nil;
-        let Nil = value;
-        Ok(Value::Nil)
+impl<Ty, Conv, Heap> Convert<Ty, Conv, Heap, Nil> for Default
+where
+    Ty: CoreTypes,
+{
+    fn convert(&mut self, _gc: &mut Heap, _value: Nil) -> StrongValue<Ty, Conv> {
+        Value::Nil
     }
 }

@@ -163,8 +163,8 @@ impl Display for TypeWithoutMetatable {
     }
 }
 
-pub type StrongValue<Ty> = Value<Strong<Ty>>;
-pub type WeakValue<Ty> = Value<Weak<Ty>>;
+pub type StrongValue<Ty, Conv> = Value<Strong<Ty, Conv>>;
+pub type WeakValue<Ty, Conv> = Value<Weak<Ty, Conv>>;
 
 /// Enum representing all possible Lua values.
 ///
@@ -214,12 +214,12 @@ impl<Ty: Types> Value<Ty> {
     }
 }
 
-impl<Ty> StrongValue<Ty>
+impl<Ty, Conv> StrongValue<Ty, Conv>
 where
     Ty: CoreTypes,
     Ty::RustClosure: Clone,
 {
-    pub fn downgrade(&self) -> WeakValue<Ty> {
+    pub fn downgrade(&self) -> WeakValue<Ty, Conv> {
         use callable::RustCallable;
 
         match self {
@@ -228,24 +228,25 @@ where
             Value::Int(t) => Value::Int(*t),
             Value::Float(t) => Value::Float(*t),
             Value::String(t) => Value::String(t.downgrade()),
-            Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade())),
+            Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade_cell())),
             Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
                 Value::Function(Callable::Rust(RustCallable::Ptr(*t)))
             }
             Value::Function(Callable::Rust(RustCallable::Ref(t))) => {
-                Value::Function(Callable::Rust(RustCallable::Ref(t.downgrade())))
+                Value::Function(Callable::Rust(RustCallable::Ref(t.downgrade_cell())))
             }
-            Value::Table(t) => Value::Table(t.downgrade()),
-            Value::Userdata(t) => Value::Userdata(t.downgrade()),
+            Value::Table(t) => Value::Table(t.downgrade_cell()),
+            Value::Userdata(t) => Value::Userdata(t.downgrade_cell()),
         }
     }
 }
 
-impl<Ty> WeakValue<Ty>
+impl<Ty, Conv> WeakValue<Ty, Conv>
 where
     Ty: CoreTypes,
+    Conv: 'static,
 {
-    pub fn upgrade(self, heap: &Heap) -> Option<StrongValue<Ty>> {
+    pub fn upgrade(self, heap: &Heap) -> Option<StrongValue<Ty, Conv>> {
         use callable::RustCallable;
 
         let r = match self {
@@ -253,23 +254,28 @@ where
             Value::Bool(t) => Value::Bool(t),
             Value::Int(t) => Value::Int(t),
             Value::Float(t) => Value::Float(t),
-            Value::String(t) => Value::String(heap.upgrade(t)?),
+            Value::String(t) => Value::String(t.upgrade(heap)?),
             Value::Function(Callable::Lua(t)) => {
-                Value::Function(Callable::Lua(heap.upgrade_cell(t)?))
+                Value::Function(Callable::Lua(t.upgrade_cell(heap)?))
             }
             Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
                 Value::Function(Callable::Rust(RustCallable::Ptr(t)))
             }
             Value::Function(Callable::Rust(RustCallable::Ref(t))) => {
-                Value::Function(Callable::Rust(RustCallable::Ref(heap.upgrade_cell(t)?)))
+                Value::Function(Callable::Rust(RustCallable::Ref(t.upgrade_cell(heap)?)))
             }
-            Value::Table(t) => Value::Table(heap.upgrade_cell(t)?),
-            Value::Userdata(t) => Value::Userdata(heap.upgrade_cell(t)?),
+            Value::Table(t) => Value::Table(t.upgrade_cell(heap)?),
+            Value::Userdata(t) => Value::Userdata(t.upgrade_cell(heap)?),
         };
 
         Some(r)
     }
+}
 
+impl<Ty, Conv> WeakValue<Ty, Conv>
+where
+    Ty: CoreTypes,
+{
     pub(crate) fn is_transient(&self) -> bool {
         use callable::RustCallable;
         use Value::*;
@@ -290,58 +296,28 @@ where
     }
 }
 
-impl<Ty> From<StrongValue<Ty>> for WeakValue<Ty>
+impl<Ty, Conv> From<StrongValue<Ty, Conv>> for WeakValue<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    fn from(value: StrongValue<Ty>) -> Self {
+    fn from(value: StrongValue<Ty, Conv>) -> Self {
         value.downgrade()
     }
 }
 
-impl<Ty> TryFromWithGc<WeakValue<Ty>, Heap> for StrongValue<Ty>
+impl<Ty, Conv> TryFromWithGc<WeakValue<Ty, Conv>, Heap> for StrongValue<Ty, Conv>
 where
+    Conv: 'static,
     Ty: CoreTypes,
     Ty::Table: Trace,
     Ty::FullUserdata: Trace,
 {
     type Error = crate::error::AlreadyDroppedError;
 
-    fn try_from_with_gc(value: WeakValue<Ty>, heap: &mut Heap) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: WeakValue<Ty, Conv>, heap: &mut Heap) -> Result<Self, Self::Error> {
         use crate::error::AlreadyDroppedError;
-        use callable::RustCallable;
 
-        let r = match value {
-            Value::Nil => Value::Nil,
-            Value::Bool(t) => Value::Bool(t),
-            Value::Int(t) => Value::Int(t),
-            Value::Float(t) => Value::Float(t),
-            Value::String(t) => {
-                let t = heap.upgrade(t).ok_or(AlreadyDroppedError)?;
-                Value::String(t)
-            }
-            Value::Function(Callable::Lua(t)) => {
-                let t = heap.upgrade_cell(t).ok_or(AlreadyDroppedError)?;
-                Value::Function(Callable::Lua(t))
-            }
-            Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
-                Value::Function(Callable::Rust(RustCallable::Ptr(t)))
-            }
-            Value::Function(Callable::Rust(RustCallable::Ref(t))) => {
-                let t = heap.upgrade_cell(t).ok_or(AlreadyDroppedError)?;
-                Value::Function(Callable::Rust(RustCallable::Ref(t)))
-            }
-            Value::Table(t) => {
-                let t = heap.upgrade_cell(t).ok_or(AlreadyDroppedError)?;
-                Value::Table(t)
-            }
-            Value::Userdata(t) => {
-                let t = heap.upgrade_cell(t).ok_or(AlreadyDroppedError)?;
-                Value::Userdata(t)
-            }
-        };
-
-        Ok(r)
+        value.upgrade(heap).ok_or(AlreadyDroppedError)
     }
 }
 
@@ -425,66 +401,38 @@ where
 {
 }
 
-impl<Ty> PartialEq for WeakValue<Ty>
+impl<Ty> PartialEq for Value<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     Ty::String: PartialEq,
+    Ty::LuaCallable: PartialEq,
+    Ty::RustCallable: PartialEq,
+    Ty::Table: PartialEq,
+    Ty::FullUserdata: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        use callable::RustCallable;
-
         match (self, other) {
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0.addr() == r0.addr(),
-            (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
-                l0.addr() == r0.addr()
-            }
-            (
-                Self::Function(Callable::Rust(RustCallable::Ref(l0))),
-                Self::Function(Callable::Rust(RustCallable::Ref(r0))),
-            ) => l0.addr() == r0.addr(),
-            (
-                Self::Function(Callable::Rust(RustCallable::Ptr(l0))),
-                Self::Function(Callable::Rust(RustCallable::Ptr(r0))),
-            ) => l0 == r0,
-            (Self::Table(l0), Self::Table(r0)) => l0.addr() == r0.addr(),
-            (Self::Userdata(l0), Self::Userdata(r0)) => l0.addr() == r0.addr(),
+            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::Function(l0), Self::Function(r0)) => l0 == r0,
+            (Self::Table(l0), Self::Table(r0)) => l0 == r0,
+            (Self::Userdata(l0), Self::Userdata(r0)) => l0 == r0,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
 }
 
-impl<Ty> PartialEq for StrongValue<Ty>
+impl<Ty> Eq for Value<Ty>
 where
-    Ty: CoreTypes,
-    Ty::String: PartialEq,
+    Ty: Types,
+    Ty::String: Eq,
+    Ty::LuaCallable: Eq,
+    Ty::RustCallable: Eq,
+    Ty::Table: Eq,
+    Ty::FullUserdata: Eq,
 {
-    fn eq(&self, other: &Self) -> bool {
-        use callable::RustCallable;
-
-        match (self, other) {
-            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
-            (Self::Int(l0), Self::Int(r0)) => l0 == r0,
-            (Self::Float(l0), Self::Float(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0.addr() == r0.addr(),
-            (Self::Function(Callable::Lua(l0)), Self::Function(Callable::Lua(r0))) => {
-                l0.addr() == r0.addr()
-            }
-            (
-                Self::Function(Callable::Rust(RustCallable::Ref(l0))),
-                Self::Function(Callable::Rust(RustCallable::Ref(r0))),
-            ) => l0.addr() == r0.addr(),
-            (
-                Self::Function(Callable::Rust(RustCallable::Ptr(l0))),
-                Self::Function(Callable::Rust(RustCallable::Ptr(r0))),
-            ) => l0 == r0,
-            (Self::Table(l0), Self::Table(r0)) => l0.addr() == r0.addr(),
-            (Self::Userdata(l0), Self::Userdata(r0)) => l0.addr() == r0.addr(),
-            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-        }
-    }
 }
 
 // No, clippy, you cannot.
@@ -500,7 +448,7 @@ where
 
 pub struct ValueWith<'a, Value, Heap>(&'a Value, &'a Heap);
 
-impl<'a, Ty> Display for ValueWith<'a, WeakValue<Ty>, Heap>
+impl<'a, Ty, Conv> Display for ValueWith<'a, WeakValue<Ty, Conv>, Heap>
 where
     Ty: CoreTypes,
 {
@@ -515,7 +463,7 @@ where
             Int(t) => write!(f, "{t}"),
             Float(t) => write!(f, "{t}"),
             String(t) => {
-                if let Some(s) = heap.get(*t).map(AsRef::as_ref) {
+                if let Some(s) = heap.get(t.0).map(AsRef::as_ref) {
                     write!(f, "{s}")
                 } else {
                     Ok(())
@@ -529,7 +477,7 @@ where
     }
 }
 
-impl<'a, Ty> Display for ValueWith<'a, StrongValue<Ty>, Heap>
+impl<'a, Ty, Conv> Display for ValueWith<'a, StrongValue<Ty, Conv>, Heap>
 where
     Ty: CoreTypes,
 {
@@ -544,7 +492,7 @@ where
             Int(t) => write!(f, "{t}"),
             Float(t) => write!(f, "{t}"),
             String(t) => {
-                let s = heap.get_root(t).as_ref();
+                let s = heap.get_root(&t.0).as_ref();
                 write!(f, "{s}")
             }
             Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
@@ -555,22 +503,26 @@ where
     }
 }
 
-impl<Ty> DisplayWith<Heap> for WeakValue<Ty>
+impl<Ty, Conv> DisplayWith<Heap> for WeakValue<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    type Output<'a> = ValueWith<'a, Self, Heap>;
+    type Output<'a> = ValueWith<'a, Self, Heap>
+    where
+        Self: 'a;
 
     fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
         ValueWith(self, extra)
     }
 }
 
-impl<Ty> DisplayWith<Heap> for StrongValue<Ty>
+impl<Ty, Conv> DisplayWith<Heap> for StrongValue<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    type Output<'a> = ValueWith<'a, Self, Heap>;
+    type Output<'a> = ValueWith<'a, Self, Heap>
+    where
+        Self: 'a;
 
     fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
         ValueWith(self, extra)
