@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use gc::{Gc, GcCell, Root, RootCell, Trace};
 
-use super::callable::{RustCallable, RustClosureRef};
+use super::callable::RustCallable;
 use super::string::PossiblyUtf8Vec;
 use super::userdata::FullUserdata;
 use super::{KeyValue, Value};
@@ -19,28 +19,28 @@ pub trait Types: Sized {
     type FullUserdata;
 }
 
-pub struct Strong<Ty, Conv>(PhantomData<(Ty, Conv)>);
+pub struct Strong<Ty>(PhantomData<(Ty,)>);
 
-impl<Ty, Conv> Types for Strong<Ty, Conv>
+impl<Ty> Types for Strong<Ty>
 where
     Ty: CoreTypes,
 {
     type String = LuaPtr<Root<Interned<<Ty as CoreTypes>::String>>>;
-    type LuaCallable = LuaPtr<RootCell<Closure<Ty, Conv>>>;
-    type RustCallable = RustCallable<Ty, Conv, LuaPtr<RootCell<<Ty as CoreTypes>::RustClosure>>>;
+    type LuaCallable = LuaPtr<RootCell<<Ty as CoreTypes>::LuaClosure>>;
+    type RustCallable = LuaPtr<RootCell<<Ty as CoreTypes>::RustClosure>>;
     type Table = LuaPtr<RootCell<<Ty as CoreTypes>::Table>>;
     type FullUserdata = LuaPtr<RootCell<<Ty as CoreTypes>::FullUserdata>>;
 }
 
-pub struct Weak<Ty, Conv>(PhantomData<(Ty, Conv)>);
+pub struct Weak<Ty>(PhantomData<(Ty,)>);
 
-impl<Ty, Conv> Types for Weak<Ty, Conv>
+impl<Ty> Types for Weak<Ty>
 where
     Ty: CoreTypes,
 {
     type String = LuaPtr<Gc<Interned<<Ty as CoreTypes>::String>>>;
-    type LuaCallable = LuaPtr<GcCell<Closure<Ty, Conv>>>;
-    type RustCallable = RustCallable<Ty, Conv, LuaPtr<GcCell<<Ty as CoreTypes>::RustClosure>>>;
+    type LuaCallable = LuaPtr<GcCell<<Ty as CoreTypes>::LuaClosure>>;
+    type RustCallable = LuaPtr<GcCell<<Ty as CoreTypes>::RustClosure>>;
     type Table = LuaPtr<GcCell<<Ty as CoreTypes>::Table>>;
     type FullUserdata = LuaPtr<GcCell<<Ty as CoreTypes>::FullUserdata>>;
 }
@@ -56,6 +56,7 @@ pub trait CoreTypes: Sized + 'static {
         + From<String>
         + From<&'static str>
         + AsRef<[u8]>;
+    type LuaClosure: Trace;
     type RustClosure: Clone + PartialEq + Trace;
     type Table: Default + Trace + Metatable<LuaPtr<GcCell<Self::Table>>>;
     type FullUserdata: Trace + Metatable<GcCell<Self::Table>>;
@@ -68,8 +69,9 @@ where
     Conv: 'static,
 {
     type String = PossiblyUtf8Vec;
-    type RustClosure = RustClosureRef<Self, Conv>;
-    type Table = super::Table<Weak<Self, Conv>>;
+    type LuaClosure = Closure<Self>;
+    type RustClosure = RustCallable<Self, Conv>;
+    type Table = super::Table<Weak<Self>>;
     type FullUserdata = Box<dyn FullUserdata<Self, Conv>>;
 }
 

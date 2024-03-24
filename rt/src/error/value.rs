@@ -8,11 +8,11 @@ use crate::value::{CoreTypes, StrongValue};
 
 pub struct ValueError<Value>(pub Value);
 
-impl<Ty, Conv> ValueError<StrongValue<Ty, Conv>>
+impl<Ty> ValueError<StrongValue<Ty>>
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
-    StrongValue<Ty, Conv>: DisplayWith<Heap>,
+    StrongValue<Ty>: DisplayWith<Heap>,
 {
     pub(crate) fn into_diagnostic<FileId>(self, heap: &Heap) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;

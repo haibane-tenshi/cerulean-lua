@@ -79,10 +79,9 @@ where
     }
 }
 
-impl<Ty, Conv> Trace for Table<Weak<Ty, Conv>>
+impl<Ty> Trace for Table<Weak<Ty>>
 where
     Ty: CoreTypes,
-    Conv: 'static,
     Ty::String: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {

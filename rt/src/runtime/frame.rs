@@ -24,12 +24,12 @@ use crate::value::{
     Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, Weak, WeakValue,
 };
 
-pub(crate) enum ChangeFrame<Ty, Conv>
+pub(crate) enum ChangeFrame<Ty>
 where
     Ty: CoreTypes,
 {
     Return(StackSlot),
-    Invoke(Option<Event>, Callable<Strong<Ty, Conv>>, RawStackSlot),
+    Invoke(Option<Event>, Callable<Strong<Ty>>, RawStackSlot),
 }
 
 trait MapControlFlow<F> {
@@ -69,18 +69,17 @@ pub(crate) enum UpvaluePlace<Value> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Closure<Ty, Conv>
+pub struct Closure<Ty>
 where
     Ty: CoreTypes,
 {
     fn_ptr: FunctionPtr,
-    upvalues: TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty, Conv>>>>,
+    upvalues: TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>,
 }
 
-impl<Ty, Conv> Trace for Closure<Ty, Conv>
+impl<Ty> Trace for Closure<Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
     fn trace(&self, collector: &mut Collector) {
         for upvalue in &self.upvalues {
@@ -92,16 +91,15 @@ where
     }
 }
 
-impl<Ty, Conv> Closure<Ty, Conv>
+impl<Ty> Closure<Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
-    pub(crate) fn new(
+    pub(crate) fn new<Conv>(
         rt: &mut RuntimeView<Ty, Conv>,
         fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = WeakValue<Ty, Conv>>,
-    ) -> Result<RootCell<Self>, RuntimeError<StrongValue<Ty, Conv>>> {
+        upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
+    ) -> Result<RootCell<Self>, RuntimeError<StrongValue<Ty>>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let upvalue_count = rt
@@ -130,7 +128,7 @@ where
     }
 }
 
-impl<Ty, Conv> Closure<Ty, Conv>
+impl<Ty> Closure<Ty>
 where
     Ty: CoreTypes,
 {
@@ -138,27 +136,25 @@ where
         self.fn_ptr
     }
 
-    pub(crate) fn upvalues(
-        &self,
-    ) -> &TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty, Conv>>>> {
+    pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
         &self.upvalues
     }
 
     pub(crate) fn upvalues_mut(
         &mut self,
-    ) -> &mut TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty, Conv>>>> {
+    ) -> &mut TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
         &mut self.upvalues
     }
 }
 
-pub(crate) struct Frame<Ty, Conv>
+pub(crate) struct Frame<Ty>
 where
     Ty: CoreTypes,
 {
-    closure: RootCell<Closure<Ty, Conv>>,
+    closure: RootCell<Closure<Ty>>,
     ip: InstrId,
     stack_start: RawStackSlot,
-    register_variadic: Vec<StrongValue<Ty, Conv>>,
+    register_variadic: Vec<StrongValue<Ty>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -166,17 +162,16 @@ where
     event: Option<Event>,
 }
 
-impl<Ty, Conv> Frame<Ty, Conv>
+impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
-    StrongValue<Ty, Conv>: Clone,
+    StrongValue<Ty>: Clone,
 {
-    pub(crate) fn new(
+    pub(crate) fn new<Conv>(
         rt: &mut RuntimeView<Ty, Conv>,
-        closure: RootCell<Closure<Ty, Conv>>,
+        closure: RootCell<Closure<Ty>>,
         event: Option<Event>,
-    ) -> Result<Self, RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<Self, RuntimeError<StrongValue<Ty>>> {
         use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
         use repr::chunk::Function;
 
@@ -232,11 +227,11 @@ where
     }
 }
 
-impl<Ty, Conv> Frame<Ty, Conv>
+impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
 {
-    pub(crate) fn closure(&self) -> &RootCell<Closure<Ty, Conv>> {
+    pub(crate) fn closure(&self) -> &RootCell<Closure<Ty>> {
         &self.closure
     }
 
@@ -245,16 +240,15 @@ where
     }
 }
 
-impl<Ty, Conv> Frame<Ty, Conv>
+impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
-    WeakValue<Ty, Conv>: DisplayWith<Heap>,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
-    pub(crate) fn activate<'a>(
+    pub(crate) fn activate<'a, Conv>(
         self,
         rt: &'a mut RuntimeView<Ty, Conv>,
-    ) -> Result<ActiveFrame<'a, Ty, Conv>, RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<ActiveFrame<'a, Ty, Conv>, RuntimeError<StrongValue<Ty>>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let RuntimeView {
@@ -306,10 +300,9 @@ where
     }
 }
 
-impl<Ty, Conv> Frame<Ty, Conv>
+impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
     pub(crate) fn backtrace(&self, heap: &Heap, chunk_cache: &dyn ChunkCache) -> BacktraceFrame {
         use crate::backtrace::{FrameSource, Location};
@@ -362,10 +355,10 @@ where
     }
 }
 
-impl<Ty, Conv> Debug for Frame<Ty, Conv>
+impl<Ty> Debug for Frame<Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty, Conv>: Debug,
+    StrongValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Frame")
@@ -382,14 +375,14 @@ pub struct ActiveFrame<'rt, Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    closure: RootCell<Closure<Ty, Conv>>,
+    closure: RootCell<Closure<Ty>>,
     core: &'rt mut Core<Ty, Conv>,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
     ip: InstrId,
-    stack: StackGuard<'rt, Ty, Conv>,
-    register_variadic: Vec<StrongValue<Ty, Conv>>,
+    stack: StackGuard<'rt, Ty>,
+    register_variadic: Vec<StrongValue<Ty>>,
     /// Whether frame was created as result of evaluating metamethod.
     ///
     /// Metamethods in general mimic builtin behavior of opcodes,
@@ -406,14 +399,14 @@ where
         self.constants.get(index).ok_or(MissingConstId(index))
     }
 
-    fn get_stack(&self, index: StackSlot) -> Result<&WeakValue<Ty, Conv>, MissingStackSlot> {
+    fn get_stack(&self, index: StackSlot) -> Result<&WeakValue<Ty>, MissingStackSlot> {
         self.stack.get_slot(index).ok_or(MissingStackSlot(index))
     }
 
     fn upvalue(
         &self,
         index: UpvalueSlot,
-    ) -> Result<UpvaluePlace<GcCell<WeakValue<Ty, Conv>>>, MissingUpvalue> {
+    ) -> Result<UpvaluePlace<GcCell<WeakValue<Ty>>>, MissingUpvalue> {
         let closure = &self.core.gc[&self.closure];
 
         closure
@@ -445,14 +438,14 @@ where
 
 impl<'rt, Ty, Conv> ActiveFrame<'rt, Ty, Conv>
 where
-    Ty: CoreTypes,
+    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Conv: 'static,
-    Ty::Table: TableIndex<Weak<Ty, Conv>>,
-    WeakValue<Ty, Conv>: DisplayWith<Heap>,
+    Ty::Table: TableIndex<Weak<Ty>>,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     pub(super) fn step(
         &mut self,
-    ) -> Result<ControlFlow<ChangeFrame<Ty, Conv>>, RefAccessOrError<opcode_err::Error>> {
+    ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Error>> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
                 self.stack.lua_frame().next_slot(),
@@ -466,7 +459,7 @@ where
     fn exec(
         &mut self,
         opcode: OpCode,
-    ) -> Result<ControlFlow<ChangeFrame<Ty, Conv>>, RefAccessOrError<opcode_err::Cause>> {
+    ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Cause>> {
         use super::stack::Source;
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
@@ -665,10 +658,10 @@ where
     #[allow(clippy::type_complexity)]
     fn exec_una_op(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 1],
+        args: [WeakValue<Ty>; 1],
         op: UnaOp,
     ) -> Result<
-        ControlFlow<(Event, Callable<Strong<Ty, Conv>>, StackSlot)>,
+        ControlFlow<(Event, Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::UnaOpCause>,
     > {
         use super::stack::Source;
@@ -688,7 +681,10 @@ where
             UnaOp::BitNot => {
                 use super::CoerceArgs;
 
-                let args = self.core.dialect.coerce_una_op_bit(args);
+                let args = <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::coerce_una_op_bit(
+                    &self.core.dialect,
+                    args,
+                );
 
                 match args {
                     [Value::Int(val)] => Continue((!Int(val)).into()),
@@ -775,10 +771,10 @@ where
     #[allow(clippy::type_complexity)]
     fn exec_bin_op(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 2],
+        args: [WeakValue<Ty>; 2],
         op: BinOp,
     ) -> Result<
-        std::ops::ControlFlow<(Event, Callable<Strong<Ty, Conv>>, StackSlot)>,
+        std::ops::ControlFlow<(Event, Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::BinOpCause>,
     > {
         use super::stack::Source;
@@ -819,7 +815,7 @@ where
                 };
 
                 let key = self.core.lookup_event(event);
-                let lookup_event = |value: &WeakValue<Ty, Conv>| -> Result<_, AlreadyDroppedError> {
+                let lookup_event = |value: &WeakValue<Ty>| -> Result<_, AlreadyDroppedError> {
                     let r = self
                         .core
                         .metatable_of(value)?
@@ -882,10 +878,9 @@ where
     #[allow(clippy::type_complexity)]
     fn exec_bin_op_str(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 2],
+        args: [WeakValue<Ty>; 2],
         op: StrBinOp,
-    ) -> Result<ControlFlow<[WeakValue<Ty, Conv>; 2], Option<WeakValue<Ty, Conv>>>, RefAccessError>
-    {
+    ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
         use super::CoerceArgs;
 
         self.stack.lua_frame().sync_transient(&mut self.core.gc);
@@ -917,14 +912,15 @@ where
 
     fn exec_bin_op_eq(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 2],
+        args: [WeakValue<Ty>; 2],
         op: EqBinOp,
-    ) -> ControlFlow<[WeakValue<Ty, Conv>; 2], Option<WeakValue<Ty, Conv>>> {
+    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
-        let cmp = <_ as CoerceArgs<Weak<Ty, Conv>>>::cmp_float_and_int(&self.core.dialect);
+        let cmp =
+            <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::cmp_float_and_int(&self.core.dialect);
 
         let equal = match args {
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
@@ -949,16 +945,16 @@ where
     #[allow(clippy::type_complexity)]
     fn exec_bin_op_rel(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 2],
+        args: [WeakValue<Ty>; 2],
         op: RelBinOp,
-    ) -> Result<ControlFlow<[WeakValue<Ty, Conv>; 2], Option<WeakValue<Ty, Conv>>>, RefAccessError>
-    {
+    ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
         use super::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
         use Value::*;
 
-        let cmp = <_ as CoerceArgs<Weak<Ty, Conv>>>::cmp_float_and_int(&self.core.dialect);
+        let cmp =
+            <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::cmp_float_and_int(&self.core.dialect);
 
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
@@ -994,13 +990,17 @@ where
 
     fn exec_bin_op_bit(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 2],
+        args: [WeakValue<Ty>; 2],
         op: BitBinOp,
-    ) -> ControlFlow<[WeakValue<Ty, Conv>; 2], Option<WeakValue<Ty, Conv>>> {
+    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::Int;
 
-        let args = self.core.dialect.coerce_bin_op_bit(op, args);
+        let args = <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::coerce_bin_op_bit(
+            &self.core.dialect,
+            op,
+            args,
+        );
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
@@ -1018,15 +1018,19 @@ where
 
     fn exec_bin_op_ari(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 2],
+        args: [WeakValue<Ty>; 2],
         op: AriBinOp,
-    ) -> ControlFlow<[WeakValue<Ty, Conv>; 2], Option<WeakValue<Ty, Conv>>> {
+    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
         use super::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
 
         // Coercions.
-        let args = self.core.dialect.coerce_bin_op_ari(op, args);
+        let args = <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::coerce_bin_op_ari(
+            &self.core.dialect,
+            op,
+            args,
+        );
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
@@ -1057,9 +1061,9 @@ where
     #[allow(clippy::type_complexity)]
     fn exec_tab_get(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 2],
+        args: [WeakValue<Ty>; 2],
     ) -> Result<
-        ControlFlow<(Callable<Strong<Ty, Conv>>, StackSlot)>,
+        ControlFlow<(Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
         use super::stack::Source;
@@ -1072,7 +1076,10 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(LuaPtr(table)) = &table {
-                let index = self.core.dialect.coerce_tab_get(index);
+                let index = <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::coerce_tab_get(
+                    &self.core.dialect,
+                    index,
+                );
 
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = *table;
@@ -1153,9 +1160,9 @@ where
     #[allow(clippy::type_complexity)]
     fn exec_tab_set(
         &mut self,
-        args: [WeakValue<Ty, Conv>; 3],
+        args: [WeakValue<Ty>; 3],
     ) -> Result<
-        ControlFlow<(Callable<Strong<Ty, Conv>>, StackSlot)>,
+        ControlFlow<(Callable<Strong<Ty>>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
         use super::stack::Source;
@@ -1168,7 +1175,10 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(LuaPtr(table)) = &table {
-                let index = self.core.dialect.coerce_tab_set(index);
+                let index = <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::coerce_tab_set(
+                    &self.core.dialect,
+                    index,
+                );
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = self.core.gc.get_mut(*table).ok_or(AlreadyDroppedError)?;
 
@@ -1208,7 +1218,10 @@ where
                             // Third: Fallback to raw assignment.
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
-                            let index = self.core.dialect.coerce_tab_set(index);
+                            let index = <_ as CoerceArgs<Weak<Ty>, Core<Ty, Conv>>>::coerce_tab_set(
+                                &self.core.dialect,
+                                index,
+                            );
                             let key = index.try_into().map_err(InvalidKey)?;
 
                             self.core
@@ -1251,9 +1264,9 @@ where
 
     fn prepare_invoke(
         &mut self,
-        mut callable: WeakValue<Ty, Conv>,
+        mut callable: WeakValue<Ty>,
         start: StackSlot,
-    ) -> Result<Callable<Strong<Ty, Conv>>, RefAccessOrError<NotCallableError>> {
+    ) -> Result<Callable<Strong<Ty>>, RefAccessOrError<NotCallableError>> {
         use super::stack::Source;
 
         loop {
@@ -1301,7 +1314,7 @@ where
     pub(crate) fn construct_closure(
         &mut self,
         recipe_id: RecipeId,
-    ) -> Result<RootCell<Closure<Ty, Conv>>, opcode_err::Cause> {
+    ) -> Result<RootCell<Closure<Ty>>, opcode_err::Cause> {
         let recipe = self
             .chunk
             .get_recipe(recipe_id)
@@ -1356,7 +1369,7 @@ where
         Ok(closure)
     }
 
-    pub(crate) fn suspend(self) -> Frame<Ty, Conv> {
+    pub(crate) fn suspend(self) -> Frame<Ty> {
         let ActiveFrame {
             closure,
             ip,
@@ -1377,10 +1390,7 @@ where
         }
     }
 
-    pub(crate) fn exit(
-        mut self,
-        returns: StackSlot,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    pub(crate) fn exit(mut self, returns: StackSlot) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         let mut stack = self.stack.lua_frame();
 
         // All upvalues need to be gone.
@@ -1406,8 +1416,8 @@ impl<'rt, Ty, Conv> Debug for ActiveFrame<'rt, Ty, Conv>
 where
     Ty: Debug + CoreTypes,
     Conv: Debug,
-    WeakValue<Ty, Conv>: Debug,
-    StrongValue<Ty, Conv>: Debug,
+    WeakValue<Ty>: Debug,
+    StrongValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ActiveFrame")

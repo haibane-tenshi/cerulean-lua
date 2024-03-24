@@ -251,7 +251,7 @@ where
     fn call_once(
         self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty, Conv>>> {
+    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
         self.0.call_once(rt)
     }
 
@@ -268,7 +268,7 @@ where
     fn call_mut(
         &mut self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty, Conv>>> {
+    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
         self.0.call_mut(rt)
     }
 }
@@ -281,7 +281,7 @@ where
     fn call(
         &self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty, Conv>>> {
+    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
         self.0.call(rt)
     }
 }

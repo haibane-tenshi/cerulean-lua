@@ -59,13 +59,13 @@ pub fn builder<Ty: CoreTypes, Conv, T>() -> ValueBuilder<
         RuntimeView<'rt, Ty, Conv>,
         ChunkId,
         T,
-    ) -> Result<T, RuntimeError<StrongValue<Ty, Conv>>>,
+    ) -> Result<T, RuntimeError<StrongValue<Ty>>>,
 > {
     fn builder<Ty: CoreTypes, Conv, T>(
         _: RuntimeView<Ty, Conv>,
         _: ChunkId,
         value: T,
-    ) -> Result<T, RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<T, RuntimeError<StrongValue<Ty>>> {
         Ok(value)
     }
 
@@ -98,24 +98,16 @@ impl<P> ValueBuilder<P> {
         self,
         chunk_part: Part<Fun, Con, Rec, F>,
     ) -> ValueBuilder<
-        impl FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<V, RuntimeError<StrongValue<Ty, Conv>>>,
+        impl FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<V, RuntimeError<StrongValue<Ty>>>,
     >
     where
         Ty: CoreTypes,
         // Value<Ty>: Display,
-        P: FnOnce(
-            RuntimeView<Ty, Conv>,
-            ChunkId,
-            T,
-        ) -> Result<U, RuntimeError<StrongValue<Ty, Conv>>>,
+        P: FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
         Fun: IntoIterator<Item = Function>,
         Con: IntoIterator<Item = Literal>,
         Rec: IntoIterator<Item = ClosureRecipe>,
-        F: FnOnce(
-            RuntimeView<Ty, Conv>,
-            ChunkRange,
-            U,
-        ) -> Result<V, RuntimeError<StrongValue<Ty, Conv>>>,
+        F: FnOnce(RuntimeView<Ty, Conv>, ChunkRange, U) -> Result<V, RuntimeError<StrongValue<Ty>>>,
     {
         let Part {
             chunk_ext,
@@ -160,15 +152,11 @@ impl<P> ValueBuilder<P> {
         self,
     ) -> (
         Chunk,
-        impl FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty, Conv>>>,
+        impl FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
     )
     where
         Ty: CoreTypes,
-        P: FnOnce(
-            RuntimeView<Ty, Conv>,
-            ChunkId,
-            T,
-        ) -> Result<U, RuntimeError<StrongValue<Ty, Conv>>>,
+        P: FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
     {
         let ValueBuilder { chunk, builder } = self;
 

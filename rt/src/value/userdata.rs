@@ -18,7 +18,7 @@ where
         scope: &str,
         name: &str,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>>;
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>>;
 }
 
 pub enum Method<Ref, Mut, Val> {
@@ -43,17 +43,17 @@ where
         &self,
         method: Self::Ref,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
     fn call_mut(
         &mut self,
         method: Self::Mut,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
     fn call_once(
         self,
         method: Self::Val,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>>;
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
 }
 
 impl<Marker, Ty, Conv, T> DispatchMethod<Marker, Ty, Conv> for RefCell<T>
@@ -85,7 +85,7 @@ where
         &self,
         method: Self::Ref,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         match method {
             Method::Ref(m) => self.try_borrow().map_err(|_| BorrowError::Ref)?.call(m, rt),
             Method::Mut(m) => self
@@ -100,7 +100,7 @@ where
         &mut self,
         method: Self::Mut,
         _rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         match method {}
     }
 
@@ -108,7 +108,7 @@ where
         self,
         method: Self::Val,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.into_inner().call_once(method, rt)
     }
 }
@@ -143,7 +143,7 @@ where
         &self,
         method: Self::Ref,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
         let Some(value) = self else {
@@ -157,7 +157,7 @@ where
         &mut self,
         method: Self::Mut,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
         match method {
@@ -183,7 +183,7 @@ where
         self,
         method: Self::Val,
         _rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         match method {}
     }
 }
@@ -198,7 +198,7 @@ where
         scope: &str,
         name: &str,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>>;
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>>;
 }
 
 impl<Ty, Conv, T> DispatchTrait<(), Ty, Conv> for T
@@ -210,7 +210,7 @@ where
         _scope: &str,
         _name: &str,
         _rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
         None
     }
 }
@@ -227,7 +227,7 @@ where
         scope: &str,
         name: &str,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
         if scope == T::SCOPE_NAME {
             if let Some(method) = T::dispatch_method(name) {
                 let r = if let Method::Ref(f) = method {
@@ -261,7 +261,7 @@ where
         &str,
         &str,
         RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>>,
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>>,
 }
 
 impl<T, Ty, Conv> Dispatchable<T, Ty, Conv>
@@ -307,7 +307,7 @@ where
         scope: &str,
         name: &str,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
         (self.dispatcher)(&self.value, scope, name, rt)
     }
 }
@@ -349,7 +349,7 @@ where
         scope: &str,
         name: &str,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
         self.value.dispatch_trait(scope, name, rt)
     }
 }
@@ -377,7 +377,7 @@ where
         scope: &str,
         name: &str,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
         self.as_ref().method(scope, name, rt)
     }
 }
@@ -445,7 +445,7 @@ where
         scope: &str,
         name: &str,
         rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty, Conv>>>> {
+    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
         self.as_ref().method(scope, name, rt)
     }
 }

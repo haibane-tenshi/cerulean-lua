@@ -311,16 +311,14 @@ impl DialectBuilder {
     }
 }
 
-pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
-    type Core;
-
+pub trait CoerceArgs<Ty: Types, Core>: sealed::Sealed {
     fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
     fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
     fn coerce_bin_op_str(
         &self,
         op: StrBinOp,
         args: [Value<Ty>; 2],
-        gc: &mut Self::Core,
+        gc: &mut Core,
     ) -> [Value<Ty>; 2];
     fn coerce_una_op_bit(&self, args: [Value<Ty>; 1]) -> [Value<Ty>; 1];
     fn coerce_tab_set(&self, key: Value<Ty>) -> Value<Ty>;
@@ -328,18 +326,12 @@ pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
     fn cmp_float_and_int(&self) -> bool;
 }
 
-impl<Ty, Conv> CoerceArgs<Weak<Ty, Conv>> for DialectBuilder
+impl<Ty, Conv> CoerceArgs<Weak<Ty>, Core<Ty, Conv>> for DialectBuilder
 where
     Ty: CoreTypes,
     Ty::String: From<String>,
 {
-    type Core = Core<Ty, Conv>;
-
-    fn coerce_bin_op_ari(
-        &self,
-        op: AriBinOp,
-        args: [WeakValue<Ty, Conv>; 2],
-    ) -> [WeakValue<Ty, Conv>; 2] {
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
         use crate::value::{Float, Int};
 
         match (op, args) {
@@ -363,14 +355,10 @@ where
         }
     }
 
-    fn coerce_bin_op_bit(
-        &self,
-        _op: BitBinOp,
-        args: [WeakValue<Ty, Conv>; 2],
-    ) -> [WeakValue<Ty, Conv>; 2] {
+    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
         use crate::value::{Float, Int};
 
-        let try_into = |value: f64| -> WeakValue<Ty, Conv> {
+        let try_into = |value: f64| -> WeakValue<Ty> {
             if let Ok(value) = Int::try_from(Float(value)) {
                 value.into()
             } else {
@@ -398,20 +386,20 @@ where
     fn coerce_bin_op_str(
         &self,
         op: StrBinOp,
-        args: [WeakValue<Ty, Conv>; 2],
-        core: &mut Self::Core,
-    ) -> [WeakValue<Ty, Conv>; 2] {
+        args: [WeakValue<Ty>; 2],
+        core: &mut Core<Ty, Conv>,
+    ) -> [WeakValue<Ty>; 2] {
         match op {
             StrBinOp::Concat => {
                 use crate::gc::LuaPtr;
                 use Value::*;
 
-                let flt_to_string = |x: f64, core: &mut Self::Core| {
+                let flt_to_string = |x: f64, core: &mut Core<_, _>| {
                     let value = core.alloc_string(x.to_string().into()).downgrade();
                     Value::String(LuaPtr(value))
                 };
 
-                let int_to_string = |x: i64, core: &mut Self::Core| {
+                let int_to_string = |x: i64, core: &mut Core<_, _>| {
                     let value = core.alloc_string(x.to_string().into()).downgrade();
                     Value::String(LuaPtr(value))
                 };
@@ -433,7 +421,7 @@ where
         }
     }
 
-    fn coerce_una_op_bit(&self, args: [WeakValue<Ty, Conv>; 1]) -> [WeakValue<Ty, Conv>; 1] {
+    fn coerce_una_op_bit(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1] {
         use crate::value::{Float, Int};
 
         match args {
@@ -448,7 +436,7 @@ where
         }
     }
 
-    fn coerce_tab_set(&self, key: WeakValue<Ty, Conv>) -> WeakValue<Ty, Conv> {
+    fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_set_float_to_int {
@@ -467,7 +455,7 @@ where
         }
     }
 
-    fn coerce_tab_get(&self, key: WeakValue<Ty, Conv>) -> WeakValue<Ty, Conv> {
+    fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_get_float_to_int {

@@ -57,7 +57,7 @@ where
             fn call_once(
                 self,
                 rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-            ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+            ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
                 self.func.call_once(rt)
             }
 
@@ -74,7 +74,7 @@ where
             fn call_mut(
                 &mut self,
                 rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-            ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+            ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
                 self.func.call_mut(rt)
             }
         }
@@ -87,7 +87,7 @@ where
             fn call(
                 &self,
                 rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-            ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+            ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
                 self.func.call(rt)
             }
         }
@@ -150,7 +150,7 @@ where
             fn call_once(
                 self,
                 rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-            ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+            ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
                 self.call(rt)
             }
 
@@ -167,7 +167,7 @@ where
             fn call_mut(
                 &mut self,
                 rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-            ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+            ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
                 self.call(rt)
             }
         }
@@ -180,7 +180,7 @@ where
             fn call(
                 &self,
                 rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-            ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+            ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
                 let f = self.func.take().ok_or(AlreadyDroppedError)?;
                 f.call_once(rt)
             }
@@ -242,7 +242,7 @@ where
     fn call_once(
         self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
     }
 
@@ -258,7 +258,7 @@ where
     fn call_mut(
         &mut self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
     }
 }
@@ -270,7 +270,7 @@ where
     fn call(
         &self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.0.call(rt)
     }
 }
@@ -285,19 +285,18 @@ where
     }
 }
 
-pub enum RustCallable<Ty, Conv, Closure>
+pub enum RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
 {
-    Ref(Closure),
+    Ref(RustClosureRef<Ty, Conv>),
     Ptr(LuaFfiPtr<Ty, Conv>),
 }
 
-impl<Ty, Conv, Closure> Trace for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> Trace for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
     Conv: 'static,
-    Closure: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         match self {
@@ -307,10 +306,9 @@ where
     }
 }
 
-impl<Ty, Conv, Closure> Debug for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> Debug for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
-    Closure: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -320,7 +318,7 @@ where
     }
 }
 
-impl<Ty, Conv, Closure> Display for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> Display for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -331,10 +329,9 @@ where
     }
 }
 
-impl<Ty, Conv, Closure> Clone for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> Clone for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
-    Closure: Clone,
 {
     fn clone(&self) -> Self {
         match self {
@@ -344,17 +341,9 @@ where
     }
 }
 
-impl<Ty, Conv, Closure> Copy for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> PartialEq for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
-    Closure: Copy,
-{
-}
-
-impl<Ty, Conv, Closure> PartialEq for RustCallable<Ty, Conv, Closure>
-where
-    Ty: CoreTypes,
-    Closure: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -365,17 +354,11 @@ where
     }
 }
 
-impl<Ty, Conv, Closure> Eq for RustCallable<Ty, Conv, Closure>
-where
-    Ty: CoreTypes,
-    Closure: Eq,
-{
-}
+impl<Ty, Conv> Eq for RustCallable<Ty, Conv> where Ty: CoreTypes {}
 
-impl<Ty, Conv, Closure> Hash for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> Hash for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
-    Closure: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
@@ -387,16 +370,15 @@ where
     }
 }
 
-impl<Ty, Conv, Closure> LuaFfiOnce<Ty, Conv> for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> LuaFfiOnce<Ty, Conv> for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
-    Closure: LuaFfiOnce<Ty, Conv>,
-    WeakValue<Ty, Conv>: DisplayWith<Heap>,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     fn call_once(
         self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         match self {
             Self::Ref(f) => rt.invoke(f),
             Self::Ptr(f) => rt.invoke(f),
@@ -410,7 +392,7 @@ where
     }
 }
 
-impl<Ty, Conv, Closure> From<LuaFfiPtr<Ty, Conv>> for RustCallable<Ty, Conv, Closure>
+impl<Ty, Conv> From<LuaFfiPtr<Ty, Conv>> for RustCallable<Ty, Conv>
 where
     Ty: CoreTypes,
 {
@@ -419,8 +401,8 @@ where
     }
 }
 
-pub type StrongCallable<Ty, Conv> = Callable<Strong<Ty, Conv>>;
-pub type WeakCallable<Ty, Conv> = Callable<Weak<Ty, Conv>>;
+pub type StrongCallable<Ty> = Callable<Strong<Ty>>;
+pub type WeakCallable<Ty> = Callable<Weak<Ty>>;
 
 pub enum Callable<Ty>
 where
@@ -430,18 +412,13 @@ where
     Rust(Ty::RustCallable),
 }
 
-impl<Ty, Conv> WeakCallable<Ty, Conv>
+impl<Ty> WeakCallable<Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
-    pub fn upgrade(self, heap: &Heap) -> Option<StrongCallable<Ty, Conv>> {
+    pub fn upgrade(self, heap: &Heap) -> Option<StrongCallable<Ty>> {
         let r = match self {
-            Callable::Rust(RustCallable::Ptr(t)) => Callable::Rust(RustCallable::Ptr(t)),
-            Callable::Rust(RustCallable::Ref(t)) => {
-                let t = t.upgrade_cell(heap)?;
-                Callable::Rust(RustCallable::Ref(t))
-            }
+            Callable::Rust(t) => Callable::Rust(t.upgrade_cell(heap)?),
             Callable::Lua(t) => {
                 let t = t.upgrade_cell(heap)?;
                 Callable::Lua(t)
@@ -452,32 +429,25 @@ where
     }
 }
 
-impl<Ty, Conv> StrongCallable<Ty, Conv>
+impl<Ty> StrongCallable<Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn downgrade(&self) -> WeakCallable<Ty, Conv> {
+    pub fn downgrade(&self) -> WeakCallable<Ty> {
         match self {
-            Callable::Rust(RustCallable::Ptr(t)) => Callable::Rust(RustCallable::Ptr(*t)),
-            Callable::Rust(RustCallable::Ref(t)) => {
-                Callable::Rust(RustCallable::Ref(t.downgrade_cell()))
-            }
+            Callable::Rust(t) => Callable::Rust(t.downgrade_cell()),
             Callable::Lua(t) => Callable::Lua(t.downgrade_cell()),
         }
     }
 }
 
-impl<Ty, Conv> TryFromWithGc<Callable<Weak<Ty, Conv>>, Heap> for Callable<Strong<Ty, Conv>>
+impl<Ty> TryFromWithGc<Callable<Weak<Ty>>, Heap> for Callable<Strong<Ty>>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
     type Error = crate::error::AlreadyDroppedError;
 
-    fn try_from_with_gc(
-        value: Callable<Weak<Ty, Conv>>,
-        heap: &mut Heap,
-    ) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: Callable<Weak<Ty>>, heap: &mut Heap) -> Result<Self, Self::Error> {
         use crate::error::AlreadyDroppedError;
 
         value.upgrade(heap).ok_or(AlreadyDroppedError)
@@ -587,18 +557,18 @@ where
     }
 }
 
-impl<Ty, Conv> LuaFfiOnce<Ty, Conv> for Callable<Strong<Ty, Conv>>
+impl<Ty, Conv> LuaFfiOnce<Ty, Conv> for Callable<Strong<Ty>>
 where
     Conv: 'static,
-    Ty: CoreTypes,
-    Ty::Table: TableIndex<Weak<Ty, Conv>>,
+    Ty: CoreTypes<LuaClosure = LuaClosure<Ty>>,
+    Ty::Table: TableIndex<Weak<Ty>>,
     Ty::RustClosure: LuaFfi<Ty, Conv>,
-    WeakValue<Ty, Conv>: DisplayWith<Heap>,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     fn call_once(
         self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::gc::LuaPtr;
 
         match self {
@@ -614,18 +584,18 @@ where
     }
 }
 
-impl<Ty, Conv> LuaFfiOnce<Ty, Conv> for Callable<Weak<Ty, Conv>>
+impl<Ty, Conv> LuaFfiOnce<Ty, Conv> for Callable<Weak<Ty>>
 where
     Conv: 'static,
-    Ty: CoreTypes,
-    Ty::Table: TableIndex<Weak<Ty, Conv>>,
+    Ty: CoreTypes<LuaClosure = LuaClosure<Ty>>,
+    Ty::Table: TableIndex<Weak<Ty>>,
     Ty::RustClosure: LuaFfi<Ty, Conv>,
-    WeakValue<Ty, Conv>: DisplayWith<Heap>,
+    WeakValue<Ty>: DisplayWith<Heap>,
 {
     fn call_once(
         self,
         rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty, Conv>>> {
+    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::AlreadyDroppedError;
         use crate::gc::LuaPtr;
 

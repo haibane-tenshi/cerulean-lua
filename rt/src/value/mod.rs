@@ -163,8 +163,8 @@ impl Display for TypeWithoutMetatable {
     }
 }
 
-pub type StrongValue<Ty, Conv> = Value<Strong<Ty, Conv>>;
-pub type WeakValue<Ty, Conv> = Value<Weak<Ty, Conv>>;
+pub type StrongValue<Ty> = Value<Strong<Ty>>;
+pub type WeakValue<Ty> = Value<Weak<Ty>>;
 
 /// Enum representing all possible Lua values.
 ///
@@ -214,14 +214,12 @@ impl<Ty: Types> Value<Ty> {
     }
 }
 
-impl<Ty, Conv> StrongValue<Ty, Conv>
+impl<Ty> StrongValue<Ty>
 where
     Ty: CoreTypes,
     Ty::RustClosure: Clone,
 {
-    pub fn downgrade(&self) -> WeakValue<Ty, Conv> {
-        use callable::RustCallable;
-
+    pub fn downgrade(&self) -> WeakValue<Ty> {
         match self {
             Value::Nil => Value::Nil,
             Value::Bool(t) => Value::Bool(*t),
@@ -229,11 +227,8 @@ where
             Value::Float(t) => Value::Float(*t),
             Value::String(t) => Value::String(t.downgrade()),
             Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade_cell())),
-            Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
-                Value::Function(Callable::Rust(RustCallable::Ptr(*t)))
-            }
-            Value::Function(Callable::Rust(RustCallable::Ref(t))) => {
-                Value::Function(Callable::Rust(RustCallable::Ref(t.downgrade_cell())))
+            Value::Function(Callable::Rust(t)) => {
+                Value::Function(Callable::Rust(t.downgrade_cell()))
             }
             Value::Table(t) => Value::Table(t.downgrade_cell()),
             Value::Userdata(t) => Value::Userdata(t.downgrade_cell()),
@@ -241,14 +236,11 @@ where
     }
 }
 
-impl<Ty, Conv> WeakValue<Ty, Conv>
+impl<Ty> WeakValue<Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
-    pub fn upgrade(self, heap: &Heap) -> Option<StrongValue<Ty, Conv>> {
-        use callable::RustCallable;
-
+    pub fn upgrade(self, heap: &Heap) -> Option<StrongValue<Ty>> {
         let r = match self {
             Value::Nil => Value::Nil,
             Value::Bool(t) => Value::Bool(t),
@@ -258,11 +250,8 @@ where
             Value::Function(Callable::Lua(t)) => {
                 Value::Function(Callable::Lua(t.upgrade_cell(heap)?))
             }
-            Value::Function(Callable::Rust(RustCallable::Ptr(t))) => {
-                Value::Function(Callable::Rust(RustCallable::Ptr(t)))
-            }
-            Value::Function(Callable::Rust(RustCallable::Ref(t))) => {
-                Value::Function(Callable::Rust(RustCallable::Ref(t.upgrade_cell(heap)?)))
+            Value::Function(Callable::Rust(t)) => {
+                Value::Function(Callable::Rust(t.upgrade_cell(heap)?))
             }
             Value::Table(t) => Value::Table(t.upgrade_cell(heap)?),
             Value::Userdata(t) => Value::Userdata(t.upgrade_cell(heap)?),
@@ -272,23 +261,17 @@ where
     }
 }
 
-impl<Ty, Conv> WeakValue<Ty, Conv>
+impl<Ty> WeakValue<Ty>
 where
     Ty: CoreTypes,
 {
     pub(crate) fn is_transient(&self) -> bool {
-        use callable::RustCallable;
         use Value::*;
 
         match self {
             Nil | Bool(_) | Int(_) | Float(_) => false,
-            // In current impl strings are not gc allocated.
-            // Will need to be adjusted when that changes.
-            String(_) => false,
-            // Pointers are curently passed by-value.
-            // Will need to be adjusted if that changes.
-            Function(Callable::Rust(RustCallable::Ptr(_))) => false,
-            Function(Callable::Rust(RustCallable::Ref(_)))
+            String(_)
+            | Function(Callable::Rust(_))
             | Function(Callable::Lua(_))
             | Table(_)
             | Userdata(_) => true,
@@ -296,25 +279,24 @@ where
     }
 }
 
-impl<Ty, Conv> From<StrongValue<Ty, Conv>> for WeakValue<Ty, Conv>
+impl<Ty> From<StrongValue<Ty>> for WeakValue<Ty>
 where
     Ty: CoreTypes,
 {
-    fn from(value: StrongValue<Ty, Conv>) -> Self {
+    fn from(value: StrongValue<Ty>) -> Self {
         value.downgrade()
     }
 }
 
-impl<Ty, Conv> TryFromWithGc<WeakValue<Ty, Conv>, Heap> for StrongValue<Ty, Conv>
+impl<Ty> TryFromWithGc<WeakValue<Ty>, Heap> for StrongValue<Ty>
 where
-    Conv: 'static,
     Ty: CoreTypes,
     Ty::Table: Trace,
     Ty::FullUserdata: Trace,
 {
     type Error = crate::error::AlreadyDroppedError;
 
-    fn try_from_with_gc(value: WeakValue<Ty, Conv>, heap: &mut Heap) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: WeakValue<Ty>, heap: &mut Heap) -> Result<Self, Self::Error> {
         use crate::error::AlreadyDroppedError;
 
         value.upgrade(heap).ok_or(AlreadyDroppedError)
@@ -448,7 +430,7 @@ where
 
 pub struct ValueWith<'a, Value, Heap>(&'a Value, &'a Heap);
 
-impl<'a, Ty, Conv> Display for ValueWith<'a, WeakValue<Ty, Conv>, Heap>
+impl<'a, Ty> Display for ValueWith<'a, WeakValue<Ty>, Heap>
 where
     Ty: CoreTypes,
 {
@@ -470,14 +452,14 @@ where
                 }
             }
             Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Function(Callable::Rust(t)) => write!(f, "{t}"),
+            Function(Callable::Rust(t)) => write!(f, "{{[rust] closure <{t:p}>}}"),
             Table(t) => write!(f, "{{table <{t:p}>}}"),
             Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
         }
     }
 }
 
-impl<'a, Ty, Conv> Display for ValueWith<'a, StrongValue<Ty, Conv>, Heap>
+impl<'a, Ty> Display for ValueWith<'a, StrongValue<Ty>, Heap>
 where
     Ty: CoreTypes,
 {
@@ -496,14 +478,14 @@ where
                 write!(f, "{s}")
             }
             Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Function(Callable::Rust(t)) => write!(f, "{t}"),
+            Function(Callable::Rust(t)) => write!(f, "{{[rust] closure <{t:p}>}}"),
             Table(t) => write!(f, "{{table <{t:p}>}}"),
             Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
         }
     }
 }
 
-impl<Ty, Conv> DisplayWith<Heap> for WeakValue<Ty, Conv>
+impl<Ty> DisplayWith<Heap> for WeakValue<Ty>
 where
     Ty: CoreTypes,
 {
@@ -516,7 +498,7 @@ where
     }
 }
 
-impl<Ty, Conv> DisplayWith<Heap> for StrongValue<Ty, Conv>
+impl<Ty> DisplayWith<Heap> for StrongValue<Ty>
 where
     Ty: CoreTypes,
 {
