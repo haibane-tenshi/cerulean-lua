@@ -109,17 +109,9 @@ impl Heap {
     where
         T: Trace,
     {
-        let RootCell {
-            addr,
-            counter,
-            _marker,
-        } = self.alloc_cell(value);
+        let RootCell { addr, counter } = self.alloc_cell(value);
 
-        Root {
-            addr,
-            counter,
-            _marker,
-        }
+        Root { addr, counter }
     }
 
     #[inline(never)]
@@ -226,15 +218,11 @@ impl Heap {
     where
         T: Trace,
     {
-        let GcCell { addr, _marker } = ptr;
+        let GcCell { addr } = ptr;
 
         let counter = self.arena::<T>()?.upgrade(addr)?;
 
-        let r = RootCell {
-            addr,
-            counter,
-            _marker,
-        };
+        let r = RootCell { addr, counter };
 
         Some(r)
     }
@@ -246,15 +234,11 @@ impl Heap {
     where
         T: Trace,
     {
-        let Gc { addr, _marker } = ptr;
+        let Gc { addr } = ptr;
 
         let counter = self.arena::<T>()?.upgrade(addr)?;
 
-        let r = Root {
-            addr,
-            counter,
-            _marker,
-        };
+        let r = Root { addr, counter };
 
         Some(r)
     }

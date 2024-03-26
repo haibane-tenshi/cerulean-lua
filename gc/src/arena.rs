@@ -32,16 +32,24 @@ impl<T> ArenaStore<T> {
         }
     }
 
-    pub(crate) fn get(&self, index: Location) -> Option<&T> {
-        let Location { index, gen } = index;
+    pub(crate) fn get(&self, index: Location<T>) -> Option<&T> {
+        let Location {
+            index,
+            gen,
+            _marker: _,
+        } = index;
 
         self.values
             .get(index)
             .and_then(|place| (place.gen == gen).then_some(&place.value))
     }
 
-    pub(crate) fn get_mut(&mut self, index: Location) -> Option<&mut T> {
-        let Location { index, gen } = index;
+    pub(crate) fn get_mut(&mut self, index: Location<T>) -> Option<&mut T> {
+        let Location {
+            index,
+            gen,
+            _marker: _,
+        } = index;
 
         self.values
             .get_mut(index)
@@ -52,7 +60,7 @@ impl<T> ArenaStore<T> {
         self.values.get(index).map(|place| &place.value)
     }
 
-    pub(crate) fn upgrade(&self, addr: Location) -> Option<Counter> {
+    pub(crate) fn upgrade(&self, addr: Location<T>) -> Option<Counter> {
         let Place {
             counter: counter_place,
             ..
@@ -88,8 +96,8 @@ impl<T> ArenaStore<T> {
                     addr: Location {
                         index,
                         gen: self.gen,
+                        _marker: PhantomData,
                     },
-                    _marker: PhantomData,
                 }
             })
             .map_err(|place| place.value)
@@ -97,15 +105,11 @@ impl<T> ArenaStore<T> {
 
     pub(crate) fn try_insert(&mut self, value: T) -> Result<RootCell<T>, T> {
         self.insert_weak(value).map(|ptr| {
-            let GcCell { addr, _marker } = ptr;
+            let GcCell { addr } = ptr;
 
             let counter = self.upgrade(addr).unwrap();
 
-            RootCell {
-                addr,
-                counter,
-                _marker,
-            }
+            RootCell { addr, counter }
         })
     }
 

@@ -262,6 +262,7 @@ pub use heap::{Collector, Heap};
 pub use trace::{Trace, Untrace};
 
 use std::fmt::{Debug, Pointer};
+use std::hash::Hash;
 use std::marker::PhantomData;
 
 use crate::arena::Counter;
@@ -343,15 +344,14 @@ use crate::arena::Counter;
 /// assert_eq!(heap.get(weak), Some(&4));
 /// ```
 pub struct GcCell<T> {
-    addr: Location,
-    _marker: PhantomData<T>,
+    addr: Location<T>,
 }
 
 impl<T> GcCell<T> {
     /// Return location of referenced object.
     ///
     /// See [`Location`] struct for more information.
-    pub fn addr(self) -> Location {
+    pub fn addr(self) -> Location<T> {
         self.addr
     }
 
@@ -471,30 +471,22 @@ impl<T> Copy for GcCell<T> {}
 /// assert_eq!(heap[&strong], 3);
 /// ```
 pub struct RootCell<T> {
-    addr: Location,
+    addr: Location<T>,
     counter: Counter,
-    _marker: PhantomData<T>,
 }
 
 impl<T> RootCell<T> {
     /// Downgrade into weak reference.
     pub fn downgrade(&self) -> GcCell<T> {
-        let RootCell {
-            addr,
-            counter: _,
-            _marker,
-        } = self;
+        let RootCell { addr, counter: _ } = self;
 
-        GcCell {
-            addr: *addr,
-            _marker: PhantomData,
-        }
+        GcCell { addr: *addr }
     }
 
     /// Return location of referenced object.
     ///
     /// See [`Location`] struct for more information.
-    pub fn addr(&self) -> Location {
+    pub fn addr(&self) -> Location<T> {
         self.addr
     }
 
@@ -530,16 +522,11 @@ impl<T> Pointer for RootCell<T> {
 
 impl<T> Clone for RootCell<T> {
     fn clone(&self) -> Self {
-        let RootCell {
-            addr,
-            counter,
-            _marker,
-        } = self;
+        let RootCell { addr, counter } = self;
 
         Self {
             addr: *addr,
             counter: counter.clone(),
-            _marker: PhantomData,
         }
     }
 }
@@ -611,15 +598,14 @@ impl<T> From<RootCell<T>> for GcCell<T> {
 /// assert_eq!(heap.get(weak), None);
 /// ```
 pub struct Gc<T> {
-    addr: Location,
-    _marker: PhantomData<T>,
+    addr: Location<T>,
 }
 
 impl<T> Gc<T> {
     /// Return location of referenced object.
     ///
     /// See [`Location`] struct for more information.
-    pub fn addr(self) -> Location {
+    pub fn addr(self) -> Location<T> {
         self.addr
     }
 
@@ -730,30 +716,22 @@ impl<T> Copy for Gc<T> {}
 /// assert_eq!(heap[&strong], 3);
 /// ```
 pub struct Root<T> {
-    addr: Location,
+    addr: Location<T>,
     counter: Counter,
-    _marker: PhantomData<T>,
 }
 
 impl<T> Root<T> {
     /// Downgrade into weak reference.
     pub fn downgrade(&self) -> Gc<T> {
-        let Root {
-            addr,
-            counter: _,
-            _marker,
-        } = self;
+        let Root { addr, counter: _ } = self;
 
-        Gc {
-            addr: *addr,
-            _marker: PhantomData,
-        }
+        Gc { addr: *addr }
     }
 
     /// Return location of referenced object.
     ///
     /// See [`Location`] struct for more information.
-    pub fn addr(&self) -> Location {
+    pub fn addr(&self) -> Location<T> {
         self.addr
     }
 
@@ -789,16 +767,11 @@ impl<T> Pointer for Root<T> {
 
 impl<T> Clone for Root<T> {
     fn clone(&self) -> Self {
-        let Root {
-            addr,
-            counter,
-            _marker,
-        } = self;
+        let Root { addr, counter } = self;
 
         Self {
             addr: *addr,
             counter: counter.clone(),
-            _marker: PhantomData,
         }
     }
 }
@@ -811,25 +784,16 @@ impl<T> From<Root<T>> for Gc<T> {
 
 /// A memory location of garbage-collected object.
 ///
+/// This garbage collector was originally written to back up Lua runtime needs.
 /// Since Lua defines that certain objects are equal if and only if
 /// they are the same object in the memory
 /// we need some means to compare memory locations for gc-allocated entities.
 /// This type provides such functionality.
 ///
 /// The struct relates to [`GcCell<T>`](GcCell), [`RootCell<T>`](RootCell), [`Gc<T>`](Gc) and [`Root<T>`](Root)
-/// as `usize` address to `*const T`/`*mut T`.
-/// It uniquely (with some caveats) identifies allocated object.
-/// However unlike `usize`,
-/// location comparisons are *only well defined between pointers of the same type*.
-/// Since `Location` does not include type information
-/// the result of comparing locations constructed out of pointers to different types
-/// is unspecified and meaningless.
-///
-/// Heap uses generations to tag pointers (and therefore `Location`s),
-/// so even if a new value is allocated at exact same memory spot
-/// `Location` of the old object will be unequal to the `Location` of the new object.
-///
-/// With this `Location` gaurantees (as long as both `lhs` and `rhs` are produced from pointers to the same type):
+/// as `*const T`/`*mut T` pointer to `&T`/`&mut T`.
+/// It uniquely identifies potentially allocated object
+/// and provides implementation of commonplace Rust traits as if applied to an actual pointer:
 ///
 /// * `Eq` implementation, such that
 ///
@@ -842,24 +806,72 @@ impl<T> From<Root<T>> for Gc<T> {
 ///
 /// * `Hash` implementation
 ///
+/// Heap uses generations to tag pointers (and therefore `Location`s),
+/// so even if a new value is allocated at exact same memory spot
+/// `Location` of the old object will be unequal to the `Location` of the new object.
+///
 /// Lastly, besides provided functionality `Location` is opaque
 /// (as it contains implementation-specific details)
 /// and there is no way to reconstruct [`GcCell`]/[`Gc`] out of it.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Location {
+pub struct Location<T> {
     index: usize,
     gen: usize,
+    _marker: PhantomData<T>,
 }
 
-impl Debug for Location {
+impl<T> Clone for Location<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Location<T> {}
+
+impl<T> PartialEq for Location<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.gen == other.gen && self._marker == other._marker
+    }
+}
+
+impl<T> Eq for Location<T> {}
+
+impl<T> PartialOrd for Location<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> Ord for Location<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        match self.index.cmp(&other.index) {
+            Ordering::Equal => (),
+            ord => return ord,
+        }
+
+        self.gen.cmp(&other.gen)
+    }
+}
+
+impl<T> Hash for Location<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+        self.gen.hash(state);
+        self._marker.hash(state);
+    }
+}
+
+impl<T> Debug for Location<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Location")
             .field("index", &self.index)
+            .field("gen", &self.gen)
             .finish_non_exhaustive()
     }
 }
 
-impl Pointer for Location {
+impl<T> Pointer for Location<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.index as *const ())
     }
@@ -868,30 +880,30 @@ impl Pointer for Location {
 mod sealed {
     use super::{Gc, GcCell, Location, Root, RootCell};
 
-    pub trait Sealed {
-        fn addr(&self) -> Location;
+    pub trait Sealed<T> {
+        fn addr(&self) -> Location<T>;
     }
 
-    impl<T> Sealed for GcCell<T> {
-        fn addr(&self) -> Location {
+    impl<T> Sealed<T> for GcCell<T> {
+        fn addr(&self) -> Location<T> {
             self.addr
         }
     }
 
-    impl<T> Sealed for RootCell<T> {
-        fn addr(&self) -> Location {
+    impl<T> Sealed<T> for RootCell<T> {
+        fn addr(&self) -> Location<T> {
             self.addr
         }
     }
 
-    impl<T> Sealed for Gc<T> {
-        fn addr(&self) -> Location {
+    impl<T> Sealed<T> for Gc<T> {
+        fn addr(&self) -> Location<T> {
             self.addr
         }
     }
 
-    impl<T> Sealed for Root<T> {
-        fn addr(&self) -> Location {
+    impl<T> Sealed<T> for Root<T> {
+        fn addr(&self) -> Location<T> {
             self.addr
         }
     }
@@ -923,7 +935,7 @@ mod sealed_root {
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait RefAccess<T>: sealed::Sealed {}
+pub trait RefAccess<T>: sealed::Sealed<T> {}
 
 /// Marker trait permitting by-mut-reference (`&mut T`) access.
 ///
