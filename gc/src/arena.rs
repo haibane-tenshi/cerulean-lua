@@ -1,11 +1,13 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::rc::Rc;
 
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
-use super::{Collector, GcCell, Location, RootCell, Trace};
+use super::{Collector, Trace};
 use crate::vec_list::VecList;
 
 pub(crate) trait Arena {
@@ -14,16 +16,18 @@ pub(crate) trait Arena {
     fn roots(&self) -> BitVec;
     fn trace(&self, indices: &BitSlice, collector: &mut Collector);
     fn retain(&mut self, indices: &BitSlice);
+    fn validate_counter(&self, counter: &Counter) -> bool;
+    fn upgrade(&self, addr: Addr) -> Option<Counter>;
 }
 
 #[derive(Debug)]
-pub(crate) struct ArenaStore<T> {
+pub(crate) struct Store<T> {
     values: VecList<Place<T>>,
     strong_counters: Rc<RefCell<StrongCounters>>,
     gen: usize,
 }
 
-impl<T> ArenaStore<T> {
+impl<T> Store<T> {
     pub(crate) fn new() -> Self {
         Self {
             values: VecList::with_capacity(10),
@@ -32,88 +36,34 @@ impl<T> ArenaStore<T> {
         }
     }
 
-    pub(crate) fn get(&self, index: Location<T>) -> Option<&T> {
-        let Location {
-            index,
-            gen,
-            _marker: _,
-        } = index;
-
-        self.values
-            .get(index)
-            .and_then(|place| (place.gen == gen).then_some(&place.value))
-    }
-
-    pub(crate) fn get_mut(&mut self, index: Location<T>) -> Option<&mut T> {
-        let Location {
-            index,
-            gen,
-            _marker: _,
-        } = index;
-
-        self.values
-            .get_mut(index)
-            .and_then(|place| (place.gen == gen).then_some(&mut place.value))
-    }
-
     fn get_index(&self, index: usize) -> Option<&T> {
         self.values.get(index).map(|place| &place.value)
     }
 
-    pub(crate) fn upgrade(&self, addr: Location<T>) -> Option<Counter> {
-        let Place {
-            counter: counter_place,
-            ..
-        } = self.values.get(addr.index)?;
-
-        let index = match counter_place.get() {
-            Some(index) => {
-                self.strong_counters.borrow_mut().increment(index);
-                index
-            }
-            None => {
-                let index = self.strong_counters.borrow_mut().insert(1);
-                counter_place.set(Some(index));
-                index
-            }
-        };
-
-        let counter = Counter {
-            index,
-            counters: self.strong_counters.clone(),
-        };
-
-        Some(counter)
-    }
-
-    fn insert_weak(&mut self, value: T) -> Result<GcCell<T>, T> {
+    fn insert_weak(&mut self, value: T) -> Result<Addr, T> {
         self.values
             .try_insert(Place::new(value, self.gen))
-            .map(|index| {
-                use std::marker::PhantomData;
-
-                GcCell {
-                    addr: Location {
-                        index,
-                        gen: self.gen,
-                        _marker: PhantomData,
-                    },
-                }
+            .map(|index| Addr {
+                index,
+                gen: self.gen,
             })
             .map_err(|place| place.value)
     }
+}
 
-    pub(crate) fn try_insert(&mut self, value: T) -> Result<RootCell<T>, T> {
-        self.insert_weak(value).map(|ptr| {
-            let GcCell { addr } = ptr;
-
+impl<T> Store<T>
+where
+    T: Trace,
+{
+    pub(crate) fn try_insert(&mut self, value: T) -> Result<(Addr, Counter), T> {
+        self.insert_weak(value).map(|addr| {
             let counter = self.upgrade(addr).unwrap();
 
-            RootCell { addr, counter }
+            (addr, counter)
         })
     }
 
-    pub(crate) fn insert(&mut self, value: T) -> RootCell<T> {
+    pub(crate) fn insert(&mut self, value: T) -> (Addr, Counter) {
         self.values.grow();
 
         let Ok(ptr) = self.try_insert(value) else {
@@ -122,13 +72,9 @@ impl<T> ArenaStore<T> {
 
         ptr
     }
-
-    pub(crate) fn validate_counter(&self, counter: &Counter) -> bool {
-        Rc::ptr_eq(&counter.counters, &self.strong_counters)
-    }
 }
 
-impl<T> Arena for ArenaStore<T>
+impl<T> Arena for Store<T>
 where
     T: Trace,
     Self: Any,
@@ -184,6 +130,36 @@ where
                 self.gen = self.gen.max(gen + 1);
             }
         }
+    }
+
+    fn validate_counter(&self, counter: &Counter) -> bool {
+        Rc::ptr_eq(&counter.counters, &self.strong_counters)
+    }
+
+    fn upgrade(&self, addr: Addr) -> Option<Counter> {
+        let Place {
+            counter: counter_place,
+            ..
+        } = self.values.get(addr.index)?;
+
+        let index = match counter_place.get() {
+            Some(index) => {
+                self.strong_counters.borrow_mut().increment(index);
+                index
+            }
+            None => {
+                let index = self.strong_counters.borrow_mut().insert(1);
+                counter_place.set(Some(index));
+                index
+            }
+        };
+
+        let counter = Counter {
+            index,
+            counters: self.strong_counters.clone(),
+        };
+
+        Some(counter)
     }
 }
 
@@ -263,5 +239,44 @@ impl Clone for Counter {
 impl Drop for Counter {
     fn drop(&mut self) {
         self.counters.borrow_mut().decrement(self.index);
+    }
+}
+
+pub(crate) trait Get<T: ?Sized> {
+    fn get(&self, addr: Addr) -> Option<&T>;
+    fn get_mut(&mut self, addr: Addr) -> Option<&mut T>;
+}
+
+impl<T> Get<T> for Store<T> {
+    fn get(&self, addr: Addr) -> Option<&T> {
+        let Addr { index, gen } = addr;
+
+        self.values
+            .get(index)
+            .and_then(|place| (place.gen == gen).then_some(&place.value))
+    }
+
+    fn get_mut(&mut self, addr: Addr) -> Option<&mut T> {
+        let Addr { index, gen } = addr;
+
+        self.values
+            .get_mut(index)
+            .and_then(|place| (place.gen == gen).then_some(&mut place.value))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct Addr {
+    index: usize,
+    gen: usize,
+}
+
+impl Addr {
+    pub(crate) fn index(self) -> usize {
+        self.index
+    }
+
+    pub(crate) fn gen(self) -> usize {
+        self.gen
     }
 }

@@ -4,10 +4,12 @@ use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
 use bitvec::vec::BitVec;
+use typed_index_collections::TiVec;
 
-use crate::arena::{Arena, ArenaStore};
+use crate::arena::{Addr, Arena, Counter, Store};
+use crate::index::sealed_upgrade::Sealed;
+use crate::index::{Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted, Upgradeable};
 use crate::trace::Trace;
-use crate::{Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted};
 
 /// Backing store for garbage-collected objects.
 ///
@@ -35,7 +37,8 @@ use crate::{Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted};
 /// Implementation uses standard mark-and-sweep strategy.
 #[derive(Default)]
 pub struct Heap {
-    arenas: HashMap<TypeId, Box<dyn Arena>>,
+    type_map: HashMap<TypeId, TypeIndex>,
+    arenas: TiVec<TypeIndex, Box<dyn Arena>>,
     status: Status,
 }
 
@@ -45,34 +48,50 @@ impl Heap {
         Default::default()
     }
 
-    fn arena<T>(&self) -> Option<&ArenaStore<T>>
+    fn arena_mut<T>(&mut self) -> Option<&mut Store<T>>
     where
         T: Trace,
     {
         let id = TypeId::of::<T>();
-        let arena = self.arenas.get(&id)?;
-        arena.as_any().downcast_ref()
-    }
-
-    fn arena_mut<T>(&mut self) -> Option<&mut ArenaStore<T>>
-    where
-        T: Trace,
-    {
-        let id = TypeId::of::<T>();
-        let arena = self.arenas.get_mut(&id)?;
+        let index = *self.type_map.get(&id)?;
+        let arena = self.arenas.get_mut(index)?;
         arena.as_any_mut().downcast_mut()
     }
 
-    fn arena_or_insert<T>(&mut self) -> &mut ArenaStore<T>
+    fn arena_or_insert<T>(&mut self) -> (TypeIndex, &mut Store<T>)
     where
         T: Trace,
     {
         let id = TypeId::of::<T>();
-        let arena = self
-            .arenas
+        let index = *self
+            .type_map
             .entry(id)
-            .or_insert_with(|| Box::new(ArenaStore::<T>::new()));
-        arena.as_any_mut().downcast_mut().unwrap()
+            .or_insert_with(|| self.arenas.push_and_get_key(Box::new(Store::<T>::new())));
+        let arena = self.arenas.get_mut(index).unwrap();
+        let store = arena.as_any_mut().downcast_mut().unwrap();
+        (index, store)
+    }
+
+    #[inline(never)]
+    fn alloc_slow<T>(&mut self, value: T) -> (Addr, Counter)
+    where
+        T: Trace,
+    {
+        self.gc_with(&value);
+        self.arena_mut().unwrap().insert(value)
+    }
+
+    fn alloc_inner<T>(&mut self, value: T) -> (Addr, TypeIndex, Counter)
+    where
+        T: Trace,
+    {
+        let (ty, arena) = self.arena_or_insert();
+        let (addr, counter) = match arena.try_insert(value) {
+            Ok(ptr) => ptr,
+            Err(value) => self.alloc_slow(value),
+        };
+
+        (addr, ty, counter)
     }
 
     /// Allocate an object.
@@ -88,11 +107,9 @@ impl Heap {
     where
         T: Trace,
     {
-        let arena = self.arena_or_insert();
-        match arena.try_insert(value) {
-            Ok(ptr) => ptr,
-            Err(value) => self.alloc_slow(value),
-        }
+        let (addr, ty, counter) = self.alloc_inner(value);
+
+        RootCell::new(addr, ty, counter)
     }
 
     /// Allocate an object.
@@ -109,18 +126,9 @@ impl Heap {
     where
         T: Trace,
     {
-        let RootCell { addr, counter } = self.alloc_cell(value);
+        let (addr, ty, counter) = self.alloc_inner(value);
 
-        Root { addr, counter }
-    }
-
-    #[inline(never)]
-    fn alloc_slow<T>(&mut self, value: T) -> RootCell<T>
-    where
-        T: Trace,
-    {
-        self.gc_with(&value);
-        self.arena_mut().unwrap().insert(value)
+        Root::new(addr, ty, counter)
     }
 
     /// Get `&T` out of weak reference such as [`GcCell`] or [`Gc`].
@@ -141,7 +149,10 @@ impl Heap {
     where
         T: Trace,
     {
-        self.arena()?.get(ptr.addr())
+        use crate::index::Index;
+
+        let arena = self.arenas.get(ptr.type_index().0)?;
+        ptr.get(arena.as_ref())
     }
 
     /// Get `&mut T` out of weak reference such as [`GcCell`].
@@ -162,7 +173,10 @@ impl Heap {
     where
         T: Trace,
     {
-        self.arena_mut()?.get_mut(ptr.addr())
+        use crate::index::Index;
+
+        let arena = self.arenas.get_mut(ptr.type_index().0)?;
+        ptr.get_mut(arena.as_mut())
     }
 
     /// Get `&T` out of strong reference such as [`RootCell`] or [`Root`].
@@ -178,13 +192,14 @@ impl Heap {
     where
         T: Trace,
     {
-        let arena = match self.arena() {
+        use crate::index::Index;
+
+        let arena = match self.arenas.get(ptr.type_index().0) {
             Some(arena) if arena.validate_counter(ptr.counter().0) => arena,
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
-        arena
-            .get(ptr.addr())
+        ptr.get(arena.as_ref())
             .expect("rooted object should never be deallocated")
     }
 
@@ -201,68 +216,41 @@ impl Heap {
     where
         T: Trace,
     {
-        let arena = match self.arena_mut() {
+        use crate::index::Index;
+
+        let arena = match self.arenas.get_mut(ptr.type_index().0) {
             Some(arena) if arena.validate_counter(ptr.counter().0) => arena,
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
-        arena
-            .get_mut(ptr.addr())
+        ptr.get_mut(arena.as_mut())
             .expect("rooted object should never be deallocated")
     }
 
-    /// Upgrade weak reference into strong reference.
+    /// Upgrade weak reference ([`Gc`]/[`GcCell`]) into corresponding strong reference ([`Root`]/[`RootCell`]).
     ///
     /// The function will return `None` if object was since deallocated.
-    pub fn upgrade_cell<T>(&self, ptr: GcCell<T>) -> Option<RootCell<T>>
+    pub fn upgrade<Ptr>(&self, ptr: Ptr) -> Option<<Ptr as Sealed>::Target>
     where
-        T: Trace,
+        Ptr: Upgradeable,
     {
-        let GcCell { addr } = ptr;
+        use crate::index::sealed_upgrade::Counter;
 
-        let counter = self.arena::<T>()?.upgrade(addr)?;
-
-        let r = RootCell { addr, counter };
-
-        Some(r)
-    }
-
-    /// Upgrade weak reference into strong reference.
-    ///
-    /// The function will return `None` if object was since deallocated.
-    pub fn upgrade<T>(&self, ptr: Gc<T>) -> Option<Root<T>>
-    where
-        T: Trace,
-    {
-        let Gc { addr } = ptr;
-
-        let counter = self.arena::<T>()?.upgrade(addr)?;
-
-        let r = Root { addr, counter };
-
-        Some(r)
+        let arena = self.arenas.get(ptr.type_index().0)?;
+        let counter = arena.upgrade(ptr.addr().0)?;
+        let ptr = ptr.upgrade(Counter(counter));
+        Some(ptr)
     }
 
     fn collector(&self) -> (Collector, Collector) {
-        let masks = self
-            .arenas
-            .iter()
-            .map(|(key, arena)| {
-                let enqueued = arena.roots();
-
-                (*key, enqueued)
-            })
-            .collect();
+        let masks = self.arenas.iter().map(|arena| arena.roots()).collect();
 
         let queue = Collector { masks };
 
         let masks = queue
             .masks
             .iter()
-            .map(|(key, mask)| {
-                let processed = BitVec::repeat(false, mask.len());
-                (*key, processed)
-            })
+            .map(|mask| BitVec::repeat(false, mask.len()))
             .collect();
 
         let processed = Collector { masks };
@@ -286,7 +274,7 @@ impl Heap {
             keep_alive.trace(&mut queue);
 
             let mut last_missed_id = None;
-            for (id, arena) in self.arenas.iter().cycle() {
+            for (id, arena) in self.arenas.iter_enumerated().cycle() {
                 let mut enqueued = queue.take(id).unwrap();
                 let processed = processed.masks.get_mut(id).unwrap();
 
@@ -323,7 +311,7 @@ impl Heap {
             processed
         };
 
-        for (id, arena) in self.arenas.iter_mut() {
+        for (id, arena) in self.arenas.iter_mut_enumerated() {
             let mask = processed.masks.get(id).unwrap();
             arena.retain(mask);
         }
@@ -451,7 +439,7 @@ impl Default for Status {
 
 /// Intermediary keeping track of visited objects during [`Trace`]ing.
 pub struct Collector {
-    masks: HashMap<TypeId, BitVec>,
+    masks: TiVec<TypeIndex, BitVec>,
 }
 
 impl Collector {
@@ -460,13 +448,19 @@ impl Collector {
     where
         T: Trace,
     {
-        let id = TypeId::of::<T>();
-
-        let Some(mask) = self.masks.get_mut(&id) else {
+        let Some(mask) = self.masks.get_mut(ptr.ty()) else {
             return;
         };
 
-        let Some(mut bit) = mask.get_mut(ptr.addr.index) else {
+        // This is slightly incorrect.
+        // It is possible that weak reference we got here is dead and
+        // location it points to was reallocated for another object.
+        // This marks the new object as reachable which sometimes may cause it live longer that expected.
+        // It *probably* doesn't matter much: we shouldn't receive dead references here
+        // unless there are horribly wrong `Trace` implementations or deliberately malformed input.
+        // Solutions are either to check every object for liveness (which requires heap reference),
+        // or track what was the latest generation that was reached in every slot.
+        let Some(mut bit) = mask.get_mut(ptr.addr().index()) else {
             return;
         };
 
@@ -478,25 +472,47 @@ impl Collector {
     where
         T: Trace,
     {
-        let id = TypeId::of::<T>();
-
-        let Some(mask) = self.masks.get_mut(&id) else {
+        let Some(mask) = self.masks.get_mut(ptr.ty()) else {
             return;
         };
 
-        let Some(mut bit) = mask.get_mut(ptr.addr.index) else {
+        // This is slightly incorrect.
+        // It is possible that weak reference we got here is dead and
+        // location it points to was reallocated for another object.
+        // This marks the new object as reachable which sometimes may cause it live longer that expected.
+        // It *probably* doesn't matter much: we shouldn't receive dead references here
+        // unless there are horribly wrong `Trace` implementations or deliberately malformed input.
+        // Solutions are either to check every object for liveness (which requires heap reference),
+        // or track what was the latest generation that was reached in every slot.
+        let Some(mut bit) = mask.get_mut(ptr.addr().index()) else {
             return;
         };
 
         *bit = true;
     }
 
-    fn take(&mut self, id: &TypeId) -> Option<BitVec> {
-        let mask = self.masks.get_mut(id)?;
+    fn take(&mut self, index: TypeIndex) -> Option<BitVec> {
+        let mask = self.masks.get_mut(index)?;
 
         let empty = BitVec::repeat(false, mask.len());
         let mask = std::mem::replace(mask, empty);
 
         Some(mask)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub(crate) struct TypeIndex(usize);
+
+impl From<usize> for TypeIndex {
+    fn from(value: usize) -> Self {
+        TypeIndex(value)
+    }
+}
+
+impl From<TypeIndex> for usize {
+    fn from(value: TypeIndex) -> Self {
+        let TypeIndex(value) = value;
+        value
     }
 }
