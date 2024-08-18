@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["repr", "parser", "rt", "gc", "lua_std", "interp"]
+members = ["repr", "parser", "rt", "gc", "lua_std", "interp", "virtual_fn"]
