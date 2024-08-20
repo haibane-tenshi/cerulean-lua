@@ -8,7 +8,7 @@ use crate::heap::arena::Arena;
 use crate::heap::store::{Addr, Counter};
 use crate::heap::TypeIndex;
 use crate::trace::Trace;
-use crate::userdata::{Params, Userdata};
+use crate::userdata::{FullUserdata, Params, Userdata};
 
 /// A weak reference to gc-allocated mutable value.
 ///
@@ -96,6 +96,14 @@ impl<T> GcCell<T>
 where
     T: ?Sized,
 {
+    pub(crate) fn new(addr: Addr, ty: TypeIndex) -> Self {
+        GcCell {
+            addr,
+            ty,
+            _marker: PhantomData,
+        }
+    }
+
     pub(crate) fn ty(self) -> TypeIndex {
         self.ty
     }
@@ -800,7 +808,10 @@ pub(crate) mod sealed {
         fn type_index(&self) -> TypeIndex;
     }
 
-    impl<T> Sealed for GcCell<T> {
+    impl<T> Sealed for GcCell<T>
+    where
+        T: ?Sized,
+    {
         fn addr(&self) -> Addr {
             Addr(self.addr)
         }
@@ -810,7 +821,10 @@ pub(crate) mod sealed {
         }
     }
 
-    impl<T> Sealed for RootCell<T> {
+    impl<T> Sealed for RootCell<T>
+    where
+        T: ?Sized,
+    {
         fn addr(&self) -> Addr {
             Addr(self.addr)
         }
@@ -820,7 +834,10 @@ pub(crate) mod sealed {
         }
     }
 
-    impl<T> Sealed for Gc<T> {
+    impl<T> Sealed for Gc<T>
+    where
+        T: ?Sized,
+    {
         fn addr(&self) -> Addr {
             Addr(self.addr)
         }
@@ -830,7 +847,10 @@ pub(crate) mod sealed {
         }
     }
 
-    impl<T> Sealed for Root<T> {
+    impl<T> Sealed for Root<T>
+    where
+        T: ?Sized,
+    {
         fn addr(&self) -> Addr {
             Addr(self.addr)
         }
@@ -865,13 +885,19 @@ mod sealed_root {
         fn counter(&self) -> Counter;
     }
 
-    impl<T> Sealed for RootCell<T> {
+    impl<T> Sealed for RootCell<T>
+    where
+        T: ?Sized,
+    {
         fn counter(&self) -> Counter {
             Counter(&self.counter)
         }
     }
 
-    impl<T> Sealed for Root<T> {
+    impl<T> Sealed for Root<T>
+    where
+        T: ?Sized,
+    {
         fn counter(&self) -> Counter {
             Counter(&self.counter)
         }
@@ -900,7 +926,10 @@ pub(crate) mod sealed_upgrade {
         fn upgrade(self, counter: Counter) -> Self::Target;
     }
 
-    impl<T> Sealed for Gc<T> {
+    impl<T> Sealed for Gc<T>
+    where
+        T: ?Sized,
+    {
         type Target = Root<T>;
 
         fn upgrade(self, counter: Counter) -> Self::Target {
@@ -914,7 +943,10 @@ pub(crate) mod sealed_upgrade {
         }
     }
 
-    impl<T> Sealed for GcCell<T> {
+    impl<T> Sealed for GcCell<T>
+    where
+        T: ?Sized,
+    {
         type Target = RootCell<T>;
 
         fn upgrade(self, counter: Counter) -> Self::Target {
@@ -930,49 +962,62 @@ pub(crate) mod sealed_upgrade {
 }
 
 pub(crate) mod sealed_allocated {
-    use super::{Params, Trace, Userdata};
+    use super::{FullUserdata, Params, Trace, Userdata};
 
     #[doc(hidden)]
-    pub struct ArenaRef<'a, P>(pub(crate) &'a dyn super::Arena<P>);
+    pub struct ArenaRef<'a, M, P>(pub(crate) &'a dyn super::Arena<M, P>);
 
     #[doc(hidden)]
-    pub struct ArenaMut<'a, P>(pub(crate) &'a mut dyn super::Arena<P>);
+    pub struct ArenaMut<'a, M, P>(pub(crate) &'a mut dyn super::Arena<M, P>);
 
     #[doc(hidden)]
     pub struct Addr(pub(crate) super::Addr);
 
-    pub trait Sealed<P> {
+    pub trait Sealed<M, P> {
         #[doc(hidden)]
-        fn get_ref(arena: ArenaRef<'_, P>, addr: Addr) -> Option<&Self>;
+        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self>;
 
         #[doc(hidden)]
-        fn get_mut(arena: ArenaMut<'_, P>, addr: Addr) -> Option<&mut Self>;
+        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self>;
     }
 
-    impl<T, P> Sealed<P> for T
+    impl<T, M, P> Sealed<M, P> for T
     where
         T: Trace,
         P: Params,
     {
-        fn get_ref(arena: ArenaRef<'_, P>, addr: Addr) -> Option<&Self> {
+        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
             arena.0.get(addr.0)
         }
 
-        fn get_mut(arena: ArenaMut<'_, P>, addr: Addr) -> Option<&mut Self> {
+        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
             arena.0.get_mut(addr.0)
         }
     }
 
-    impl<P> Sealed<P> for dyn Userdata<P>
+    impl<M, P> Sealed<M, P> for dyn Userdata<P>
     where
         P: Params,
     {
-        fn get_ref(arena: ArenaRef<'_, P>, addr: Addr) -> Option<&Self> {
+        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
             arena.0.get_userdata(addr.0)
         }
 
-        fn get_mut(arena: ArenaMut<'_, P>, addr: Addr) -> Option<&mut Self> {
+        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
             arena.0.get_userdata_mut(addr.0)
+        }
+    }
+
+    impl<M, P> Sealed<M, P> for dyn FullUserdata<M, P>
+    where
+        P: Params,
+    {
+        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
+            arena.0.get_full_userdata(addr.0)
+        }
+
+        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
+            arena.0.get_full_userdata_mut(addr.0)
         }
     }
 }
@@ -1005,33 +1050,35 @@ pub trait Weak: sealed::Sealed + sealed_upgrade::Sealed {}
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait Allocated<P>: sealed_allocated::Sealed<P> {}
+pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
 
-impl<T> RefAccess<T> for GcCell<T> {}
-impl<T> MutAccess<T> for GcCell<T> {}
-impl<T> Weak for GcCell<T> {}
+impl<T: ?Sized> RefAccess<T> for GcCell<T> {}
+impl<T: ?Sized> MutAccess<T> for GcCell<T> {}
+impl<T: ?Sized> Weak for GcCell<T> {}
 
-impl<T> RefAccess<T> for RootCell<T> {}
-impl<T> MutAccess<T> for RootCell<T> {}
-impl<T> Rooted for RootCell<T> {}
+impl<T: ?Sized> RefAccess<T> for RootCell<T> {}
+impl<T: ?Sized> MutAccess<T> for RootCell<T> {}
+impl<T: ?Sized> Rooted for RootCell<T> {}
 
-impl<T> RefAccess<T> for Gc<T> {}
-impl<T> Weak for Gc<T> {}
+impl<T: ?Sized> RefAccess<T> for Gc<T> {}
+impl<T: ?Sized> Weak for Gc<T> {}
 
-impl<T> RefAccess<T> for Root<T> {}
-impl<T> Rooted for Root<T> {}
+impl<T: ?Sized> RefAccess<T> for Root<T> {}
+impl<T: ?Sized> Rooted for Root<T> {}
 
-impl<'a, T, Item> RefAccess<Item> for &'a T where T: RefAccess<Item> {}
+impl<'a, T, Item: ?Sized> RefAccess<Item> for &'a T where T: RefAccess<Item> {}
 
-impl<'a, T, Item> MutAccess<Item> for &'a T where T: MutAccess<Item> {}
+impl<'a, T, Item: ?Sized> MutAccess<Item> for &'a T where T: MutAccess<Item> {}
 
 impl<'a, T> Rooted for &'a T where T: Rooted {}
 
-impl<T, P> Allocated<P> for T
+impl<T, M, P> Allocated<M, P> for T
 where
     T: Trace,
     P: Params,
 {
 }
 
-impl<P> Allocated<P> for dyn Userdata<P> where P: Params {}
+impl<M, P> Allocated<M, P> for dyn Userdata<P> where P: Params {}
+
+impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P> where P: Params {}

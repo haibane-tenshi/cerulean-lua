@@ -13,7 +13,7 @@ use typed_index_collections::TiVec;
 use crate::index::sealed_upgrade::Sealed;
 use crate::index::{Allocated, Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted, Weak};
 use crate::trace::Trace;
-use crate::userdata::{Dispatcher, Params, Userdata};
+use crate::userdata::{Dispatcher, FullUserdata, Params, Userdata};
 use arena::Arena;
 use store::{Addr, Counter, Store};
 
@@ -41,13 +41,13 @@ use store::{Addr, Counter, Store};
 /// or manually via [`gc`](Heap::gc) method.
 ///
 /// Implementation uses standard mark-and-sweep strategy.
-pub struct Heap<P> {
+pub struct Heap<M, P> {
     type_map: HashMap<TypeId, Indices>,
-    arenas: TiVec<TypeIndex, Box<dyn Arena<P>>>,
+    arenas: TiVec<TypeIndex, Box<dyn Arena<M, P>>>,
     status: Status,
 }
 
-impl<P> Heap<P>
+impl<M, P> Heap<M, P>
 where
     P: Params,
 {
@@ -56,7 +56,7 @@ where
         Default::default()
     }
 
-    fn concrete_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<P>)
+    fn concrete_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
         T: Trace,
     {
@@ -69,7 +69,7 @@ where
         (index, store)
     }
 
-    fn ud_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<P>)
+    fn light_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
         T: Trace,
     {
@@ -80,6 +80,24 @@ where
         let index = *indices.userdata.get_or_insert_with(|| {
             self.arenas
                 .push_and_get_key(Box::new(UserdataStore::<T, P>::new()))
+        });
+
+        let store = self.arenas.get_mut(index).unwrap().as_mut();
+        (index, store)
+    }
+
+    fn full_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
+    where
+        M: Trace,
+        T: Trace,
+    {
+        use userdata_store::FullUserdataStore;
+
+        let id = TypeId::of::<T>();
+        let indices = self.type_map.entry(id).or_default();
+        let index = *indices.userdata.get_or_insert_with(|| {
+            self.arenas
+                .push_and_get_key(Box::new(FullUserdataStore::<T, M, P>::new()))
         });
 
         let store = self.arenas.get_mut(index).unwrap().as_mut();
@@ -167,10 +185,31 @@ where
     where
         T: Trace,
     {
-        let (ty, _) = self.ud_arena_or_insert::<T>();
+        let (ty, _) = self.light_arena_or_insert::<T>();
         let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
             unreachable!()
         };
+
+        Root::new(addr, ty, counter)
+    }
+
+    pub fn alloc_full_userdata<T>(
+        &mut self,
+        value: T,
+        metatable: Option<M>,
+    ) -> Root<dyn FullUserdata<M, P>>
+    where
+        T: Trace,
+        M: Trace,
+    {
+        let (ty, _) = self.full_arena_or_insert::<T>();
+        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
+            unreachable!()
+        };
+
+        let temp = GcCell::<dyn FullUserdata<M, P>>::new(addr, ty);
+        let value = self.get_mut(temp).unwrap();
+        let _ = value.set_metatable(metatable);
 
         Root::new(addr, ty, counter)
     }
@@ -191,7 +230,7 @@ where
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get<T>(&self, ptr: impl RefAccess<T>) -> Option<&T>
     where
-        T: Allocated<P>,
+        T: Allocated<M, P> + ?Sized,
     {
         use crate::index::sealed_allocated::{Addr, ArenaRef, Sealed};
 
@@ -200,7 +239,7 @@ where
 
         let arena = self.arenas.get(ty)?.as_ref();
 
-        <T as Sealed<P>>::get_ref(ArenaRef(arena), Addr(addr))
+        <T as Sealed<M, P>>::get_ref(ArenaRef(arena), Addr(addr))
     }
 
     /// Get `&mut T` out of weak reference such as [`GcCell`].
@@ -219,7 +258,7 @@ where
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get_mut<T>(&mut self, ptr: impl MutAccess<T>) -> Option<&mut T>
     where
-        T: Allocated<P>,
+        T: Allocated<M, P> + ?Sized,
     {
         use crate::index::sealed_allocated::{Addr, ArenaMut, Sealed};
 
@@ -228,7 +267,7 @@ where
 
         let arena = self.arenas.get_mut(ty)?.as_mut();
 
-        <T as Sealed<P>>::get_mut(ArenaMut(arena), Addr(addr))
+        <T as Sealed<M, P>>::get_mut(ArenaMut(arena), Addr(addr))
     }
 
     /// Get `&T` out of strong reference such as [`RootCell`] or [`Root`].
@@ -242,7 +281,7 @@ where
     /// but otherwise it never will.
     pub fn get_root<T>(&self, ptr: impl RefAccess<T> + Rooted) -> &T
     where
-        T: Allocated<P>,
+        T: Allocated<M, P> + ?Sized,
     {
         let ty = ptr.type_index().0;
         let counter = ptr.counter().0;
@@ -267,7 +306,7 @@ where
     /// but otherwise it never will.
     pub fn get_root_mut<T>(&mut self, ptr: impl MutAccess<T> + Rooted) -> &mut T
     where
-        T: Allocated<P>,
+        T: Allocated<M, P> + ?Sized,
     {
         let ty = ptr.type_index().0;
         let counter = ptr.counter().0;
@@ -307,7 +346,7 @@ where
     where
         T: Trace,
     {
-        let (_, arena) = self.ud_arena_or_insert::<T>();
+        let (_, arena) = self.light_arena_or_insert::<T>();
         arena.set_dispatcher(&dispatcher)
     }
 
@@ -404,7 +443,7 @@ where
     }
 }
 
-impl<P> Default for Heap<P> {
+impl<M, P> Default for Heap<M, P> {
     fn default() -> Self {
         Self {
             type_map: Default::default(),
@@ -414,13 +453,13 @@ impl<P> Default for Heap<P> {
     }
 }
 
-impl<P> Debug for Heap<P> {
+impl<M, P> Debug for Heap<M, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Heap").finish_non_exhaustive()
     }
 }
 
-impl<T, P> Index<&RootCell<T>> for Heap<P>
+impl<T, M, P> Index<&RootCell<T>> for Heap<M, P>
 where
     T: Trace,
     P: Params,
@@ -432,7 +471,7 @@ where
     }
 }
 
-impl<T, P> Index<&Root<T>> for Heap<P>
+impl<T, M, P> Index<&Root<T>> for Heap<M, P>
 where
     T: Trace,
     P: Params,
@@ -444,7 +483,7 @@ where
     }
 }
 
-impl<T, P> IndexMut<&RootCell<T>> for Heap<P>
+impl<T, M, P> IndexMut<&RootCell<T>> for Heap<M, P>
 where
     T: Trace,
     P: Params,

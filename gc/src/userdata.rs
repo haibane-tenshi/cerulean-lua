@@ -84,3 +84,12 @@ where
 /// Signature of method dispatcher function for type `T`.
 pub type Dispatcher<T, P> =
     fn(&T, <P as Params>::Id<'_>, <P as Params>::Rt<'_>) -> Option<<P as Params>::Res>;
+
+pub trait Metatable<M> {
+    fn metatable(&self) -> Option<&M>;
+    fn set_metatable(&mut self, mt: Option<M>) -> Option<M>;
+}
+
+pub trait FullUserdata<M, P: Params>: Userdata<P> + Metatable<M> {}
+
+impl<T, M, P: Params> FullUserdata<M, P> for T where T: Userdata<P> + Metatable<M> {}

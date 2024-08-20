@@ -2,7 +2,7 @@ use bitvec::prelude::{BitSlice, BitVec};
 use std::any::Any;
 
 use super::{Addr, Collector, Counter};
-use crate::userdata::{Params, Userdata};
+use crate::userdata::{FullUserdata, Params, Userdata};
 
 pub(crate) trait Traceable {
     fn roots(&self) -> BitVec;
@@ -10,7 +10,7 @@ pub(crate) trait Traceable {
     fn retain(&mut self, indices: &BitSlice);
 }
 
-pub(crate) trait Arena<P: Params>: Traceable {
+pub(crate) trait Arena<M, P: Params>: Traceable {
     fn try_insert_any(
         &mut self,
         value: &mut dyn Any,
@@ -26,10 +26,16 @@ pub(crate) trait Arena<P: Params>: Traceable {
     fn get_userdata(&self, addr: Addr) -> Option<&(dyn Userdata<P> + 'static)>;
     fn get_userdata_mut(&mut self, addr: Addr) -> Option<&mut (dyn Userdata<P> + 'static)>;
 
+    fn get_full_userdata(&self, addr: Addr) -> Option<&(dyn FullUserdata<M, P> + 'static)>;
+    fn get_full_userdata_mut(
+        &mut self,
+        addr: Addr,
+    ) -> Option<&mut (dyn FullUserdata<M, P> + 'static)>;
+
     fn set_dispatcher(&mut self, dispatcher: &dyn Any);
 }
 
-impl<P> dyn Arena<P> + '_
+impl<M, P> dyn Arena<M, P> + '_
 where
     P: Params,
 {
@@ -77,3 +83,40 @@ where
 }
 
 pub(crate) struct IncompatibleType;
+
+pub(crate) fn try_insert<T>(
+    value: &mut dyn Any,
+    f: impl FnOnce(T) -> Result<(Addr, Counter), T>,
+) -> Result<Option<(Addr, Counter)>, IncompatibleType>
+where
+    T: 'static,
+{
+    let place = value.downcast_mut::<Option<T>>().ok_or(IncompatibleType)?;
+    let value = place.take().ok_or(IncompatibleType)?;
+
+    let ptr = match (f)(value) {
+        Ok(ptr) => Some(ptr),
+        Err(value) => {
+            *place = Some(value);
+            None
+        }
+    };
+
+    Ok(ptr)
+}
+
+pub(crate) fn insert<T>(
+    value: &mut dyn Any,
+    f: impl FnOnce(T) -> (Addr, Counter),
+) -> Result<(Addr, Counter), IncompatibleType>
+where
+    T: 'static,
+{
+    let value = value
+        .downcast_mut::<Option<T>>()
+        .ok_or(IncompatibleType)?
+        .take()
+        .ok_or(IncompatibleType)?;
+
+    Ok((f)(value))
+}

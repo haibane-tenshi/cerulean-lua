@@ -7,9 +7,9 @@ use std::rc::Rc;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
-use super::arena::{Arena, IncompatibleType, Traceable};
+use super::arena::{insert, try_insert, Arena, IncompatibleType, Traceable};
 use super::{Collector, Trace};
-use crate::userdata::{Params, Userdata};
+use crate::userdata::{FullUserdata, Params, Userdata};
 use crate::vec_list::VecList;
 
 #[derive(Debug)]
@@ -158,7 +158,7 @@ where
     }
 }
 
-impl<T, P> Arena<P> for Store<T>
+impl<T, M, P> Arena<M, P> for Store<T>
 where
     T: Trace,
     P: Params,
@@ -167,28 +167,11 @@ where
         &mut self,
         value: &mut dyn Any,
     ) -> Result<Option<(Addr, Counter)>, IncompatibleType> {
-        let place = value.downcast_mut::<Option<T>>().ok_or(IncompatibleType)?;
-        let value = place.take().ok_or(IncompatibleType)?;
-
-        let ptr = match self.try_insert(value) {
-            Ok(ptr) => Some(ptr),
-            Err(value) => {
-                *place = Some(value);
-                None
-            }
-        };
-
-        Ok(ptr)
+        try_insert(value, |value| self.try_insert(value))
     }
 
     fn insert_any(&mut self, value: &mut dyn Any) -> Result<(Addr, Counter), IncompatibleType> {
-        let value = value
-            .downcast_mut::<Option<T>>()
-            .ok_or(IncompatibleType)?
-            .take()
-            .ok_or(IncompatibleType)?;
-
-        Ok(self.insert(value))
+        insert(value, |value| self.insert(value))
     }
 
     fn validate(&self, counter: &Counter) -> bool {
@@ -214,6 +197,17 @@ where
     }
 
     fn get_userdata_mut(&mut self, _addr: Addr) -> Option<&mut (dyn Userdata<P> + 'static)> {
+        None
+    }
+
+    fn get_full_userdata(&self, _addr: Addr) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
+        None
+    }
+
+    fn get_full_userdata_mut(
+        &mut self,
+        _addr: Addr,
+    ) -> Option<&mut (dyn FullUserdata<M, P> + 'static)> {
         None
     }
 
