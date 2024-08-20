@@ -7,18 +7,10 @@ use std::rc::Rc;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
+use super::arena::{Arena, IncompatibleType, Traceable};
 use super::{Collector, Trace};
+use crate::userdata::{Params, Userdata};
 use crate::vec_list::VecList;
-
-pub(crate) trait Arena {
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn roots(&self) -> BitVec;
-    fn trace(&self, indices: &BitSlice, collector: &mut Collector);
-    fn retain(&mut self, indices: &BitSlice);
-    fn validate_counter(&self, counter: &Counter) -> bool;
-    fn upgrade(&self, addr: Addr) -> Option<Counter>;
-}
 
 #[derive(Debug)]
 pub(crate) struct Store<T> {
@@ -49,6 +41,48 @@ impl<T> Store<T> {
             })
             .map_err(|place| place.value)
     }
+
+    pub(crate) fn get(&self, addr: Addr) -> Option<&T> {
+        let Addr { index, gen } = addr;
+
+        self.values
+            .get(index)
+            .and_then(|place| (place.gen == gen).then_some(&place.value))
+    }
+
+    pub(crate) fn get_mut(&mut self, addr: Addr) -> Option<&mut T> {
+        let Addr { index, gen } = addr;
+
+        self.values
+            .get_mut(index)
+            .and_then(|place| (place.gen == gen).then_some(&mut place.value))
+    }
+
+    fn upgrade(&self, addr: Addr) -> Option<Counter> {
+        let Place {
+            counter: counter_place,
+            ..
+        } = self.values.get(addr.index)?;
+
+        let index = match counter_place.get() {
+            Some(index) => {
+                self.strong_counters.borrow_mut().increment(index);
+                index
+            }
+            None => {
+                let index = self.strong_counters.borrow_mut().insert(1);
+                counter_place.set(Some(index));
+                index
+            }
+        };
+
+        let counter = Counter {
+            index,
+            counters: self.strong_counters.clone(),
+        };
+
+        Some(counter)
+    }
 }
 
 impl<T> Store<T>
@@ -74,19 +108,10 @@ where
     }
 }
 
-impl<T> Arena for Store<T>
+impl<T> Traceable for Store<T>
 where
     T: Trace,
-    Self: Any,
 {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn roots(&self) -> BitVec {
         let mut counters = self.strong_counters.borrow_mut();
 
@@ -131,36 +156,68 @@ where
             }
         }
     }
+}
 
-    fn validate_counter(&self, counter: &Counter) -> bool {
+impl<T, P> Arena<P> for Store<T>
+where
+    T: Trace,
+    P: Params,
+{
+    fn try_insert_any(
+        &mut self,
+        value: &mut dyn Any,
+    ) -> Result<Option<(Addr, Counter)>, IncompatibleType> {
+        let place = value.downcast_mut::<Option<T>>().ok_or(IncompatibleType)?;
+        let value = place.take().ok_or(IncompatibleType)?;
+
+        let ptr = match self.try_insert(value) {
+            Ok(ptr) => Some(ptr),
+            Err(value) => {
+                *place = Some(value);
+                None
+            }
+        };
+
+        Ok(ptr)
+    }
+
+    fn insert_any(&mut self, value: &mut dyn Any) -> Result<(Addr, Counter), IncompatibleType> {
+        let value = value
+            .downcast_mut::<Option<T>>()
+            .ok_or(IncompatibleType)?
+            .take()
+            .ok_or(IncompatibleType)?;
+
+        Ok(self.insert(value))
+    }
+
+    fn validate(&self, counter: &Counter) -> bool {
         Rc::ptr_eq(&counter.counters, &self.strong_counters)
     }
 
     fn upgrade(&self, addr: Addr) -> Option<Counter> {
-        let Place {
-            counter: counter_place,
-            ..
-        } = self.values.get(addr.index)?;
-
-        let index = match counter_place.get() {
-            Some(index) => {
-                self.strong_counters.borrow_mut().increment(index);
-                index
-            }
-            None => {
-                let index = self.strong_counters.borrow_mut().insert(1);
-                counter_place.set(Some(index));
-                index
-            }
-        };
-
-        let counter = Counter {
-            index,
-            counters: self.strong_counters.clone(),
-        };
-
-        Some(counter)
+        Store::upgrade(self, addr)
     }
+
+    fn get_value(&self, addr: Addr) -> Option<&dyn Any> {
+        let value = self.get(addr)?;
+        Some(value)
+    }
+
+    fn get_value_mut(&mut self, addr: Addr) -> Option<&mut dyn Any> {
+        let value = self.get_mut(addr)?;
+        Some(value)
+    }
+
+    fn get_userdata(&self, _addr: Addr) -> Option<&(dyn Userdata<P> + 'static)> {
+        None
+    }
+
+    fn get_userdata_mut(&mut self, _addr: Addr) -> Option<&mut (dyn Userdata<P> + 'static)> {
+        None
+    }
+
+    fn set_dispatcher(&mut self, _dispatcher: &dyn Any) {}
 }
 
 #[derive(Debug)]
@@ -239,29 +296,6 @@ impl Clone for Counter {
 impl Drop for Counter {
     fn drop(&mut self) {
         self.counters.borrow_mut().decrement(self.index);
-    }
-}
-
-pub(crate) trait Get<T: ?Sized> {
-    fn get(&self, addr: Addr) -> Option<&T>;
-    fn get_mut(&mut self, addr: Addr) -> Option<&mut T>;
-}
-
-impl<T> Get<T> for Store<T> {
-    fn get(&self, addr: Addr) -> Option<&T> {
-        let Addr { index, gen } = addr;
-
-        self.values
-            .get(index)
-            .and_then(|place| (place.gen == gen).then_some(&place.value))
-    }
-
-    fn get_mut(&mut self, addr: Addr) -> Option<&mut T> {
-        let Addr { index, gen } = addr;
-
-        self.values
-            .get_mut(index)
-            .and_then(|place| (place.gen == gen).then_some(&mut place.value))
     }
 }
 

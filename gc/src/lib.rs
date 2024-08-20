@@ -253,7 +253,6 @@
 
 #![forbid(unsafe_code)]
 
-mod arena;
 mod heap;
 pub mod index;
 mod trace;

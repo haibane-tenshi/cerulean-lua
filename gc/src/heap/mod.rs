@@ -1,3 +1,7 @@
+pub(crate) mod arena;
+pub(crate) mod store;
+pub(crate) mod userdata_store;
+
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -6,10 +10,12 @@ use std::ops::{Index, IndexMut};
 use bitvec::vec::BitVec;
 use typed_index_collections::TiVec;
 
-use crate::arena::{Addr, Arena, Counter, Store};
 use crate::index::sealed_upgrade::Sealed;
-use crate::index::{Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted, Upgradeable};
+use crate::index::{Allocated, Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted, Weak};
 use crate::trace::Trace;
+use crate::userdata::{Dispatcher, Params, Userdata};
+use arena::Arena;
+use store::{Addr, Counter, Store};
 
 /// Backing store for garbage-collected objects.
 ///
@@ -35,63 +41,69 @@ use crate::trace::Trace;
 /// or manually via [`gc`](Heap::gc) method.
 ///
 /// Implementation uses standard mark-and-sweep strategy.
-#[derive(Default)]
-pub struct Heap {
-    type_map: HashMap<TypeId, TypeIndex>,
-    arenas: TiVec<TypeIndex, Box<dyn Arena>>,
+pub struct Heap<P> {
+    type_map: HashMap<TypeId, Indices>,
+    arenas: TiVec<TypeIndex, Box<dyn Arena<P>>>,
     status: Status,
 }
 
-impl Heap {
+impl<P> Heap<P>
+where
+    P: Params,
+{
     /// Construct fresh heap.
     pub fn new() -> Self {
         Default::default()
     }
 
-    fn arena_mut<T>(&mut self) -> Option<&mut Store<T>>
+    fn concrete_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<P>)
     where
         T: Trace,
     {
         let id = TypeId::of::<T>();
-        let index = *self.type_map.get(&id)?;
-        let arena = self.arenas.get_mut(index)?;
-        arena.as_any_mut().downcast_mut()
+        let indices = self.type_map.entry(id).or_default();
+        let index = *indices
+            .concrete
+            .get_or_insert_with(|| self.arenas.push_and_get_key(Box::new(Store::<T>::new())));
+        let store = self.arenas.get_mut(index).unwrap().as_mut();
+        (index, store)
     }
 
-    fn arena_or_insert<T>(&mut self) -> (TypeIndex, &mut Store<T>)
+    fn ud_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<P>)
     where
         T: Trace,
     {
+        use userdata_store::UserdataStore;
+
         let id = TypeId::of::<T>();
-        let index = *self
-            .type_map
-            .entry(id)
-            .or_insert_with(|| self.arenas.push_and_get_key(Box::new(Store::<T>::new())));
-        let arena = self.arenas.get_mut(index).unwrap();
-        let store = arena.as_any_mut().downcast_mut().unwrap();
+        let indices = self.type_map.entry(id).or_default();
+        let index = *indices.userdata.get_or_insert_with(|| {
+            self.arenas
+                .push_and_get_key(Box::new(UserdataStore::<T, P>::new()))
+        });
+
+        let store = self.arenas.get_mut(index).unwrap().as_mut();
         (index, store)
     }
 
     #[inline(never)]
-    fn alloc_slow<T>(&mut self, value: T) -> (Addr, Counter)
+    fn alloc_slow<T>(&mut self, ty: TypeIndex, value: T) -> Result<(Addr, Counter), T>
     where
         T: Trace,
     {
         self.gc_with(&value);
-        self.arena_mut().unwrap().insert(value)
+        self.arenas.get_mut(ty).unwrap().insert(value)
     }
 
-    fn alloc_inner<T>(&mut self, value: T) -> (Addr, TypeIndex, Counter)
+    fn alloc_inner<T>(&mut self, ty: TypeIndex, value: T) -> Result<(Addr, Counter), T>
     where
         T: Trace,
     {
-        let (ty, arena) = self.arena_or_insert();
-        let (addr, counter) = match arena.try_insert(value) {
-            Ok(ptr) => ptr,
-            Err(value) => self.alloc_slow(value),
-        };
-
-        (addr, ty, counter)
+        let arena = self.arenas.get_mut(ty).unwrap();
+        match arena.try_insert(value) {
+            ptr @ Ok(_) => ptr,
+            Err(value) => self.alloc_slow(ty, value),
+        }
     }
 
     /// Allocate an object.
@@ -107,7 +119,10 @@ impl Heap {
     where
         T: Trace,
     {
-        let (addr, ty, counter) = self.alloc_inner(value);
+        let (ty, _) = self.concrete_arena_or_insert::<T>();
+        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
+            unreachable!()
+        };
 
         RootCell::new(addr, ty, counter)
     }
@@ -126,7 +141,36 @@ impl Heap {
     where
         T: Trace,
     {
-        let (addr, ty, counter) = self.alloc_inner(value);
+        let (ty, _) = self.concrete_arena_or_insert::<T>();
+        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
+            unreachable!()
+        };
+
+        Root::new(addr, ty, counter)
+    }
+
+    /// Allocate an object as light userdata.
+    ///
+    /// Userdata is mechanism for Lua to represent foreign types.
+    /// Every userdata requires three key pieces to function:
+    /// object itself, method dispatcher function and metatable.
+    ///
+    /// Method dispatcher function translates Lua function invocations into actual Rust function calls.
+    /// By design all values of the same type share dispatcher function
+    /// and it can be set using [`Heap::set_dispatcher`].
+    /// When unset default dispatcher (which does nothing) will be used.
+    ///
+    /// Note that **light** userdata does not carry its own metatable!
+    /// It is assumed that appropriate metatable will be provided by an external source.
+    /// In case of our Lua runtime that is done through metatable registry.
+    pub fn alloc_userdata<T>(&mut self, value: T) -> Root<dyn Userdata<P>>
+    where
+        T: Trace,
+    {
+        let (ty, _) = self.ud_arena_or_insert::<T>();
+        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
+            unreachable!()
+        };
 
         Root::new(addr, ty, counter)
     }
@@ -147,12 +191,16 @@ impl Heap {
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get<T>(&self, ptr: impl RefAccess<T>) -> Option<&T>
     where
-        T: Trace,
+        T: Allocated<P>,
     {
-        use crate::index::Index;
+        use crate::index::sealed_allocated::{Addr, ArenaRef, Sealed};
 
-        let arena = self.arenas.get(ptr.type_index().0)?;
-        ptr.get(arena.as_ref())
+        let ty = ptr.type_index().0;
+        let addr = ptr.addr().0;
+
+        let arena = self.arenas.get(ty)?.as_ref();
+
+        <T as Sealed<P>>::get_ref(ArenaRef(arena), Addr(addr))
     }
 
     /// Get `&mut T` out of weak reference such as [`GcCell`].
@@ -171,12 +219,16 @@ impl Heap {
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get_mut<T>(&mut self, ptr: impl MutAccess<T>) -> Option<&mut T>
     where
-        T: Trace,
+        T: Allocated<P>,
     {
-        use crate::index::Index;
+        use crate::index::sealed_allocated::{Addr, ArenaMut, Sealed};
 
-        let arena = self.arenas.get_mut(ptr.type_index().0)?;
-        ptr.get_mut(arena.as_mut())
+        let ty = ptr.type_index().0;
+        let addr = ptr.addr().0;
+
+        let arena = self.arenas.get_mut(ty)?.as_mut();
+
+        <T as Sealed<P>>::get_mut(ArenaMut(arena), Addr(addr))
     }
 
     /// Get `&T` out of strong reference such as [`RootCell`] or [`Root`].
@@ -188,18 +240,19 @@ impl Heap {
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root<T>(&self, ptr: &(impl RefAccess<T> + Rooted)) -> &T
+    pub fn get_root<T>(&self, ptr: impl RefAccess<T> + Rooted) -> &T
     where
-        T: Trace,
+        T: Allocated<P>,
     {
-        use crate::index::Index;
+        let ty = ptr.type_index().0;
+        let counter = ptr.counter().0;
 
-        let arena = match self.arenas.get(ptr.type_index().0) {
-            Some(arena) if arena.validate_counter(ptr.counter().0) => arena,
+        match self.arenas.get(ty) {
+            Some(arena) if arena.validate(counter) => (),
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
-        ptr.get(arena.as_ref())
+        self.get(ptr)
             .expect("rooted object should never be deallocated")
     }
 
@@ -212,18 +265,19 @@ impl Heap {
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root_mut<T>(&mut self, ptr: &(impl MutAccess<T> + Rooted)) -> &mut T
+    pub fn get_root_mut<T>(&mut self, ptr: impl MutAccess<T> + Rooted) -> &mut T
     where
-        T: Trace,
+        T: Allocated<P>,
     {
-        use crate::index::Index;
+        let ty = ptr.type_index().0;
+        let counter = ptr.counter().0;
 
-        let arena = match self.arenas.get_mut(ptr.type_index().0) {
-            Some(arena) if arena.validate_counter(ptr.counter().0) => arena,
+        match self.arenas.get(ty) {
+            Some(arena) if arena.validate(counter) => (),
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
-        ptr.get_mut(arena.as_mut())
+        self.get_mut(ptr)
             .expect("rooted object should never be deallocated")
     }
 
@@ -232,14 +286,29 @@ impl Heap {
     /// The function will return `None` if object was since deallocated.
     pub fn upgrade<Ptr>(&self, ptr: Ptr) -> Option<<Ptr as Sealed>::Target>
     where
-        Ptr: Upgradeable,
+        Ptr: Weak,
     {
         use crate::index::sealed_upgrade::Counter;
 
-        let arena = self.arenas.get(ptr.type_index().0)?;
-        let counter = arena.upgrade(ptr.addr().0)?;
+        let ty = ptr.type_index().0;
+        let addr = ptr.addr().0;
+
+        let arena = self.arenas.get(ty)?;
+        let counter = arena.upgrade(addr)?;
         let ptr = ptr.upgrade(Counter(counter));
         Some(ptr)
+    }
+
+    /// Set dispatcher method for the type.
+    ///
+    /// By design all values of the same type share dispacher function.
+    /// This change will affect all future and existing userdata of this type.
+    pub fn set_dispatcher<T>(&mut self, dispatcher: Dispatcher<T, P>)
+    where
+        T: Trace,
+    {
+        let (_, arena) = self.ud_arena_or_insert::<T>();
+        arena.set_dispatcher(&dispatcher)
     }
 
     fn collector(&self) -> (Collector, Collector) {
@@ -335,15 +404,26 @@ impl Heap {
     }
 }
 
-impl Debug for Heap {
+impl<P> Default for Heap<P> {
+    fn default() -> Self {
+        Self {
+            type_map: Default::default(),
+            arenas: Default::default(),
+            status: Default::default(),
+        }
+    }
+}
+
+impl<P> Debug for Heap<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Heap").finish_non_exhaustive()
     }
 }
 
-impl<T> Index<&RootCell<T>> for Heap
+impl<T, P> Index<&RootCell<T>> for Heap<P>
 where
     T: Trace,
+    P: Params,
 {
     type Output = T;
 
@@ -352,9 +432,10 @@ where
     }
 }
 
-impl<T> Index<&Root<T>> for Heap
+impl<T, P> Index<&Root<T>> for Heap<P>
 where
     T: Trace,
+    P: Params,
 {
     type Output = T;
 
@@ -363,9 +444,10 @@ where
     }
 }
 
-impl<T> IndexMut<&RootCell<T>> for Heap
+impl<T, P> IndexMut<&RootCell<T>> for Heap<P>
 where
     T: Trace,
+    P: Params,
 {
     fn index_mut(&mut self, index: &RootCell<T>) -> &mut Self::Output {
         self.get_root_mut(index)
@@ -515,4 +597,10 @@ impl From<TypeIndex> for usize {
         let TypeIndex(value) = value;
         value
     }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Indices {
+    concrete: Option<TypeIndex>,
+    userdata: Option<TypeIndex>,
 }

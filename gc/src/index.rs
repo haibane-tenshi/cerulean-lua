@@ -1,9 +1,14 @@
+//! Smart pointers and related traits.
+
 use std::fmt::{Debug, Pointer};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use crate::arena::{Addr, Arena, Counter};
+use crate::heap::arena::Arena;
+use crate::heap::store::{Addr, Counter};
 use crate::heap::TypeIndex;
+use crate::trace::Trace;
+use crate::userdata::{Params, Userdata};
 
 /// A weak reference to gc-allocated mutable value.
 ///
@@ -11,7 +16,7 @@ use crate::heap::TypeIndex;
 ///
 /// * The reference is *weak* as in it alone won't prevent value from being dropped.
 ///     However when part of certainly alive object
-///     it will indicate that referencee is also alive through [`Trace`](crate::Trace) trait.
+///     it will indicate that referencee is also alive through [`Trace`] trait.
 ///
 /// * Internal value can be mutated through any existing reference.
 ///     In this regard it behaves as if it was wrapped in `RefCell` - hence `Cell` in the name.
@@ -81,13 +86,16 @@ use crate::heap::TypeIndex;
 /// *ref_mut = 4;
 /// assert_eq!(heap.get(weak), Some(&4));
 /// ```
-pub struct GcCell<T> {
+pub struct GcCell<T: ?Sized> {
     addr: Addr,
     ty: TypeIndex,
     _marker: PhantomData<T>,
 }
 
-impl<T> GcCell<T> {
+impl<T> GcCell<T>
+where
+    T: ?Sized,
+{
     pub(crate) fn ty(self) -> TypeIndex {
         self.ty
     }
@@ -121,7 +129,10 @@ impl<T> GcCell<T> {
     }
 }
 
-impl<T> Debug for GcCell<T> {
+impl<T> Debug for GcCell<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Gc")
             .field("addr", &self.addr)
@@ -129,19 +140,25 @@ impl<T> Debug for GcCell<T> {
     }
 }
 
-impl<T> Pointer for GcCell<T> {
+impl<T> Pointer for GcCell<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.location())
     }
 }
 
-impl<T> Clone for GcCell<T> {
+impl<T> Clone for GcCell<T>
+where
+    T: ?Sized,
+{
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for GcCell<T> {}
+impl<T> Copy for GcCell<T> where T: ?Sized {}
 
 /// A strong reference to gc-allocated mutable value.
 ///
@@ -220,14 +237,17 @@ impl<T> Copy for GcCell<T> {}
 /// heap[&strong] = 3;
 /// assert_eq!(heap[&strong], 3);
 /// ```
-pub struct RootCell<T> {
+pub struct RootCell<T: ?Sized> {
     addr: Addr,
     ty: TypeIndex,
     counter: Counter,
     _marker: PhantomData<T>,
 }
 
-impl<T> RootCell<T> {
+impl<T> RootCell<T>
+where
+    T: ?Sized,
+{
     pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
         RootCell {
             addr,
@@ -276,7 +296,10 @@ impl<T> RootCell<T> {
     }
 }
 
-impl<T> Debug for RootCell<T> {
+impl<T> Debug for RootCell<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Root")
             .field("addr", &self.addr)
@@ -284,13 +307,19 @@ impl<T> Debug for RootCell<T> {
     }
 }
 
-impl<T> Pointer for RootCell<T> {
+impl<T> Pointer for RootCell<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.location())
     }
 }
 
-impl<T> Clone for RootCell<T> {
+impl<T> Clone for RootCell<T>
+where
+    T: ?Sized,
+{
     fn clone(&self) -> Self {
         let RootCell {
             addr,
@@ -308,7 +337,10 @@ impl<T> Clone for RootCell<T> {
     }
 }
 
-impl<T> From<RootCell<T>> for GcCell<T> {
+impl<T> From<RootCell<T>> for GcCell<T>
+where
+    T: ?Sized,
+{
     fn from(value: RootCell<T>) -> Self {
         value.downgrade()
     }
@@ -320,7 +352,7 @@ impl<T> From<RootCell<T>> for GcCell<T> {
 ///
 /// * The reference is *weak* as in it alone won't prevent value from being dropped.
 ///     However when part of certainly alive object
-///     it will indicate that referencee is also alive through [`Trace`](crate::Trace) trait.
+///     it will indicate that referencee is also alive through [`Trace`] trait.
 ///
 /// * Internal value cannot be mutably accessed after allocation.
 ///
@@ -374,13 +406,16 @@ impl<T> From<RootCell<T>> for GcCell<T> {
 /// heap.gc();
 /// assert_eq!(heap.get(weak), None);
 /// ```
-pub struct Gc<T> {
+pub struct Gc<T: ?Sized> {
     addr: Addr,
     ty: TypeIndex,
     _marker: PhantomData<T>,
 }
 
-impl<T> Gc<T> {
+impl<T> Gc<T>
+where
+    T: ?Sized,
+{
     pub(crate) fn ty(self) -> TypeIndex {
         self.ty
     }
@@ -414,7 +449,10 @@ impl<T> Gc<T> {
     }
 }
 
-impl<T> Debug for Gc<T> {
+impl<T> Debug for Gc<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Gc")
             .field("addr", &self.addr)
@@ -422,19 +460,25 @@ impl<T> Debug for Gc<T> {
     }
 }
 
-impl<T> Pointer for Gc<T> {
+impl<T> Pointer for Gc<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.location())
     }
 }
 
-impl<T> Clone for Gc<T> {
+impl<T> Clone for Gc<T>
+where
+    T: ?Sized,
+{
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for Gc<T> {}
+impl<T> Copy for Gc<T> where T: ?Sized {}
 
 /// A strong reference to gc-allocated immutable value.
 ///
@@ -504,14 +548,17 @@ impl<T> Copy for Gc<T> {}
 /// # let strong = heap.alloc(3_usize);
 /// assert_eq!(heap[&strong], 3);
 /// ```
-pub struct Root<T> {
+pub struct Root<T: ?Sized> {
     addr: Addr,
     ty: TypeIndex,
     counter: Counter,
     _marker: PhantomData<T>,
 }
 
-impl<T> Root<T> {
+impl<T> Root<T>
+where
+    T: ?Sized,
+{
     pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
         Root {
             addr,
@@ -560,7 +607,10 @@ impl<T> Root<T> {
     }
 }
 
-impl<T> Debug for Root<T> {
+impl<T> Debug for Root<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Root")
             .field("addr", &self.addr)
@@ -568,13 +618,19 @@ impl<T> Debug for Root<T> {
     }
 }
 
-impl<T> Pointer for Root<T> {
+impl<T> Pointer for Root<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:p}", self.location())
     }
 }
 
-impl<T> Clone for Root<T> {
+impl<T> Clone for Root<T>
+where
+    T: ?Sized,
+{
     fn clone(&self) -> Self {
         let Root {
             addr,
@@ -592,7 +648,10 @@ impl<T> Clone for Root<T> {
     }
 }
 
-impl<T> From<Root<T>> for Gc<T> {
+impl<T> From<Root<T>> for Gc<T>
+where
+    T: ?Sized,
+{
     fn from(value: Root<T>) -> Self {
         value.downgrade()
     }
@@ -635,29 +694,41 @@ pub struct Location<T: ?Sized> {
     _marker: PhantomData<T>,
 }
 
-impl<T> Clone for Location<T> {
+impl<T> Clone for Location<T>
+where
+    T: ?Sized,
+{
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for Location<T> {}
+impl<T> Copy for Location<T> where T: ?Sized {}
 
-impl<T> PartialEq for Location<T> {
+impl<T> PartialEq for Location<T>
+where
+    T: ?Sized,
+{
     fn eq(&self, other: &Self) -> bool {
         self.addr == other.addr && self.ty == other.ty && self._marker == other._marker
     }
 }
 
-impl<T> Eq for Location<T> {}
+impl<T> Eq for Location<T> where T: ?Sized {}
 
-impl<T> PartialOrd for Location<T> {
+impl<T> PartialOrd for Location<T>
+where
+    T: ?Sized,
+{
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T> Ord for Location<T> {
+impl<T> Ord for Location<T>
+where
+    T: ?Sized,
+{
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
 
@@ -675,7 +746,10 @@ impl<T> Ord for Location<T> {
     }
 }
 
-impl<T> Hash for Location<T> {
+impl<T> Hash for Location<T>
+where
+    T: ?Sized,
+{
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.addr.hash(state);
         self.ty.hash(state);
@@ -683,7 +757,10 @@ impl<T> Hash for Location<T> {
     }
 }
 
-impl<T> Debug for Location<T> {
+impl<T> Debug for Location<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Location")
             .field("index", &self.addr.index())
@@ -692,7 +769,10 @@ impl<T> Debug for Location<T> {
     }
 }
 
-impl<T> Pointer for Location<T> {
+impl<T> Pointer for Location<T>
+where
+    T: ?Sized,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -759,6 +839,19 @@ pub(crate) mod sealed {
             TypeIndex(self.ty)
         }
     }
+
+    impl<'a, T> Sealed for &'a T
+    where
+        T: Sealed,
+    {
+        fn addr(&self) -> Addr {
+            <T as Sealed>::addr(*self)
+        }
+
+        fn type_index(&self) -> TypeIndex {
+            <T as Sealed>::type_index(*self)
+        }
+    }
 }
 
 mod sealed_root {
@@ -781,6 +874,15 @@ mod sealed_root {
     impl<T> Sealed for Root<T> {
         fn counter(&self) -> Counter {
             Counter(&self.counter)
+        }
+    }
+
+    impl<'a, T> Sealed for &'a T
+    where
+        T: Sealed,
+    {
+        fn counter(&self) -> Counter {
+            <T as Sealed>::counter(self)
         }
     }
 }
@@ -827,17 +929,65 @@ pub(crate) mod sealed_upgrade {
     }
 }
 
+pub(crate) mod sealed_allocated {
+    use super::{Params, Trace, Userdata};
+
+    #[doc(hidden)]
+    pub struct ArenaRef<'a, P>(pub(crate) &'a dyn super::Arena<P>);
+
+    #[doc(hidden)]
+    pub struct ArenaMut<'a, P>(pub(crate) &'a mut dyn super::Arena<P>);
+
+    #[doc(hidden)]
+    pub struct Addr(pub(crate) super::Addr);
+
+    pub trait Sealed<P> {
+        #[doc(hidden)]
+        fn get_ref(arena: ArenaRef<'_, P>, addr: Addr) -> Option<&Self>;
+
+        #[doc(hidden)]
+        fn get_mut(arena: ArenaMut<'_, P>, addr: Addr) -> Option<&mut Self>;
+    }
+
+    impl<T, P> Sealed<P> for T
+    where
+        T: Trace,
+        P: Params,
+    {
+        fn get_ref(arena: ArenaRef<'_, P>, addr: Addr) -> Option<&Self> {
+            arena.0.get(addr.0)
+        }
+
+        fn get_mut(arena: ArenaMut<'_, P>, addr: Addr) -> Option<&mut Self> {
+            arena.0.get_mut(addr.0)
+        }
+    }
+
+    impl<P> Sealed<P> for dyn Userdata<P>
+    where
+        P: Params,
+    {
+        fn get_ref(arena: ArenaRef<'_, P>, addr: Addr) -> Option<&Self> {
+            arena.0.get_userdata(addr.0)
+        }
+
+        fn get_mut(arena: ArenaMut<'_, P>, addr: Addr) -> Option<&mut Self> {
+            arena.0.get_userdata_mut(addr.0)
+        }
+    }
+}
+
 /// Marker trait permitting by-reference (`&T`) access.
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait RefAccess<T>: sealed::Sealed {}
+pub trait RefAccess<T: ?Sized>: sealed::Sealed {}
 
 /// Marker trait permitting by-mut-reference (`&mut T`) access.
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait MutAccess<T>: RefAccess<T> {}
+pub trait MutAccess<T: ?Sized>: RefAccess<T> {}
 
 /// Marker trait for strong references.
 ///
@@ -849,47 +999,39 @@ pub trait Rooted: sealed_root::Sealed {}
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait Upgradeable: sealed::Sealed + sealed_upgrade::Sealed {}
+pub trait Weak: sealed::Sealed + sealed_upgrade::Sealed {}
+
+/// Marker trait for types that can be retrieved from [`Heap`](crate::Heap).
+///
+/// Purpose of this trait is to serve as bound in `Heap`'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait Allocated<P>: sealed_allocated::Sealed<P> {}
 
 impl<T> RefAccess<T> for GcCell<T> {}
 impl<T> MutAccess<T> for GcCell<T> {}
-impl<T> Upgradeable for GcCell<T> {}
+impl<T> Weak for GcCell<T> {}
 
 impl<T> RefAccess<T> for RootCell<T> {}
 impl<T> MutAccess<T> for RootCell<T> {}
 impl<T> Rooted for RootCell<T> {}
 
 impl<T> RefAccess<T> for Gc<T> {}
-impl<T> Upgradeable for Gc<T> {}
+impl<T> Weak for Gc<T> {}
 
 impl<T> RefAccess<T> for Root<T> {}
 impl<T> Rooted for Root<T> {}
 
-pub(crate) trait Index<T: ?Sized> {
-    fn get<'a>(&self, arena: &'a dyn Arena) -> Option<&'a T>;
-    fn get_mut<'a>(&self, arena: &'a mut dyn Arena) -> Option<&'a mut T>;
-}
+impl<'a, T, Item> RefAccess<Item> for &'a T where T: RefAccess<Item> {}
 
-impl<Item, T> Index<Item> for T
+impl<'a, T, Item> MutAccess<Item> for &'a T where T: MutAccess<Item> {}
+
+impl<'a, T> Rooted for &'a T where T: Rooted {}
+
+impl<T, P> Allocated<P> for T
 where
-    Item: 'static,
-    T: sealed::Sealed,
+    T: Trace,
+    P: Params,
 {
-    fn get<'a>(&self, arena: &'a dyn Arena) -> Option<&'a Item> {
-        use crate::arena::{Get, Store};
-
-        arena
-            .as_any()
-            .downcast_ref::<Store<Item>>()?
-            .get(self.addr().0)
-    }
-
-    fn get_mut<'a>(&self, arena: &'a mut dyn Arena) -> Option<&'a mut Item> {
-        use crate::arena::{Get, Store};
-
-        arena
-            .as_any_mut()
-            .downcast_mut::<Store<Item>>()?
-            .get_mut(self.addr().0)
-    }
 }
+
+impl<P> Allocated<P> for dyn Userdata<P> where P: Params {}
