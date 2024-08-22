@@ -969,10 +969,6 @@ pub(crate) mod sealed_upgrade {
 
 pub(crate) mod sealed_allocated {
     use super::{FullUserdata, Params, Trace, Userdata};
-    use crate::heap::Heap;
-
-    #[doc(hidden)]
-    pub struct TypeIndex(pub(crate) super::TypeIndex);
 
     #[doc(hidden)]
     pub struct ArenaRef<'a, M, P>(pub(crate) &'a dyn super::Arena<M, P>);
@@ -985,9 +981,6 @@ pub(crate) mod sealed_allocated {
 
     pub trait Sealed<M, P> {
         #[doc(hidden)]
-        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>);
-
-        #[doc(hidden)]
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self>;
 
         #[doc(hidden)]
@@ -999,17 +992,12 @@ pub(crate) mod sealed_allocated {
         T: Trace,
         P: Params,
     {
-        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>) {
-            let (ty, arena) = heap.concrete_arena_or_insert::<S>();
-            (TypeIndex(ty), ArenaMut(arena))
-        }
-
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get(addr.0)
+            arena.0.get(addr.0).unwrap()
         }
 
         fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_mut(addr.0)
+            arena.0.get_mut(addr.0).unwrap()
         }
     }
 
@@ -1017,11 +1005,6 @@ pub(crate) mod sealed_allocated {
     where
         P: Params,
     {
-        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>) {
-            let (ty, arena) = heap.light_arena_or_insert::<S>();
-            (TypeIndex(ty), ArenaMut(arena))
-        }
-
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
             arena.0.get_userdata(addr.0)
         }
@@ -1036,17 +1019,59 @@ pub(crate) mod sealed_allocated {
         M: Trace,
         P: Params,
     {
-        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>) {
-            let (ty, arena) = heap.full_arena_or_insert::<S>();
-            (TypeIndex(ty), ArenaMut(arena))
-        }
-
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
             arena.0.get_full_userdata(addr.0)
         }
 
         fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
             arena.0.get_full_userdata_mut(addr.0)
+        }
+    }
+}
+
+pub(crate) mod sealed_allocated_from {
+    use super::{FullUserdata, Params, Trace, Userdata};
+    use crate::heap::Heap;
+
+    #[doc(hidden)]
+    pub struct TypeIndex(pub(crate) super::TypeIndex);
+
+    pub trait Sealed<T, M, P> {
+        #[doc(hidden)]
+        fn select(heap: &mut Heap<M, P>) -> TypeIndex;
+    }
+
+    impl<T, M, P> Sealed<T, M, P> for T
+    where
+        T: Trace,
+        P: Params,
+    {
+        fn select(heap: &mut Heap<M, P>) -> TypeIndex {
+            let (ty, _arena) = heap.concrete_arena_or_insert::<T>();
+            TypeIndex(ty)
+        }
+    }
+
+    impl<T, M, P> Sealed<T, M, P> for dyn Userdata<P>
+    where
+        T: Trace,
+        P: Params,
+    {
+        fn select(heap: &mut Heap<M, P>) -> TypeIndex {
+            let (ty, _arena) = heap.light_arena_or_insert::<T>();
+            TypeIndex(ty)
+        }
+    }
+
+    impl<T, M, P> Sealed<T, M, P> for dyn FullUserdata<M, P>
+    where
+        T: Trace,
+        M: Trace,
+        P: Params,
+    {
+        fn select(heap: &mut Heap<M, P>) -> TypeIndex {
+            let (ty, _arena) = heap.full_arena_or_insert::<T>();
+            TypeIndex(ty)
         }
     }
 }
@@ -1088,6 +1113,12 @@ pub trait Weak: sealed::Sealed + sealed_upgrade::Sealed {}
 /// You probably shouldn't use it for anything else or at all.
 pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
 
+/// Marker trait for types that can be allocated in `Heap`.
+/// 
+/// Purpose of this trait is to serve as bound in `Heap`'s allocation methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait AllocatedFrom<T, M, P>: sealed_allocated_from::Sealed<T, M, P> {}
+
 impl<T: ?Sized> Contains<T> for GcCell<T> {}
 impl<T: ?Sized> RefAccess<T> for GcCell<T> {}
 impl<T: ?Sized> MutAccess<T> for GcCell<T> {}
@@ -1117,6 +1148,28 @@ impl<M, P> Allocated<M, P> for dyn Userdata<P> where P: Params {}
 
 impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P>
 where
+    M: Trace,
+    P: Params,
+{
+}
+
+impl<T, M, P> AllocatedFrom<T, M, P> for T
+where
+    T: Trace,
+    P: Params,
+{
+}
+
+impl<T, M, P> AllocatedFrom<T, M, P> for dyn Userdata<P>
+where
+    T: Trace,
+    P: Params,
+{
+}
+
+impl<T, M, P> AllocatedFrom<T, M, P> for dyn FullUserdata<M, P>
+where
+    T: Trace,
     M: Trace,
     P: Params,
 {

@@ -1,5 +1,7 @@
 use bitvec::prelude::{BitSlice, BitVec};
 use std::any::Any;
+use std::error::Error;
+use std::fmt::Display;
 
 use super::{Addr, Collector, Counter};
 use crate::userdata::{FullUserdata, Params, Userdata};
@@ -39,50 +41,67 @@ impl<M, P> dyn Arena<M, P> + '_
 where
     P: Params,
 {
-    pub(crate) fn try_insert<T>(&mut self, value: T) -> Result<(Addr, Counter), T>
+    pub(crate) fn try_insert<T>(
+        &mut self,
+        value: T,
+    ) -> Result<Result<(Addr, Counter), T>, IncompatibleType>
     where
         T: 'static,
     {
         let mut value = Some(value);
-        let out = self.try_insert_any(&mut value);
+        let out = self.try_insert_any(&mut value)?;
 
         match (value, out) {
-            (None, Ok(Some(ptr))) => Ok(ptr),
-            (Some(value), Ok(None) | Err(_)) => Err(value),
+            (None, Some(ptr)) => Ok(Ok(ptr)),
+            (Some(value), None) => Ok(Err(value)),
             _ => unreachable!(),
         }
     }
 
-    pub(crate) fn insert<T>(&mut self, value: T) -> Result<(Addr, Counter), T>
+    pub(crate) fn insert<T>(&mut self, value: T) -> Result<(Addr, Counter), IncompatibleType>
     where
         T: 'static,
     {
         let mut value = Some(value);
-        let out = self.insert_any(&mut value);
+        let ptr = self.insert_any(&mut value)?;
 
-        match (value, out) {
-            (None, Ok(ptr)) => Ok(ptr),
-            (Some(value), Err(_)) => Err(value),
-            _ => unreachable!(),
-        }
+        debug_assert!(value.is_none());
+
+        Ok(ptr)
     }
 
-    pub(crate) fn get<T>(&self, addr: Addr) -> Option<&T>
+    pub(crate) fn get<T>(&self, addr: Addr) -> Result<Option<&T>, IncompatibleType>
     where
         T: 'static,
     {
-        self.get_value(addr)?.downcast_ref()
+        self.get_value(addr)
+            .map(|value| value.downcast_ref().ok_or(IncompatibleType))
+            .transpose()
     }
 
-    pub(crate) fn get_mut<T>(&mut self, addr: Addr) -> Option<&mut T>
+    pub(crate) fn get_mut<T>(&mut self, addr: Addr) -> Result<Option<&mut T>, IncompatibleType>
     where
         T: 'static,
     {
-        self.get_value_mut(addr)?.downcast_mut()
+        self.get_value_mut(addr)
+            .map(|value| value.downcast_mut().ok_or(IncompatibleType))
+            .transpose()
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct IncompatibleType;
+
+impl Display for IncompatibleType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "internal error: attempt to use arena containing values of incompatible type"
+        )
+    }
+}
+
+impl Error for IncompatibleType {}
 
 pub(crate) fn try_insert<T>(
     value: &mut dyn Any,

@@ -12,7 +12,8 @@ use typed_index_collections::TiVec;
 
 use crate::index::sealed_upgrade::Sealed;
 use crate::index::{
-    Allocated, Contains, Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted, Weak,
+    Allocated, AllocatedFrom, Contains, Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted,
+    Weak,
 };
 use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
@@ -107,12 +108,12 @@ where
     }
 
     #[inline(never)]
-    fn alloc_slow<T>(&mut self, ty: TypeIndex, value: T) -> Result<(Addr, Counter), T>
+    fn alloc_slow<T>(&mut self, ty: TypeIndex, value: T) -> (Addr, Counter)
     where
         T: Trace,
     {
         self.gc_with(&value);
-        self.arenas.get_mut(ty).unwrap().insert(value)
+        self.arenas.get_mut(ty).unwrap().insert(value).unwrap()
     }
 
     fn alloc_inner<T>(&mut self, ty: TypeIndex, value: T) -> Result<(Addr, Counter), T>
@@ -120,10 +121,12 @@ where
         T: Trace,
     {
         let arena = self.arenas.get_mut(ty).unwrap();
-        match arena.try_insert(value) {
-            ptr @ Ok(_) => ptr,
+        let ptr = match arena.try_insert(value).unwrap() {
+            Ok(ptr) => ptr,
             Err(value) => self.alloc_slow(ty, value),
-        }
+        };
+
+        Ok(ptr)
     }
 
     /// Allocate an object.
@@ -160,12 +163,12 @@ where
     where
         T: Trace,
         R: Rooted + Contains<U>,
-        U: Allocated<M, P> + ?Sized,
+        U: AllocatedFrom<T, M, P> + ?Sized,
     {
         let (addr, ty, counter) = {
-            use crate::index::sealed_allocated::{Sealed, TypeIndex};
+            use crate::index::sealed_allocated_from::{Sealed, TypeIndex};
 
-            let (TypeIndex(ty), _) = <U as Sealed<M, P>>::select::<T>(self);
+            let TypeIndex(ty) = <U as Sealed<T, M, P>>::select(self);
             let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
                 unreachable!()
             };
@@ -289,7 +292,7 @@ where
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
-        let ptr = Gc::new(addr, ty);
+        let ptr = Gc::<T>::new(addr, ty);
 
         self.get(ptr)
             .expect("rooted object should never be deallocated")
@@ -317,7 +320,7 @@ where
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
 
-        let ptr = GcCell::new(addr, ty);
+        let ptr = GcCell::<T>::new(addr, ty);
 
         self.get_mut(ptr)
             .expect("rooted object should never be deallocated")
