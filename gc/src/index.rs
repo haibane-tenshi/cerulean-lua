@@ -45,7 +45,7 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// let strong = heap.alloc_cell(3);
+/// let strong = heap.alloc(3);
 /// let weak: GcCell<usize> = strong.downgrade();
 /// ```
 ///
@@ -54,7 +54,7 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// # let weak: GcCell<usize> = heap.alloc_cell(3).downgrade();
+/// # let weak: GcCell<usize> = heap.alloc(3).downgrade();
 /// let strong: RootCell<usize> = heap.upgrade(weak).expect("object is still alive");
 /// ```
 ///
@@ -66,7 +66,7 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// let weak = heap.alloc_cell(3_usize).downgrade();
+/// let weak = heap.alloc(3_usize).downgrade();
 /// assert_eq!(heap.get(weak), Some(&3));
 ///
 /// // Object have no strong references left so it will be collected.
@@ -79,7 +79,7 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
 /// # let mut heap = Heap::new();
-/// let weak = heap.alloc_cell(3_usize).downgrade();
+/// let weak = heap.alloc(3_usize).downgrade();
 /// assert_eq!(heap.get(weak), Some(&3));
 ///
 /// let ref_mut: &mut usize = heap.get_mut(weak).expect("object is still alive");
@@ -128,8 +128,8 @@ where
     /// ```
     /// # use gc::{Heap, GcCell};
     /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc_cell(1_usize).downgrade();
-    /// # let b = heap.alloc_cell(2_usize).downgrade();
+    /// # let a = heap.alloc(1_usize).downgrade();
+    /// # let b = heap.alloc(2_usize).downgrade();
     /// assert_eq!(GcCell::ptr_eq(a, b), a.location() == b.location());
     /// ```
     pub fn ptr_eq(self, other: Self) -> bool {
@@ -202,7 +202,7 @@ impl<T> Copy for GcCell<T> where T: ?Sized {}
 /// ```
 /// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// let strong: RootCell<usize> = heap.alloc_cell(3);
+/// let strong: RootCell<usize> = heap.alloc(3);
 /// ```
 ///
 /// You can also clone already existing roots or upgrade weak references:
@@ -210,7 +210,7 @@ impl<T> Copy for GcCell<T> where T: ?Sized {}
 /// ```
 /// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// # let strong: RootCell<usize> = heap.alloc_cell(3_usize);
+/// # let strong: RootCell<usize> = heap.alloc(3_usize);
 /// let weak = strong.downgrade();
 /// let strong = heap.upgrade(weak).expect("object is still alive");
 /// ```
@@ -223,7 +223,7 @@ impl<T> Copy for GcCell<T> where T: ?Sized {}
 /// ```
 /// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// let strong = heap.alloc_cell(3_usize);
+/// let strong = heap.alloc(3_usize);
 /// assert_eq!(heap.get_root(&strong), &3);
 ///
 /// // Root prevents object from being collected.
@@ -239,7 +239,7 @@ impl<T> Copy for GcCell<T> where T: ?Sized {}
 /// ```
 /// # use gc::{Heap, RootCell};
 /// # let mut heap = Heap::new();
-/// # let strong = heap.alloc_cell(4_usize);
+/// # let strong = heap.alloc(4_usize);
 /// assert_eq!(heap[&strong], 4);
 ///
 /// heap[&strong] = 3;
@@ -295,8 +295,8 @@ where
     /// ```
     /// # use gc::{Heap, RootCell};
     /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc_cell(1_usize);
-    /// # let b = heap.alloc_cell(2_usize);
+    /// # let a = heap.alloc(1_usize);
+    /// # let b = heap.alloc(2_usize);
     /// assert_eq!(RootCell::ptr_eq(&a, &b), a.location() == b.location());
     /// ```
     pub fn ptr_eq(&self, other: &Self) -> bool {
@@ -424,6 +424,14 @@ impl<T> Gc<T>
 where
     T: ?Sized,
 {
+    pub(crate) fn new(addr: Addr, ty: TypeIndex) -> Self {
+        Gc {
+            addr,
+            ty,
+            _marker: PhantomData,
+        }
+    }
+
     pub(crate) fn ty(self) -> TypeIndex {
         self.ty
     }
@@ -859,38 +867,41 @@ pub(crate) mod sealed {
             TypeIndex(self.ty)
         }
     }
-
-    impl<'a, T> Sealed for &'a T
-    where
-        T: Sealed,
-    {
-        fn addr(&self) -> Addr {
-            <T as Sealed>::addr(*self)
-        }
-
-        fn type_index(&self) -> TypeIndex {
-            <T as Sealed>::type_index(*self)
-        }
-    }
 }
 
-mod sealed_root {
+pub(crate) mod sealed_root {
     use super::{Root, RootCell};
 
     #[doc(hidden)]
-    pub struct Counter<'a>(pub(crate) &'a super::Counter);
+    pub struct CounterRef<'a>(pub(crate) &'a super::Counter);
+
+    #[doc(hidden)]
+    pub struct Addr(pub(crate) super::Addr);
+
+    #[doc(hidden)]
+    pub struct TypeIndex(pub(crate) super::TypeIndex);
+
+    #[doc(hidden)]
+    pub struct Counter(pub(crate) super::Counter);
 
     pub trait Sealed {
         #[doc(hidden)]
-        fn counter(&self) -> Counter;
+        fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self;
+
+        #[doc(hidden)]
+        fn counter(&self) -> CounterRef;
     }
 
     impl<T> Sealed for RootCell<T>
     where
         T: ?Sized,
     {
-        fn counter(&self) -> Counter {
-            Counter(&self.counter)
+        fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
+            RootCell::new(addr.0, ty.0, counter.0)
+        }
+
+        fn counter(&self) -> CounterRef {
+            CounterRef(&self.counter)
         }
     }
 
@@ -898,17 +909,12 @@ mod sealed_root {
     where
         T: ?Sized,
     {
-        fn counter(&self) -> Counter {
-            Counter(&self.counter)
+        fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
+            Root::new(addr.0, ty.0, counter.0)
         }
-    }
 
-    impl<'a, T> Sealed for &'a T
-    where
-        T: Sealed,
-    {
-        fn counter(&self) -> Counter {
-            <T as Sealed>::counter(self)
+        fn counter(&self) -> CounterRef {
+            CounterRef(&self.counter)
         }
     }
 }
@@ -963,6 +969,10 @@ pub(crate) mod sealed_upgrade {
 
 pub(crate) mod sealed_allocated {
     use super::{FullUserdata, Params, Trace, Userdata};
+    use crate::heap::Heap;
+
+    #[doc(hidden)]
+    pub struct TypeIndex(pub(crate) super::TypeIndex);
 
     #[doc(hidden)]
     pub struct ArenaRef<'a, M, P>(pub(crate) &'a dyn super::Arena<M, P>);
@@ -975,6 +985,9 @@ pub(crate) mod sealed_allocated {
 
     pub trait Sealed<M, P> {
         #[doc(hidden)]
+        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>);
+
+        #[doc(hidden)]
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self>;
 
         #[doc(hidden)]
@@ -986,6 +999,11 @@ pub(crate) mod sealed_allocated {
         T: Trace,
         P: Params,
     {
+        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>) {
+            let (ty, arena) = heap.concrete_arena_or_insert::<S>();
+            (TypeIndex(ty), ArenaMut(arena))
+        }
+
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
             arena.0.get(addr.0)
         }
@@ -999,6 +1017,11 @@ pub(crate) mod sealed_allocated {
     where
         P: Params,
     {
+        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>) {
+            let (ty, arena) = heap.light_arena_or_insert::<S>();
+            (TypeIndex(ty), ArenaMut(arena))
+        }
+
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
             arena.0.get_userdata(addr.0)
         }
@@ -1010,8 +1033,14 @@ pub(crate) mod sealed_allocated {
 
     impl<M, P> Sealed<M, P> for dyn FullUserdata<M, P>
     where
+        M: Trace,
         P: Params,
     {
+        fn select<S: Trace>(heap: &mut Heap<M, P>) -> (TypeIndex, ArenaMut<M, P>) {
+            let (ty, arena) = heap.full_arena_or_insert::<S>();
+            (TypeIndex(ty), ArenaMut(arena))
+        }
+
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
             arena.0.get_full_userdata(addr.0)
         }
@@ -1022,11 +1051,18 @@ pub(crate) mod sealed_allocated {
     }
 }
 
+/// Marker trait indicating referenced type.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+
+pub trait Contains<T: ?Sized>: sealed::Sealed {}
+
 /// Marker trait permitting by-reference (`&T`) access.
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait RefAccess<T: ?Sized>: sealed::Sealed {}
+pub trait RefAccess<T: ?Sized>: Contains<T> {}
 
 /// Marker trait permitting by-mut-reference (`&mut T`) access.
 ///
@@ -1052,25 +1088,23 @@ pub trait Weak: sealed::Sealed + sealed_upgrade::Sealed {}
 /// You probably shouldn't use it for anything else or at all.
 pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
 
+impl<T: ?Sized> Contains<T> for GcCell<T> {}
 impl<T: ?Sized> RefAccess<T> for GcCell<T> {}
 impl<T: ?Sized> MutAccess<T> for GcCell<T> {}
 impl<T: ?Sized> Weak for GcCell<T> {}
 
+impl<T: ?Sized> Contains<T> for RootCell<T> {}
 impl<T: ?Sized> RefAccess<T> for RootCell<T> {}
 impl<T: ?Sized> MutAccess<T> for RootCell<T> {}
 impl<T: ?Sized> Rooted for RootCell<T> {}
 
+impl<T: ?Sized> Contains<T> for Gc<T> {}
 impl<T: ?Sized> RefAccess<T> for Gc<T> {}
 impl<T: ?Sized> Weak for Gc<T> {}
 
+impl<T: ?Sized> Contains<T> for Root<T> {}
 impl<T: ?Sized> RefAccess<T> for Root<T> {}
 impl<T: ?Sized> Rooted for Root<T> {}
-
-impl<'a, T, Item: ?Sized> RefAccess<Item> for &'a T where T: RefAccess<Item> {}
-
-impl<'a, T, Item: ?Sized> MutAccess<Item> for &'a T where T: MutAccess<Item> {}
-
-impl<'a, T> Rooted for &'a T where T: Rooted {}
 
 impl<T, M, P> Allocated<M, P> for T
 where
@@ -1081,4 +1115,9 @@ where
 
 impl<M, P> Allocated<M, P> for dyn Userdata<P> where P: Params {}
 
-impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P> where P: Params {}
+impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P>
+where
+    M: Trace,
+    P: Params,
+{
+}

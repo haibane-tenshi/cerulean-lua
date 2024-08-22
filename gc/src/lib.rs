@@ -115,8 +115,8 @@
 //!
 //! let mut heap = Heap::new();
 //!
-//! let a = heap.alloc_cell(BinaryTree::default());
-//! let b = heap.alloc_cell(BinaryTree::default());
+//! let a = heap.alloc(BinaryTree::default());
+//! let b = heap.alloc(BinaryTree::default());
 //!
 //! heap[&a].left = Some(b.downgrade());
 //! heap[&b].right = Some(b.downgrade());
@@ -132,8 +132,8 @@
 //! ```
 //! # use gc::{Heap, GcCell};
 //! # let mut heap = Heap::new();
-//! # let a = heap.alloc_cell(3_usize);
-//! # let b = heap.alloc_cell(3_usize);
+//! # let a = heap.alloc(3_usize);
+//! # let b = heap.alloc(3_usize);
 //! // Drop strong references leaving only weak ones.
 //! let weak_a: GcCell<_> = a.downgrade();
 //! let weak_b: GcCell<_> = b.downgrade();
@@ -191,14 +191,14 @@
 //! #
 //! # let mut heap = Heap::new();
 //! #
-//! let a = heap.alloc_cell(3).downgrade();
+//! let a = heap.alloc(3).downgrade();
 //!
 //! // Oops, this allocation happened to trigger garbage collection.
 //! // `a` is not rooted and will be deallocated.
 //! # heap.gc();
-//! let b = heap.alloc_cell(-3).downgrade();
+//! let b = heap.alloc(-3).downgrade();
 //!
-//! let complex = heap.alloc_cell(Complex {
+//! let complex = heap.alloc(Complex {
 //!     a,
 //!     b,
 //! });
@@ -226,17 +226,17 @@
 //! #
 //! # let mut heap = Heap::new();
 //! #
-//! let weak = heap.alloc_cell('a').downgrade();
+//! let weak = heap.alloc('a').downgrade();
 //!
 //! // Garbage allocation will be paused inside the closure.
 //! let complex = heap.pause(|heap| {
-//!     let a = heap.alloc_cell(3).downgrade();
+//!     let a = heap.alloc(3).downgrade();
 //!  
 //!     // Even manual triggers are paused.   
 //!     heap.gc();
-//!     let b = heap.alloc_cell(-3).downgrade();
+//!     let b = heap.alloc(-3).downgrade();
 //!
-//!     heap.alloc_cell(Complex {
+//!     heap.alloc(Complex {
 //!         a,
 //!         b,
 //!     })

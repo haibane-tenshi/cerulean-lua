@@ -11,9 +11,11 @@ use bitvec::vec::BitVec;
 use typed_index_collections::TiVec;
 
 use crate::index::sealed_upgrade::Sealed;
-use crate::index::{Allocated, Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted, Weak};
+use crate::index::{
+    Allocated, Contains, Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted, Weak,
+};
 use crate::trace::Trace;
-use crate::userdata::{Dispatcher, FullUserdata, Params, Userdata};
+use crate::userdata::{Dispatcher, FullUserdata, Params};
 use arena::Arena;
 use store::{Addr, Counter, Store};
 
@@ -56,7 +58,7 @@ where
         Default::default()
     }
 
-    fn concrete_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
+    pub(crate) fn concrete_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
         T: Trace,
     {
@@ -69,7 +71,7 @@ where
         (index, store)
     }
 
-    fn light_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
+    pub(crate) fn light_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
         T: Trace,
     {
@@ -86,7 +88,7 @@ where
         (index, store)
     }
 
-    fn full_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
+    pub(crate) fn full_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
         M: Trace,
         T: Trace,
@@ -126,92 +128,87 @@ where
 
     /// Allocate an object.
     ///
-    /// This function can potentially trigger a garbage collection phase.
+    /// This function can output 6 different pointers depending on type hints:
     ///
-    /// The object can later be mutated through any reference as if it was wrapped in `RefCell`.
-    /// If this behavior is undesirable consider using [`alloc`](Heap::alloc) instead.
+    /// * `Root<T>`
+    /// * `RootCell<T>`
+    /// * `Root<dyn Userdata<P>>`
+    /// * `RootCell<dyn Userdata<P>>`
+    /// * `Root<dyn FullUserdata<M, P>>`
+    /// * `RootCell<dyn FullUserdata<M, P>>`
     ///
-    /// The function immediately roots the object it allocates so you don't need to worry
-    /// that inner references will get dropped if gc is triggered as part of the call.
-    pub fn alloc_cell<T>(&mut self, value: T) -> RootCell<T>
+    /// It was too cumbersome to maintain a whole zoo of allocation functions, so here we are.
+    ///
+    /// [`Root`]s reference immutable values, whereas [`RootCell`]s reference mutable values.
+    ///
+    /// # On userdata
+    ///
+    /// Userdata is mechanism for Lua to ineract with foreign types.
+    /// See [module-level explanations](crate::userdata#userdata-design) for more details.
+    ///
+    /// When allocating userdata through this method other parts will be configured for you:
+    ///
+    /// * All values of one type share dispacher function by design.
+    ///    Currently configured function will be used, otherwise a default "do nothing" dispacher will be set.
+    ///    Dispacher method needs to be configured separately using [`set_dispatcher`](Heap::set_dispatcher).
+    /// * `FullUserdata` will use metatable for the type if configured, otherwise no metatable will be set.
+    ///
+    /// Alternatively full userdata can be allocated using [`alloc_full_userdata`](Heap::alloc_full_userdata) which allows you to set its metatable immediately.
+    /// Note that [`Metatable::set_metatable`](crate::userdata::Metatable::set_metatable) requires mutable access,
+    /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
+    pub fn alloc<T, R, U>(&mut self, value: T) -> R
     where
         T: Trace,
+        R: Rooted + Contains<U>,
+        U: Allocated<M, P> + ?Sized,
     {
-        let (ty, _) = self.concrete_arena_or_insert::<T>();
-        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
-            unreachable!()
+        let (addr, ty, counter) = {
+            use crate::index::sealed_allocated::{Sealed, TypeIndex};
+
+            let (TypeIndex(ty), _) = <U as Sealed<M, P>>::select::<T>(self);
+            let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
+                unreachable!()
+            };
+
+            (addr, ty, counter)
         };
 
-        RootCell::new(addr, ty, counter)
+        {
+            use crate::index::sealed_root::{Addr, Counter, Sealed, TypeIndex};
+
+            <R as Sealed>::new(Addr(addr), TypeIndex(ty), Counter(counter))
+        }
     }
 
-    /// Allocate an object.
+    /// Allocate an object as full userdata.
     ///
-    /// This function can potentially trigger a garbage collection phase.
+    /// This function can output 2 different pointers depending on type hints:
     ///
-    /// It is not possible to acquire mutable reference to the allocated object.
-    /// If you want to mutate the object later consider using [`alloc_cell`](Heap::alloc_cell)
-    /// instead of wrapping it in `Cell` or `RefCell`.
+    /// * `Root<dyn FullUserdata<M, P>>`
+    /// * `RootCell<dyn FullUserdata<M, P>>`
     ///
-    /// The function immediately roots the object it allocates so you don't need to worry
-    /// that inner references will get dropped if gc is triggered as part of the call.
-    pub fn alloc<T>(&mut self, value: T) -> Root<T>
-    where
-        T: Trace,
-    {
-        let (ty, _) = self.concrete_arena_or_insert::<T>();
-        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
-            unreachable!()
-        };
-
-        Root::new(addr, ty, counter)
-    }
-
-    /// Allocate an object as light userdata.
+    /// Unlike [`alloc`](Heap::alloc) This function allows you to immediately set metatable for the value.
     ///
-    /// Userdata is mechanism for Lua to represent foreign types.
-    /// Every userdata requires three key pieces to function:
-    /// object itself, method dispatcher function and metatable.
-    ///
-    /// Method dispatcher function translates Lua function invocations into actual Rust function calls.
-    /// By design all values of the same type share dispatcher function
-    /// and it can be set using [`Heap::set_dispatcher`].
-    /// When unset default dispatcher (which does nothing) will be used.
-    ///
-    /// Note that **light** userdata does not carry its own metatable!
-    /// It is assumed that appropriate metatable will be provided by an external source.
-    /// In case of our Lua runtime that is done through metatable registry.
-    pub fn alloc_userdata<T>(&mut self, value: T) -> Root<dyn Userdata<P>>
-    where
-        T: Trace,
-    {
-        let (ty, _) = self.light_arena_or_insert::<T>();
-        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
-            unreachable!()
-        };
-
-        Root::new(addr, ty, counter)
-    }
-
-    pub fn alloc_full_userdata<T>(
-        &mut self,
-        value: T,
-        metatable: Option<M>,
-    ) -> Root<dyn FullUserdata<M, P>>
+    /// Note that [`Metatable::set_metatable`](crate::userdata::Metatable::set_metatable) requires mutable access,
+    /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
+    pub fn alloc_full_userdata<T, R>(&mut self, value: T, metatable: Option<M>) -> R
     where
         T: Trace,
         M: Trace,
+        R: Rooted + Contains<dyn FullUserdata<M, P>>,
     {
-        let (ty, _) = self.full_arena_or_insert::<T>();
-        let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
-            unreachable!()
-        };
+        let r: R = self.alloc(value);
 
-        let temp = GcCell::<dyn FullUserdata<M, P>>::new(addr, ty);
-        let value = self.get_mut(temp).unwrap();
-        let _ = value.set_metatable(metatable);
+        {
+            let addr = r.addr().0;
+            let ty = r.type_index().0;
 
-        Root::new(addr, ty, counter)
+            let temp = GcCell::<dyn FullUserdata<M, P>>::new(addr, ty);
+            let value = self.get_mut(temp).unwrap();
+            let _ = value.set_metatable(metatable);
+        }
+
+        r
     }
 
     /// Get `&T` out of weak reference such as [`GcCell`] or [`Gc`].
@@ -279,10 +276,11 @@ where
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root<T>(&self, ptr: impl RefAccess<T> + Rooted) -> &T
+    pub fn get_root<T>(&self, ptr: &(impl RefAccess<T> + Rooted)) -> &T
     where
         T: Allocated<M, P> + ?Sized,
     {
+        let addr = ptr.addr().0;
         let ty = ptr.type_index().0;
         let counter = ptr.counter().0;
 
@@ -290,6 +288,8 @@ where
             Some(arena) if arena.validate(counter) => (),
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
+
+        let ptr = Gc::new(addr, ty);
 
         self.get(ptr)
             .expect("rooted object should never be deallocated")
@@ -304,10 +304,11 @@ where
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root_mut<T>(&mut self, ptr: impl MutAccess<T> + Rooted) -> &mut T
+    pub fn get_root_mut<T>(&mut self, ptr: &(impl MutAccess<T> + Rooted)) -> &mut T
     where
         T: Allocated<M, P> + ?Sized,
     {
+        let addr = ptr.addr().0;
         let ty = ptr.type_index().0;
         let counter = ptr.counter().0;
 
@@ -315,6 +316,8 @@ where
             Some(arena) if arena.validate(counter) => (),
             _ => panic!("attempt to dereference a pointer created from a different heap"),
         };
+
+        let ptr = GcCell::new(addr, ty);
 
         self.get_mut(ptr)
             .expect("rooted object should never be deallocated")
