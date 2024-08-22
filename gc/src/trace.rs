@@ -57,7 +57,7 @@ where
     T: Trace,
 {
     fn trace(&self, collector: &mut Collector) {
-        collector.mark_cell(*self)
+        collector.mark(*self)
     }
 }
 
@@ -785,7 +785,7 @@ impl Trace for SystemTime {
 /// (which is a perfectly understandable sentiment).
 /// Something like `Box<dyn Write>` cannot implement [`Trace`] (as `Box` delegates implementation to inner value),
 /// so you can wrap it in `Untrace<Box<dyn Write>>` or `Box<Untrace<dyn Write>>`
-/// to indicate to garbage collector that there is no need to trace references through this value.
+/// to indicate that there is no need to trace references through this value.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
 pub struct Untrace<T: ?Sized>(pub T);
 

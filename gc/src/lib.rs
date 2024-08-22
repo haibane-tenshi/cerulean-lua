@@ -43,9 +43,10 @@
 //! Dereferencing our pointers *requires access to heap*:
 //!
 //! ```
-//! # use gc::{Heap};
-//! # let mut heap = Heap::new();
-//! let ptr = heap.alloc_cell(3_usize);
+//! # use gc::{Heap, Root};
+//! # use gc::userdata::UnitParams;
+//! # let mut heap = Heap::<(), UnitParams>::new();
+//! let ptr = heap.alloc(3);
 //!
 //! // Need heap to dereference
 //! assert_eq!(heap[&ptr], 3);
@@ -111,12 +112,14 @@
 //! #         right.trace(collector);
 //! #     }
 //! # }
-//! use gc::Heap;
-//!
-//! let mut heap = Heap::new();
-//!
-//! let a = heap.alloc(BinaryTree::default());
-//! let b = heap.alloc(BinaryTree::default());
+//! # use gc::Heap;
+//! # use gc::userdata::UnitParams;
+//! #
+//! # let mut heap = Heap::<_, _>::new();
+//! # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
+//! #
+//! let a = heap.alloc_cell(BinaryTree::default());
+//! let b = heap.alloc_cell(BinaryTree::default());
 //!
 //! heap[&a].left = Some(b.downgrade());
 //! heap[&b].right = Some(b.downgrade());
@@ -130,10 +133,11 @@
 //! but if an object is not reachable from one of the roots it will be considered garbage and collected:
 //!
 //! ```
-//! # use gc::{Heap, GcCell};
-//! # let mut heap = Heap::new();
-//! # let a = heap.alloc(3_usize);
-//! # let b = heap.alloc(3_usize);
+//! # use gc::{Heap, GcCell, RootCell};
+//! # use gc::userdata::UnitParams;
+//! # let mut heap = Heap::<(), UnitParams>::new();
+//! # let a = heap.alloc_cell(3_usize);
+//! # let b = heap.alloc_cell(3_usize);
 //! // Drop strong references leaving only weak ones.
 //! let weak_a: GcCell<_> = a.downgrade();
 //! let weak_b: GcCell<_> = b.downgrade();
@@ -147,12 +151,13 @@
 //! assert!(matches!(heap.get(weak_b), None));
 //! ```
 //!
-//! There is also non-cell version: [`Heap::alloc`] which works with [`Root`]/[`Gc`] respectively.
+//! Alternatively you can allocate using [`Heap::alloc`] which returns [`Root`] instead.
 //! The biggest difference is that you cannot acquire mutable reference to objects behind `Root`/`Gc`:
 //!
 //! ```compile_fail
 //! # use gc::{Heap, Root};
-//! # let heap = Heap::new();
+//! # use gc::userdata::UnitParams;
+//! # let heap = Heap::<(), UnitParams>::new();
 //! let num = heap.alloc(3_usize);
 //!
 //! // You cannot acquire mutable reference to the value:
@@ -164,7 +169,7 @@
 //! constructing `&T`/`&mut T` requires a borrow from heap and
 //! borrow checker will prevent any aliasing issues from arising.
 //! Rather, `Cell` in the name is a reminder that referenced value *behaves as if it was inside a cell*,
-//! that is it can get mutated through any reference at any point you are not looking at it.
+//! that is it can get mutated through any other reference at any point you are not looking at it.
 //!
 //! # Common pitfalls: constructing complex objects
 //!
@@ -175,6 +180,7 @@
 //!
 //! ```rust,should_panic
 //! # use gc::{Heap, Trace, Collector, GcCell};
+//! # use gc::userdata::UnitParams;
 //! #
 //! struct Complex {
 //!     a: GcCell<u64>,
@@ -189,14 +195,14 @@
 //! #     }
 //! # }
 //! #
-//! # let mut heap = Heap::new();
+//! # let mut heap = Heap::<(), UnitParams>::new();
 //! #
-//! let a = heap.alloc(3).downgrade();
+//! let a = heap.alloc_cell(3).downgrade();
 //!
 //! // Oops, this allocation happened to trigger garbage collection.
 //! // `a` is not rooted and will be deallocated.
 //! # heap.gc();
-//! let b = heap.alloc(-3).downgrade();
+//! let b = heap.alloc_cell(-3).downgrade();
 //!
 //! let complex = heap.alloc(Complex {
 //!     a,
@@ -210,6 +216,7 @@
 //!
 //! ```
 //! # use gc::{Heap, Trace, Collector, GcCell};
+//! # use gc::userdata::UnitParams;
 //! #
 //! # struct Complex {
 //! #     a: GcCell<u64>,
@@ -224,17 +231,17 @@
 //! #     }
 //! # }
 //! #
-//! # let mut heap = Heap::new();
+//! # let mut heap = Heap::<(), UnitParams>::new();
 //! #
 //! let weak = heap.alloc('a').downgrade();
 //!
 //! // Garbage allocation will be paused inside the closure.
 //! let complex = heap.pause(|heap| {
-//!     let a = heap.alloc(3).downgrade();
+//!     let a = heap.alloc_cell(3).downgrade();
 //!  
 //!     // Even manual triggers are paused.   
 //!     heap.gc();
-//!     let b = heap.alloc(-3).downgrade();
+//!     let b = heap.alloc_cell(-3).downgrade();
 //!
 //!     heap.alloc(Complex {
 //!         a,
@@ -248,8 +255,9 @@
 //! assert_eq!(heap.get(weak), None);
 //! ```
 //!
-//! Also [`Heap::alloc_cell`] immediately roots the object it allocates so you don't need to worry
-//! that inner references will get dropped if gc is triggered as part of the call.
+//! Also both [`Heap::alloc`] and [`Heap::alloc_cell`] immediately root the object it allocates
+//! so you don't need to worry that inner references will get dropped
+//! if gc is triggered as part of the call.
 
 #![forbid(unsafe_code)]
 
@@ -262,3 +270,114 @@ mod vec_list;
 pub use heap::{Collector, Heap};
 pub use index::{Gc, GcCell, Root, RootCell};
 pub use trace::{Trace, Untrace};
+
+#[cfg(test)]
+mod test {
+    use super::{Heap, Root, RootCell, Trace};
+    use crate::userdata::Params;
+
+    struct P;
+
+    impl Params for P {
+        type Id<'id> = ();
+        type Rt<'rt> = ();
+        type Res = ();
+    }
+
+    struct Custom;
+
+    impl Trace for Custom {
+        fn trace(&self, _: &mut super::Collector) {}
+    }
+
+    #[test]
+    fn alloc_t() {
+        let mut heap = Heap::<(), P>::new();
+
+        let _: Root<u32> = heap.alloc(3);
+        let _: RootCell<Custom> = heap.alloc_cell(Custom);
+    }
+
+    #[test]
+    fn index_root_t() {
+        let mut heap = Heap::<(), P>::new();
+
+        const N: u32 = 5;
+
+        let number: Root<u32> = heap.alloc(N);
+
+        assert_eq!(heap.get_root(&number), &N);
+        assert_eq!(heap[&number], N);
+
+        let number: Root<f32> = heap.alloc(0.0);
+
+        assert_eq!(heap.get_root(&number), &0.0);
+        assert_eq!(heap[&number], 0.0);
+    }
+
+    #[test]
+    fn index_root_cell_t() {
+        let asserts = |heap: &mut Heap<_, _>, ptr, mut value| {
+            assert_eq!(heap.get_root(ptr), &value);
+            assert_eq!(heap.get_root_mut(ptr), &mut value);
+            assert_eq!(heap[ptr], value);
+        };
+
+        let mut heap = Heap::<(), P>::new();
+
+        let number: RootCell<u32> = heap.alloc_cell(5);
+        asserts(&mut heap, &number, 5);
+
+        *heap.get_root_mut(&number) = 10;
+        asserts(&mut heap, &number, 10);
+
+        heap[&number] = 15;
+        asserts(&mut heap, &number, 15);
+    }
+
+    #[test]
+    fn index_gc_t() {
+        let mut heap = Heap::<(), P>::new();
+
+        let root: Root<u32> = heap.alloc(5);
+        let number = root.downgrade();
+
+        assert_eq!(heap.get(number), Some(&5));
+
+        heap.gc();
+
+        assert_eq!(heap.get(number), Some(&5));
+
+        drop(root);
+        heap.gc();
+
+        assert_eq!(heap.get(number), None);
+    }
+
+    #[test]
+    fn index_gc_cell_t() {
+        let mut heap = Heap::<(), P>::new();
+
+        let root: RootCell<u32> = heap.alloc_cell(5);
+        let number = root.downgrade();
+
+        assert_eq!(heap.get(number), Some(&5));
+        assert_eq!(heap.get_mut(number), Some(&mut 5));
+
+        heap.gc();
+
+        assert_eq!(heap.get(number), Some(&5));
+        assert_eq!(heap.get_mut(number), Some(&mut 5));
+
+        *heap.get_mut(number).unwrap() = 6;
+
+        assert_eq!(heap.get(number), Some(&6));
+        assert_eq!(heap.get_mut(number), Some(&mut 6));
+
+        drop(root);
+        heap.gc();
+
+        assert_eq!(heap.get(number), None);
+        assert_eq!(heap.get_mut(number), None);
+    }
+}

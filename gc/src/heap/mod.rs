@@ -12,8 +12,8 @@ use typed_index_collections::TiVec;
 
 use crate::index::sealed_upgrade::Sealed;
 use crate::index::{
-    Allocated, AllocatedFrom, Contains, Gc, GcCell, MutAccess, RefAccess, Root, RootCell, Rooted,
-    Weak,
+    Access, Allocated, AllocatedFrom, Gc, GcCell, GcPtr, MutAccess, RefAccess, Root, RootCell,
+    RootPtr, Rooted,
 };
 use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
@@ -27,7 +27,9 @@ use store::{Addr, Counter, Store};
 ///
 /// ```
 /// # use gc::{Heap};
-/// let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// let mut heap = Heap::<_, _>::new();
+/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
 /// let a = heap.alloc(3_usize);
 ///
 /// assert_eq!(heap[&a], 3);
@@ -36,12 +38,18 @@ use store::{Addr, Counter, Store};
 /// Allocated objects require to implement [`Trace`] trait
 /// which allows garbage collector to discover transitive references through an object.
 /// Note that `Trace` requires `'static`: this is due to internal use of [`Any`](std::any::Any)
-/// so unfortunately you cannot allocate objects containing non-static references.
+/// so unfortunately you cannot allocate objects containing non-static lifetimes.
 ///
 /// # Garbage collection
 ///
-/// Garbage collection can be triggered automatically on [`alloc_cell`](Heap::alloc_cell), [`alloc`](Heap::alloc)
-/// or manually via [`gc`](Heap::gc) method.
+/// Garbage collection may be triggered automatically on any allocation function:
+///
+/// * [`alloc`](Heap::alloc)
+/// * [`alloc_cell`](Heap::alloc_cell),
+/// * [`alloc_as`](Heap::alloc_as)
+/// * [`alloc_full_userdata`](Heap::alloc_full_userdata)
+///
+/// Alternatively it can be called manually via [`gc`](Heap::gc) method.
 ///
 /// Implementation uses standard mark-and-sweep strategy.
 pub struct Heap<M, P> {
@@ -129,9 +137,35 @@ where
         Ok(ptr)
     }
 
+    /// Convenience function to allocate `T` as [`Root<T>`].
+    ///
+    /// `Root`s only permit immutable access to value.
+    /// If you intend to mutate it later consider using [`Heap::alloc_cell`].
+    ///
+    /// If you intend to allocate value as userdata consider using [`Heap::alloc_as`] or [`Heap::alloc_full_userdata`].
+    pub fn alloc<T>(&mut self, value: T) -> Root<T>
+    where
+        T: Trace,
+    {
+        self.alloc_as(value)
+    }
+
+    /// Convenience function to allocate `T` as [`RootCell<T>`].
+    ///
+    /// `RootCell`s permit both mutable and immutable access to value.
+    /// If you don't intend to mutate it later consider using [`Heap::alloc`].
+    ///
+    /// If you intend to allocate value as userdata consider using [`Heap::alloc_as`] or [`Heap::alloc_full_userdata`].
+    pub fn alloc_cell<T>(&mut self, value: T) -> RootCell<T>
+    where
+        T: Trace,
+    {
+        self.alloc_as(value)
+    }
+
     /// Allocate an object.
     ///
-    /// This function can output 6 different pointers depending on type hints:
+    /// This function can output one of 6 different pointers:
     ///
     /// * `Root<T>`
     /// * `RootCell<T>`
@@ -140,7 +174,7 @@ where
     /// * `Root<dyn FullUserdata<M, P>>`
     /// * `RootCell<dyn FullUserdata<M, P>>`
     ///
-    /// It was too cumbersome to maintain a whole zoo of allocation functions, so here we are.
+    /// As such it requires type annotations when used since compiler cannot always deduce intended type.
     ///
     /// [`Root`]s reference immutable values, whereas [`RootCell`]s reference mutable values.
     ///
@@ -153,17 +187,17 @@ where
     ///
     /// * All values of one type share dispacher function by design.
     ///    Currently configured function will be used, otherwise a default "do nothing" dispacher will be set.
-    ///    Dispacher method needs to be configured separately using [`set_dispatcher`](Heap::set_dispatcher).
+    ///    Dispacher method needs to be configured separately using [`set_dispatcher`](Heap::set_dispatcher) method.
     /// * `FullUserdata` will use metatable for the type if configured, otherwise no metatable will be set.
     ///
     /// Alternatively full userdata can be allocated using [`alloc_full_userdata`](Heap::alloc_full_userdata) which allows you to set its metatable immediately.
     /// Note that [`Metatable::set_metatable`](crate::userdata::Metatable::set_metatable) requires mutable access,
     /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
-    pub fn alloc<T, R, U>(&mut self, value: T) -> R
+    pub fn alloc_as<U, T, A>(&mut self, value: T) -> RootPtr<U, A>
     where
         T: Trace,
-        R: Rooted + Contains<U>,
         U: AllocatedFrom<T, M, P> + ?Sized,
+        A: Access,
     {
         let (addr, ty, counter) = {
             use crate::index::sealed_allocated_from::{Sealed, TypeIndex};
@@ -176,11 +210,7 @@ where
             (addr, ty, counter)
         };
 
-        {
-            use crate::index::sealed_root::{Addr, Counter, Sealed, TypeIndex};
-
-            <R as Sealed>::new(Addr(addr), TypeIndex(ty), Counter(counter))
-        }
+        RootPtr::new(addr, ty, counter)
     }
 
     /// Allocate an object as full userdata.
@@ -190,21 +220,25 @@ where
     /// * `Root<dyn FullUserdata<M, P>>`
     /// * `RootCell<dyn FullUserdata<M, P>>`
     ///
-    /// Unlike [`alloc`](Heap::alloc) This function allows you to immediately set metatable for the value.
+    /// Unlike [`alloc_as`](Heap::alloc_as) this function allows you to immediately set metatable for the value.
     ///
     /// Note that [`Metatable::set_metatable`](crate::userdata::Metatable::set_metatable) requires mutable access,
     /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
-    pub fn alloc_full_userdata<T, R>(&mut self, value: T, metatable: Option<M>) -> R
+    pub fn alloc_full_userdata<T, A>(
+        &mut self,
+        value: T,
+        metatable: Option<M>,
+    ) -> RootPtr<dyn FullUserdata<M, P>, A>
     where
         T: Trace,
         M: Trace,
-        R: Rooted + Contains<dyn FullUserdata<M, P>>,
+        A: Access,
     {
-        let r: R = self.alloc(value);
+        let r = self.alloc_as(value);
 
         {
-            let addr = r.addr().0;
-            let ty = r.type_index().0;
+            let addr = r.addr();
+            let ty = r.ty();
 
             let temp = GcCell::<dyn FullUserdata<M, P>>::new(addr, ty);
             let value = self.get_mut(temp).unwrap();
@@ -272,7 +306,7 @@ where
 
     /// Get `&T` out of strong reference such as [`RootCell`] or [`Root`].
     ///
-    /// Method returnes reference directly
+    /// Method returns reference directly
     /// because strong references prevent object from being deallocated.
     ///
     /// # Panic
@@ -300,7 +334,7 @@ where
 
     /// Get `&mut T` out of strong reference such as [`RootCell`].
     ///
-    /// Method returnes reference directly
+    /// Method returns reference directly
     /// because strong references prevent object from being deallocated.
     ///
     /// # Panic
@@ -329,14 +363,15 @@ where
     /// Upgrade weak reference ([`Gc`]/[`GcCell`]) into corresponding strong reference ([`Root`]/[`RootCell`]).
     ///
     /// The function will return `None` if object was since deallocated.
-    pub fn upgrade<Ptr>(&self, ptr: Ptr) -> Option<<Ptr as Sealed>::Target>
+    pub fn upgrade<T, A>(&self, ptr: GcPtr<T, A>) -> Option<RootPtr<T, A>>
     where
-        Ptr: Weak,
+        T: ?Sized,
+        A: Access,
     {
         use crate::index::sealed_upgrade::Counter;
 
-        let ty = ptr.type_index().0;
-        let addr = ptr.addr().0;
+        let ty = ptr.ty();
+        let addr = ptr.addr();
 
         let arena = self.arenas.get(ty)?;
         let counter = arena.upgrade(addr)?;
@@ -571,33 +606,10 @@ pub struct Collector {
 
 impl Collector {
     /// Mark an object as reachable.
-    pub fn mark_cell<T>(&mut self, ptr: GcCell<T>)
+    pub fn mark<T, A>(&mut self, ptr: GcPtr<T, A>)
     where
         T: Trace,
-    {
-        let Some(mask) = self.masks.get_mut(ptr.ty()) else {
-            return;
-        };
-
-        // This is slightly incorrect.
-        // It is possible that weak reference we got here is dead and
-        // location it points to was reallocated for another object.
-        // This marks the new object as reachable which sometimes may cause it live longer that expected.
-        // It *probably* doesn't matter much: we shouldn't receive dead references here
-        // unless there are horribly wrong `Trace` implementations or deliberately malformed input.
-        // Solutions are either to check every object for liveness (which requires heap reference),
-        // or track what was the latest generation that was reached in every slot.
-        let Some(mut bit) = mask.get_mut(ptr.addr().index()) else {
-            return;
-        };
-
-        *bit = true;
-    }
-
-    /// Mark an object as reachable.
-    pub fn mark<T>(&mut self, ptr: Gc<T>)
-    where
-        T: Trace,
+        A: Access,
     {
         let Some(mask) = self.masks.get_mut(ptr.ty()) else {
             return;

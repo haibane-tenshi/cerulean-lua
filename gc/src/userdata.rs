@@ -14,7 +14,7 @@
 //!
 //! On the one hand heap has no use for runtime at all.
 //! While it needs to be aware of userdata interface, provided API is entirely for external use.
-//! On the other hand either projects is complex enough in its own right.
+//! On the other hand either project is complex enough in its own right.
 //!
 //! In the end I decided that it is worth to provide extra level of "generic-ness" to decouple the two.
 //!
@@ -57,6 +57,11 @@
 //! A dispatcher can be set using [`Heap::set_dispatcher`](crate::Heap::set_dispatcher) for each individual type.
 //! By design all values of one type share dispatcher method.
 //!
+//! There are two ways to provide metatable for [`FullUserdata`].
+//! The simplest option is to set it in allocation method using [`Heap::alloc_full_userdata`](crate::Heap::alloc_full_userdata).
+//! Otherwise you can set default metatable for type and it will be used instead
+//! when you allocate full userdata through other methods.
+//!
 //! For this reason it is meaningless to implement [`Userdata`] trait on its own -
 //! unless you wish to completely replace provided mechanism.
 
@@ -85,11 +90,39 @@ where
 pub type Dispatcher<T, P> =
     fn(&T, <P as Params>::Id<'_>, <P as Params>::Rt<'_>) -> Option<<P as Params>::Res>;
 
+/// Trait describing types that contain its own Lua metatable.
 pub trait Metatable<M> {
+    /// Retrieve metatable.
     fn metatable(&self) -> Option<&M>;
+
+    /// Set new metatable.
+    ///
+    /// # Return
+    ///
+    /// This function returns the previously set metatable.
     fn set_metatable(&mut self, mt: Option<M>) -> Option<M>;
 }
 
+/// Trait describing Lua full userdata.
+///
+/// Userdata is a mechanism for Lua to represent and interact with foreign types.
+/// Full userdata is just userdata with attached metatable.
+///
+/// This specific trait's purpose is to provide type-erased interface to userdata object.
+/// See section on [userdata design](crate::userdata#userdata-design) in module-level docs for more details.
 pub trait FullUserdata<M, P: Params>: Userdata<P> + Metatable<M> {}
 
 impl<T, M, P: Params> FullUserdata<M, P> for T where T: Userdata<P> + Metatable<M> {}
+
+/// A "default" params set for use in doc tests.
+///
+/// This type is not part of public API and you shouldn't use it.
+#[doc(hidden)]
+pub struct UnitParams;
+
+#[doc(hidden)]
+impl Params for UnitParams {
+    type Id<'id> = ();
+    type Rt<'rt> = ();
+    type Res = ();
+}

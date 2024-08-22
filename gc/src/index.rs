@@ -10,6 +10,242 @@ use crate::heap::TypeIndex;
 use crate::trace::Trace;
 use crate::userdata::{FullUserdata, Params, Userdata};
 
+mod sealed_access {
+    use super::{Mut, Ref};
+
+    pub trait Sealed {}
+
+    impl Sealed for Ref {}
+
+    impl Sealed for Mut {}
+}
+
+/// Trait for marking possible access permissions of a smart pointer.
+pub trait Access: sealed_access::Sealed {}
+
+/// Marker type denoting immutable-only access permissions of smart pointer.
+pub struct Ref;
+
+impl Access for Ref {}
+
+/// Marker type denoting mutable and immutable access permissions of smart pointer.
+pub struct Mut;
+
+impl Access for Mut {}
+
+/// Common type for all weak references.
+///
+/// Exact behavior of this type will differ based on access parameter.
+/// For explanations and examples see [`Gc`] or [`GcCell`].
+pub struct GcPtr<T: ?Sized, A: Access> {
+    addr: Addr,
+    ty: TypeIndex,
+    _type: PhantomData<T>,
+    _access: PhantomData<A>,
+}
+
+impl<T, A> GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    pub(crate) fn new(addr: Addr, ty: TypeIndex) -> Self {
+        GcPtr {
+            addr,
+            ty,
+            _type: PhantomData,
+            _access: PhantomData,
+        }
+    }
+
+    pub(crate) fn ty(self) -> TypeIndex {
+        self.ty
+    }
+
+    pub(crate) fn addr(self) -> Addr {
+        self.addr
+    }
+
+    /// Return location of referenced object.
+    ///
+    /// See [`Location`] struct for more information.
+    pub fn location(self) -> Location<T> {
+        let GcPtr {
+            addr,
+            ty,
+            _type: _,
+            _access: _,
+        } = self;
+
+        Location {
+            addr,
+            ty,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Whether pointers refer to the same object.
+    ///
+    /// This is equivalent to comparing their locations for equality:
+    ///
+    /// ```
+    /// # use gc::{Heap, Gc};
+    /// # use gc::userdata::UnitParams;
+    /// #
+    /// # let mut heap = Heap::<(), UnitParams>::new();
+    /// # let a = heap.alloc(1_usize).downgrade();
+    /// # let b = heap.alloc(2_usize).downgrade();
+    /// assert_eq!(Gc::ptr_eq(a, b), a.location() == b.location());
+    /// ```
+    pub fn ptr_eq(self, other: Self) -> bool {
+        self.location() == other.location()
+    }
+}
+
+impl<T, A> Pointer for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:p}", self.location())
+    }
+}
+
+impl<T, A> Clone for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T, A> Copy for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+}
+
+/// Common type for all strong references.
+///
+/// Exact behavior of this type will differ based on access parameter.
+/// For explanations and examples see [`Root`] or [`RootCell`].
+pub struct RootPtr<T: ?Sized, A: Access> {
+    addr: Addr,
+    ty: TypeIndex,
+    counter: Counter,
+    _type: PhantomData<T>,
+    _access: PhantomData<A>,
+}
+
+impl<T, A> RootPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
+        RootPtr {
+            addr,
+            ty,
+            counter,
+            _type: PhantomData,
+            _access: PhantomData,
+        }
+    }
+
+    pub(crate) fn addr(&self) -> Addr {
+        self.addr
+    }
+
+    pub(crate) fn ty(&self) -> TypeIndex {
+        self.ty
+    }
+
+    /// Downgrade into weak reference.
+    pub fn downgrade(&self) -> GcPtr<T, A> {
+        let RootPtr {
+            addr,
+            ty,
+            counter: _,
+            _type: _,
+            _access: _,
+        } = self;
+
+        GcPtr::new(*addr, *ty)
+    }
+
+    /// Return location of referenced object.
+    ///
+    /// See [`Location`] struct for more information.
+    pub fn location(&self) -> Location<T> {
+        self.downgrade().location()
+    }
+
+    /// Whether pointers refer to the same object.
+    ///
+    /// This is equivalent to comparing their locations for equality:
+    ///
+    /// ```
+    /// # use gc::{Heap, Root};
+    /// # use gc::userdata::UnitParams;
+    /// #
+    /// # let mut heap = Heap::<(), UnitParams>::new();
+    /// # let a = heap.alloc(1_usize);
+    /// # let b = heap.alloc(2_usize);
+    /// assert_eq!(Root::ptr_eq(&a, &b), a.location() == b.location());
+    /// ```
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        self.location() == other.location()
+    }
+}
+
+impl<T, A> Pointer for RootPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:p}", self.location())
+    }
+}
+
+impl<T, A> Clone for RootPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn clone(&self) -> Self {
+        let RootPtr {
+            addr,
+            ty,
+            counter,
+            _type: _,
+            _access: _,
+        } = self;
+
+        Self {
+            addr: *addr,
+            ty: *ty,
+            counter: counter.clone(),
+            _type: PhantomData,
+            _access: PhantomData,
+        }
+    }
+}
+
+impl<T, A> From<RootPtr<T, A>> for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn from(value: RootPtr<T, A>) -> Self {
+        value.downgrade()
+    }
+}
+
 /// A weak reference to gc-allocated mutable value.
 ///
 /// This reference is an equivalent of `Weak<RefCell<T>>`:
@@ -44,8 +280,10 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 ///
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
-/// # let mut heap = Heap::new();
-/// let strong = heap.alloc(3);
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// let strong = heap.alloc_cell(3);
 /// let weak: GcCell<usize> = strong.downgrade();
 /// ```
 ///
@@ -53,8 +291,10 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 ///
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
-/// # let mut heap = Heap::new();
-/// # let weak: GcCell<usize> = heap.alloc(3).downgrade();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// # let weak = heap.alloc_cell(3_usize).downgrade();
 /// let strong: RootCell<usize> = heap.upgrade(weak).expect("object is still alive");
 /// ```
 ///
@@ -65,7 +305,9 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 ///
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// let weak = heap.alloc(3_usize).downgrade();
 /// assert_eq!(heap.get(weak), Some(&3));
 ///
@@ -78,64 +320,17 @@ use crate::userdata::{FullUserdata, Params, Userdata};
 ///
 /// ```
 /// # use gc::{Heap, GcCell, RootCell};
-/// # let mut heap = Heap::new();
-/// let weak = heap.alloc(3_usize).downgrade();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// let weak = heap.alloc_cell(3_usize).downgrade();
 /// assert_eq!(heap.get(weak), Some(&3));
 ///
 /// let ref_mut: &mut usize = heap.get_mut(weak).expect("object is still alive");
 /// *ref_mut = 4;
 /// assert_eq!(heap.get(weak), Some(&4));
 /// ```
-pub struct GcCell<T: ?Sized> {
-    addr: Addr,
-    ty: TypeIndex,
-    _marker: PhantomData<T>,
-}
-
-impl<T> GcCell<T>
-where
-    T: ?Sized,
-{
-    pub(crate) fn new(addr: Addr, ty: TypeIndex) -> Self {
-        GcCell {
-            addr,
-            ty,
-            _marker: PhantomData,
-        }
-    }
-
-    pub(crate) fn ty(self) -> TypeIndex {
-        self.ty
-    }
-
-    pub(crate) fn addr(self) -> Addr {
-        self.addr
-    }
-
-    /// Return location of referenced object.
-    ///
-    /// See [`Location`] struct for more information.
-    pub fn location(self) -> Location<T> {
-        let GcCell { addr, ty, _marker } = self;
-
-        Location { addr, ty, _marker }
-    }
-
-    /// Whether pointers refer to the same object.
-    ///
-    /// This is equivalent to comparing their locations for equality:
-    ///
-    /// ```
-    /// # use gc::{Heap, GcCell};
-    /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc(1_usize).downgrade();
-    /// # let b = heap.alloc(2_usize).downgrade();
-    /// assert_eq!(GcCell::ptr_eq(a, b), a.location() == b.location());
-    /// ```
-    pub fn ptr_eq(self, other: Self) -> bool {
-        self.location() == other.location()
-    }
-}
+pub type GcCell<T> = GcPtr<T, Mut>;
 
 impl<T> Debug for GcCell<T>
 where
@@ -147,26 +342,6 @@ where
             .finish_non_exhaustive()
     }
 }
-
-impl<T> Pointer for GcCell<T>
-where
-    T: ?Sized,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
-    }
-}
-
-impl<T> Clone for GcCell<T>
-where
-    T: ?Sized,
-{
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for GcCell<T> where T: ?Sized {}
 
 /// A strong reference to gc-allocated mutable value.
 ///
@@ -201,16 +376,20 @@ impl<T> Copy for GcCell<T> where T: ?Sized {}
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
-/// # let mut heap = Heap::new();
-/// let strong: RootCell<usize> = heap.alloc(3);
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// let strong: RootCell<usize> = heap.alloc_cell(3);
 /// ```
 ///
 /// You can also clone already existing roots or upgrade weak references:
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
-/// # let mut heap = Heap::new();
-/// # let strong: RootCell<usize> = heap.alloc(3_usize);
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// # let strong: RootCell<usize> = heap.alloc_cell(3_usize);
 /// let weak = strong.downgrade();
 /// let strong = heap.upgrade(weak).expect("object is still alive");
 /// ```
@@ -222,8 +401,10 @@ impl<T> Copy for GcCell<T> where T: ?Sized {}
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
-/// # let mut heap = Heap::new();
-/// let strong = heap.alloc(3_usize);
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// let strong = heap.alloc_cell(3_usize);
 /// assert_eq!(heap.get_root(&strong), &3);
 ///
 /// // Root prevents object from being collected.
@@ -238,71 +419,16 @@ impl<T> Copy for GcCell<T> where T: ?Sized {}
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
-/// # let mut heap = Heap::new();
-/// # let strong = heap.alloc(4_usize);
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// # let strong = heap.alloc_cell(4_usize);
 /// assert_eq!(heap[&strong], 4);
 ///
 /// heap[&strong] = 3;
 /// assert_eq!(heap[&strong], 3);
 /// ```
-pub struct RootCell<T: ?Sized> {
-    addr: Addr,
-    ty: TypeIndex,
-    counter: Counter,
-    _marker: PhantomData<T>,
-}
-
-impl<T> RootCell<T>
-where
-    T: ?Sized,
-{
-    pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
-        RootCell {
-            addr,
-            ty,
-            counter,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Downgrade into weak reference.
-    pub fn downgrade(&self) -> GcCell<T> {
-        let RootCell {
-            addr,
-            ty,
-            counter: _,
-            _marker: _,
-        } = self;
-
-        GcCell {
-            addr: *addr,
-            ty: *ty,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Return location of referenced object.
-    ///
-    /// See [`Location`] struct for more information.
-    pub fn location(&self) -> Location<T> {
-        self.downgrade().location()
-    }
-
-    /// Whether pointers refer to the same object.
-    ///
-    /// This is equivalent to comparing their locations for equality:
-    ///
-    /// ```
-    /// # use gc::{Heap, RootCell};
-    /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc(1_usize);
-    /// # let b = heap.alloc(2_usize);
-    /// assert_eq!(RootCell::ptr_eq(&a, &b), a.location() == b.location());
-    /// ```
-    pub fn ptr_eq(&self, other: &Self) -> bool {
-        self.addr == other.addr
-    }
-}
+pub type RootCell<T> = RootPtr<T, Mut>;
 
 impl<T> Debug for RootCell<T>
 where
@@ -312,45 +438,6 @@ where
         f.debug_struct("Root")
             .field("addr", &self.addr)
             .finish_non_exhaustive()
-    }
-}
-
-impl<T> Pointer for RootCell<T>
-where
-    T: ?Sized,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
-    }
-}
-
-impl<T> Clone for RootCell<T>
-where
-    T: ?Sized,
-{
-    fn clone(&self) -> Self {
-        let RootCell {
-            addr,
-            ty,
-            counter,
-            _marker: _,
-        } = self;
-
-        Self {
-            addr: *addr,
-            ty: *ty,
-            counter: counter.clone(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T> From<RootCell<T>> for GcCell<T>
-where
-    T: ?Sized,
-{
-    fn from(value: RootCell<T>) -> Self {
-        value.downgrade()
     }
 }
 
@@ -385,7 +472,9 @@ where
 ///
 /// ```
 /// # use gc::{Heap, Gc, Root};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// let strong = heap.alloc(3);
 /// let weak: Gc<usize> = strong.downgrade();
 /// ```
@@ -394,7 +483,9 @@ where
 ///
 /// ```
 /// # use gc::{Heap, Gc, Root};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// # let weak: Gc<usize> = heap.alloc(3).downgrade();
 /// let strong: Root<usize> = heap.upgrade(weak).expect("object is still alive");
 /// ```
@@ -406,7 +497,9 @@ where
 ///
 /// ```
 /// # use gc::{Heap, Gc, Root};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// let weak = heap.alloc(3_usize).downgrade();
 /// assert_eq!(heap.get(weak), Some(&3));
 ///
@@ -414,56 +507,7 @@ where
 /// heap.gc();
 /// assert_eq!(heap.get(weak), None);
 /// ```
-pub struct Gc<T: ?Sized> {
-    addr: Addr,
-    ty: TypeIndex,
-    _marker: PhantomData<T>,
-}
-
-impl<T> Gc<T>
-where
-    T: ?Sized,
-{
-    pub(crate) fn new(addr: Addr, ty: TypeIndex) -> Self {
-        Gc {
-            addr,
-            ty,
-            _marker: PhantomData,
-        }
-    }
-
-    pub(crate) fn ty(self) -> TypeIndex {
-        self.ty
-    }
-
-    pub(crate) fn addr(self) -> Addr {
-        self.addr
-    }
-
-    /// Return location of referenced object.
-    ///
-    /// See [`Location`] struct for more information.
-    pub fn location(self) -> Location<T> {
-        let Gc { addr, ty, _marker } = self;
-
-        Location { addr, ty, _marker }
-    }
-
-    /// Whether pointers refer to the same object.
-    ///
-    /// This is equivalent to comparing their locations for equality:
-    ///
-    /// ```
-    /// # use gc::{Heap, Gc};
-    /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc(1_usize).downgrade();
-    /// # let b = heap.alloc(2_usize).downgrade();
-    /// assert_eq!(Gc::ptr_eq(a, b), a.location() == b.location());
-    /// ```
-    pub fn ptr_eq(self, other: Self) -> bool {
-        self.location() == other.location()
-    }
-}
+pub type Gc<T> = GcPtr<T, Ref>;
 
 impl<T> Debug for Gc<T>
 where
@@ -475,26 +519,6 @@ where
             .finish_non_exhaustive()
     }
 }
-
-impl<T> Pointer for Gc<T>
-where
-    T: ?Sized,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
-    }
-}
-
-impl<T> Clone for Gc<T>
-where
-    T: ?Sized,
-{
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for Gc<T> where T: ?Sized {}
 
 /// A strong reference to gc-allocated immutable value.
 ///
@@ -526,7 +550,9 @@ impl<T> Copy for Gc<T> where T: ?Sized {}
 ///
 /// ```
 /// # use gc::{Heap, Root};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// let strong: Root<usize> = heap.alloc(3);
 /// ```
 ///
@@ -534,7 +560,9 @@ impl<T> Copy for Gc<T> where T: ?Sized {}
 ///
 /// ```
 /// # use gc::{Heap, Root};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// # let strong: Root<usize> = heap.alloc(3_usize);
 /// let weak = strong.downgrade();
 /// let strong = heap.upgrade(weak).expect("object is still alive");
@@ -547,7 +575,9 @@ impl<T> Copy for Gc<T> where T: ?Sized {}
 ///
 /// ```
 /// # use gc::{Heap, Root};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// let strong = heap.alloc(3_usize);
 /// assert_eq!(heap.get_root(&strong), &3);
 ///
@@ -560,68 +590,13 @@ impl<T> Copy for Gc<T> where T: ?Sized {}
 ///
 /// ```
 /// # use gc::{Heap, Root};
-/// # let mut heap = Heap::new();
+/// # use gc::userdata::UnitParams;
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
 /// # let strong = heap.alloc(3_usize);
 /// assert_eq!(heap[&strong], 3);
 /// ```
-pub struct Root<T: ?Sized> {
-    addr: Addr,
-    ty: TypeIndex,
-    counter: Counter,
-    _marker: PhantomData<T>,
-}
-
-impl<T> Root<T>
-where
-    T: ?Sized,
-{
-    pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
-        Root {
-            addr,
-            ty,
-            counter,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Downgrade into weak reference.
-    pub fn downgrade(&self) -> Gc<T> {
-        let Root {
-            addr,
-            ty,
-            counter: _,
-            _marker: _,
-        } = self;
-
-        Gc {
-            addr: *addr,
-            ty: *ty,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Return location of referenced object.
-    ///
-    /// See [`Location`] struct for more information.
-    pub fn location(&self) -> Location<T> {
-        self.downgrade().location()
-    }
-
-    /// Whether pointers refer to the same object.
-    ///
-    /// This is equivalent to comparing their locations for equality:
-    ///
-    /// ```
-    /// # use gc::{Heap, Root};
-    /// # let mut heap = Heap::new();
-    /// # let a = heap.alloc(1_usize);
-    /// # let b = heap.alloc(2_usize);
-    /// assert_eq!(Root::ptr_eq(&a, &b), a.location() == b.location());
-    /// ```
-    pub fn ptr_eq(&self, other: &Self) -> bool {
-        self.addr == other.addr
-    }
-}
+pub type Root<T> = RootPtr<T, Ref>;
 
 impl<T> Debug for Root<T>
 where
@@ -631,45 +606,6 @@ where
         f.debug_struct("Root")
             .field("addr", &self.addr)
             .finish_non_exhaustive()
-    }
-}
-
-impl<T> Pointer for Root<T>
-where
-    T: ?Sized,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
-    }
-}
-
-impl<T> Clone for Root<T>
-where
-    T: ?Sized,
-{
-    fn clone(&self) -> Self {
-        let Root {
-            addr,
-            ty,
-            counter,
-            _marker: _,
-        } = self;
-
-        Self {
-            addr: *addr,
-            ty: *ty,
-            counter: counter.clone(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T> From<Root<T>> for Gc<T>
-where
-    T: ?Sized,
-{
-    fn from(value: Root<T>) -> Self {
-        value.downgrade()
     }
 }
 
@@ -800,7 +736,7 @@ where
 }
 
 pub(crate) mod sealed {
-    use super::{Gc, GcCell, Root, RootCell};
+    use super::{Access, GcPtr, RootPtr};
 
     #[doc(hidden)]
     pub struct Addr(pub(crate) super::Addr);
@@ -816,9 +752,10 @@ pub(crate) mod sealed {
         fn type_index(&self) -> TypeIndex;
     }
 
-    impl<T> Sealed for GcCell<T>
+    impl<T, A> Sealed for GcPtr<T, A>
     where
         T: ?Sized,
+        A: Access,
     {
         fn addr(&self) -> Addr {
             Addr(self.addr)
@@ -829,35 +766,10 @@ pub(crate) mod sealed {
         }
     }
 
-    impl<T> Sealed for RootCell<T>
+    impl<T, A> Sealed for RootPtr<T, A>
     where
         T: ?Sized,
-    {
-        fn addr(&self) -> Addr {
-            Addr(self.addr)
-        }
-
-        fn type_index(&self) -> TypeIndex {
-            TypeIndex(self.ty)
-        }
-    }
-
-    impl<T> Sealed for Gc<T>
-    where
-        T: ?Sized,
-    {
-        fn addr(&self) -> Addr {
-            Addr(self.addr)
-        }
-
-        fn type_index(&self) -> TypeIndex {
-            TypeIndex(self.ty)
-        }
-    }
-
-    impl<T> Sealed for Root<T>
-    where
-        T: ?Sized,
+        A: Access,
     {
         fn addr(&self) -> Addr {
             Addr(self.addr)
@@ -870,49 +782,21 @@ pub(crate) mod sealed {
 }
 
 pub(crate) mod sealed_root {
-    use super::{Root, RootCell};
+    use super::{Access, RootPtr};
 
     #[doc(hidden)]
     pub struct CounterRef<'a>(pub(crate) &'a super::Counter);
 
-    #[doc(hidden)]
-    pub struct Addr(pub(crate) super::Addr);
-
-    #[doc(hidden)]
-    pub struct TypeIndex(pub(crate) super::TypeIndex);
-
-    #[doc(hidden)]
-    pub struct Counter(pub(crate) super::Counter);
-
     pub trait Sealed {
-        #[doc(hidden)]
-        fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self;
-
         #[doc(hidden)]
         fn counter(&self) -> CounterRef;
     }
 
-    impl<T> Sealed for RootCell<T>
+    impl<T, A> Sealed for RootPtr<T, A>
     where
         T: ?Sized,
+        A: Access,
     {
-        fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
-            RootCell::new(addr.0, ty.0, counter.0)
-        }
-
-        fn counter(&self) -> CounterRef {
-            CounterRef(&self.counter)
-        }
-    }
-
-    impl<T> Sealed for Root<T>
-    where
-        T: ?Sized,
-    {
-        fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
-            Root::new(addr.0, ty.0, counter.0)
-        }
-
         fn counter(&self) -> CounterRef {
             CounterRef(&self.counter)
         }
@@ -920,7 +804,7 @@ pub(crate) mod sealed_root {
 }
 
 pub(crate) mod sealed_upgrade {
-    use super::{Gc, GcCell, Root, RootCell};
+    use super::{Access, GcPtr, RootPtr};
 
     #[doc(hidden)]
     pub struct Counter(pub(crate) super::Counter);
@@ -932,37 +816,23 @@ pub(crate) mod sealed_upgrade {
         fn upgrade(self, counter: Counter) -> Self::Target;
     }
 
-    impl<T> Sealed for Gc<T>
+    impl<T, A> Sealed for GcPtr<T, A>
     where
         T: ?Sized,
+        A: Access,
     {
-        type Target = Root<T>;
+        type Target = RootPtr<T, A>;
 
         fn upgrade(self, counter: Counter) -> Self::Target {
             let Counter(counter) = counter;
-            let Gc {
+            let GcPtr {
                 addr,
                 ty,
-                _marker: _,
+                _type: _,
+                _access: _,
             } = self;
-            Root::new(addr, ty, counter)
-        }
-    }
 
-    impl<T> Sealed for GcCell<T>
-    where
-        T: ?Sized,
-    {
-        type Target = RootCell<T>;
-
-        fn upgrade(self, counter: Counter) -> Self::Target {
-            let Counter(counter) = counter;
-            let GcCell {
-                addr,
-                ty,
-                _marker: _,
-            } = self;
-            RootCell::new(addr, ty, counter)
+            RootPtr::new(addr, ty, counter)
         }
     }
 }
@@ -1076,18 +946,11 @@ pub(crate) mod sealed_allocated_from {
     }
 }
 
-/// Marker trait indicating referenced type.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-
-pub trait Contains<T: ?Sized>: sealed::Sealed {}
-
 /// Marker trait permitting by-reference (`&T`) access.
 ///
 /// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait RefAccess<T: ?Sized>: Contains<T> {}
+pub trait RefAccess<T: ?Sized>: sealed::Sealed {}
 
 /// Marker trait permitting by-mut-reference (`&mut T`) access.
 ///
@@ -1101,12 +964,6 @@ pub trait MutAccess<T: ?Sized>: RefAccess<T> {}
 /// You probably shouldn't use it for anything else or at all.
 pub trait Rooted: sealed_root::Sealed {}
 
-/// Marker trait for weak references.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-pub trait Weak: sealed::Sealed + sealed_upgrade::Sealed {}
-
 /// Marker trait for types that can be retrieved from [`Heap`](crate::Heap).
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s getter methods.
@@ -1114,26 +971,20 @@ pub trait Weak: sealed::Sealed + sealed_upgrade::Sealed {}
 pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
 
 /// Marker trait for types that can be allocated in `Heap`.
-/// 
+///
 /// Purpose of this trait is to serve as bound in `Heap`'s allocation methods.
 /// You probably shouldn't use it for anything else or at all.
 pub trait AllocatedFrom<T, M, P>: sealed_allocated_from::Sealed<T, M, P> {}
 
-impl<T: ?Sized> Contains<T> for GcCell<T> {}
 impl<T: ?Sized> RefAccess<T> for GcCell<T> {}
 impl<T: ?Sized> MutAccess<T> for GcCell<T> {}
-impl<T: ?Sized> Weak for GcCell<T> {}
 
-impl<T: ?Sized> Contains<T> for RootCell<T> {}
 impl<T: ?Sized> RefAccess<T> for RootCell<T> {}
 impl<T: ?Sized> MutAccess<T> for RootCell<T> {}
 impl<T: ?Sized> Rooted for RootCell<T> {}
 
-impl<T: ?Sized> Contains<T> for Gc<T> {}
 impl<T: ?Sized> RefAccess<T> for Gc<T> {}
-impl<T: ?Sized> Weak for Gc<T> {}
 
-impl<T: ?Sized> Contains<T> for Root<T> {}
 impl<T: ?Sized> RefAccess<T> for Root<T> {}
 impl<T: ?Sized> Rooted for Root<T> {}
 
