@@ -136,7 +136,7 @@ impl Trace for f64 {
 
 impl<T> Trace for &'static T
 where
-    T: Trace,
+    T: Trace + ?Sized,
 {
     fn trace(&self, collector: &mut Collector) {
         <T as Trace>::trace(self, collector)
