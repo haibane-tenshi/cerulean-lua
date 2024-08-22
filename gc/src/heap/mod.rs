@@ -262,12 +262,14 @@ where
     ///
     /// Result of dereferencing a reference created from a different heap is unspecified but *safe*.
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
-    pub fn get<T>(&self, ptr: impl RefAccess<T>) -> Option<&T>
+    pub fn get<Ptr, T>(&self, ptr: impl AsRef<Ptr>) -> Option<&T>
     where
+        Ptr: RefAccess<T>,
         T: Allocated<M, P> + ?Sized,
     {
         use crate::index::sealed_allocated::{Addr, ArenaRef, Sealed};
 
+        let ptr = ptr.as_ref();
         let ty = ptr.type_index().0;
         let addr = ptr.addr().0;
 
@@ -290,12 +292,14 @@ where
     ///
     /// Result of dereferencing a reference created from a different heap is unspecified but *safe*.
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
-    pub fn get_mut<T>(&mut self, ptr: impl MutAccess<T>) -> Option<&mut T>
+    pub fn get_mut<Ptr, T>(&mut self, ptr: impl AsRef<Ptr>) -> Option<&mut T>
     where
+        Ptr: MutAccess<T>,
         T: Allocated<M, P> + ?Sized,
     {
         use crate::index::sealed_allocated::{Addr, ArenaMut, Sealed};
 
+        let ptr = ptr.as_ref();
         let ty = ptr.type_index().0;
         let addr = ptr.addr().0;
 
@@ -313,10 +317,12 @@ where
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root<T>(&self, ptr: &(impl RefAccess<T> + Rooted)) -> &T
+    pub fn get_root<Ptr, T>(&self, ptr: impl AsRef<Ptr>) -> &T
     where
+        Ptr: RefAccess<T> + Rooted,
         T: Allocated<M, P> + ?Sized,
     {
+        let ptr = ptr.as_ref();
         let addr = ptr.addr().0;
         let ty = ptr.type_index().0;
         let counter = ptr.counter().0;
@@ -341,10 +347,12 @@ where
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root_mut<T>(&mut self, ptr: &(impl MutAccess<T> + Rooted)) -> &mut T
+    pub fn get_root_mut<Ptr, T>(&mut self, ptr: impl AsRef<Ptr>) -> &mut T
     where
+        Ptr: MutAccess<T> + Rooted,
         T: Allocated<M, P> + ?Sized,
     {
+        let ptr = ptr.as_ref();
         let addr = ptr.addr().0;
         let ty = ptr.type_index().0;
         let counter = ptr.counter().0;

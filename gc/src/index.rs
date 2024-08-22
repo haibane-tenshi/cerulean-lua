@@ -129,6 +129,16 @@ where
 {
 }
 
+impl<T, A> AsRef<Self> for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 /// Common type for all strong references.
 ///
 /// Exact behavior of this type will differ based on access parameter.
@@ -243,6 +253,16 @@ where
 {
     fn from(value: RootPtr<T, A>) -> Self {
         value.downgrade()
+    }
+}
+
+impl<T, A> AsRef<Self> for RootPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
