@@ -510,7 +510,7 @@ impl<M, P> Debug for Heap<M, P> {
 
 impl<T, M, P> Index<&RootCell<T>> for Heap<M, P>
 where
-    T: Trace,
+    T: Allocated<M, P> + ?Sized,
     P: Params,
 {
     type Output = T;
@@ -522,7 +522,7 @@ where
 
 impl<T, M, P> Index<&Root<T>> for Heap<M, P>
 where
-    T: Trace,
+    T: Allocated<M, P> + ?Sized,
     P: Params,
 {
     type Output = T;
@@ -534,7 +534,7 @@ where
 
 impl<T, M, P> IndexMut<&RootCell<T>> for Heap<M, P>
 where
-    T: Trace,
+    T: Allocated<M, P> + ?Sized,
     P: Params,
 {
     fn index_mut(&mut self, index: &RootCell<T>) -> &mut Self::Output {
