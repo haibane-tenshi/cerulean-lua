@@ -12,13 +12,14 @@ use typed_index_collections::TiVec;
 
 use crate::index::sealed_upgrade::Sealed;
 use crate::index::{
-    Access, Allocated, AllocatedFrom, Gc, GcCell, GcPtr, MutAccess, RefAccess, Root, RootCell,
+    Access, AllocateAs, Allocated, Gc, GcCell, GcPtr, MutAccess, RefAccess, Root, RootCell,
     RootPtr, Rooted,
 };
 use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
 use arena::Arena;
-use store::{Addr, Counter, Store};
+use store::{Addr, Counter};
+use userdata_store::Dispatched;
 
 /// Backing store for garbage-collected objects.
 ///
@@ -53,7 +54,7 @@ use store::{Addr, Counter, Store};
 ///
 /// Implementation uses standard mark-and-sweep strategy.
 pub struct Heap<M, P> {
-    type_map: HashMap<TypeId, Indices>,
+    type_map: HashMap<TypeId, TypeIndex>,
     arenas: TiVec<TypeIndex, Box<dyn Arena<M, P>>>,
     status: Status,
 }
@@ -67,50 +68,18 @@ where
         Default::default()
     }
 
-    pub(crate) fn concrete_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
+    fn arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
-        T: Trace,
-    {
-        let id = TypeId::of::<T>();
-        let indices = self.type_map.entry(id).or_default();
-        let index = *indices
-            .concrete
-            .get_or_insert_with(|| self.arenas.push_and_get_key(Box::new(Store::<T>::new())));
-        let store = self.arenas.get_mut(index).unwrap().as_mut();
-        (index, store)
-    }
-
-    pub(crate) fn light_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
-    where
-        T: Trace,
+        T: Trace + Dispatched<M, P>,
+        M: 'static,
     {
         use userdata_store::UserdataStore;
 
         let id = TypeId::of::<T>();
-        let indices = self.type_map.entry(id).or_default();
-        let index = *indices.userdata.get_or_insert_with(|| {
+        let index = *self.type_map.entry(id).or_insert_with(|| {
             self.arenas
-                .push_and_get_key(Box::new(UserdataStore::<T, P>::new()))
+                .push_and_get_key(Box::new(UserdataStore::<T, M, P>::new()))
         });
-
-        let store = self.arenas.get_mut(index).unwrap().as_mut();
-        (index, store)
-    }
-
-    pub(crate) fn full_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
-    where
-        M: Trace,
-        T: Trace,
-    {
-        use userdata_store::FullUserdataStore;
-
-        let id = TypeId::of::<T>();
-        let indices = self.type_map.entry(id).or_default();
-        let index = *indices.userdata.get_or_insert_with(|| {
-            self.arenas
-                .push_and_get_key(Box::new(FullUserdataStore::<T, M, P>::new()))
-        });
-
         let store = self.arenas.get_mut(index).unwrap().as_mut();
         (index, store)
     }
@@ -118,23 +87,30 @@ where
     #[inline(never)]
     fn alloc_slow<T>(&mut self, ty: TypeIndex, value: T) -> (Addr, Counter)
     where
-        T: Trace,
+        T: Trace + Dispatched<M, P>,
+        M: 'static,
     {
         self.gc_with(&value);
-        self.arenas.get_mut(ty).unwrap().insert(value).unwrap()
+        self.arenas
+            .get_mut(ty)
+            .unwrap()
+            .cast_as_mut()
+            .unwrap()
+            .insert(value)
     }
 
-    fn alloc_inner<T>(&mut self, ty: TypeIndex, value: T) -> Result<(Addr, Counter), T>
+    pub(crate) fn alloc_inner<T>(&mut self, value: T) -> (Addr, TypeIndex, Counter)
     where
-        T: Trace,
+        T: Trace + Dispatched<M, P>,
+        M: 'static,
     {
-        let arena = self.arenas.get_mut(ty).unwrap();
-        let ptr = match arena.try_insert(value).unwrap() {
+        let (ty, arena) = self.arena_or_insert::<T>();
+        let (addr, counter) = match arena.cast_as_mut().unwrap().try_insert(value) {
             Ok(ptr) => ptr,
             Err(value) => self.alloc_slow(ty, value),
         };
 
-        Ok(ptr)
+        (addr, ty, counter)
     }
 
     /// Convenience function to allocate `T` as [`Root<T>`].
@@ -146,6 +122,7 @@ where
     pub fn alloc<T>(&mut self, value: T) -> Root<T>
     where
         T: Trace,
+        M: 'static,
     {
         self.alloc_as(value)
     }
@@ -159,6 +136,7 @@ where
     pub fn alloc_cell<T>(&mut self, value: T) -> RootCell<T>
     where
         T: Trace,
+        M: 'static,
     {
         self.alloc_as(value)
     }
@@ -195,20 +173,13 @@ where
     /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
     pub fn alloc_as<U, T, A>(&mut self, value: T) -> RootPtr<U, A>
     where
-        T: Trace,
-        U: AllocatedFrom<T, M, P> + ?Sized,
+        T: Trace + AllocateAs<U, M, P>,
+        U: ?Sized,
         A: Access,
     {
-        let (addr, ty, counter) = {
-            use crate::index::sealed_allocated_from::{Sealed, TypeIndex};
+        use crate::index::sealed_allocate_as::{Addr, Counter, TypeIndex};
 
-            let TypeIndex(ty) = <U as Sealed<T, M, P>>::select(self);
-            let Ok((addr, counter)) = self.alloc_inner(ty, value) else {
-                unreachable!()
-            };
-
-            (addr, ty, counter)
-        };
+        let (Addr(addr), TypeIndex(ty), Counter(counter)) = value.alloc_into(self);
 
         RootPtr::new(addr, ty, counter)
     }
@@ -394,9 +365,15 @@ where
     pub fn set_dispatcher<T>(&mut self, dispatcher: Dispatcher<T, P>)
     where
         T: Trace,
+        M: Trace,
     {
-        let (_, arena) = self.light_arena_or_insert::<T>();
-        arena.set_dispatcher(&dispatcher)
+        use userdata_store::{FullUd, LightUd};
+
+        let (_, arena) = self.arena_or_insert::<LightUd<T, P>>();
+        arena.set_dispatcher(&dispatcher);
+
+        let (_, arena) = self.arena_or_insert::<FullUd<T, M, P>>();
+        arena.set_dispatcher(&dispatcher);
     }
 
     fn collector(&self) -> (Collector, Collector) {
@@ -662,10 +639,4 @@ impl From<TypeIndex> for usize {
         let TypeIndex(value) = value;
         value
     }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct Indices {
-    concrete: Option<TypeIndex>,
-    userdata: Option<TypeIndex>,
 }

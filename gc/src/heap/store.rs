@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -7,9 +6,8 @@ use std::rc::Rc;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
-use super::arena::{insert, try_insert, Arena, IncompatibleType, Traceable};
+use super::arena::{HandleStrongRef, Traceable};
 use super::{Collector, Trace};
-use crate::userdata::{FullUserdata, Params, Userdata};
 use crate::vec_list::VecList;
 
 #[derive(Debug)]
@@ -58,7 +56,7 @@ impl<T> Store<T> {
             .and_then(|place| (place.gen == gen).then_some(&mut place.value))
     }
 
-    fn upgrade(&self, addr: Addr) -> Option<Counter> {
+    pub(crate) fn upgrade(&self, addr: Addr) -> Option<Counter> {
         let Place {
             counter: counter_place,
             ..
@@ -83,12 +81,7 @@ impl<T> Store<T> {
 
         Some(counter)
     }
-}
 
-impl<T> Store<T>
-where
-    T: Trace,
-{
     pub(crate) fn try_insert(&mut self, value: T) -> Result<(Addr, Counter), T> {
         self.insert_weak(value).map(|addr| {
             let counter = self.upgrade(addr).unwrap();
@@ -158,60 +151,14 @@ where
     }
 }
 
-impl<T, M, P> Arena<M, P> for Store<T>
-where
-    T: Trace,
-    P: Params,
-{
-    fn try_insert_any(
-        &mut self,
-        value: &mut dyn Any,
-    ) -> Result<Option<(Addr, Counter)>, IncompatibleType> {
-        try_insert(value, |value| self.try_insert(value))
-    }
-
-    fn insert_any(&mut self, value: &mut dyn Any) -> Result<(Addr, Counter), IncompatibleType> {
-        insert(value, |value| self.insert(value))
-    }
-
+impl<T> HandleStrongRef for Store<T> {
     fn validate(&self, counter: &Counter) -> bool {
-        Rc::ptr_eq(&counter.counters, &self.strong_counters)
+        Rc::ptr_eq(&self.strong_counters, &counter.counters)
     }
 
     fn upgrade(&self, addr: Addr) -> Option<Counter> {
         Store::upgrade(self, addr)
     }
-
-    fn get_value(&self, addr: Addr) -> Option<&dyn Any> {
-        let value = self.get(addr)?;
-        Some(value)
-    }
-
-    fn get_value_mut(&mut self, addr: Addr) -> Option<&mut dyn Any> {
-        let value = self.get_mut(addr)?;
-        Some(value)
-    }
-
-    fn get_userdata(&self, _addr: Addr) -> Option<&(dyn Userdata<P> + 'static)> {
-        None
-    }
-
-    fn get_userdata_mut(&mut self, _addr: Addr) -> Option<&mut (dyn Userdata<P> + 'static)> {
-        None
-    }
-
-    fn get_full_userdata(&self, _addr: Addr) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
-        None
-    }
-
-    fn get_full_userdata_mut(
-        &mut self,
-        _addr: Addr,
-    ) -> Option<&mut (dyn FullUserdata<M, P> + 'static)> {
-        None
-    }
-
-    fn set_dispatcher(&mut self, _dispatcher: &dyn Any) {}
 }
 
 #[derive(Debug)]

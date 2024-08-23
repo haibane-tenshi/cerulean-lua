@@ -880,14 +880,15 @@ pub(crate) mod sealed_allocated {
     impl<T, M, P> Sealed<M, P> for T
     where
         T: Trace,
+        M: 'static,
         P: Params,
     {
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get(addr.0).unwrap()
+            arena.0.get(addr.0)
         }
 
         fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_mut(addr.0).unwrap()
+            arena.0.get_mut(addr.0)
         }
     }
 
@@ -919,49 +920,69 @@ pub(crate) mod sealed_allocated {
     }
 }
 
-pub(crate) mod sealed_allocated_from {
+pub(crate) mod sealed_allocate_as {
     use super::{FullUserdata, Params, Trace, Userdata};
     use crate::heap::Heap;
 
     #[doc(hidden)]
+    pub struct Addr(pub(crate) super::Addr);
+
+    #[doc(hidden)]
     pub struct TypeIndex(pub(crate) super::TypeIndex);
 
-    pub trait Sealed<T, M, P> {
+    #[doc(hidden)]
+    pub struct Counter(pub(crate) super::Counter);
+
+    pub trait Sealed<T: ?Sized, M, P> {
         #[doc(hidden)]
-        fn select(heap: &mut Heap<M, P>) -> TypeIndex;
+        fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter);
     }
 
     impl<T, M, P> Sealed<T, M, P> for T
     where
         T: Trace,
+        M: 'static,
         P: Params,
     {
-        fn select(heap: &mut Heap<M, P>) -> TypeIndex {
-            let (ty, _arena) = heap.concrete_arena_or_insert::<T>();
-            TypeIndex(ty)
+        fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
+            use crate::heap::userdata_store::Concrete;
+
+            let value = Concrete::new(self);
+
+            let (addr, ty, counter) = heap.alloc_inner(value);
+            (Addr(addr), TypeIndex(ty), Counter(counter))
         }
     }
 
-    impl<T, M, P> Sealed<T, M, P> for dyn Userdata<P>
+    impl<T, M, P> Sealed<dyn Userdata<P>, M, P> for T
     where
         T: Trace,
+        M: 'static,
         P: Params,
     {
-        fn select(heap: &mut Heap<M, P>) -> TypeIndex {
-            let (ty, _arena) = heap.light_arena_or_insert::<T>();
-            TypeIndex(ty)
+        fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
+            use crate::heap::userdata_store::LightUd;
+
+            let value = LightUd::new(self);
+
+            let (addr, ty, counter) = heap.alloc_inner(value);
+            (Addr(addr), TypeIndex(ty), Counter(counter))
         }
     }
 
-    impl<T, M, P> Sealed<T, M, P> for dyn FullUserdata<M, P>
+    impl<T, M, P> Sealed<dyn FullUserdata<M, P>, M, P> for T
     where
         T: Trace,
         M: Trace,
         P: Params,
     {
-        fn select(heap: &mut Heap<M, P>) -> TypeIndex {
-            let (ty, _arena) = heap.full_arena_or_insert::<T>();
-            TypeIndex(ty)
+        fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
+            use crate::heap::userdata_store::FullUd;
+
+            let value = FullUd::new(self);
+
+            let (addr, ty, counter) = heap.alloc_inner(value);
+            (Addr(addr), TypeIndex(ty), Counter(counter))
         }
     }
 }
@@ -994,7 +1015,7 @@ pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s allocation methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait AllocatedFrom<T, M, P>: sealed_allocated_from::Sealed<T, M, P> {}
+pub trait AllocateAs<T: ?Sized, M, P>: sealed_allocate_as::Sealed<T, M, P> {}
 
 impl<T: ?Sized> RefAccess<T> for GcCell<T> {}
 impl<T: ?Sized> MutAccess<T> for GcCell<T> {}
@@ -1011,6 +1032,7 @@ impl<T: ?Sized> Rooted for Root<T> {}
 impl<T, M, P> Allocated<M, P> for T
 where
     T: Trace,
+    M: 'static,
     P: Params,
 {
 }
@@ -1024,21 +1046,23 @@ where
 {
 }
 
-impl<T, M, P> AllocatedFrom<T, M, P> for T
+impl<T, M, P> AllocateAs<T, M, P> for T
 where
     T: Trace,
+    M: 'static,
     P: Params,
 {
 }
 
-impl<T, M, P> AllocatedFrom<T, M, P> for dyn Userdata<P>
+impl<T, M, P> AllocateAs<dyn Userdata<P>, M, P> for T
 where
     T: Trace,
+    M: 'static,
     P: Params,
 {
 }
 
-impl<T, M, P> AllocatedFrom<T, M, P> for dyn FullUserdata<M, P>
+impl<T, M, P> AllocateAs<dyn FullUserdata<M, P>, M, P> for T
 where
     T: Trace,
     M: Trace,

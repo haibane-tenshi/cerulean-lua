@@ -1,174 +1,134 @@
 use std::any::Any;
 use std::cell::Cell;
+use std::fmt::Debug;
 
-use super::arena::{insert, try_insert, Arena, IncompatibleType, Traceable};
+use bitvec::slice::BitSlice;
+use bitvec::vec::BitVec;
+
+use super::arena::{AsAny, Getters, HandleStrongRef, Traceable};
 use super::store::{Addr, Counter, Store};
 use super::{Collector, Trace};
 use crate::userdata::{Dispatcher, FullUserdata, Metatable, Params, Userdata};
 
-struct WithDispatcher<T, P: Params> {
-    dispatcher: Cell<Dispatcher<T, P>>,
-    value: T,
-}
-
-impl<T, P> Trace for WithDispatcher<T, P>
+#[derive(Debug)]
+pub(crate) struct UserdataStore<T, M, P>
 where
-    T: Trace,
-    P: Params,
+    T: Dispatched<M, P>,
 {
-    fn trace(&self, collector: &mut Collector) {
-        let WithDispatcher {
-            dispatcher: _,
-            value,
-        } = self;
-
-        value.trace(collector)
-    }
+    dispatcher: <T as Dispatched<M, P>>::Dispatcher,
+    store: Store<T>,
 }
 
-impl<T, P> Userdata<P> for WithDispatcher<T, P>
+impl<T, M, P> UserdataStore<T, M, P>
 where
-    P: Params,
-{
-    fn method(&self, ident: P::Id<'_>, rt: P::Rt<'_>) -> Option<P::Res> {
-        (self.dispatcher.get())(&self.value, ident, rt)
-    }
-}
-
-impl<T, M, P> Metatable<M> for WithDispatcher<T, P>
-where
-    T: Metatable<M>,
-    P: Params,
-{
-    fn metatable(&self) -> Option<&M> {
-        self.value.metatable()
-    }
-
-    fn set_metatable(&mut self, mt: Option<M>) -> Option<M> {
-        self.value.set_metatable(mt)
-    }
-}
-
-pub(crate) struct UserdataStore<T, P: Params> {
-    dispatcher: Dispatcher<T, P>,
-    store: Store<WithDispatcher<T, P>>,
-}
-
-impl<T, P> UserdataStore<T, P>
-where
-    P: Params,
+    T: Dispatched<M, P>,
 {
     pub(crate) fn new() -> Self {
         Self {
-            dispatcher: |_, _, _| None,
+            dispatcher: <T as Dispatched<M, P>>::default(),
             store: Store::new(),
         }
     }
 
-    fn get(&self, addr: Addr) -> Option<&WithDispatcher<T, P>> {
-        self.store.get(addr)
+    pub(crate) fn get(&self, addr: Addr) -> Option<&T> {
+        self.store
+            .get(addr)
+            .inspect(|value| value.set(self.dispatcher))
     }
 
-    fn get_mut(&mut self, addr: Addr) -> Option<&mut WithDispatcher<T, P>> {
-        self.store.get_mut(addr)
+    pub(crate) fn get_mut(&mut self, addr: Addr) -> Option<&mut T> {
+        self.store
+            .get_mut(addr)
+            .inspect(|value| value.set(self.dispatcher))
     }
-}
 
-impl<T, P> UserdataStore<T, P>
-where
-    T: Trace,
-    P: Params,
-{
     pub(crate) fn try_insert(&mut self, value: T) -> Result<(Addr, Counter), T> {
-        let value = WithDispatcher {
-            dispatcher: Cell::new(self.dispatcher),
-            value,
-        };
-
-        self.store.try_insert(value).map_err(|ud| ud.value)
+        self.store.try_insert(value)
     }
 
     pub(crate) fn insert(&mut self, value: T) -> (Addr, Counter) {
-        let value = WithDispatcher {
-            dispatcher: Cell::new(self.dispatcher),
-            value,
-        };
-
         self.store.insert(value)
     }
 }
 
-impl<T, P> Traceable for UserdataStore<T, P>
+impl<T, M, P> Traceable for UserdataStore<T, M, P>
 where
-    T: Trace,
-    P: Params,
+    T: Trace + Dispatched<M, P>,
 {
-    fn roots(&self) -> bitvec::prelude::BitVec {
+    fn roots(&self) -> BitVec {
         self.store.roots()
     }
 
-    fn trace(&self, indices: &bitvec::prelude::BitSlice, collector: &mut Collector) {
+    fn trace(&self, indices: &BitSlice, collector: &mut Collector) {
         self.store.trace(indices, collector)
     }
 
-    fn retain(&mut self, indices: &bitvec::prelude::BitSlice) {
+    fn retain(&mut self, indices: &BitSlice) {
         self.store.retain(indices)
     }
 }
 
-impl<T, M, P> Arena<M, P> for UserdataStore<T, P>
+impl<T, M, P> AsAny for UserdataStore<T, M, P>
 where
-    T: Trace,
+    T: Dispatched<M, P> + 'static,
+    M: 'static,
     P: Params,
 {
-    fn try_insert_any(
-        &mut self,
-        value: &mut dyn Any,
-    ) -> Result<Option<(Addr, Counter)>, IncompatibleType> {
-        try_insert(value, |value| self.try_insert(value))
-    }
+    // fn as_any(&self) -> &dyn Any {
+    //     self
+    // }
 
-    fn insert_any(&mut self, value: &mut dyn Any) -> Result<(Addr, Counter), IncompatibleType> {
-        insert(value, |value| self.insert(value))
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
+}
 
+impl<T, M, P> HandleStrongRef for UserdataStore<T, M, P>
+where
+    T: Dispatched<M, P>,
+    P: Params,
+{
     fn validate(&self, counter: &Counter) -> bool {
-        <_ as Arena<M, P>>::validate(&self.store, counter)
+        self.store.validate(counter)
     }
 
     fn upgrade(&self, addr: Addr) -> Option<Counter> {
-        <_ as Arena<M, P>>::upgrade(&self.store, addr)
+        self.store.upgrade(addr)
+    }
+}
+
+impl<T, M, P> Getters<M, P> for UserdataStore<T, M, P>
+where
+    T: Trace + Dispatched<M, P>,
+    P: Params,
+{
+    fn get_value(&self, addr: Addr) -> Option<&dyn Any> {
+        let value = self.get(addr)?.as_inner();
+        Some(value)
     }
 
-    fn get_value(&self, _addr: Addr) -> Option<&dyn Any> {
-        None
-    }
-
-    fn get_value_mut(&mut self, _addr: Addr) -> Option<&mut dyn Any> {
-        None
+    fn get_value_mut(&mut self, addr: Addr) -> Option<&mut dyn Any> {
+        let value = self.get_mut(addr)?.as_inner_mut();
+        Some(value)
     }
 
     fn get_userdata(&self, addr: Addr) -> Option<&(dyn Userdata<P> + 'static)> {
-        let value = self.store.get(addr)?;
-        value.dispatcher.set(self.dispatcher);
-        Some(value)
+        self.get(addr)?.as_light()
     }
 
     fn get_userdata_mut(&mut self, addr: Addr) -> Option<&mut (dyn Userdata<P> + 'static)> {
-        let value = self.store.get_mut(addr)?;
-        value.dispatcher.set(self.dispatcher);
-        Some(value)
+        self.get_mut(addr)?.as_light_mut()
     }
 
-    fn get_full_userdata(&self, _addr: Addr) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
-        None
+    fn get_full_userdata(&self, addr: Addr) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
+        self.get(addr)?.as_full()
     }
 
     fn get_full_userdata_mut(
         &mut self,
-        _addr: Addr,
+        addr: Addr,
     ) -> Option<&mut (dyn FullUserdata<M, P> + 'static)> {
-        None
+        self.get_mut(addr)?.as_full_mut()
     }
 
     fn set_dispatcher(&mut self, dispatcher: &dyn Any) {
@@ -178,148 +138,265 @@ where
     }
 }
 
-pub(crate) struct WithMetatable<T, M> {
-    metatable: Option<M>,
-    value: T,
+pub(crate) trait Dispatched<M, P> {
+    type Inner: 'static;
+    type Dispatcher: Debug + Copy + 'static;
+
+    fn default() -> Self::Dispatcher;
+    fn set(&self, dispatcher: Self::Dispatcher);
+
+    fn as_inner(&self) -> &Self::Inner;
+    fn as_inner_mut(&mut self) -> &mut Self::Inner;
+
+    fn as_light(&self) -> Option<&(dyn Userdata<P> + 'static)>;
+    fn as_light_mut(&mut self) -> Option<&mut (dyn Userdata<P> + 'static)>;
+
+    fn as_full(&self) -> Option<&(dyn FullUserdata<M, P> + 'static)>;
+    fn as_full_mut(&mut self) -> Option<&mut (dyn FullUserdata<M, P> + 'static)>;
 }
 
-impl<T, M> Trace for WithMetatable<T, M>
+pub(crate) struct Concrete<T> {
+    pub(crate) value: T,
+}
+
+impl<T> Concrete<T> {
+    pub(crate) fn new(value: T) -> Self {
+        Concrete { value }
+    }
+}
+
+impl<T> Trace for Concrete<T>
 where
     T: Trace,
-    M: Trace,
 {
     fn trace(&self, collector: &mut Collector) {
-        let WithMetatable { metatable, value } = self;
-        metatable.trace(collector);
+        let Concrete { value } = self;
+
         value.trace(collector);
     }
 }
 
-impl<T, M> Metatable<M> for WithMetatable<T, M> {
+impl<T, M, P> Dispatched<M, P> for Concrete<T>
+where
+    T: 'static,
+{
+    type Inner = T;
+    type Dispatcher = ();
+
+    fn default() -> Self::Dispatcher {}
+    fn set(&self, _dispatcher: Self::Dispatcher) {}
+
+    fn as_inner(&self) -> &Self::Inner {
+        &self.value
+    }
+
+    fn as_inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.value
+    }
+
+    fn as_light(&self) -> Option<&(dyn Userdata<P> + 'static)> {
+        None
+    }
+
+    fn as_light_mut(&mut self) -> Option<&mut (dyn Userdata<P> + 'static)> {
+        None
+    }
+
+    fn as_full(&self) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
+        None
+    }
+
+    fn as_full_mut(&mut self) -> Option<&mut (dyn FullUserdata<M, P> + 'static)> {
+        None
+    }
+}
+
+pub(crate) struct LightUd<T, P: Params> {
+    pub(crate) value: T,
+    pub(crate) dispatcher: Cell<Dispatcher<T, P>>,
+}
+
+impl<T, P> LightUd<T, P>
+where
+    T: 'static,
+    P: Params,
+{
+    pub(crate) fn new(value: T) -> Self {
+        LightUd {
+            value,
+            dispatcher: Cell::new(<Self as Dispatched<(), _>>::default()),
+        }
+    }
+}
+
+impl<T, P> Trace for LightUd<T, P>
+where
+    T: Trace,
+    P: Params,
+{
+    fn trace(&self, collector: &mut Collector) {
+        let LightUd {
+            value,
+            dispatcher: _,
+        } = self;
+
+        value.trace(collector);
+    }
+}
+
+impl<T, M, P> Dispatched<M, P> for LightUd<T, P>
+where
+    T: 'static,
+    P: Params,
+{
+    type Inner = T;
+    type Dispatcher = Dispatcher<T, P>;
+
+    fn default() -> Self::Dispatcher {
+        |_, _, _| None
+    }
+
+    fn set(&self, dispatcher: Self::Dispatcher) {
+        self.dispatcher.set(dispatcher);
+    }
+
+    fn as_inner(&self) -> &Self::Inner {
+        &self.value
+    }
+
+    fn as_inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.value
+    }
+
+    fn as_light(&self) -> Option<&(dyn Userdata<P> + 'static)> {
+        Some(self)
+    }
+
+    fn as_light_mut(&mut self) -> Option<&mut (dyn Userdata<P> + 'static)> {
+        Some(self)
+    }
+
+    fn as_full(&self) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
+        None
+    }
+
+    fn as_full_mut(&mut self) -> Option<&mut (dyn FullUserdata<M, P> + 'static)> {
+        None
+    }
+}
+
+impl<T, P> Userdata<P> for LightUd<T, P>
+where
+    P: Params,
+{
+    fn method(
+        &self,
+        ident: <P as Params>::Id<'_>,
+        rt: <P as Params>::Rt<'_>,
+    ) -> Option<<P as Params>::Res> {
+        (self.dispatcher.get())(&self.value, ident, rt)
+    }
+}
+
+pub(crate) struct FullUd<T, M, P: Params> {
+    pub(crate) value: T,
+    pub(crate) dispacher: Cell<Dispatcher<T, P>>,
+    pub(crate) metatable: Option<M>,
+}
+
+impl<T, M, P> FullUd<T, M, P>
+where
+    T: 'static,
+    M: 'static,
+    P: Params,
+{
+    pub(crate) fn new(value: T) -> Self {
+        FullUd {
+            value,
+            dispacher: Cell::new(Self::default()),
+            metatable: None,
+        }
+    }
+}
+
+impl<T, M, P> Trace for FullUd<T, M, P>
+where
+    T: Trace,
+    M: Trace,
+    P: Params,
+{
+    fn trace(&self, collector: &mut Collector) {
+        let FullUd {
+            value,
+            dispacher: _,
+            metatable,
+        } = self;
+
+        value.trace(collector);
+        metatable.trace(collector);
+    }
+}
+
+impl<T, M, P> Dispatched<M, P> for FullUd<T, M, P>
+where
+    T: 'static,
+    M: 'static,
+    P: Params,
+{
+    type Inner = T;
+    type Dispatcher = Dispatcher<T, P>;
+
+    fn default() -> Self::Dispatcher {
+        |_, _, _| None
+    }
+
+    fn set(&self, dispatcher: Self::Dispatcher) {
+        self.dispacher.set(dispatcher);
+    }
+
+    fn as_inner(&self) -> &Self::Inner {
+        &self.value
+    }
+
+    fn as_inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.value
+    }
+
+    fn as_light(&self) -> Option<&(dyn Userdata<P> + 'static)> {
+        Some(self)
+    }
+
+    fn as_light_mut(&mut self) -> Option<&mut (dyn Userdata<P> + 'static)> {
+        Some(self)
+    }
+
+    fn as_full(&self) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
+        Some(self)
+    }
+
+    fn as_full_mut(&mut self) -> Option<&mut (dyn FullUserdata<M, P> + 'static)> {
+        Some(self)
+    }
+}
+
+impl<T, M, P> Userdata<P> for FullUd<T, M, P>
+where
+    P: Params,
+{
+    fn method(&self, ident: P::Id<'_>, rt: P::Rt<'_>) -> Option<P::Res> {
+        (self.dispacher.get())(&self.value, ident, rt)
+    }
+}
+
+impl<T, M, P> Metatable<M> for FullUd<T, M, P>
+where
+    P: Params,
+{
     fn metatable(&self) -> Option<&M> {
         self.metatable.as_ref()
     }
 
     fn set_metatable(&mut self, mt: Option<M>) -> Option<M> {
         std::mem::replace(&mut self.metatable, mt)
-    }
-}
-
-pub(crate) struct FullUserdataStore<T, M, P: Params> {
-    // default: Option<M>,
-    store: UserdataStore<WithMetatable<T, M>, P>,
-}
-
-impl<T, M, P> FullUserdataStore<T, M, P>
-where
-    P: Params,
-{
-    pub(crate) fn new() -> Self {
-        FullUserdataStore {
-            store: UserdataStore::new(),
-        }
-    }
-}
-
-impl<T, M, P> FullUserdataStore<T, M, P>
-where
-    T: Trace,
-    M: Trace,
-    P: Params,
-{
-    pub(crate) fn try_insert(&mut self, value: T) -> Result<(Addr, Counter), T> {
-        let value = WithMetatable {
-            metatable: None,
-            value,
-        };
-
-        self.store.try_insert(value).map_err(|ud| ud.value)
-    }
-
-    pub(crate) fn insert(&mut self, value: T) -> (Addr, Counter) {
-        let value = WithMetatable {
-            metatable: None,
-            value,
-        };
-
-        self.store.insert(value)
-    }
-}
-
-impl<T, M, P> Traceable for FullUserdataStore<T, M, P>
-where
-    T: Trace,
-    M: Trace,
-    P: Params,
-{
-    fn roots(&self) -> bitvec::prelude::BitVec {
-        self.store.roots()
-    }
-
-    fn trace(&self, indices: &bitvec::prelude::BitSlice, collector: &mut Collector) {
-        self.store.trace(indices, collector)
-    }
-
-    fn retain(&mut self, indices: &bitvec::prelude::BitSlice) {
-        self.store.retain(indices)
-    }
-}
-
-impl<T, M, P> Arena<M, P> for FullUserdataStore<T, M, P>
-where
-    T: Trace,
-    M: Trace,
-    P: Params,
-{
-    fn try_insert_any(
-        &mut self,
-        value: &mut dyn Any,
-    ) -> Result<Option<(Addr, Counter)>, IncompatibleType> {
-        try_insert(value, |value| self.try_insert(value))
-    }
-
-    fn insert_any(&mut self, value: &mut dyn Any) -> Result<(Addr, Counter), IncompatibleType> {
-        insert(value, |value| self.insert(value))
-    }
-
-    fn validate(&self, counter: &Counter) -> bool {
-        <_ as Arena<M, P>>::validate(&self.store, counter)
-    }
-
-    fn upgrade(&self, addr: Addr) -> Option<Counter> {
-        <_ as Arena<M, P>>::upgrade(&self.store, addr)
-    }
-
-    fn get_value(&self, _addr: Addr) -> Option<&dyn Any> {
-        None
-    }
-
-    fn get_value_mut(&mut self, _addr: Addr) -> Option<&mut dyn Any> {
-        None
-    }
-
-    fn get_userdata(&self, _addr: Addr) -> Option<&(dyn Userdata<P> + 'static)> {
-        None
-    }
-
-    fn get_userdata_mut(&mut self, _addr: Addr) -> Option<&mut (dyn Userdata<P> + 'static)> {
-        None
-    }
-
-    fn get_full_userdata(&self, addr: Addr) -> Option<&(dyn FullUserdata<M, P> + 'static)> {
-        let value = self.store.get(addr)?;
-        Some(value)
-    }
-
-    fn get_full_userdata_mut(
-        &mut self,
-        addr: Addr,
-    ) -> Option<&mut (dyn FullUserdata<M, P> + 'static)> {
-        let value = self.store.get_mut(addr)?;
-        Some(value)
-    }
-
-    fn set_dispatcher(&mut self, dispatcher: &dyn Any) {
-        <_ as Arena<M, P>>::set_dispatcher(&mut self.store, dispatcher)
     }
 }

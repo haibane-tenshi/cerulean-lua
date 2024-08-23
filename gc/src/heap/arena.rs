@@ -1,8 +1,7 @@
 use bitvec::prelude::{BitSlice, BitVec};
 use std::any::Any;
-use std::error::Error;
-use std::fmt::Display;
 
+use super::userdata_store::{Dispatched, UserdataStore};
 use super::{Addr, Collector, Counter};
 use crate::userdata::{FullUserdata, Params, Userdata};
 
@@ -12,16 +11,17 @@ pub(crate) trait Traceable {
     fn retain(&mut self, indices: &BitSlice);
 }
 
-pub(crate) trait Arena<M, P: Params>: Traceable {
-    fn try_insert_any(
-        &mut self,
-        value: &mut dyn Any,
-    ) -> Result<Option<(Addr, Counter)>, IncompatibleType>;
-    fn insert_any(&mut self, value: &mut dyn Any) -> Result<(Addr, Counter), IncompatibleType>;
+pub(crate) trait AsAny {
+    // fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
 
+pub(crate) trait HandleStrongRef {
     fn validate(&self, counter: &Counter) -> bool;
     fn upgrade(&self, addr: Addr) -> Option<Counter>;
+}
 
+pub(crate) trait Getters<M, P: Params> {
     fn get_value(&self, addr: Addr) -> Option<&dyn Any>;
     fn get_value_mut(&mut self, addr: Addr) -> Option<&mut dyn Any>;
 
@@ -37,105 +37,48 @@ pub(crate) trait Arena<M, P: Params>: Traceable {
     fn set_dispatcher(&mut self, dispatcher: &dyn Any);
 }
 
-impl<M, P> dyn Arena<M, P> + '_
+pub(crate) trait Arena<M, P: Params>:
+    Traceable + AsAny + HandleStrongRef + Getters<M, P>
+{
+}
+
+impl<M, P, T> Arena<M, P> for T
 where
     P: Params,
+    T: Traceable + AsAny + HandleStrongRef + Getters<M, P>,
 {
-    pub(crate) fn try_insert<T>(
-        &mut self,
-        value: T,
-    ) -> Result<Result<(Addr, Counter), T>, IncompatibleType>
-    where
-        T: 'static,
-    {
-        let mut value = Some(value);
-        let out = self.try_insert_any(&mut value)?;
-
-        match (value, out) {
-            (None, Some(ptr)) => Ok(Ok(ptr)),
-            (Some(value), None) => Ok(Err(value)),
-            _ => unreachable!(),
-        }
-    }
-
-    pub(crate) fn insert<T>(&mut self, value: T) -> Result<(Addr, Counter), IncompatibleType>
-    where
-        T: 'static,
-    {
-        let mut value = Some(value);
-        let ptr = self.insert_any(&mut value)?;
-
-        debug_assert!(value.is_none());
-
-        Ok(ptr)
-    }
-
-    pub(crate) fn get<T>(&self, addr: Addr) -> Result<Option<&T>, IncompatibleType>
-    where
-        T: 'static,
-    {
-        self.get_value(addr)
-            .map(|value| value.downcast_ref().ok_or(IncompatibleType))
-            .transpose()
-    }
-
-    pub(crate) fn get_mut<T>(&mut self, addr: Addr) -> Result<Option<&mut T>, IncompatibleType>
-    where
-        T: 'static,
-    {
-        self.get_value_mut(addr)
-            .map(|value| value.downcast_mut().ok_or(IncompatibleType))
-            .transpose()
-    }
 }
 
-#[derive(Debug)]
-pub(crate) struct IncompatibleType;
-
-impl Display for IncompatibleType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "internal error: attempt to use arena containing values of incompatible type"
-        )
-    }
-}
-
-impl Error for IncompatibleType {}
-
-pub(crate) fn try_insert<T>(
-    value: &mut dyn Any,
-    f: impl FnOnce(T) -> Result<(Addr, Counter), T>,
-) -> Result<Option<(Addr, Counter)>, IncompatibleType>
+impl<M, P> dyn Arena<M, P> + '_
 where
-    T: 'static,
+    M: 'static,
+    P: Params,
 {
-    let place = value.downcast_mut::<Option<T>>().ok_or(IncompatibleType)?;
-    let value = place.take().ok_or(IncompatibleType)?;
+    pub(crate) fn get<T>(&self, addr: Addr) -> Option<&T>
+    where
+        T: 'static,
+    {
+        self.get_value(addr)?.downcast_ref()
+    }
 
-    let ptr = match (f)(value) {
-        Ok(ptr) => Some(ptr),
-        Err(value) => {
-            *place = Some(value);
-            None
-        }
-    };
+    pub(crate) fn get_mut<T>(&mut self, addr: Addr) -> Option<&mut T>
+    where
+        T: 'static,
+    {
+        self.get_value_mut(addr)?.downcast_mut()
+    }
 
-    Ok(ptr)
-}
+    // pub(crate) fn cast_as<T>(&self) -> Option<&UserdataStore<T, M, P>>
+    // where
+    //     T: Dispatched<M, P> + 'static
+    // {
+    //     self.as_any().downcast_ref()
+    // }
 
-pub(crate) fn insert<T>(
-    value: &mut dyn Any,
-    f: impl FnOnce(T) -> (Addr, Counter),
-) -> Result<(Addr, Counter), IncompatibleType>
-where
-    T: 'static,
-{
-    let value = value
-        .downcast_mut::<Option<T>>()
-        .ok_or(IncompatibleType)?
-        .take()
-        .ok_or(IncompatibleType)?;
-
-    Ok((f)(value))
+    pub(crate) fn cast_as_mut<T>(&mut self) -> Option<&mut UserdataStore<T, M, P>>
+    where
+        T: Dispatched<M, P> + 'static,
+    {
+        self.as_any_mut().downcast_mut()
+    }
 }
