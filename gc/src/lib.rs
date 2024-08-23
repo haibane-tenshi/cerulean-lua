@@ -692,4 +692,21 @@ mod test {
         assert_eq!(prev, Some(2));
         assert_eq!(heap.metatable_of::<u32>(), None);
     }
+
+    #[test]
+    fn ptr_sizes() {
+        use std::mem::size_of;
+
+        assert_eq!(size_of::<Gc<()>>(), 8);
+        assert_eq!(size_of::<Gc<dyn Userdata<UnitParams>>>(), 8);
+        assert_eq!(size_of::<Gc<dyn FullUserdata<(), UnitParams>>>(), 8);
+
+        assert_eq!(size_of::<Gc<()>>(), size_of::<Option<Gc<()>>>());
+
+        assert_eq!(size_of::<Root<()>>(), 24);
+        assert_eq!(size_of::<Root<dyn Userdata<UnitParams>>>(), 24);
+        assert_eq!(size_of::<Root<dyn FullUserdata<(), UnitParams>>>(), 24);
+
+        assert_eq!(size_of::<Root<()>>(), size_of::<Option<Root<()>>>());
+    }
 }

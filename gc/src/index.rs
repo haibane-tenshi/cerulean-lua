@@ -5,7 +5,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 
 use crate::heap::arena::Arena;
-use crate::heap::store::{Addr, Counter};
+use crate::heap::store::{Addr, Counter, Gen, Index};
 use crate::heap::TypeIndex;
 use crate::trace::Trace;
 use crate::userdata::{FullUserdata, Params, Userdata};
@@ -38,7 +38,9 @@ impl Access for Mut {}
 /// Exact behavior of this type will differ based on access parameter.
 /// For explanations and examples see [`Gc`] or [`GcCell`].
 pub struct GcPtr<T: ?Sized, A: Access> {
-    addr: Addr,
+    // We need to unpack `Addr` struct here so that rustc generates good layout.
+    index: Index,
+    gen: Gen,
     ty: TypeIndex,
     _type: PhantomData<T>,
     _access: PhantomData<A>,
@@ -50,8 +52,11 @@ where
     A: Access,
 {
     pub(crate) fn new(addr: Addr, ty: TypeIndex) -> Self {
+        let Addr { index, gen } = addr;
+
         GcPtr {
-            addr,
+            index,
+            gen,
             ty,
             _type: PhantomData,
             _access: PhantomData,
@@ -63,7 +68,9 @@ where
     }
 
     pub(crate) fn addr(self) -> Addr {
-        self.addr
+        let GcPtr { index, gen, .. } = self;
+
+        Addr { index, gen }
     }
 
     /// Return location of referenced object.
@@ -71,14 +78,16 @@ where
     /// See [`Location`] struct for more information.
     pub fn location(self) -> Location<T> {
         let GcPtr {
-            addr,
+            index,
+            gen,
             ty,
             _type: _,
             _access: _,
         } = self;
 
         Location {
-            addr,
+            index,
+            gen,
             ty,
             _marker: PhantomData,
         }
@@ -144,7 +153,9 @@ where
 /// Exact behavior of this type will differ based on access parameter.
 /// For explanations and examples see [`Root`] or [`RootCell`].
 pub struct RootPtr<T: ?Sized, A: Access> {
-    addr: Addr,
+    // We need to unpack `Addr` struct here so that rustc generates good layout.
+    index: Index,
+    gen: Gen,
     ty: TypeIndex,
     counter: Counter,
     _type: PhantomData<T>,
@@ -157,8 +168,11 @@ where
     A: Access,
 {
     pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: Counter) -> Self {
+        let Addr { index, gen } = addr;
+
         RootPtr {
-            addr,
+            index,
+            gen,
             ty,
             counter,
             _type: PhantomData,
@@ -168,15 +182,16 @@ where
 
     /// Downgrade into weak reference.
     pub fn downgrade(&self) -> GcPtr<T, A> {
-        let RootPtr {
-            addr,
-            ty,
-            counter: _,
-            _type: _,
-            _access: _,
-        } = self;
+        GcPtr::new(self.addr(), self.ty)
+    }
 
-        GcPtr::new(*addr, *ty)
+    pub(crate) fn addr(&self) -> Addr {
+        let RootPtr { index, gen, .. } = self;
+
+        Addr {
+            index: *index,
+            gen: *gen,
+        }
     }
 
     /// Return location of referenced object.
@@ -221,7 +236,8 @@ where
 {
     fn clone(&self) -> Self {
         let RootPtr {
-            addr,
+            index,
+            gen,
             ty,
             counter,
             _type: _,
@@ -229,7 +245,8 @@ where
         } = self;
 
         Self {
-            addr: *addr,
+            index: *index,
+            gen: *gen,
             ty: *ty,
             counter: counter.clone(),
             _type: PhantomData,
@@ -350,7 +367,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Gc")
-            .field("addr", &self.addr)
+            .field("addr", &self.addr())
             .finish_non_exhaustive()
     }
 }
@@ -448,7 +465,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Root")
-            .field("addr", &self.addr)
+            .field("addr", &self.addr())
             .finish_non_exhaustive()
     }
 }
@@ -527,7 +544,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Gc")
-            .field("addr", &self.addr)
+            .field("addr", &self.addr())
             .finish_non_exhaustive()
     }
 }
@@ -616,7 +633,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Root")
-            .field("addr", &self.addr)
+            .field("addr", &self.addr())
             .finish_non_exhaustive()
     }
 }
@@ -653,7 +670,9 @@ where
 /// (as it contains implementation-specific details)
 /// and there is no way to reconstruct [`GcCell`]/[`Gc`] out of it.
 pub struct Location<T: ?Sized> {
-    addr: Addr,
+    // We need to unpack `Addr` struct here so that rustc generates good layout.
+    index: Index,
+    gen: Gen,
     ty: TypeIndex,
     _marker: PhantomData<T>,
 }
@@ -674,7 +693,10 @@ where
     T: ?Sized,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.addr == other.addr && self.ty == other.ty && self._marker == other._marker
+        self.index == other.index
+            && self.gen == other.gen
+            && self.ty == other.ty
+            && self._marker == other._marker
     }
 }
 
@@ -696,7 +718,12 @@ where
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
 
-        match self.addr.cmp(&other.addr) {
+        match self.index.cmp(&other.index) {
+            Ordering::Equal => (),
+            ord => return ord,
+        };
+
+        match self.gen.cmp(&other.gen) {
             Ordering::Equal => (),
             ord => return ord,
         };
@@ -715,7 +742,8 @@ where
     T: ?Sized,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.addr.hash(state);
+        self.index.hash(state);
+        self.gen.hash(state);
         self.ty.hash(state);
         self._marker.hash(state);
     }
@@ -727,8 +755,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Location")
-            .field("index", &self.addr.index())
-            .field("gen", &self.addr.gen())
+            .field("index", &self.index)
+            .field("gen", &self.gen)
             .finish_non_exhaustive()
     }
 }
@@ -738,12 +766,7 @@ where
     T: ?Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{:p}:{}",
-            self.addr.index() as *const (),
-            self.addr.gen()
-        )
+        write!(f, "{:p}:{}", self.index, self.gen)
     }
 }
 
@@ -770,7 +793,7 @@ pub(crate) mod sealed {
         A: Access,
     {
         fn addr(&self) -> Addr {
-            Addr(self.addr)
+            Addr(GcPtr::addr(*self))
         }
 
         fn type_index(&self) -> TypeIndex {
@@ -784,7 +807,7 @@ pub(crate) mod sealed {
         A: Access,
     {
         fn addr(&self) -> Addr {
-            Addr(self.addr)
+            Addr(RootPtr::addr(self))
         }
 
         fn type_index(&self) -> TypeIndex {
@@ -837,14 +860,7 @@ pub(crate) mod sealed_upgrade {
 
         fn upgrade(self, counter: Counter) -> Self::Target {
             let Counter(counter) = counter;
-            let GcPtr {
-                addr,
-                ty,
-                _type: _,
-                _access: _,
-            } = self;
-
-            RootPtr::new(addr, ty, counter)
+            RootPtr::new(self.addr(), self.ty, counter)
         }
     }
 }

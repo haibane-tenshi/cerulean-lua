@@ -656,17 +656,20 @@ impl Collector {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub(crate) struct TypeIndex(usize);
+pub(crate) struct TypeIndex(u16);
 
 impl From<usize> for TypeIndex {
     fn from(value: usize) -> Self {
+        let value = value
+            .try_into()
+            .expect("reached limit of `u16::MAX` allocated types");
+
         TypeIndex(value)
     }
 }
 
 impl From<TypeIndex> for usize {
     fn from(value: TypeIndex) -> Self {
-        let TypeIndex(value) = value;
-        value
+        value.0.into()
     }
 }

@@ -1,10 +1,11 @@
 use std::cell::{Cell, RefCell};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Pointer};
 use std::hash::Hash;
 use std::rc::Rc;
 
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
+use nonmax::NonMaxU32;
 
 use super::arena::{HandleStrongRef, Traceable};
 use super::{Collector, Trace};
@@ -231,37 +232,55 @@ impl Drop for Counter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Addr {
-    index: Index,
-    gen: Gen,
+    pub(crate) index: Index,
+    pub(crate) gen: Gen,
 }
 
 impl Addr {
     pub(crate) fn index(self) -> usize {
-        self.index.0
+        self.index.into()
     }
 
-    pub(crate) fn gen(self) -> usize {
-        self.gen.0
-    }
+    // pub(crate) fn gen(self) -> usize {
+    //     self.gen.into()
+    // }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Index(usize);
+pub(crate) struct Index(NonMaxU32);
 
 impl From<Index> for usize {
     fn from(value: Index) -> Self {
-        value.0
+        value.0.get().try_into().unwrap()
     }
 }
 
 impl From<usize> for Index {
     fn from(value: usize) -> Self {
+        let value = value
+            .try_into()
+            .ok()
+            .and_then(NonMaxU32::new)
+            .expect("reached limit of `u32::MAX - 1` allocations for a type");
+
         Index(value)
     }
 }
 
+impl Pointer for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:p}", self.0.get() as *const ())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Gen(usize);
+pub(crate) struct Gen(u16);
+
+impl From<Gen> for usize {
+    fn from(value: Gen) -> Self {
+        value.0.into()
+    }
+}
 
 impl GenTag for Gen {
     fn new() -> Self {
@@ -271,5 +290,11 @@ impl GenTag for Gen {
     fn next(self) -> Option<Self> {
         let index = self.0.checked_add(1)?;
         Some(Gen(index))
+    }
+}
+
+impl Display for Gen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
