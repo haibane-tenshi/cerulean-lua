@@ -1,4 +1,89 @@
 //! Smart pointers and related traits.
+//!
+//! # Limitations
+//!
+//! It is important to remember that both [`Gc`] and [`GcCell`] are effectively glorified index.
+//! As such they are not aware of internal state of the `Heap` and cannot respond to its changes.
+//! Their representation imposes boundaries on `Heap` capabilities.
+//!
+//! Currently it is guaranteed that all weak references are 64-bit wide:
+//!
+//! ```
+//! # use std::mem::size_of;
+//! # use gc::{Gc, GcCell};
+//! assert_eq!(size_of::<Gc<()>>(), 8);
+//! assert_eq!(size_of::<GcCell<()>>(), 8);
+//! ```
+//!
+//! Those are allocated between three parts:
+//!
+//! * 32 bits are value index, which denotes memory slot within their respective arena
+//! * 16 bits are [generation tag](#generation-tags) of target memory slot
+//! * 16 bits are [type index](#type-indices)
+//!
+//! Additionally it is guaranteed that all pointer types (`Gc`, `GcCell`, `Root` and `RootCell`) have a *niche*.
+//! In practice it means that they will have the same size when wrapped in `Option`:
+//!
+//! ```
+//! # use std::mem::size_of;
+//! # use gc::{Gc, GcCell, Root, RootCell};
+//! assert_eq!(size_of::<Gc<()>>(), size_of::<Option<Gc<()>>>());
+//! assert_eq!(size_of::<GcCell<()>>(), size_of::<Option<GcCell<()>>>());
+//! assert_eq!(size_of::<Root<()>>(), size_of::<Option<Root<()>>>());
+//! assert_eq!(size_of::<RootCell<()>>(), size_of::<Option<RootCell<()>>>());
+//! ```
+//!
+//! There are no guarantees about layout of strong pointers.
+//! You can reasonably expect that to be bigger that weak pointer by at least a `usize` -
+//! strong pointers keep an actual memory pointer internally.
+//!
+//! ## Generation tags
+//!
+//! It is possible that the value weak reference points to was deallocated
+//! but then a new value was allocated in the same memory slot.
+//! Logically, existing weak references should die and refuse to return references to the new value.
+//! In practice this is achieved through generation tags.
+//!
+//! Whenever a value is allocated in a given slot it is assigned a new generation tag.
+//! Weak references remember gen tag of their own value so
+//! if they find that the memory slot is occupied using a different tag,
+//! pointer can deduce that their value was deallocated.
+//!
+//! It is guaranteed that once value is deallocated all weak references become dead
+//! and will never "resurrect".
+//! However, combined with the fact that `Gc`/`GcCell` can exist arbitrarily long
+//! it also means that generation tags cannot be ever reused.
+//! In particular it implies that every memory slot can support at most `u16::MAX` allocations,
+//! after which it will be marked as *dead*.
+//! In effect dead memory slots leak memory as it is basically impossible to deallocate it
+//! without sophisticated measures.
+//!
+//! The rundown here is that there is only finite (albeit quite big) number of allocation that can be performed in one heap.
+//! Over long period of operation heap will slowly but inevitably leak memory.
+//!
+//! ## Type indices
+//!
+//! All references additionally preserve a type index.
+//! Those indices are decided at runtime and specific to each heap.
+//! It is required for normal operation of `Gc<dyn Userdata<_>>`, `Gc<dyn FullUserdata<_, _>>` and other variants.
+//! Trait object versions erase the type of underlying value and we need to be able to navigate back to correct arena.
+//!
+//! Type indices are limited to `u16`.
+//! This means you cannot allocate more that `u16::MAX` different types in one heap.
+//! Note that this includes `Userdata` and `FullUserdata` variations for each type!
+//! Userdata requires additional data to be functional so it is allocated separately from "normal" instances of `T`.
+//! Internally when allocating `T` as userdata heap converts it to blessed types (like `LightUserdata<T>` and `FullUserdata<T>`)
+//! and each of those receives its own arena.
+//!
+//! Technically type index is redundant for references to `Sized` types, but nonetheless useful.
+//! On normal occasions it saves an extra `HashTable` lookup (`T` -> type index),
+//! but also lends itself to reference downcasting.
+//!
+//! Reference downcasting allows you to have have both `Gc<T>` and `Gc<dyn Userdata<_>>` pointing to the same value.
+//! This is somewhat tricky to achieve.
+//! Because of this feature `Gc<T>` may point to one of three different arenas:
+//! one for normal values, one for light userdata and one for full userdata.
+//! Owning type index directly allows for very straightforward resolution to this situation.
 
 use std::fmt::{Debug, Pointer};
 use std::hash::Hash;
