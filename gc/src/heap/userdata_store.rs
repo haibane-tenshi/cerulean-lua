@@ -11,21 +11,21 @@ use super::{Collector, Trace};
 use crate::userdata::{Dispatcher, FullUserdata, Metatable, Params, Userdata};
 
 #[derive(Debug)]
-pub(crate) struct UserdataStore<T, M, P>
+pub(crate) struct UserdataStore<T, P>
 where
-    T: Dispatched<M, P>,
+    T: Dispatched<P>,
 {
-    dispatcher: <T as Dispatched<M, P>>::Dispatcher,
+    dispatcher: <T as Dispatched<P>>::Dispatcher,
     store: Store<T>,
 }
 
-impl<T, M, P> UserdataStore<T, M, P>
+impl<T, P> UserdataStore<T, P>
 where
-    T: Dispatched<M, P>,
+    T: Dispatched<P>,
 {
     pub(crate) fn new() -> Self {
         Self {
-            dispatcher: <T as Dispatched<M, P>>::default(),
+            dispatcher: <T as Dispatched<P>>::default(),
             store: Store::new(),
         }
     }
@@ -51,9 +51,9 @@ where
     }
 }
 
-impl<T, M, P> Traceable for UserdataStore<T, M, P>
+impl<T, P> Traceable for UserdataStore<T, P>
 where
-    T: Trace + Dispatched<M, P>,
+    T: Trace + Dispatched<P>,
 {
     fn roots(&self) -> BitVec {
         self.store.roots()
@@ -68,10 +68,9 @@ where
     }
 }
 
-impl<T, M, P> AsAny for UserdataStore<T, M, P>
+impl<T, P> AsAny for UserdataStore<T, P>
 where
-    T: Dispatched<M, P> + 'static,
-    M: 'static,
+    T: Dispatched<P> + 'static,
     P: Params,
 {
     // fn as_any(&self) -> &dyn Any {
@@ -83,9 +82,9 @@ where
     }
 }
 
-impl<T, M, P> HandleStrongRef for UserdataStore<T, M, P>
+impl<T, P> HandleStrongRef for UserdataStore<T, P>
 where
-    T: Dispatched<M, P>,
+    T: Dispatched<P>,
     P: Params,
 {
     fn validate(&self, counter: &Counter) -> bool {
@@ -97,9 +96,9 @@ where
     }
 }
 
-impl<T, M, P> Getters<M, P> for UserdataStore<T, M, P>
+impl<T, M, P> Getters<M, P> for UserdataStore<T, P>
 where
-    T: Trace + Dispatched<M, P>,
+    T: Trace + Views<M, P>,
     P: Params,
 {
     fn get_value(&self, addr: Addr) -> Option<&dyn Any> {
@@ -138,12 +137,15 @@ where
     }
 }
 
-pub(crate) trait Dispatched<M, P> {
-    type Inner: 'static;
+pub(crate) trait Dispatched<P> {
     type Dispatcher: Debug + Copy + 'static;
 
     fn default() -> Self::Dispatcher;
     fn set(&self, dispatcher: Self::Dispatcher);
+}
+
+pub(crate) trait Views<M, P>: Dispatched<P> {
+    type Inner: 'static;
 
     fn as_inner(&self) -> &Self::Inner;
     fn as_inner_mut(&mut self) -> &mut Self::Inner;
@@ -176,15 +178,18 @@ where
     }
 }
 
-impl<T, M, P> Dispatched<M, P> for Concrete<T>
-where
-    T: 'static,
-{
-    type Inner = T;
+impl<T, P> Dispatched<P> for Concrete<T> {
     type Dispatcher = ();
 
     fn default() -> Self::Dispatcher {}
     fn set(&self, _dispatcher: Self::Dispatcher) {}
+}
+
+impl<T, M, P> Views<M, P> for Concrete<T>
+where
+    T: 'static,
+{
+    type Inner = T;
 
     fn as_inner(&self) -> &Self::Inner {
         &self.value
@@ -224,7 +229,7 @@ where
     pub(crate) fn new(value: T) -> Self {
         LightUd {
             value,
-            dispatcher: Cell::new(<Self as Dispatched<(), _>>::default()),
+            dispatcher: Cell::new(Self::default()),
         }
     }
 }
@@ -244,12 +249,11 @@ where
     }
 }
 
-impl<T, M, P> Dispatched<M, P> for LightUd<T, P>
+impl<T, P> Dispatched<P> for LightUd<T, P>
 where
     T: 'static,
     P: Params,
 {
-    type Inner = T;
     type Dispatcher = Dispatcher<T, P>;
 
     fn default() -> Self::Dispatcher {
@@ -259,6 +263,14 @@ where
     fn set(&self, dispatcher: Self::Dispatcher) {
         self.dispatcher.set(dispatcher);
     }
+}
+
+impl<T, M, P> Views<M, P> for LightUd<T, P>
+where
+    T: 'static,
+    P: Params,
+{
+    type Inner = T;
 
     fn as_inner(&self) -> &Self::Inner {
         &self.value
@@ -307,7 +319,6 @@ pub(crate) struct FullUd<T, M, P: Params> {
 impl<T, M, P> FullUd<T, M, P>
 where
     T: 'static,
-    M: 'static,
     P: Params,
 {
     pub(crate) fn new(value: T) -> Self {
@@ -337,13 +348,11 @@ where
     }
 }
 
-impl<T, M, P> Dispatched<M, P> for FullUd<T, M, P>
+impl<T, M, P> Dispatched<P> for FullUd<T, M, P>
 where
     T: 'static,
-    M: 'static,
     P: Params,
 {
-    type Inner = T;
     type Dispatcher = Dispatcher<T, P>;
 
     fn default() -> Self::Dispatcher {
@@ -353,6 +362,15 @@ where
     fn set(&self, dispatcher: Self::Dispatcher) {
         self.dispacher.set(dispatcher);
     }
+}
+
+impl<T, M, P> Views<M, P> for FullUd<T, M, P>
+where
+    T: 'static,
+    M: 'static,
+    P: Params,
+{
+    type Inner = T;
 
     fn as_inner(&self) -> &Self::Inner {
         &self.value

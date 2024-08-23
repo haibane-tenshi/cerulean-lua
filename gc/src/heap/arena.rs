@@ -51,7 +51,6 @@ where
 
 impl<M, P> dyn Arena<M, P> + '_
 where
-    M: 'static,
     P: Params,
 {
     pub(crate) fn get<T>(&self, addr: Addr) -> Option<&T>
@@ -75,9 +74,9 @@ where
     //     self.as_any().downcast_ref()
     // }
 
-    pub(crate) fn cast_as_mut<T>(&mut self) -> Option<&mut UserdataStore<T, M, P>>
+    pub(crate) fn cast_as_mut<T>(&mut self) -> Option<&mut UserdataStore<T, P>>
     where
-        T: Dispatched<M, P> + 'static,
+        T: Dispatched<P> + 'static,
     {
         self.as_any_mut().downcast_mut()
     }

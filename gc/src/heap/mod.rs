@@ -19,7 +19,7 @@ use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
 use arena::Arena;
 use store::{Addr, Counter};
-use userdata_store::Dispatched;
+use userdata_store::Views;
 
 /// Backing store for garbage-collected objects.
 ///
@@ -70,15 +70,14 @@ where
 
     fn arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
-        T: Trace + Dispatched<M, P>,
-        M: 'static,
+        T: Trace + Views<M, P>,
     {
         use userdata_store::UserdataStore;
 
         let id = TypeId::of::<T>();
         let index = *self.type_map.entry(id).or_insert_with(|| {
             self.arenas
-                .push_and_get_key(Box::new(UserdataStore::<T, M, P>::new()))
+                .push_and_get_key(Box::new(UserdataStore::<T, P>::new()))
         });
         let store = self.arenas.get_mut(index).unwrap().as_mut();
         (index, store)
@@ -87,8 +86,7 @@ where
     #[inline(never)]
     fn alloc_slow<T>(&mut self, ty: TypeIndex, value: T) -> (Addr, Counter)
     where
-        T: Trace + Dispatched<M, P>,
-        M: 'static,
+        T: Trace + Views<M, P>,
     {
         self.gc_with(&value);
         self.arenas
@@ -101,8 +99,7 @@ where
 
     pub(crate) fn alloc_inner<T>(&mut self, value: T) -> (Addr, TypeIndex, Counter)
     where
-        T: Trace + Dispatched<M, P>,
-        M: 'static,
+        T: Trace + Views<M, P>,
     {
         let (ty, arena) = self.arena_or_insert::<T>();
         let (addr, counter) = match arena.cast_as_mut().unwrap().try_insert(value) {
@@ -122,7 +119,6 @@ where
     pub fn alloc<T>(&mut self, value: T) -> Root<T>
     where
         T: Trace,
-        M: 'static,
     {
         self.alloc_as(value)
     }
@@ -136,7 +132,6 @@ where
     pub fn alloc_cell<T>(&mut self, value: T) -> RootCell<T>
     where
         T: Trace,
-        M: 'static,
     {
         self.alloc_as(value)
     }

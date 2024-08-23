@@ -941,7 +941,6 @@ pub(crate) mod sealed_allocate_as {
     impl<T, M, P> Sealed<T, M, P> for T
     where
         T: Trace,
-        M: 'static,
         P: Params,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
@@ -957,7 +956,6 @@ pub(crate) mod sealed_allocate_as {
     impl<T, M, P> Sealed<dyn Userdata<P>, M, P> for T
     where
         T: Trace,
-        M: 'static,
         P: Params,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
@@ -1049,7 +1047,6 @@ where
 impl<T, M, P> AllocateAs<T, M, P> for T
 where
     T: Trace,
-    M: 'static,
     P: Params,
 {
 }
@@ -1057,7 +1054,6 @@ where
 impl<T, M, P> AllocateAs<dyn Userdata<P>, M, P> for T
 where
     T: Trace,
-    M: 'static,
     P: Params,
 {
 }
