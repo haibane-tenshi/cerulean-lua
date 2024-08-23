@@ -12,7 +12,7 @@ use crate::vec_list::{GenTag, VecList};
 
 #[derive(Debug)]
 pub(crate) struct Store<T> {
-    values: VecList<Place<T>, Gen>,
+    values: VecList<Index, Gen, Place<T>>,
     strong_counters: Rc<RefCell<StrongCounters>>,
 }
 
@@ -45,7 +45,7 @@ impl<T> Store<T> {
             .map(|place| &mut place.value)
     }
 
-    fn get_untagged(&self, index: usize) -> Option<&T> {
+    fn get_untagged(&self, index: Index) -> Option<&T> {
         self.values.get_untagged(index).map(|place| &place.value)
     }
 
@@ -129,7 +129,7 @@ where
 
     fn trace(&self, indices: &BitSlice, collector: &mut Collector) {
         for index in indices.iter_ones() {
-            if let Some(value) = self.get_untagged(index) {
+            if let Some(value) = self.get_untagged(index.into()) {
                 value.trace(collector)
             }
         }
@@ -137,7 +137,7 @@ where
 
     fn retain(&mut self, indices: &BitSlice) {
         for index in indices.iter_zeros() {
-            self.values.remove(index);
+            self.values.remove(index.into());
         }
     }
 }
@@ -168,7 +168,7 @@ impl<T> Place<T> {
 }
 
 #[derive(Debug, Default)]
-struct StrongCounters(VecList<usize, ()>);
+struct StrongCounters(VecList<usize, (), usize>);
 
 impl StrongCounters {
     fn insert(&mut self, value: usize) -> CounterIndex {
@@ -231,17 +231,32 @@ impl Drop for Counter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Addr {
-    index: usize,
+    index: Index,
     gen: Gen,
 }
 
 impl Addr {
     pub(crate) fn index(self) -> usize {
-        self.index
+        self.index.0
     }
 
     pub(crate) fn gen(self) -> usize {
         self.gen.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct Index(usize);
+
+impl From<Index> for usize {
+    fn from(value: Index) -> Self {
+        value.0
+    }
+}
+
+impl From<usize> for Index {
+    fn from(value: usize) -> Self {
+        Index(value)
     }
 }
 
