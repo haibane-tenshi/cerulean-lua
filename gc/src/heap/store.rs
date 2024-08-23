@@ -8,13 +8,12 @@ use bitvec::vec::BitVec;
 
 use super::arena::{HandleStrongRef, Traceable};
 use super::{Collector, Trace};
-use crate::vec_list::VecList;
+use crate::vec_list::{GenTag, VecList};
 
 #[derive(Debug)]
 pub(crate) struct Store<T> {
-    values: VecList<Place<T>>,
+    values: VecList<Place<T>, Gen>,
     strong_counters: Rc<RefCell<StrongCounters>>,
-    gen: usize,
 }
 
 impl<T> Store<T> {
@@ -22,45 +21,41 @@ impl<T> Store<T> {
         Self {
             values: VecList::with_capacity(10),
             strong_counters: Default::default(),
-            gen: Default::default(),
         }
-    }
-
-    fn get_index(&self, index: usize) -> Option<&T> {
-        self.values.get(index).map(|place| &place.value)
     }
 
     fn insert_weak(&mut self, value: T) -> Result<Addr, T> {
         self.values
-            .try_insert(Place::new(value, self.gen))
-            .map(|index| Addr {
-                index,
-                gen: self.gen,
-            })
+            .try_insert(Place::new(value))
+            .map(|(index, gen)| Addr { index, gen })
             .map_err(|place| place.value)
     }
 
     pub(crate) fn get(&self, addr: Addr) -> Option<&T> {
         let Addr { index, gen } = addr;
 
-        self.values
-            .get(index)
-            .and_then(|place| (place.gen == gen).then_some(&place.value))
+        self.values.get(index, gen).map(|place| &place.value)
     }
 
     pub(crate) fn get_mut(&mut self, addr: Addr) -> Option<&mut T> {
         let Addr { index, gen } = addr;
 
         self.values
-            .get_mut(index)
-            .and_then(|place| (place.gen == gen).then_some(&mut place.value))
+            .get_mut(index, gen)
+            .map(|place| &mut place.value)
+    }
+
+    fn get_untagged(&self, index: usize) -> Option<&T> {
+        self.values.get_untagged(index).map(|place| &place.value)
     }
 
     pub(crate) fn upgrade(&self, addr: Addr) -> Option<Counter> {
+        let Addr { index, gen } = addr;
+
         let Place {
             counter: counter_place,
             ..
-        } = self.values.get(addr.index)?;
+        } = self.values.get(index, gen)?;
 
         let index = match counter_place.get() {
             Some(index) => {
@@ -109,7 +104,7 @@ where
         let mut counters = self.strong_counters.borrow_mut();
 
         self.values
-            .place_iter()
+            .iter_occupied()
             .map(|value| match value {
                 Some(Place {
                     counter: counter_place,
@@ -134,7 +129,7 @@ where
 
     fn trace(&self, indices: &BitSlice, collector: &mut Collector) {
         for index in indices.iter_ones() {
-            if let Some(value) = self.get_index(index) {
+            if let Some(value) = self.get_untagged(index) {
                 value.trace(collector)
             }
         }
@@ -142,11 +137,7 @@ where
 
     fn retain(&mut self, indices: &BitSlice) {
         for index in indices.iter_zeros() {
-            let place = self.values.remove(index);
-
-            if let Some(Place { gen, .. }) = place {
-                self.gen = self.gen.max(gen + 1);
-            }
+            self.values.remove(index);
         }
     }
 }
@@ -165,25 +156,23 @@ impl<T> HandleStrongRef for Store<T> {
 struct Place<T> {
     value: T,
     counter: Cell<Option<CounterIndex>>,
-    gen: usize,
 }
 
 impl<T> Place<T> {
-    fn new(value: T, gen: usize) -> Self {
+    fn new(value: T) -> Self {
         Place {
             value,
             counter: Default::default(),
-            gen,
         }
     }
 }
 
 #[derive(Debug, Default)]
-struct StrongCounters(VecList<usize>);
+struct StrongCounters(VecList<usize, ()>);
 
 impl StrongCounters {
     fn insert(&mut self, value: usize) -> CounterIndex {
-        let index = self
+        let (index, ()) = self
             .0
             .try_insert(value)
             .unwrap_or_else(|_| self.0.insert(value));
@@ -196,17 +185,17 @@ impl StrongCounters {
     }
 
     fn get(&self, index: CounterIndex) -> Option<usize> {
-        self.0.get(index.0).copied()
+        self.0.get(index.0, ()).copied()
     }
 
     fn increment(&mut self, index: CounterIndex) {
-        if let Some(counter) = self.0.get_mut(index.0) {
+        if let Some(counter) = self.0.get_mut(index.0, ()) {
             *counter += 1;
         }
     }
 
     fn decrement(&mut self, index: CounterIndex) {
-        if let Some(counter) = self.0.get_mut(index.0) {
+        if let Some(counter) = self.0.get_mut(index.0, ()) {
             *counter -= 1;
         }
     }
@@ -243,7 +232,7 @@ impl Drop for Counter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Addr {
     index: usize,
-    gen: usize,
+    gen: Gen,
 }
 
 impl Addr {
@@ -252,6 +241,20 @@ impl Addr {
     }
 
     pub(crate) fn gen(self) -> usize {
-        self.gen
+        self.gen.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct Gen(usize);
+
+impl GenTag for Gen {
+    fn new() -> Self {
+        Gen(0)
+    }
+
+    fn next(self) -> Option<Self> {
+        let index = self.0.checked_add(1)?;
+        Some(Gen(index))
     }
 }
