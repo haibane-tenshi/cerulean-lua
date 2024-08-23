@@ -166,14 +166,6 @@ where
         }
     }
 
-    pub(crate) fn addr(&self) -> Addr {
-        self.addr
-    }
-
-    pub(crate) fn ty(&self) -> TypeIndex {
-        self.ty
-    }
-
     /// Downgrade into weak reference.
     pub fn downgrade(&self) -> GcPtr<T, A> {
         let RootPtr {
@@ -971,13 +963,14 @@ pub(crate) mod sealed_allocate_as {
     impl<T, M, P> Sealed<dyn FullUserdata<M, P>, M, P> for T
     where
         T: Trace,
-        M: Trace,
+        M: Trace + Clone,
         P: Params,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
             use crate::heap::userdata_store::FullUd;
 
-            let value = FullUd::new(self);
+            let metatable = heap.metatable_of::<T>();
+            let value = FullUd::new(self, metatable.cloned());
 
             let (addr, ty, counter) = heap.alloc_inner(value);
             (Addr(addr), TypeIndex(ty), Counter(counter))
@@ -1061,7 +1054,7 @@ where
 impl<T, M, P> AllocateAs<dyn FullUserdata<M, P>, M, P> for T
 where
     T: Trace,
-    M: Trace,
+    M: Trace + Clone,
     P: Params,
 {
 }

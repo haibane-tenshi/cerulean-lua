@@ -56,6 +56,7 @@ use userdata_store::Views;
 pub struct Heap<M, P> {
     type_map: HashMap<TypeId, TypeIndex>,
     arenas: TiVec<TypeIndex, Box<dyn Arena<M, P>>>,
+    metatables: HashMap<TypeId, M>,
     status: Status,
 }
 
@@ -200,18 +201,12 @@ where
         M: Trace,
         A: Access,
     {
-        let r = self.alloc_as(value);
+        use userdata_store::FullUd;
 
-        {
-            let addr = r.addr();
-            let ty = r.ty();
+        let value = FullUd::new(value, metatable);
+        let (addr, ty, counter) = self.alloc_inner(value);
 
-            let temp = GcCell::<dyn FullUserdata<M, P>>::new(addr, ty);
-            let value = self.get_mut(temp).unwrap();
-            let _ = value.set_metatable(metatable);
-        }
-
-        r
+        RootPtr::new(addr, ty, counter)
     }
 
     /// Get `&T` out of weak reference such as [`GcCell`] or [`Gc`].
@@ -371,6 +366,45 @@ where
         arena.set_dispatcher(&dispatcher);
     }
 
+    /// Query default metatable for the type.
+    ///
+    /// Default metatable can be set using [`Heap::set_metatable`] for the type.
+    /// This metatable will be used when value of type `T` is allocated as `dyn FullUserdata` in [`Heap::alloc_as`] method.
+    /// If you want to control what metatable is set on creation consider using [`Heap::alloc_full_userdata`] instead.
+    pub fn metatable_of<T>(&self) -> Option<&M>
+    where
+        T: 'static,
+    {
+        let id = TypeId::of::<T>();
+        self.metatables.get(&id)
+    }
+
+    /// Set default metatable for the type.
+    ///
+    /// Default metatable will be used when value of type `T` is allocated as `dyn FullUserdata` in [`Heap::alloc_as`] method.
+    /// If you want to control what metatable is set on creation consider using [`Heap::alloc_full_userdata`] instead.
+    ///
+    /// # Return
+    ///
+    /// A previously set metatable will be returned if one was set.
+    pub fn set_metatable<T>(&mut self, mt: Option<M>) -> Option<M>
+    where
+        T: 'static,
+    {
+        let id = TypeId::of::<T>();
+
+        match mt {
+            Some(mt) => match self.metatables.get_mut(&id) {
+                Some(place) => Some(std::mem::replace(place, mt)),
+                None => {
+                    self.metatables.insert(id, mt);
+                    None
+                }
+            },
+            None => self.metatables.remove(&id),
+        }
+    }
+
     fn collector(&self) -> (Collector, Collector) {
         let masks = self.arenas.iter().map(|arena| arena.roots()).collect();
 
@@ -469,6 +503,7 @@ impl<M, P> Default for Heap<M, P> {
         Self {
             type_map: Default::default(),
             arenas: Default::default(),
+            metatables: Default::default(),
             status: Default::default(),
         }
     }

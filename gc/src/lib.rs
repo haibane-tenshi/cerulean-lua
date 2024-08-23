@@ -643,4 +643,53 @@ mod test {
 
         assert_eq!(heap.get_root(&d).method((), ()), Some(10));
     }
+
+    #[test]
+    fn metatable() {
+        let mut heap = Heap::<u32, UnitParams>::new();
+
+        let a: Root<dyn FullUserdata<_, _>> = heap.alloc_as(3_u32);
+        let b: Root<dyn FullUserdata<_, _>> = heap.alloc_as(7_u64);
+
+        assert_eq!(heap.get_root(&a).metatable(), None);
+        assert_eq!(heap.get_root(&b).metatable(), None);
+
+        heap.set_metatable::<u32>(Some(2));
+        assert_eq!(heap.metatable_of::<u32>(), Some(&2));
+
+        let c: Root<dyn FullUserdata<_, _>> = heap.alloc_as(5_u32);
+        let d: Root<dyn FullUserdata<_, _>> = heap.alloc_as(9_u64);
+
+        assert_eq!(heap.get_root(&a).metatable(), None);
+        assert_eq!(heap.get_root(&b).metatable(), None);
+        assert_eq!(heap.get_root(&c).metatable(), Some(&2));
+        assert_eq!(heap.get_root(&d).metatable(), None);
+
+        let e: RootCell<dyn FullUserdata<_, _>> = heap.alloc_full_userdata(11_u64, Some(10));
+
+        assert_eq!(heap.get_root(&a).metatable(), None);
+        assert_eq!(heap.get_root(&b).metatable(), None);
+        assert_eq!(heap.get_root(&c).metatable(), Some(&2));
+        assert_eq!(heap.get_root(&d).metatable(), None);
+        assert_eq!(heap.get_root(&e).metatable(), Some(&10));
+
+        heap.set_metatable::<u64>(Some(15));
+        assert_eq!(heap.metatable_of::<u64>(), Some(&15));
+
+        heap.get_root_mut(&e).set_metatable(Some(12));
+
+        let f: RootCell<dyn FullUserdata<_, _>> = heap.alloc_as(11_u64);
+
+        assert_eq!(heap.get_root(&a).metatable(), None);
+        assert_eq!(heap.get_root(&b).metatable(), None);
+        assert_eq!(heap.get_root(&c).metatable(), Some(&2));
+        assert_eq!(heap.get_root(&d).metatable(), None);
+        assert_eq!(heap.get_root(&e).metatable(), Some(&12));
+        assert_eq!(heap.get_root(&f).metatable(), Some(&15));
+
+        let prev = heap.set_metatable::<u32>(None);
+
+        assert_eq!(prev, Some(2));
+        assert_eq!(heap.metatable_of::<u32>(), None);
+    }
 }

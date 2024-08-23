@@ -321,11 +321,11 @@ where
     T: 'static,
     P: Params,
 {
-    pub(crate) fn new(value: T) -> Self {
+    pub(crate) fn new(value: T, metatable: Option<M>) -> Self {
         FullUd {
             value,
             dispacher: Cell::new(Self::default()),
-            metatable: None,
+            metatable,
         }
     }
 }
