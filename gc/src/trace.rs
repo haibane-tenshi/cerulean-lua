@@ -18,7 +18,8 @@ use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
-use super::{Collector, Gc, GcCell};
+use super::Collector;
+use crate::index::{Access, GcPtr};
 
 /// Track transitive reference dependencies.
 ///
@@ -52,18 +53,10 @@ pub trait Trace: 'static {
     fn trace(&self, collector: &mut Collector);
 }
 
-impl<T> Trace for GcCell<T>
+impl<T, A> Trace for GcPtr<T, A>
 where
-    T: Trace + ?Sized,
-{
-    fn trace(&self, collector: &mut Collector) {
-        collector.mark(*self)
-    }
-}
-
-impl<T> Trace for Gc<T>
-where
-    T: Trace + ?Sized,
+    T: ?Sized + 'static,
+    A: Access + 'static,
 {
     fn trace(&self, collector: &mut Collector) {
         collector.mark(*self)
