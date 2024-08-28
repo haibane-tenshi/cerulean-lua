@@ -623,7 +623,7 @@ impl Collector {
     /// Mark an object as reachable.
     pub fn mark<T, A>(&mut self, ptr: GcPtr<T, A>)
     where
-        T: Trace,
+        T: Trace + ?Sized,
         A: Access,
     {
         let Some(mask) = self.masks.get_mut(ptr.ty()) else {

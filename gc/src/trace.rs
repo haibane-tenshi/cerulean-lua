@@ -54,7 +54,7 @@ pub trait Trace: 'static {
 
 impl<T> Trace for GcCell<T>
 where
-    T: Trace,
+    T: Trace + ?Sized,
 {
     fn trace(&self, collector: &mut Collector) {
         collector.mark(*self)
@@ -63,7 +63,7 @@ where
 
 impl<T> Trace for Gc<T>
 where
-    T: Trace,
+    T: Trace + ?Sized,
 {
     fn trace(&self, collector: &mut Collector) {
         collector.mark(*self)
