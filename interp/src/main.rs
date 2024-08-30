@@ -56,10 +56,10 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
-            use gc::Heap;
             use lua_std::global_env;
             use rt::chunk_cache::ChunkId;
             use rt::chunk_cache::{MainCache, SingleChunk, VecCache};
+            use rt::gc::{Heap, LuaPtr};
             use rt::runtime::{Core, DialectBuilder, Interner, Runtime};
             use rt::value::traits::DefaultTypes;
             use rt::value::Value;
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
                 MainCache::new(env, VecCache::new())
             };
 
-            let mut gc = Heap::new();
+            let mut gc = Heap::<DefaultTypes>::new();
             let core = Core {
                 global_env: Value::Nil,
                 primitive_metatables: Default::default(),
@@ -96,7 +96,7 @@ fn main() -> Result<()> {
 
             let run = || {
                 let global_env = builder(runtime.view(), ChunkId(0), ())?;
-                runtime.core.global_env = Value::Table(global_env);
+                runtime.core.global_env = Value::Table(LuaPtr(global_env));
 
                 runtime.view().invoke(rt::ffi::call_file(&path))
             };
