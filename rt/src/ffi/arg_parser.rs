@@ -164,11 +164,9 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use gc::Heap;
-
 use super::Maybe;
-use crate::gc::{IntoWithGc, TryIntoWithGc};
-use crate::value::{Types, Value};
+use crate::gc::{Heap, IntoWithGc, TryIntoWithGc};
+use crate::value::{CoreTypes, Types, Value, Weak};
 use sealed::{BubbleUp, Sealed};
 
 /// Attempt to parse `Args` out of list of values.
@@ -386,15 +384,16 @@ where
     }
 }
 
-impl<'a, Ty, T> ExtractArgs<T, Heap> for &'a [Value<Ty>]
+impl<'a, Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &'a [Value<Rf, Ty>]
 where
-    Ty: Types,
-    Value<Ty>: Clone + TryIntoWithGc<T, Heap>,
-    <Value<Ty> as TryIntoWithGc<T, Heap>>::Error: Error,
+    Rf: Types,
+    Ty: CoreTypes,
+    Value<Rf, Ty>: Clone + TryIntoWithGc<T, Heap<Ty>>,
+    <Value<Rf, Ty> as TryIntoWithGc<T, Heap<Ty>>>::Error: Error,
 {
-    type Error = MissingArg<<Value<Ty> as TryIntoWithGc<T, Heap>>::Error>;
+    type Error = MissingArg<<Value<Rf, Ty> as TryIntoWithGc<T, Heap<Ty>>>::Error>;
 
-    fn extract(self, gc: &mut Heap) -> Result<(Self, T), Self::Error> {
+    fn extract(self, gc: &mut Heap<Ty>) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;
         let value = value
             .clone()
@@ -561,13 +560,13 @@ where
     }
 }
 
-impl<Ty, T, R> FormatReturns<Ty, Heap, R> for T
+impl<Ty, T, R> FormatReturns<Ty, Heap<Ty>, R> for T
 where
-    Ty: Types,
-    T: Extend<Value<Ty>>,
-    R: IntoWithGc<Value<Ty>, Heap>,
+    Ty: CoreTypes,
+    T: Extend<Value<Weak, Ty>>,
+    R: IntoWithGc<Value<Weak, Ty>, Heap<Ty>>,
 {
-    fn format(&mut self, gc: &mut Heap, value: R) {
+    fn format(&mut self, gc: &mut Heap<Ty>, value: R) {
         let value = value.into_with_gc(gc);
         self.extend([value]);
     }

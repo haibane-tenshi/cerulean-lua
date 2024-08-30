@@ -1,24 +1,30 @@
 use std::cell::RefCell;
-use std::fmt::Debug;
+use std::marker::PhantomData;
 
-use gc::{GcCell, Trace};
+use gc::userdata::Params;
 
-use super::Metatable;
 use crate::error::{BorrowError, RuntimeError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
 use crate::value::{CoreTypes, StrongValue};
 
-pub trait Userdata<Ty, Conv>: Trace
+pub use gc::userdata::{FullUserdata, Userdata};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MethodId<'a> {
+    pub scope: &'a str,
+    pub name: &'a str,
+}
+
+pub struct DefaultParams<Ty>(PhantomData<Ty>);
+
+impl<Ty> Params for DefaultParams<Ty>
 where
     Ty: CoreTypes,
 {
-    fn method(
-        &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>>;
+    type Id<'id> = MethodId<'id>;
+    type Rt<'rt> = RuntimeView<'rt, Ty>;
+    type Res = Result<(), RuntimeError<StrongValue<Ty>>>;
 }
 
 pub enum Method<Ref, Mut, Val> {
@@ -27,7 +33,7 @@ pub enum Method<Ref, Mut, Val> {
     Val(Val),
 }
 
-pub trait DispatchMethod<Marker, Ty, Conv>: Sized
+pub trait DispatchMethod<Marker, Ty>: Sized
 where
     Ty: CoreTypes,
 {
@@ -42,34 +48,34 @@ where
     fn call(
         &self,
         method: Self::Ref,
-        rt: RuntimeView<'_, Ty, Conv>,
+        rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Ty, Conv>,
+        rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
     fn call_once(
         self,
         method: Self::Val,
-        rt: RuntimeView<'_, Ty, Conv>,
+        rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
 }
 
-impl<Marker, Ty, Conv, T> DispatchMethod<Marker, Ty, Conv> for RefCell<T>
+impl<Marker, Ty, T> DispatchMethod<Marker, Ty> for RefCell<T>
 where
     Ty: CoreTypes,
-    T: DispatchMethod<Marker, Ty, Conv>,
+    T: DispatchMethod<Marker, Ty>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Ty, Conv>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Ty>>::SCOPE_NAME;
 
     type Ref = Method<
-        <T as DispatchMethod<Marker, Ty, Conv>>::Ref,
-        <T as DispatchMethod<Marker, Ty, Conv>>::Mut,
+        <T as DispatchMethod<Marker, Ty>>::Ref,
+        <T as DispatchMethod<Marker, Ty>>::Mut,
         std::convert::Infallible,
     >;
     type Mut = std::convert::Infallible;
-    type Val = <T as DispatchMethod<Marker, Ty, Conv>>::Val;
+    type Val = <T as DispatchMethod<Marker, Ty>>::Val;
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>> {
         let r = match T::dispatch_method(name)? {
@@ -84,7 +90,7 @@ where
     fn call(
         &self,
         method: Self::Ref,
-        rt: RuntimeView<'_, Ty, Conv>,
+        rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         match method {
             Method::Ref(m) => self.try_borrow().map_err(|_| BorrowError::Ref)?.call(m, rt),
@@ -99,7 +105,7 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        _rt: RuntimeView<'_, Ty, Conv>,
+        _rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         match method {}
     }
@@ -107,25 +113,25 @@ where
     fn call_once(
         self,
         method: Self::Val,
-        rt: RuntimeView<'_, Ty, Conv>,
+        rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.into_inner().call_once(method, rt)
     }
 }
 
-impl<Marker, Ty, Conv, T> DispatchMethod<Marker, Ty, Conv> for Option<T>
+impl<Marker, Ty, T> DispatchMethod<Marker, Ty> for Option<T>
 where
     Ty: CoreTypes,
     Ty::String: From<&'static str>,
-    T: DispatchMethod<Marker, Ty, Conv>,
+    T: DispatchMethod<Marker, Ty>,
 {
-    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Ty, Conv>>::SCOPE_NAME;
+    const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Ty>>::SCOPE_NAME;
 
-    type Ref = <T as DispatchMethod<Marker, Ty, Conv>>::Ref;
+    type Ref = <T as DispatchMethod<Marker, Ty>>::Ref;
     type Mut = Method<
         std::convert::Infallible,
-        <T as DispatchMethod<Marker, Ty, Conv>>::Mut,
-        <T as DispatchMethod<Marker, Ty, Conv>>::Val,
+        <T as DispatchMethod<Marker, Ty>>::Mut,
+        <T as DispatchMethod<Marker, Ty>>::Val,
     >;
     type Val = std::convert::Infallible;
 
@@ -142,7 +148,7 @@ where
     fn call(
         &self,
         method: Self::Ref,
-        rt: RuntimeView<'_, Ty, Conv>,
+        rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
@@ -156,7 +162,7 @@ where
     fn call_mut(
         &mut self,
         method: Self::Mut,
-        rt: RuntimeView<'_, Ty, Conv>,
+        rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
@@ -182,54 +188,51 @@ where
     fn call_once(
         self,
         method: Self::Val,
-        _rt: RuntimeView<'_, Ty, Conv>,
+        _rt: RuntimeView<'_, Ty>,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         match method {}
     }
 }
 
-pub trait DispatchTrait<Traits, Ty, Conv>: Sized
+pub trait DispatchTrait<Traits, Ty>: Sized
 where
     Traits: Tuple,
     Ty: CoreTypes,
 {
     fn dispatch_trait(
         &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Ty, Conv>,
+        id: MethodId,
+        rt: RuntimeView<'_, Ty>,
     ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>>;
 }
 
-impl<Ty, Conv, T> DispatchTrait<(), Ty, Conv> for T
+impl<Ty, T> DispatchTrait<(), Ty> for T
 where
     Ty: CoreTypes,
 {
     fn dispatch_trait(
         &self,
-        _scope: &str,
-        _name: &str,
-        _rt: RuntimeView<'_, Ty, Conv>,
+        _id: MethodId,
+        _rt: RuntimeView<'_, Ty>,
     ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
         None
     }
 }
 
-impl<T, Tup, Ty, Conv> DispatchTrait<Tup, Ty, Conv> for T
+impl<T, Tup, Ty> DispatchTrait<Tup, Ty> for T
 where
     Ty: CoreTypes,
     Tup: NonEmptyTuple,
-    T: DispatchMethod<TupleHead<Tup>, Ty, Conv>,
-    T: DispatchTrait<TupleTail<Tup>, Ty, Conv>,
+    T: DispatchMethod<TupleHead<Tup>, Ty>,
+    T: DispatchTrait<TupleTail<Tup>, Ty>,
 {
     fn dispatch_trait(
         &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Ty, Conv>,
+        id: MethodId,
+        rt: RuntimeView<'_, Ty>,
     ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
-        if scope == T::SCOPE_NAME {
-            if let Some(method) = T::dispatch_method(name) {
+        if id.scope == T::SCOPE_NAME {
+            if let Some(method) = T::dispatch_method(id.name) {
                 let r = if let Method::Ref(f) = method {
                     T::call(self, f, rt)
                 } else {
@@ -243,231 +246,6 @@ where
             }
         }
 
-        <T as DispatchTrait<TupleTail<Tup>, Ty, Conv>>::dispatch_trait(self, scope, name, rt)
-    }
-}
-
-// Self: 'static requires Ty: 'static
-// see https://github.com/rust-lang/rust/issues/57325
-// https://rust-lang.github.io/rfcs/1214-projections-lifetimes-and-wf.html
-pub struct Dispatchable<T, Ty, Conv>
-where
-    Ty: CoreTypes,
-{
-    value: T,
-    #[allow(clippy::type_complexity)]
-    dispatcher: fn(
-        &T,
-        &str,
-        &str,
-        RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>>,
-}
-
-impl<T, Ty, Conv> Dispatchable<T, Ty, Conv>
-where
-    Ty: CoreTypes,
-{
-    pub fn new<Traits>(value: T) -> Self
-    where
-        Traits: Tuple,
-        T: DispatchTrait<Traits, Ty, Conv>,
-    {
-        Dispatchable {
-            value,
-            dispatcher: <T as DispatchTrait<Traits, Ty, Conv>>::dispatch_trait,
-        }
-    }
-}
-
-impl<T, Ty, Conv> Trace for Dispatchable<T, Ty, Conv>
-where
-    T: Trace,
-    Conv: 'static,
-    Ty: CoreTypes,
-{
-    fn trace(&self, collector: &mut gc::Collector) {
-        let Dispatchable {
-            value,
-            dispatcher: _,
-        } = self;
-
-        value.trace(collector);
-    }
-}
-
-impl<T, Ty, Conv> Userdata<Ty, Conv> for Dispatchable<T, Ty, Conv>
-where
-    T: Trace,
-    Conv: 'static,
-    Ty: CoreTypes,
-{
-    fn method(
-        &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
-        (self.dispatcher)(&self.value, scope, name, rt)
-    }
-}
-
-pub struct DispatchableStatic<T, Traits> {
-    value: T,
-    traits: std::marker::PhantomData<Traits>,
-}
-
-impl<T, Traits> DispatchableStatic<T, Traits> {
-    pub fn new(value: T) -> Self {
-        DispatchableStatic {
-            value,
-            traits: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T, Traits> Trace for DispatchableStatic<T, Traits>
-where
-    T: Trace,
-    Traits: 'static,
-{
-    fn trace(&self, collector: &mut gc::Collector) {
-        let DispatchableStatic { value, traits: _ } = self;
-
-        value.trace(collector);
-    }
-}
-
-impl<T, Traits, Ty, Conv> Userdata<Ty, Conv> for DispatchableStatic<T, Traits>
-where
-    Ty: CoreTypes,
-    Traits: Tuple + 'static,
-    T: DispatchTrait<Traits, Ty, Conv> + Trace,
-{
-    fn method(
-        &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
-        self.value.dispatch_trait(scope, name, rt)
-    }
-}
-
-pub trait FullUserdata<Ty, Conv>: Userdata<Ty, Conv> + Metatable<GcCell<Ty::Table>>
-where
-    Ty: CoreTypes,
-{
-}
-
-impl<Ty, Conv, T> FullUserdata<Ty, Conv> for T
-where
-    Ty: CoreTypes,
-    T: Userdata<Ty, Conv> + Metatable<GcCell<Ty::Table>>,
-{
-}
-
-impl<Ty, Conv, T> Userdata<Ty, Conv> for Box<T>
-where
-    Ty: CoreTypes,
-    T: Userdata<Ty, Conv> + ?Sized,
-{
-    fn method(
-        &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
-        self.as_ref().method(scope, name, rt)
-    }
-}
-
-impl<Table, T> Metatable<Table> for Box<T>
-where
-    T: Metatable<Table> + ?Sized,
-{
-    fn metatable(&self) -> Option<Table> {
-        self.as_ref().metatable()
-    }
-
-    fn set_metatable(&mut self, mt: Option<Table>) -> Option<Table> {
-        self.as_mut().set_metatable(mt)
-    }
-}
-
-pub fn new_full_userdata<T, Ty, Conv>(
-    value: T,
-    metatable: Option<GcCell<Ty::Table>>,
-) -> impl FullUserdata<Ty, Conv>
-where
-    Ty: CoreTypes,
-    T: Userdata<Ty, Conv>,
-{
-    UserdataValue { value, metatable }
-}
-
-#[doc(hidden)]
-struct UserdataValue<T: ?Sized, TableRef> {
-    metatable: Option<TableRef>,
-    value: T,
-}
-
-impl<T, TableRef> AsRef<T> for UserdataValue<T, TableRef>
-where
-    T: ?Sized,
-{
-    fn as_ref(&self) -> &T {
-        &self.value
-    }
-}
-
-impl<T, Table> Trace for UserdataValue<T, Table>
-where
-    T: Trace + ?Sized,
-    Table: Trace,
-{
-    fn trace(&self, collector: &mut gc::Collector) {
-        let UserdataValue { metatable, value } = self;
-
-        value.trace(collector);
-        metatable.trace(collector);
-    }
-}
-
-impl<T, Ty, Conv, Table> Userdata<Ty, Conv> for UserdataValue<T, Table>
-where
-    Ty: CoreTypes,
-    T: Userdata<Ty, Conv> + Trace + ?Sized,
-    Table: Trace,
-{
-    fn method(
-        &self,
-        scope: &str,
-        name: &str,
-        rt: RuntimeView<'_, Ty, Conv>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
-        self.as_ref().method(scope, name, rt)
-    }
-}
-
-impl<T: ?Sized, TableRef> Debug for UserdataValue<T, TableRef> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UserdataValue")
-            .field("metatable", &"<omitted>")
-            .field("value", &"<omitted>")
-            .finish()
-    }
-}
-
-impl<T, Table> Metatable<Table> for UserdataValue<T, Table>
-where
-    Table: Clone,
-{
-    fn metatable(&self) -> Option<Table> {
-        self.metatable.clone()
-    }
-
-    fn set_metatable(&mut self, mt: Option<Table>) -> Option<Table> {
-        self.metatable.replace(mt?)
+        <T as DispatchTrait<TupleTail<Tup>, Ty>>::dispatch_trait(self, id, rt)
     }
 }

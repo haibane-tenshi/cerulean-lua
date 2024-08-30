@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use super::{Type, TypeMismatchError, Types, Value};
+use super::{CoreTypes, Type, TypeMismatchError, Types, Value};
 use crate::gc::{TryFromWithGc, TryIntoWithGc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -22,10 +22,14 @@ impl Display for Nil {
     }
 }
 
-impl<Gc: Types> TryFrom<Value<Gc>> for Nil {
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Nil
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         match value {
             Value::Nil => Ok(Nil),
             value => {
@@ -40,7 +44,11 @@ impl<Gc: Types> TryFrom<Value<Gc>> for Nil {
     }
 }
 
-impl<Gc: Types> From<Nil> for Value<Gc> {
+impl<Rf, Ty> From<Nil> for Value<Rf, Ty>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
     fn from(Nil: Nil) -> Self {
         Value::Nil
     }
@@ -77,14 +85,15 @@ impl<T> From<NilOr<T>> for Option<T> {
     }
 }
 
-impl<T, Ty, Gc> TryFromWithGc<Value<Ty>, Gc> for NilOr<T>
+impl<T, Rf, Ty, Gc> TryFromWithGc<Value<Rf, Ty>, Gc> for NilOr<T>
 where
-    Ty: Types,
-    Value<Ty>: TryIntoWithGc<T, Gc>,
+    Rf: Types,
+    Ty: CoreTypes,
+    Value<Rf, Ty>: TryIntoWithGc<T, Gc>,
 {
-    type Error = <Value<Ty> as TryIntoWithGc<T, Gc>>::Error;
+    type Error = <Value<Rf, Ty> as TryIntoWithGc<T, Gc>>::Error;
 
-    fn try_from_with_gc(value: Value<Ty>, gc: &mut Gc) -> Result<NilOr<T>, Self::Error> {
+    fn try_from_with_gc(value: Value<Rf, Ty>, gc: &mut Gc) -> Result<NilOr<T>, Self::Error> {
         match value {
             Value::Nil => Ok(NilOr::Nil),
             value => Ok(NilOr::Some(value.try_into_with_gc(gc)?)),
@@ -98,9 +107,11 @@ impl<T> From<Nil> for NilOr<T> {
     }
 }
 
-impl<T, Gc: Types> From<NilOr<T>> for Value<Gc>
+impl<T, Rf, Ty> From<NilOr<T>> for Value<Rf, Ty>
 where
-    T: Into<Value<Gc>>,
+    T: Into<Value<Rf, Ty>>,
+    Rf: Types,
+    Ty: CoreTypes,
 {
     fn from(value: NilOr<T>) -> Self {
         match value {

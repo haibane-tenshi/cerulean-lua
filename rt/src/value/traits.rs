@@ -1,48 +1,44 @@
 use std::fmt::Display;
 use std::hash::Hash;
-use std::marker::PhantomData;
 
+use gc::index::Allocated;
 use gc::{Gc, GcCell, Root, RootCell, Trace};
 
 use super::callable::RustCallable;
 use super::string::PossiblyUtf8Vec;
-use super::userdata::FullUserdata;
+use super::userdata::{DefaultParams, FullUserdata};
 use super::{KeyValue, Value};
 use crate::gc::LuaPtr;
 use crate::runtime::{Closure, Interned};
 
-pub trait Types: Sized {
-    type String;
-    type LuaCallable;
-    type RustCallable;
-    type Table;
-    type FullUserdata;
+pub use gc::userdata::Metatable;
+
+pub trait Types: Sized + 'static {
+    type String<T>;
+    type LuaCallable<T>;
+    type RustCallable<T>;
+    type Table<T>;
+    type FullUserdata<T: ?Sized>;
 }
 
-pub struct Strong<Ty>(PhantomData<(Ty,)>);
+pub struct Strong;
 
-impl<Ty> Types for Strong<Ty>
-where
-    Ty: CoreTypes,
-{
-    type String = LuaPtr<Root<Interned<<Ty as CoreTypes>::String>>>;
-    type LuaCallable = LuaPtr<RootCell<<Ty as CoreTypes>::LuaClosure>>;
-    type RustCallable = LuaPtr<RootCell<<Ty as CoreTypes>::RustClosure>>;
-    type Table = LuaPtr<RootCell<<Ty as CoreTypes>::Table>>;
-    type FullUserdata = LuaPtr<RootCell<<Ty as CoreTypes>::FullUserdata>>;
+impl Types for Strong {
+    type String<T> = LuaPtr<Root<Interned<T>>>;
+    type LuaCallable<T> = LuaPtr<RootCell<T>>;
+    type RustCallable<T> = LuaPtr<RootCell<T>>;
+    type Table<T> = LuaPtr<RootCell<T>>;
+    type FullUserdata<T: ?Sized> = LuaPtr<RootCell<T>>;
 }
 
-pub struct Weak<Ty>(PhantomData<(Ty,)>);
+pub struct Weak;
 
-impl<Ty> Types for Weak<Ty>
-where
-    Ty: CoreTypes,
-{
-    type String = LuaPtr<Gc<Interned<<Ty as CoreTypes>::String>>>;
-    type LuaCallable = LuaPtr<GcCell<<Ty as CoreTypes>::LuaClosure>>;
-    type RustCallable = LuaPtr<GcCell<<Ty as CoreTypes>::RustClosure>>;
-    type Table = LuaPtr<GcCell<<Ty as CoreTypes>::Table>>;
-    type FullUserdata = LuaPtr<GcCell<<Ty as CoreTypes>::FullUserdata>>;
+impl Types for Weak {
+    type String<T> = LuaPtr<Gc<Interned<T>>>;
+    type LuaCallable<T> = LuaPtr<GcCell<T>>;
+    type RustCallable<T> = LuaPtr<GcCell<T>>;
+    type Table<T> = LuaPtr<GcCell<T>>;
+    type FullUserdata<T: ?Sized> = LuaPtr<GcCell<T>>;
 }
 
 pub trait CoreTypes: Sized + 'static {
@@ -58,33 +54,33 @@ pub trait CoreTypes: Sized + 'static {
         + AsRef<[u8]>;
     type LuaClosure: Trace;
     type RustClosure: Clone + PartialEq + Trace;
-    type Table: Default + Trace + Metatable<LuaPtr<GcCell<Self::Table>>>;
-    type FullUserdata: Trace + Metatable<GcCell<Self::Table>>;
+    type Table: Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
+    type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
+        + Allocated<Meta<Self>, DefaultParams<Self>>
+        + ?Sized;
 }
 
-pub struct DefaultTypes<Conv>(PhantomData<Conv>);
+pub type Meta<Ty> = GcCell<<Ty as CoreTypes>::Table>;
 
-impl<Conv> CoreTypes for DefaultTypes<Conv>
-where
-    Conv: 'static,
-{
+pub struct DefaultTypes;
+
+impl CoreTypes for DefaultTypes {
     type String = PossiblyUtf8Vec;
     type LuaClosure = Closure<Self>;
-    type RustClosure = RustCallable<Self, Conv>;
-    type Table = super::Table<Weak<Self>>;
-    type FullUserdata = Box<dyn FullUserdata<Self, Conv>>;
+    type RustClosure = RustCallable<Self>;
+    type Table = super::Table<Weak, Self>;
+    type FullUserdata = dyn FullUserdata<Meta<Self>, DefaultParams<Self>>;
 }
 
-pub trait Metatable<TableRef> {
-    fn metatable(&self) -> Option<TableRef>;
-    fn set_metatable(&mut self, mt: Option<TableRef>) -> Option<TableRef>;
-}
-
-pub trait TableIndex<Ty: Types> {
-    fn get(&self, key: &KeyValue<Ty>) -> Value<Ty>;
-    fn set(&mut self, key: KeyValue<Ty>, value: Value<Ty>);
+pub trait TableIndex<Rf, Ty>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
+    fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty>;
+    fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>);
     fn border(&self) -> i64;
-    fn contains_key(&self, key: &KeyValue<Ty>) -> bool {
+    fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
         !matches!(self.get(key), Value::Nil)
     }
 }

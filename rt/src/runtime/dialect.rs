@@ -1,7 +1,7 @@
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
 use super::Core;
-use crate::value::{CoreTypes, Types, Value, Weak, WeakValue};
+use crate::value::{CoreTypes, Value, WeakValue};
 
 /// Define fine aspects of runtime behavior.
 ///
@@ -311,22 +311,22 @@ impl DialectBuilder {
     }
 }
 
-pub trait CoerceArgs<Ty: Types, Core>: sealed::Sealed {
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
-    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [Value<Ty>; 2]) -> [Value<Ty>; 2];
+pub trait CoerceArgs<Ty: CoreTypes, Core>: sealed::Sealed {
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
     fn coerce_bin_op_str(
         &self,
         op: StrBinOp,
-        args: [Value<Ty>; 2],
+        args: [WeakValue<Ty>; 2],
         gc: &mut Core,
-    ) -> [Value<Ty>; 2];
-    fn coerce_una_op_bit(&self, args: [Value<Ty>; 1]) -> [Value<Ty>; 1];
-    fn coerce_tab_set(&self, key: Value<Ty>) -> Value<Ty>;
-    fn coerce_tab_get(&self, key: Value<Ty>) -> Value<Ty>;
+    ) -> [WeakValue<Ty>; 2];
+    fn coerce_una_op_bit(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1];
+    fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
+    fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
     fn cmp_float_and_int(&self) -> bool;
 }
 
-impl<Ty, Conv> CoerceArgs<Weak<Ty>, Core<Ty, Conv>> for DialectBuilder
+impl<Ty> CoerceArgs<Ty, Core<Ty>> for DialectBuilder
 where
     Ty: CoreTypes,
     Ty::String: From<String>,
@@ -387,19 +387,19 @@ where
         &self,
         op: StrBinOp,
         args: [WeakValue<Ty>; 2],
-        core: &mut Core<Ty, Conv>,
+        core: &mut Core<Ty>,
     ) -> [WeakValue<Ty>; 2] {
         match op {
             StrBinOp::Concat => {
                 use crate::gc::LuaPtr;
                 use Value::*;
 
-                let flt_to_string = |x: f64, core: &mut Core<_, _>| {
+                let flt_to_string = |x: f64, core: &mut Core<_>| {
                     let value = core.alloc_string(x.to_string().into()).downgrade();
                     Value::String(LuaPtr(value))
                 };
 
-                let int_to_string = |x: i64, core: &mut Core<_, _>| {
+                let int_to_string = |x: i64, core: &mut Core<_>| {
                     let value = core.alloc_string(x.to_string().into()).downgrade();
                     Value::String(LuaPtr(value))
                 };

@@ -3,6 +3,7 @@ use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 
 use enumoid::EnumMap;
+use gc::userdata::Params;
 use gc::{Gc, Heap, Root, Trace};
 use hashbrown::HashTable;
 
@@ -62,7 +63,10 @@ impl<T> Interner<T, std::hash::RandomState>
 where
     T: Trace + From<&'static str>,
 {
-    pub fn new(heap: &mut Heap) -> Self {
+    pub fn new<M, P>(heap: &mut Heap<M, P>) -> Self
+    where
+        P: Params,
+    {
         let events = EnumMap::new_with(|event: BuiltinMetamethod| {
             heap.alloc(Interned(event.to_str().into()))
         });
@@ -80,7 +84,10 @@ where
     T: Trace + Hash + Eq + AsRef<[u8]>,
     H: BuildHasher,
 {
-    pub(crate) fn insert(&mut self, value: T, heap: &mut Heap) -> Root<Interned<T>> {
+    pub(crate) fn insert<M, P>(&mut self, value: T, heap: &mut Heap<M, P>) -> Root<Interned<T>>
+    where
+        P: Params,
+    {
         // All metamethods are prefixed with two underscores.
         // Quick check to avoid going through events on every occasion.
         if value.as_ref().strip_prefix(&[b'_', b'_']).is_some() {

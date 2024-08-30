@@ -10,7 +10,7 @@ use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 
 use enumoid::EnumMap;
-use gc::{GcCell, Heap, Root, RootCell};
+use gc::{Root, RootCell};
 use repr::index::StackSlot;
 use repr::literal::Literal;
 
@@ -19,10 +19,9 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::{AlreadyDroppedError, RuntimeError};
 use crate::ffi::{LuaFfi, LuaFfiOnce};
-use crate::gc::DisplayWith;
+use crate::gc::{DisplayWith, Heap};
 use crate::value::{
-    CoreTypes, KeyValue, Strong, StrongValue, TableIndex, TypeWithoutMetatable, Types, Value, Weak,
-    WeakValue,
+    CoreTypes, KeyValue, Meta, StrongValue, TypeWithoutMetatable, Value, Weak, WeakValue,
 };
 use frame::{ChangeFrame, Event, Frame};
 use frame_stack::{FrameStack, FrameStackView};
@@ -34,19 +33,18 @@ pub use frame::{Closure, FunctionPtr};
 pub use interner::{Interned, Interner};
 pub use stack::{StackFrame, StackGuard, TransientStackFrame};
 
-pub struct Core<Ty, Conv>
+pub struct Core<Ty>
 where
     Ty: CoreTypes,
 {
     pub global_env: StrongValue<Ty>,
     pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<RootCell<Ty::Table>>>,
     pub dialect: DialectBuilder,
-    pub gc: Heap,
+    pub gc: Heap<Ty>,
     pub string_interner: Interner<Ty::String>,
-    pub convert: Conv,
 }
 
-impl<Ty, Conv> Core<Ty, Conv>
+impl<Ty> Core<Ty>
 where
     Ty: CoreTypes,
 {
@@ -76,18 +74,28 @@ where
         let msg = self.alloc_string(msg.into());
         ValueError(Value::String(LuaPtr(msg))).into()
     }
+}
 
-    fn lookup_event(&self, event: Event) -> KeyValue<Weak<Ty>> {
+impl<Ty> Core<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn lookup_event(&self, event: Event) -> KeyValue<Weak, Ty> {
         use crate::gc::LuaPtr;
 
         let s = self.string_interner.event(event.to_metamethod());
         KeyValue::String(LuaPtr(s))
     }
+}
 
+impl<Ty> Core<Ty>
+where
+    Ty: CoreTypes,
+{
     pub fn metatable_of(
         &self,
         value: &WeakValue<Ty>,
-    ) -> Result<Option<GcCell<Ty::Table>>, AlreadyDroppedError> {
+    ) -> Result<Option<Meta<Ty>>, AlreadyDroppedError> {
         use crate::gc::LuaPtr;
         use crate::value::Metatable;
         use TypeWithoutMetatable::*;
@@ -111,20 +119,23 @@ where
                 .get(*t)
                 .ok_or(AlreadyDroppedError)?
                 .metatable()
-                .map(|LuaPtr(t)| t),
-            Value::Userdata(LuaPtr(t)) => heap.get(*t).ok_or(AlreadyDroppedError)?.metatable(),
+                .copied(),
+            Value::Userdata(LuaPtr(t)) => heap
+                .get(*t)
+                .ok_or(AlreadyDroppedError)?
+                .metatable()
+                .copied(),
         };
 
         Ok(r)
     }
 }
 
-impl<Ty, Conv> Debug for Core<Ty, Conv>
+impl<Ty> Debug for Core<Ty>
 where
     Ty: CoreTypes,
     StrongValue<Ty>: Debug,
-    <Strong<Ty> as Types>::Table: Debug,
-    Conv: Debug,
+    Ty::Table: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Core")
@@ -133,29 +144,27 @@ where
             .field("dialect", &self.dialect)
             .field("gc", &self.gc)
             .field("string_interner", &self.string_interner)
-            .field("convert", &self.convert)
             .finish()
     }
 }
 
-pub struct Runtime<Ty, Conv, C>
+pub struct Runtime<Ty, C>
 where
     Ty: CoreTypes,
 {
-    pub core: Core<Ty, Conv>,
+    pub core: Core<Ty>,
     pub chunk_cache: C,
     frames: FrameStack<Frame<Ty>>,
     stack: Stack<Ty>,
     rust_backtrace_stack: RustBacktraceStack,
 }
 
-impl<Ty, Conv, C> Runtime<Ty, Conv, C>
+impl<Ty, C> Runtime<Ty, C>
 where
     Ty: CoreTypes,
-    Conv: 'static,
     C: Debug,
 {
-    pub fn new(chunk_cache: C, mut core: Core<Ty, Conv>) -> Self {
+    pub fn new(chunk_cache: C, mut core: Core<Ty>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         let stack = Stack::new(&mut core.gc);
@@ -170,12 +179,12 @@ where
     }
 }
 
-impl<Ty, Conv, C> Runtime<Ty, Conv, C>
+impl<Ty, C> Runtime<Ty, C>
 where
     Ty: CoreTypes,
     C: ChunkCache,
 {
-    pub fn view(&mut self) -> RuntimeView<Ty, Conv> {
+    pub fn view(&mut self) -> RuntimeView<Ty> {
         let Runtime {
             core,
             chunk_cache,
@@ -201,31 +210,31 @@ where
     }
 }
 
-pub struct RuntimeView<'rt, Ty, Conv>
+pub struct RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
 {
-    pub core: &'rt mut Core<Ty, Conv>,
+    pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
     frames: FrameStackView<'rt, Frame<Ty>>,
     pub stack: StackGuard<'rt, Ty>,
     rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn view_full(&mut self) -> RuntimeView<'_, Ty, Conv> {
+    pub fn view_full(&mut self) -> RuntimeView<'_, Ty> {
         self.view(StackSlot(0)).unwrap()
     }
 
-    pub fn view(&mut self, start: StackSlot) -> Option<RuntimeView<'_, Ty, Conv>> {
+    pub fn view(&mut self, start: StackSlot) -> Option<RuntimeView<'_, Ty>> {
         let start = self.stack.boundary() + start;
         self.view_raw(start)
     }
 
-    fn view_raw(&mut self, start: RawStackSlot) -> Option<RuntimeView<'_, Ty, Conv>> {
+    fn view_raw(&mut self, start: RawStackSlot) -> Option<RuntimeView<'_, Ty>> {
         let RuntimeView {
             core,
             chunk_cache,
@@ -250,14 +259,14 @@ where
     }
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
-    WeakValue<Ty>: DisplayWith<Heap>,
+    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub fn invoke_at(
         &mut self,
-        f: impl LuaFfiOnce<Ty, Conv>,
+        f: impl LuaFfiOnce<Ty>,
         start: StackSlot,
     ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::OutOfBoundsStack;
@@ -266,10 +275,7 @@ where
         rt.invoke(f)
     }
 
-    pub fn invoke(
-        mut self,
-        f: impl LuaFfiOnce<Ty, Conv>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    pub fn invoke(mut self, f: impl LuaFfiOnce<Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::backtrace::{BacktraceFrame, FrameSource};
         use rust_backtrace_stack::RustFrame;
 
@@ -307,7 +313,7 @@ where
     }
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
 {
@@ -317,7 +323,7 @@ where
     }
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
 {
@@ -349,13 +355,11 @@ where
     }
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
-    Conv: 'static,
-    Ty::RustClosure: LuaFfi<Ty, Conv>,
-    Ty::Table: TableIndex<Weak<Ty>>,
-    WeakValue<Ty>: DisplayWith<Heap>,
+    Ty::RustClosure: LuaFfi<Ty>,
+    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub fn enter(
         mut self,
@@ -426,10 +430,9 @@ where
     }
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
     pub fn construct_closure(
         &mut self,
@@ -444,7 +447,7 @@ where
     }
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
 {
@@ -503,10 +506,9 @@ where
     }
 }
 
-impl<'rt, Ty, Conv> RuntimeView<'rt, Ty, Conv>
+impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
-    Conv: 'static,
 {
     pub fn backtrace(&self) -> Backtrace {
         use rust_backtrace_stack::RustFrame;
@@ -545,7 +547,7 @@ where
     pub fn into_diagnostic(&self, err: RuntimeError<StrongValue<Ty>>) -> Diagnostic
     where
         Ty::String: AsRef<[u8]>,
-        StrongValue<Ty>: DisplayWith<Heap>,
+        StrongValue<Ty>: DisplayWith<Heap<Ty>>,
     {
         use codespan_reporting::files::SimpleFile;
 

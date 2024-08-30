@@ -5,19 +5,20 @@ use std::path::PathBuf;
 
 use gc::Trace;
 
-use super::{Concat, Len, TypeMismatchOrError, Types, Value};
+use super::{Concat, CoreTypes, Len, TypeMismatchOrError, Types, Value};
 use crate::gc::{TryFromWithGc, TryIntoWithGc};
 
 pub struct LuaString<T>(pub T);
 
-impl<T, Ty, Gc> TryFromWithGc<Value<Ty>, Gc> for LuaString<T>
+impl<T, Rf, Ty, Gc> TryFromWithGc<Value<Rf, Ty>, Gc> for LuaString<T>
 where
-    Ty: Types,
-    Ty::String: TryIntoWithGc<T, Gc>,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: TryIntoWithGc<T, Gc>,
 {
-    type Error = TypeMismatchOrError<<Ty::String as TryIntoWithGc<T, Gc>>::Error>;
+    type Error = TypeMismatchOrError<<Rf::String<Ty::String> as TryIntoWithGc<T, Gc>>::Error>;
 
-    fn try_from_with_gc(value: Value<Ty>, gc: &mut Gc) -> Result<Self, Self::Error> {
+    fn try_from_with_gc(value: Value<Rf, Ty>, gc: &mut Gc) -> Result<Self, Self::Error> {
         match value {
             Value::String(t) => {
                 let r = t.try_into_with_gc(gc).map_err(TypeMismatchOrError::Other)?;
@@ -37,10 +38,11 @@ where
     }
 }
 
-impl<T, Gc> From<LuaString<T>> for Value<Gc>
+impl<T, Rf, Ty> From<LuaString<T>> for Value<Rf, Ty>
 where
-    Gc: Types,
-    T: Into<Gc::String>,
+    Rf: Types,
+    Ty: CoreTypes,
+    T: Into<Rf::String<Ty::String>>,
 {
     fn from(value: LuaString<T>) -> Self {
         let LuaString(value) = value;

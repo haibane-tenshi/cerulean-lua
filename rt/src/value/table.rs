@@ -7,28 +7,30 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::{
-    CoreTypes, Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, Types, Value, Weak,
+    CoreTypes, Meta, Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, Types, Value,
 };
 
-pub struct Table<Ty>
+pub struct Table<Rf, Ty>
 where
-    Ty: Types,
+    Rf: Types,
+    Ty: CoreTypes,
 {
-    data: HashMap<KeyValue<Ty>, Value<Ty>>,
-    metatable: Option<Ty::Table>,
+    data: HashMap<KeyValue<Rf, Ty>, Value<Rf, Ty>>,
+    metatable: Option<Meta<Ty>>,
 }
 
-impl<Ty> TableIndex<Ty> for Table<Ty>
+impl<Rf, Ty> TableIndex<Rf, Ty> for Table<Rf, Ty>
 where
-    Ty: Types,
-    KeyValue<Ty>: Hash + Eq,
-    Value<Ty>: Clone,
+    Rf: Types,
+    Ty: CoreTypes,
+    KeyValue<Rf, Ty>: Hash + Eq,
+    Value<Rf, Ty>: Clone,
 {
-    fn get(&self, key: &KeyValue<Ty>) -> Value<Ty> {
+    fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty> {
         self.data.get(key).cloned().unwrap_or_default()
     }
 
-    fn set(&mut self, key: KeyValue<Ty>, value: Value<Ty>) {
+    fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>) {
         match value {
             Value::Nil => {
                 self.data.remove(&key);
@@ -43,17 +45,18 @@ where
         Table::border(self)
     }
 
-    fn contains_key(&self, key: &KeyValue<Ty>) -> bool {
+    fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
         self.data.contains_key(key)
     }
 }
 
-impl<Ty> Table<Ty>
+impl<Rf, Ty> Table<Rf, Ty>
 where
-    Ty: Types,
-    KeyValue<Ty>: Hash + Eq,
+    Rf: Types,
+    Ty: CoreTypes,
+    KeyValue<Rf, Ty>: Hash + Eq,
 {
-    pub fn get_ref<'s>(&'s self, key: &KeyValue<Ty>) -> Option<&'s Value<Ty>> {
+    pub fn get_ref<'s>(&'s self, key: &KeyValue<Rf, Ty>) -> Option<&'s Value<Rf, Ty>> {
         self.data.get(key)
     }
 
@@ -65,24 +68,29 @@ where
     }
 }
 
-impl<Ty> Metatable<Ty::Table> for Table<Ty>
+impl<Rf, Ty> Metatable<Meta<Ty>> for Table<Rf, Ty>
 where
-    Ty: Types,
-    Ty::Table: Clone,
+    Rf: Types,
+    Ty: CoreTypes,
 {
-    fn metatable(&self) -> Option<Ty::Table> {
-        self.metatable.clone()
+    fn metatable(&self) -> Option<&Meta<Ty>> {
+        self.metatable.as_ref()
     }
 
-    fn set_metatable(&mut self, mt: Option<Ty::Table>) -> Option<Ty::Table> {
+    fn set_metatable(&mut self, mt: Option<Meta<Ty>>) -> Option<Meta<Ty>> {
         std::mem::replace(&mut self.metatable, mt)
     }
 }
 
-impl<Ty> Trace for Table<Weak<Ty>>
+impl<Rf, Ty> Trace for Table<Rf, Ty>
 where
+    Rf: Types,
     Ty: CoreTypes,
-    Ty::String: Trace,
+    Rf::String<Ty::String>: Trace,
+    Callable<Rf, Ty>: Trace,
+    Rf::Table<Ty::Table>: Trace,
+    Rf::FullUserdata<Ty::FullUserdata>: Trace,
+    Meta<Ty>: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         for (key, value) in self.data.iter() {
@@ -94,12 +102,13 @@ where
     }
 }
 
-impl<Ty> Debug for Table<Ty>
+impl<Rf, Ty> Debug for Table<Rf, Ty>
 where
-    Ty: Types,
-    KeyValue<Ty>: Debug,
-    Value<Ty>: Debug,
-    Ty::Table: Debug,
+    Rf: Types,
+    Ty: CoreTypes,
+    KeyValue<Rf, Ty>: Debug,
+    Value<Rf, Ty>: Debug,
+    Meta<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Table")
@@ -109,38 +118,26 @@ where
     }
 }
 
-impl<Ty> Clone for Table<Ty>
+impl<Rf, Ty> Clone for Table<Rf, Ty>
 where
-    Ty: Types,
-    KeyValue<Ty>: Clone,
-    Value<Ty>: Clone,
-    Ty::Table: Clone,
+    Rf: Types,
+    Ty: CoreTypes,
+    KeyValue<Rf, Ty>: Clone,
+    Value<Rf, Ty>: Clone,
+    Meta<Ty>: Clone,
 {
     fn clone(&self) -> Self {
         Self {
             data: self.data.clone(),
-            metatable: self.metatable.clone(),
+            metatable: self.metatable,
         }
     }
 }
 
-impl<Ty> PartialEq for Table<Ty>
+impl<Rf, Ty> Default for Table<Rf, Ty>
 where
-    Ty: Types,
-    Ty::String: Eq + Hash,
-    Ty::LuaCallable: Eq + Hash,
-    Ty::RustCallable: Eq + Hash,
-    Ty::Table: Eq + Hash,
-    Ty::FullUserdata: Eq + Hash,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.data == other.data && self.metatable == other.metatable
-    }
-}
-
-impl<Ty> Default for Table<Ty>
-where
-    Ty: Types,
+    Rf: Types,
+    Ty: CoreTypes,
 {
     fn default() -> Self {
         Self {
@@ -150,24 +147,24 @@ where
     }
 }
 
-pub enum KeyValue<Ty: Types> {
+pub enum KeyValue<Rf: Types, Ty: CoreTypes> {
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
-    String(Ty::String),
-    Function(Callable<Ty>),
-    Table(Ty::Table),
-    Userdata(Ty::FullUserdata),
+    String(Rf::String<Ty::String>),
+    Function(Callable<Rf, Ty>),
+    Table(Rf::Table<Ty::Table>),
+    Userdata(Rf::FullUserdata<Ty::FullUserdata>),
 }
 
-impl<Ty> Trace for KeyValue<Ty>
+impl<Rf, Ty> Trace for KeyValue<Rf, Ty>
 where
-    Ty: Types + 'static,
-    Ty::String: Trace,
-    Ty::LuaCallable: Trace,
-    Ty::RustCallable: Trace,
-    Ty::Table: Trace,
-    Ty::FullUserdata: Trace,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Trace,
+    Callable<Rf, Ty>: Trace,
+    Rf::Table<Ty::Table>: Trace,
+    Rf::FullUserdata<Ty::FullUserdata>: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         use KeyValue::*;
@@ -182,14 +179,14 @@ where
     }
 }
 
-impl<Ty> Debug for KeyValue<Ty>
+impl<Rf, Ty> Debug for KeyValue<Rf, Ty>
 where
-    Ty: Types,
-    Ty::String: Debug,
-    Ty::LuaCallable: Debug,
-    Ty::RustCallable: Debug,
-    Ty::Table: Debug,
-    Ty::FullUserdata: Debug,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Debug,
+    Callable<Rf, Ty>: Debug,
+    Rf::Table<Ty::Table>: Debug,
+    Rf::FullUserdata<Ty::FullUserdata>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -204,14 +201,14 @@ where
     }
 }
 
-impl<Ty> Clone for KeyValue<Ty>
+impl<Rf, Ty> Clone for KeyValue<Rf, Ty>
 where
-    Ty: Types,
-    Ty::String: Clone,
-    Ty::LuaCallable: Clone,
-    Ty::RustCallable: Clone,
-    Ty::Table: Clone,
-    Ty::FullUserdata: Clone,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Clone,
+    Callable<Rf, Ty>: Clone,
+    Rf::Table<Ty::Table>: Clone,
+    Rf::FullUserdata<Ty::FullUserdata>: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -227,25 +224,25 @@ where
     }
 }
 
-impl<Ty> Copy for KeyValue<Ty>
+impl<Rf, Ty> Copy for KeyValue<Rf, Ty>
 where
-    Ty: Types,
-    Ty::String: Copy,
-    Ty::LuaCallable: Copy,
-    Ty::RustCallable: Copy,
-    Ty::Table: Copy,
-    Ty::FullUserdata: Copy,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Copy,
+    Callable<Rf, Ty>: Copy,
+    Rf::Table<Ty::Table>: Copy,
+    Rf::FullUserdata<Ty::FullUserdata>: Copy,
 {
 }
 
-impl<Ty> PartialEq for KeyValue<Ty>
+impl<Rf, Ty> PartialEq for KeyValue<Rf, Ty>
 where
-    Ty: Types,
-    Ty::String: PartialEq,
-    Ty::LuaCallable: PartialEq,
-    Ty::RustCallable: PartialEq,
-    Ty::Table: PartialEq,
-    Ty::FullUserdata: PartialEq,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: PartialEq,
+    Callable<Rf, Ty>: PartialEq,
+    Rf::Table<Ty::Table>: PartialEq,
+    Rf::FullUserdata<Ty::FullUserdata>: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -261,25 +258,25 @@ where
     }
 }
 
-impl<Ty> Eq for KeyValue<Ty>
+impl<Rf, Ty> Eq for KeyValue<Rf, Ty>
 where
-    Ty: Types,
-    Ty::String: Eq,
-    Ty::LuaCallable: Eq,
-    Ty::RustCallable: Eq,
-    Ty::Table: Eq,
-    Ty::FullUserdata: Eq,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Eq,
+    Callable<Rf, Ty>: Eq,
+    Rf::Table<Ty::Table>: Eq,
+    Rf::FullUserdata<Ty::FullUserdata>: Eq,
 {
 }
 
-impl<Ty> Hash for KeyValue<Ty>
+impl<Rf, Ty> Hash for KeyValue<Rf, Ty>
 where
-    Ty: Types,
-    Ty::String: Hash,
-    Ty::LuaCallable: Hash,
-    Ty::RustCallable: Hash,
-    Ty::Table: Hash,
-    Ty::FullUserdata: Hash,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Hash,
+    Callable<Rf, Ty>: Hash,
+    Rf::Table<Ty::Table>: Hash,
+    Rf::FullUserdata<Ty::FullUserdata>: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         use KeyValue::*;
@@ -313,13 +310,14 @@ impl InvalidTableKeyError {
     }
 }
 
-impl<Gc> TryFrom<Value<Gc>> for KeyValue<Gc>
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for KeyValue<Rf, Ty>
 where
-    Gc: Types,
+    Rf: Types,
+    Ty: CoreTypes,
 {
     type Error = InvalidTableKeyError;
 
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         let r = match value {
             Value::Bool(t) => KeyValue::Bool(t),
             Value::Int(t) => KeyValue::Int(t),
@@ -338,11 +336,12 @@ where
     }
 }
 
-impl<Gc> From<KeyValue<Gc>> for Value<Gc>
+impl<Rf, Ty> From<KeyValue<Rf, Ty>> for Value<Rf, Ty>
 where
-    Gc: Types,
+    Rf: Types,
+    Ty: CoreTypes,
 {
-    fn from(value: KeyValue<Gc>) -> Self {
+    fn from(value: KeyValue<Rf, Ty>) -> Self {
         match value {
             KeyValue::Bool(t) => Value::Bool(t),
             KeyValue::Int(t) => Value::Int(t),
@@ -357,12 +356,13 @@ where
 
 pub struct LuaTable<T>(pub T);
 
-impl<Ty, T> TryInto<LuaTable<T>> for Value<Ty>
+impl<Rf, Ty, T> TryInto<LuaTable<T>> for Value<Rf, Ty>
 where
-    Ty: Types,
-    Ty::Table: TryInto<T>,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::Table<Ty::Table>: TryInto<T>,
 {
-    type Error = TypeMismatchOrError<<Ty::Table as TryInto<T>>::Error>;
+    type Error = TypeMismatchOrError<<Rf::Table<Ty::Table> as TryInto<T>>::Error>;
 
     fn try_into(self) -> Result<LuaTable<T>, Self::Error> {
         match self {
@@ -384,10 +384,11 @@ where
     }
 }
 
-impl<Ty, T> From<LuaTable<T>> for Value<Ty>
+impl<Rf, Ty, T> From<LuaTable<T>> for Value<Rf, Ty>
 where
-    Ty: Types,
-    Ty::Table: From<T>,
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::Table<Ty::Table>: From<T>,
 {
     fn from(value: LuaTable<T>) -> Self {
         let LuaTable(value) = value;

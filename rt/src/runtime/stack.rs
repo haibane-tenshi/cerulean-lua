@@ -3,14 +3,14 @@ use std::fmt::Debug;
 use std::ops::{Add, Bound, Deref, DerefMut, Range, RangeBounds, Sub};
 
 use bitvec::vec::BitVec;
-use gc::{GcCell, Heap, RootCell};
+use gc::{GcCell, RootCell};
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
 use super::frame::{Closure, UpvaluePlace};
 use super::Event;
 use crate::error::opcode::MissingArgsError;
-use crate::gc::DisplayWith;
+use crate::gc::{DisplayWith, Heap};
 use crate::value::{CoreTypes, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -236,7 +236,7 @@ impl<Ty> Stack<Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn new(heap: &mut Heap) -> Self {
+    pub fn new(heap: &mut Heap<Ty>) -> Self {
         Stack {
             main: Default::default(),
             root: heap.alloc_cell(Default::default()),
@@ -247,15 +247,15 @@ where
         }
     }
 
-    fn sync_stack_cache(&mut self, heap: &mut Heap) {
+    fn sync_stack_cache(&mut self, heap: &mut Heap<Ty>) {
         let mirror = &mut heap[&self.root];
         mirror.truncate(self.diff.unsync.0);
-        mirror.extend(self.main[self.diff.unsync..].iter().cloned());
+        mirror.extend_from_slice(self.main[self.diff.unsync..].as_ref());
 
         self.diff.sync_on(self.main.next_key());
     }
 
-    fn sync_upvalue_cache(&mut self, heap: &mut Heap) {
+    fn sync_upvalue_cache(&mut self, heap: &mut Heap<Ty>) {
         heap.pause(|heap| {
             let evicted_upvalues = std::mem::take(&mut self.evicted_upvalues);
 
@@ -297,7 +297,7 @@ where
         })
     }
 
-    fn sync_transient(&mut self, heap: &mut Heap) {
+    fn sync_transient(&mut self, heap: &mut Heap<Ty>) {
         if self.diff.has_transient(self.main.next_key()) {
             self.sync_stack_cache(heap);
         }
@@ -311,7 +311,7 @@ where
         }
     }
 
-    fn sync_upvalues(&mut self, heap: &mut Heap) {
+    fn sync_upvalues(&mut self, heap: &mut Heap<Ty>) {
         if self.evicted_upvalues.is_empty() {
             return;
         }
@@ -323,7 +323,7 @@ where
         self.sync_upvalue_cache(heap);
     }
 
-    fn register_closure(&mut self, closure_ref: &RootCell<Closure<Ty>>, heap: &Heap) {
+    fn register_closure(&mut self, closure_ref: &RootCell<Closure<Ty>>, heap: &Heap<Ty>) {
         let closure = &heap[closure_ref];
 
         let iter = closure.upvalues().iter().filter_map(|place| match place {
@@ -580,7 +580,7 @@ where
         }
     }
 
-    pub fn frame<'s>(&'s mut self, heap: &'s mut Heap) -> StackFrame<'s, Ty> {
+    pub fn frame<'s>(&'s mut self, heap: &'s mut Heap<Ty>) -> StackFrame<'s, Ty> {
         StackFrame {
             guard: self.reborrow(),
             heap,
@@ -681,12 +681,12 @@ where
 impl<'a, Ty> StackGuard<'a, Ty>
 where
     Ty: CoreTypes,
-    WeakValue<Ty>: DisplayWith<Heap>,
+    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub fn emit_pretty(
         &self,
         writer: &mut impl std::fmt::Write,
-        heap: &Heap,
+        heap: &Heap<Ty>,
     ) -> Result<(), std::fmt::Error> {
         if self.is_empty() {
             return write!(writer, "[]");
@@ -708,7 +708,7 @@ where
         Ok(())
     }
 
-    pub fn to_pretty_string(&self, heap: &Heap) -> String {
+    pub fn to_pretty_string(&self, heap: &Heap<Ty>) -> String {
         let mut r = String::new();
         self.emit_pretty(&mut r, heap).unwrap();
         r
@@ -748,7 +748,7 @@ where
     Ty: CoreTypes,
 {
     /// Ensure that all values on the stack are rooted.
-    pub(super) fn sync_transient(&mut self, heap: &mut Heap) {
+    pub(super) fn sync_transient(&mut self, heap: &mut Heap<Ty>) {
         self.0.stack.sync_transient(heap)
     }
 
@@ -765,7 +765,7 @@ where
     ///
     /// A nice part about this rule that after a frame is constructed,
     /// for that specific frame invariant will stay true as long as the frame exists.
-    /// This is because any on-stack upvalues will be positioned somewhere on the stack above
+    /// This is because any on-stack upvalues will be positioned somewhere on the stack below
     /// that frame's stack therefore are impossible to remove, ergo cannot be disassociated.
     /// So, travelling up the call stack cannot violate the invariant.
     ///
@@ -773,11 +773,15 @@ where
     /// closure used to construct the frame might have some of its upvalues disassociated and stuck in the cache.
     ///
     /// Therefore, the only place where we must sync upvalue cache is inside [`Frame::new`](super::Frame::new).
-    pub(super) fn sync_upvalues(&mut self, heap: &mut Heap) {
+    pub(super) fn sync_upvalues(&mut self, heap: &mut Heap<Ty>) {
         self.0.stack.sync_upvalues(heap)
     }
 
-    pub(super) fn register_closure(&mut self, closure_ref: &RootCell<Closure<Ty>>, heap: &Heap) {
+    pub(super) fn register_closure(
+        &mut self,
+        closure_ref: &RootCell<Closure<Ty>>,
+        heap: &Heap<Ty>,
+    ) {
         self.0.stack.register_closure(closure_ref, heap)
     }
 }
@@ -1054,7 +1058,7 @@ impl<'a, Ty> TransientStackFrame<'a, Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn sync(&mut self, heap: &mut Heap) {
+    pub fn sync(&mut self, heap: &mut Heap<Ty>) {
         // There are no on-stack upvalues by construction.
         self.stack.sync_transient(heap)
     }
@@ -1106,7 +1110,7 @@ where
     Ty: CoreTypes,
 {
     guard: StackGuard<'a, Ty>,
-    heap: &'a mut Heap,
+    heap: &'a mut Heap<Ty>,
 }
 
 impl<'a, Ty> StackFrame<'a, Ty>

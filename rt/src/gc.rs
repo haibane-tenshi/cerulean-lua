@@ -3,10 +3,15 @@
 use std::fmt::Display;
 use std::hash::Hash;
 
-use gc::{Gc, GcCell, Heap, Root, RootCell, Trace};
+use gc::index::{Access, Allocated, GcPtr, RootPtr};
+use gc::userdata::Params;
+use gc::{Gc, GcCell, Heap as TrueHeap, Root, RootCell, Trace};
 
 use crate::ffi::{LuaFfi, LuaFfiMut, LuaFfiOnce};
-use crate::value::CoreTypes;
+use crate::value::userdata::DefaultParams;
+use crate::value::{CoreTypes, Meta};
+
+pub type Heap<Ty> = TrueHeap<Meta<Ty>, DefaultParams<Ty>>;
 
 pub trait TryFromWithGc<T, Gc>: Sized {
     type Error;
@@ -89,36 +94,27 @@ impl<P> LuaPtr<P> {
     }
 }
 
-impl<T> LuaPtr<Gc<T>>
+impl<T, A> LuaPtr<GcPtr<T, A>>
 where
-    T: Trace,
+    T: ?Sized,
+    A: Access,
 {
-    pub fn upgrade(self, heap: &Heap) -> Option<LuaPtr<Root<T>>> {
+    pub fn upgrade<M, P>(self, heap: &TrueHeap<M, P>) -> Option<LuaPtr<RootPtr<T, A>>>
+    where
+        P: Params,
+    {
         let LuaPtr(ptr) = self;
         let ptr = heap.upgrade(ptr)?;
         Some(LuaPtr(ptr))
     }
 }
 
-impl<T> LuaPtr<GcCell<T>>
+impl<T, A> LuaPtr<RootPtr<T, A>>
 where
-    T: Trace,
+    T: ?Sized,
+    A: Access,
 {
-    pub fn upgrade_cell(self, heap: &Heap) -> Option<LuaPtr<RootCell<T>>> {
-        let LuaPtr(ptr) = self;
-        let ptr = heap.upgrade_cell(ptr)?;
-        Some(LuaPtr(ptr))
-    }
-}
-
-impl<T> LuaPtr<Root<T>> {
-    pub fn downgrade(&self) -> LuaPtr<Gc<T>> {
-        LuaPtr(self.0.downgrade())
-    }
-}
-
-impl<T> LuaPtr<RootCell<T>> {
-    pub fn downgrade_cell(&self) -> LuaPtr<GcCell<T>> {
+    pub fn downgrade(&self) -> LuaPtr<GcPtr<T, A>> {
         LuaPtr(self.0.downgrade())
     }
 }
@@ -139,118 +135,108 @@ impl<P> From<P> for LuaPtr<P> {
     }
 }
 
-impl<T> PartialEq for LuaPtr<Gc<T>> {
+impl<T, A> PartialEq for LuaPtr<GcPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn eq(&self, other: &Self) -> bool {
-        self.0.addr() == other.0.addr()
+        self.0.location() == other.0.location()
     }
 }
 
-impl<T> PartialEq for LuaPtr<GcCell<T>> {
+impl<T, A> PartialEq for LuaPtr<RootPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn eq(&self, other: &Self) -> bool {
-        self.0.addr() == other.0.addr()
+        self.0.location() == other.0.location()
     }
 }
 
-impl<T> PartialEq for LuaPtr<Root<T>> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.addr() == other.0.addr()
-    }
+impl<T, A> Eq for LuaPtr<GcPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
 }
 
-impl<T> PartialEq for LuaPtr<RootCell<T>> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.addr() == other.0.addr()
-    }
+impl<T, A> Eq for LuaPtr<RootPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
 }
 
-impl<T> Eq for LuaPtr<Gc<T>> {}
-
-impl<T> Eq for LuaPtr<GcCell<T>> {}
-
-impl<T> Eq for LuaPtr<Root<T>> {}
-
-impl<T> Eq for LuaPtr<RootCell<T>> {}
-
-impl<T> PartialOrd for LuaPtr<Gc<T>> {
+impl<T, A> PartialOrd for LuaPtr<GcPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T> PartialOrd for LuaPtr<GcCell<T>> {
+impl<T, A> PartialOrd for LuaPtr<RootPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T> PartialOrd for LuaPtr<Root<T>> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T> PartialOrd for LuaPtr<RootCell<T>> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T> Ord for LuaPtr<Gc<T>> {
+impl<T, A> Ord for LuaPtr<GcPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.addr().cmp(&other.0.addr())
+        self.0.location().cmp(&other.0.location())
     }
 }
 
-impl<T> Ord for LuaPtr<GcCell<T>> {
+impl<T, A> Ord for LuaPtr<RootPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.addr().cmp(&other.0.addr())
+        self.0.location().cmp(&other.0.location())
     }
 }
 
-impl<T> Ord for LuaPtr<Root<T>> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.addr().cmp(&other.0.addr())
-    }
-}
-
-impl<T> Ord for LuaPtr<RootCell<T>> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.addr().cmp(&other.0.addr())
-    }
-}
-
-impl<T> Hash for LuaPtr<Gc<T>> {
+impl<T, A> Hash for LuaPtr<GcPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.addr().hash(state);
+        self.0.location().hash(state);
     }
 }
 
-impl<T> Hash for LuaPtr<GcCell<T>> {
+impl<T, A> Hash for LuaPtr<RootPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.addr().hash(state);
+        self.0.location().hash(state);
     }
 }
 
-impl<T> Hash for LuaPtr<Root<T>> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.addr().hash(state);
-    }
-}
-
-impl<T> Hash for LuaPtr<RootCell<T>> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.addr().hash(state);
-    }
-}
-
-impl<Ty, Conv, P> LuaFfiOnce<Ty, Conv> for LuaPtr<P>
+impl<Ty, P> LuaFfiOnce<Ty> for LuaPtr<P>
 where
     Ty: CoreTypes,
-    P: LuaFfiOnce<Ty, Conv>,
+    P: LuaFfiOnce<Ty>,
 {
     fn call_once(
         self,
-        rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
     ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
         self.0.call_once(rt)
     }
@@ -260,39 +246,41 @@ where
     }
 }
 
-impl<Ty, Conv, P> LuaFfiMut<Ty, Conv> for LuaPtr<P>
+impl<Ty, P> LuaFfiMut<Ty> for LuaPtr<P>
 where
     Ty: CoreTypes,
-    P: LuaFfiMut<Ty, Conv>,
+    P: LuaFfiMut<Ty>,
 {
     fn call_mut(
         &mut self,
-        rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
     ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
         self.0.call_mut(rt)
     }
 }
 
-impl<Ty, Conv, P> LuaFfi<Ty, Conv> for LuaPtr<P>
+impl<Ty, P> LuaFfi<Ty> for LuaPtr<P>
 where
     Ty: CoreTypes,
-    P: LuaFfi<Ty, Conv>,
+    P: LuaFfi<Ty>,
 {
     fn call(
         &self,
-        rt: crate::runtime::RuntimeView<'_, Ty, Conv>,
+        rt: crate::runtime::RuntimeView<'_, Ty>,
     ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
         self.0.call(rt)
     }
 }
 
-impl<T> DisplayWith<Heap> for LuaPtr<Gc<T>>
+impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Gc<T>>
 where
-    T: Trace + Display,
+    T: Allocated<M, P> + Display + ?Sized + 'static,
+    M: 'static,
+    P: Params,
 {
-    type Output<'a> = LuaPtrDisplay<'a, Gc<T>>;
+    type Output<'a> = LuaPtrDisplay<'a, Gc<T>, M, P>;
 
-    fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
+    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
         LuaPtrDisplay {
             ptr: &self.0,
             heap: extra,
@@ -300,13 +288,15 @@ where
     }
 }
 
-impl<T> DisplayWith<Heap> for LuaPtr<GcCell<T>>
+impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<GcCell<T>>
 where
-    T: Trace + Display,
+    T: Allocated<M, P> + Display + ?Sized + 'static,
+    M: 'static,
+    P: Params,
 {
-    type Output<'a> = LuaPtrDisplay<'a, GcCell<T>>;
+    type Output<'a> = LuaPtrDisplay<'a, GcCell<T>, M, P>;
 
-    fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
+    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
         LuaPtrDisplay {
             ptr: &self.0,
             heap: extra,
@@ -314,13 +304,15 @@ where
     }
 }
 
-impl<T> DisplayWith<Heap> for LuaPtr<Root<T>>
+impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Root<T>>
 where
-    T: Trace + Display,
+    T: Allocated<M, P> + Display + ?Sized + 'static,
+    M: 'static,
+    P: Params,
 {
-    type Output<'a> = LuaPtrDisplay<'a, Root<T>>;
+    type Output<'a> = LuaPtrDisplay<'a, Root<T>, M, P>;
 
-    fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
+    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
         LuaPtrDisplay {
             ptr: &self.0,
             heap: extra,
@@ -328,13 +320,15 @@ where
     }
 }
 
-impl<T> DisplayWith<Heap> for LuaPtr<RootCell<T>>
+impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<RootCell<T>>
 where
-    T: Trace + Display,
+    T: Allocated<M, P> + Display + ?Sized + 'static,
+    M: 'static,
+    P: Params,
 {
-    type Output<'a> = LuaPtrDisplay<'a, RootCell<T>>;
+    type Output<'a> = LuaPtrDisplay<'a, RootCell<T>, M, P>;
 
-    fn display<'a>(&'a self, extra: &'a Heap) -> Self::Output<'a> {
+    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
         LuaPtrDisplay {
             ptr: &self.0,
             heap: extra,
@@ -342,14 +336,31 @@ where
     }
 }
 
-pub struct LuaPtrDisplay<'a, Ptr> {
+pub struct LuaPtrDisplay<'a, Ptr, M, P> {
     ptr: &'a Ptr,
-    heap: &'a Heap,
+    heap: &'a TrueHeap<M, P>,
 }
 
-impl<'a, T> Display for LuaPtrDisplay<'a, Gc<T>>
+impl<'a, T, M, P> Display for LuaPtrDisplay<'a, Gc<T>, M, P>
 where
-    T: Trace + Display,
+    T: Allocated<M, P> + Display + ?Sized,
+    P: Params,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let LuaPtrDisplay { ptr, heap } = self;
+
+        if let Some(value) = heap.get(*ptr) {
+            write!(f, "{value}")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, T, M, P> Display for LuaPtrDisplay<'a, GcCell<T>, M, P>
+where
+    T: Allocated<M, P> + Display + ?Sized,
+    P: Params,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let LuaPtrDisplay { ptr, heap } = self;
@@ -362,24 +373,10 @@ where
     }
 }
 
-impl<'a, T> Display for LuaPtrDisplay<'a, GcCell<T>>
+impl<'a, T, M, P> Display for LuaPtrDisplay<'a, Root<T>, M, P>
 where
-    T: Trace + Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
-
-        if let Some(value) = heap.get(**ptr) {
-            write!(f, "{value}")?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<'a, T> Display for LuaPtrDisplay<'a, Root<T>>
-where
-    T: Trace + Display,
+    T: Allocated<M, P> + Display + ?Sized,
+    P: Params,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let LuaPtrDisplay { ptr, heap } = self;
@@ -389,9 +386,10 @@ where
     }
 }
 
-impl<'a, T> Display for LuaPtrDisplay<'a, RootCell<T>>
+impl<'a, T, M, P> Display for LuaPtrDisplay<'a, RootCell<T>, M, P>
 where
-    T: Trace + Display,
+    T: Allocated<M, P> + Display + ?Sized,
+    P: Params,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let LuaPtrDisplay { ptr, heap } = self;

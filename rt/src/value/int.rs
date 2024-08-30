@@ -5,7 +5,7 @@ use std::ops::{
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
-use super::{Float, Type, TypeMismatchError, Types, Value};
+use super::{CoreTypes, Float, Type, TypeMismatchError, Types, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int(pub i64);
@@ -43,7 +43,7 @@ impl TryFrom<Float> for Int {
 
     /// Attempt to convert float to integer in Lua sense.
     ///
-    /// Convertion succeeds under two conditions:
+    /// Conversion succeeds under two conditions:
     /// * float contains exactly integer (e.g. there is no fractional part)
     /// * resulting integer is representable
     fn try_from(value: Float) -> Result<Self, Self::Error> {
@@ -71,7 +71,7 @@ pub struct NotExactIntError;
 impl PartialEq<Float> for Int {
     /// Compare two values according to mathematical value they represent.
     ///
-    /// Lua spec prescribes that two [numbers should be compared according to their methematical values][lua_ref#3.4.4]
+    /// Lua spec prescribes that two [numbers should be compared according to their mathematical values][lua_ref#3.4.4]
     /// regardless of underlying type.
     /// The function provides implementation of such comparison between integers and floats.
     ///
@@ -88,7 +88,7 @@ impl PartialEq<Float> for Int {
 impl PartialOrd<Float> for Int {
     /// Compare two values according to mathematical value they represent.
     ///
-    /// Lua spec prescribes that two [numbers should be compared according to their methematical values][lua_ref#3.4.4]
+    /// Lua spec prescribes that two [numbers should be compared according to their mathematical values][lua_ref#3.4.4]
     /// regardless of underlying type.
     /// The function provides implementation of such comparison between integers and floats.
     ///
@@ -294,10 +294,14 @@ impl ShrAssign for Int {
     }
 }
 
-impl<Gc: Types> TryFrom<Value<Gc>> for Int {
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Int
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         match value {
             Value::Int(value) => Ok(Int(value)),
             value => {
@@ -312,7 +316,11 @@ impl<Gc: Types> TryFrom<Value<Gc>> for Int {
     }
 }
 
-impl<Gc: Types> From<Int> for Value<Gc> {
+impl<Rf, Ty> From<Int> for Value<Rf, Ty>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
     fn from(value: Int) -> Self {
         let Int(value) = value;
         Value::Int(value)

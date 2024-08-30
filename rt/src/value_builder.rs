@@ -54,15 +54,15 @@ pub struct Part<Fun, Con, Rec, F> {
     pub builder: F,
 }
 
-pub fn builder<Ty: CoreTypes, Conv, T>() -> ValueBuilder<
+pub fn builder<Ty: CoreTypes, T>() -> ValueBuilder<
     impl for<'rt, 'a> FnOnce(
-        RuntimeView<'rt, Ty, Conv>,
+        RuntimeView<'rt, Ty>,
         ChunkId,
         T,
     ) -> Result<T, RuntimeError<StrongValue<Ty>>>,
 > {
-    fn builder<Ty: CoreTypes, Conv, T>(
-        _: RuntimeView<Ty, Conv>,
+    fn builder<Ty: CoreTypes, T>(
+        _: RuntimeView<Ty>,
         _: ChunkId,
         value: T,
     ) -> Result<T, RuntimeError<StrongValue<Ty>>> {
@@ -94,20 +94,20 @@ impl<P> ValueBuilder<P> {
     //     ChunkBuilder { chunk, builder }
     // }
 
-    pub fn include<Fun, Con, Rec, Ty, Conv, F, T, U, V>(
+    pub fn include<Fun, Con, Rec, Ty, F, T, U, V>(
         self,
         chunk_part: Part<Fun, Con, Rec, F>,
     ) -> ValueBuilder<
-        impl FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<V, RuntimeError<StrongValue<Ty>>>,
+        impl FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<V, RuntimeError<StrongValue<Ty>>>,
     >
     where
         Ty: CoreTypes,
         // Value<Ty>: Display,
-        P: FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
+        P: FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
         Fun: IntoIterator<Item = Function>,
         Con: IntoIterator<Item = Literal>,
         Rec: IntoIterator<Item = ClosureRecipe>,
-        F: FnOnce(RuntimeView<Ty, Conv>, ChunkRange, U) -> Result<V, RuntimeError<StrongValue<Ty>>>,
+        F: FnOnce(RuntimeView<Ty>, ChunkRange, U) -> Result<V, RuntimeError<StrongValue<Ty>>>,
     {
         let Part {
             chunk_ext,
@@ -130,7 +130,7 @@ impl<P> ValueBuilder<P> {
         let constant_ids = constant_start..constant_end;
         let recipe_ids = recipe_start..recipe_end;
 
-        let builder = move |mut rt: RuntimeView<Ty, Conv>, chunk_id: ChunkId, value: T| {
+        let builder = move |mut rt: RuntimeView<Ty>, chunk_id: ChunkId, value: T| {
             let value = builder(rt.view_full(), chunk_id, value)?;
 
             let chunk_part = ChunkRange {
@@ -148,15 +148,15 @@ impl<P> ValueBuilder<P> {
         ValueBuilder { chunk, builder }
     }
 
-    pub fn finish<Ty, Conv, T, U>(
+    pub fn finish<Ty, T, U>(
         self,
     ) -> (
         Chunk,
-        impl FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
+        impl FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
     )
     where
         Ty: CoreTypes,
-        P: FnOnce(RuntimeView<Ty, Conv>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
+        P: FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
     {
         let ValueBuilder { chunk, builder } = self;
 

@@ -1,9 +1,7 @@
 use codespan_reporting::diagnostic::Diagnostic;
 use std::fmt::Debug;
 
-use gc::Heap;
-
-use crate::gc::DisplayWith;
+use crate::gc::{DisplayWith, Heap};
 use crate::value::{CoreTypes, StrongValue};
 
 pub struct ValueError<Value>(pub Value);
@@ -12,9 +10,9 @@ impl<Ty> ValueError<StrongValue<Ty>>
 where
     Ty: CoreTypes,
     Ty::String: AsRef<[u8]>,
-    StrongValue<Ty>: DisplayWith<Heap>,
+    StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
-    pub(crate) fn into_diagnostic<FileId>(self, heap: &Heap) -> Diagnostic<FileId> {
+    pub(crate) fn into_diagnostic<FileId>(self, heap: &Heap<Ty>) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
         use crate::gc::LuaPtr;
         use crate::value::Value::*;

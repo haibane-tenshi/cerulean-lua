@@ -4,7 +4,7 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 
-use super::{Int, Type, TypeMismatchError, Types, Value};
+use super::{CoreTypes, Int, Type, TypeMismatchError, Types, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Float(pub f64);
@@ -43,14 +43,14 @@ impl Display for Float {
 impl From<Int> for Float {
     /// Convert integer to float in Lua sense.
     ///
-    /// [Lua specifies][lua#3.4.3] that convertion results in
+    /// [Lua specifies][lua#3.4.3] that conversion results in
     /// * exact float representation if possible
     /// * otherwise nearest lower *or* nearest higher representable value
     ///
     /// # Note
     /// Specification seems to be ambiguous in this case,
     /// it doesn't specify *the nearest* but *either of*.
-    /// We take liberty in implementation and give it the same sematics
+    /// We take liberty in implementation and give it the same semantics
     /// as Rust's [int-to-float casts][rust_ref#numeric-cast].
     ///
     /// [lua#3.4.3]: https://www.lua.org/manual/5.4/manual.html#3.4.3
@@ -63,7 +63,7 @@ impl From<Int> for Float {
 impl PartialEq<Int> for Float {
     /// Compare two values according to mathematical value they represent.
     ///
-    /// Lua spec prescribes that two [numbers should be compared according to their methematical values][lua_ref#3.4.4]
+    /// Lua spec prescribes that two [numbers should be compared according to their mathematical values][lua_ref#3.4.4]
     /// regardless of underlying type.
     /// The function provides implementation of such comparison between integers and floats.
     ///
@@ -76,7 +76,7 @@ impl PartialEq<Int> for Float {
 impl PartialOrd<Int> for Float {
     /// Compare two values according to mathematical value they represent.
     ///
-    /// Lua spec prescribes that two [numbers should be compared according to their methematical values][lua_ref#3.4.4]
+    /// Lua spec prescribes that two [numbers should be compared according to their mathematical values][lua_ref#3.4.4]
     /// regardless of underlying type.
     /// The function provides implementation of such comparison between integers and floats.
     ///
@@ -168,10 +168,14 @@ impl RemAssign for Float {
     }
 }
 
-impl<Gc: Types> TryFrom<Value<Gc>> for Float {
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Float
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Gc>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         match value {
             Value::Float(value) => Ok(Float(value)),
             value => {
@@ -186,7 +190,11 @@ impl<Gc: Types> TryFrom<Value<Gc>> for Float {
     }
 }
 
-impl<Gc: Types> From<Float> for Value<Gc> {
+impl<Rf, Ty> From<Float> for Value<Rf, Ty>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
     fn from(value: Float) -> Self {
         let Float(value) = value;
         Value::Float(value)
