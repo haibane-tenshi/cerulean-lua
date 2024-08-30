@@ -8,7 +8,7 @@ use repr::literal::Literal;
 
 use rt::chunk_cache::ChunkId;
 use rt::error::RuntimeError;
-use rt::ffi::{LuaFfi, LuaFfiOnce, LuaFfiPtr};
+use rt::ffi::{LuaFfiOnce, LuaFfiPtr};
 use rt::gc::{DisplayWith, Heap, LuaPtr, TryIntoWithGc};
 use rt::runtime::Closure;
 use rt::runtime::RuntimeView;
@@ -91,7 +91,7 @@ pub fn pcall<Ty>() -> Part<
 >
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
-    Ty::RustClosure: LuaFfi<Ty> + From<LuaFfiPtr<Ty>>,
+    Ty::RustClosure: LuaFfiOnce<Ty> + From<LuaFfiPtr<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {

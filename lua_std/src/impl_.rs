@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use gc::GcCell;
 use repr::index::StackSlot;
 use rt::error::{AlreadyDroppedError, RefAccessError, RuntimeError};
-use rt::ffi::{self, LuaFfi, LuaFfiOnce, LuaFfiPtr, Maybe, Opts};
+use rt::ffi::{self, LuaFfiOnce, LuaFfiPtr, Maybe, Opts};
 use rt::gc::{DisplayWith, Heap, LuaPtr, TryFromWithGc, TryIntoWithGc};
 use rt::runtime::{Closure, RuntimeView};
 use rt::value::table::KeyValue;
@@ -68,7 +68,7 @@ pub fn pcall<Ty>() -> LuaFfiPtr<Ty>
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::String: AsRef<[u8]> + Display,
-    Ty::RustClosure: LuaFfi<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
