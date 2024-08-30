@@ -9,8 +9,7 @@ use crate::ffi::{DebugInfo, LuaFfi, LuaFfiMut, LuaFfiOnce, LuaFfiPtr};
 use crate::gc::{DisplayWith, Heap, TryFromWithGc};
 
 use super::{
-    CoreTypes, DefaultParams, Meta, Strong, StrongValue, TableIndex, TypeMismatchError, Types,
-    Value, Weak, WeakValue,
+    CoreTypes, Strong, StrongValue, TableIndex, TypeMismatchError, Types, Value, Weak, WeakValue,
 };
 
 pub use crate::runtime::{Closure as LuaClosure, RuntimeView};
@@ -555,7 +554,6 @@ where
     Ty: CoreTypes<LuaClosure = LuaClosure<Ty>>,
     Ty::Table: TableIndex<Weak, Ty>,
     Ty::RustClosure: LuaFfi<Ty>,
-    Ty::FullUserdata: gc::index::Allocated<Meta<Ty>, DefaultParams<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
@@ -579,7 +577,6 @@ where
     Ty: CoreTypes<LuaClosure = LuaClosure<Ty>>,
     Ty::Table: TableIndex<Weak, Ty>,
     Ty::RustClosure: LuaFfi<Ty>,
-    Ty::FullUserdata: gc::index::Allocated<Meta<Ty>, DefaultParams<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
