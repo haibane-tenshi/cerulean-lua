@@ -12,6 +12,11 @@ use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
+use gc::Root;
+
+use crate::runtime::Interned;
+use crate::value::{CoreTypes, Types, Value};
+
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
 pub use borrow::BorrowError;
@@ -34,6 +39,23 @@ pub enum RuntimeError<Value> {
     OutOfBoundsStack(OutOfBoundsStack),
     UpvalueCountMismatch(UpvalueCountMismatch),
     OpCode(OpCodeError),
+}
+
+impl<Rf, Ty> RuntimeError<Value<Rf, Ty>>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: From<Root<Interned<Ty::String>>>,
+{
+    pub fn from_msg(msg: Root<Interned<Ty::String>>) -> Self {
+        RuntimeError::Value(ValueError(Value::String(msg.into())))
+    }
+}
+
+impl<Value> RuntimeError<Value> {
+    pub fn from_value(value: Value) -> Self {
+        RuntimeError::Value(ValueError(value))
+    }
 }
 
 impl<Value> From<BorrowError> for RuntimeError<Value> {
