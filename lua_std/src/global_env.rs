@@ -51,7 +51,11 @@ pub fn assert<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
+    impl FnOnce(
+        RuntimeView<Ty>,
+        ChunkRange,
+        RootTable<Ty>,
+    ) -> Result<RootTable<Ty>, RuntimeError<StrongValue<Ty>>>,
 >
 where
     Ty: CoreTypes,
@@ -79,7 +83,11 @@ pub fn pcall<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
+    impl FnOnce(
+        RuntimeView<Ty>,
+        ChunkRange,
+        RootTable<Ty>,
+    ) -> Result<RootTable<Ty>, RuntimeError<StrongValue<Ty>>>,
 >
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
@@ -109,7 +117,11 @@ pub fn print<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
+    impl FnOnce(
+        RuntimeView<Ty>,
+        ChunkRange,
+        RootTable<Ty>,
+    ) -> Result<RootTable<Ty>, RuntimeError<StrongValue<Ty>>>,
 >
 where
     Ty: CoreTypes,
@@ -140,7 +152,11 @@ pub fn load<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
+    impl FnOnce(
+        RuntimeView<Ty>,
+        ChunkRange,
+        RootTable<Ty>,
+    ) -> Result<RootTable<Ty>, RuntimeError<StrongValue<Ty>>>,
 >
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
@@ -173,7 +189,11 @@ pub fn loadfile<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
+    impl FnOnce(
+        RuntimeView<Ty>,
+        ChunkRange,
+        RootTable<Ty>,
+    ) -> Result<RootTable<Ty>, RuntimeError<StrongValue<Ty>>>,
 >
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
@@ -205,7 +225,11 @@ pub fn setmetatable<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
+    impl FnOnce(
+        RuntimeView<Ty>,
+        ChunkRange,
+        RootTable<Ty>,
+    ) -> Result<RootTable<Ty>, RuntimeError<StrongValue<Ty>>>,
 >
 where
     Ty: CoreTypes,
@@ -233,7 +257,11 @@ pub fn getmetatable<Ty>() -> Part<
     [Function; 0],
     [Literal; 0],
     [ClosureRecipe; 0],
-    impl FnOnce(RuntimeView<Ty>, ChunkRange, RootTable<Ty>) -> Result<RootTable<Ty>, RuntimeError<Ty>>,
+    impl FnOnce(
+        RuntimeView<Ty>,
+        ChunkRange,
+        RootTable<Ty>,
+    ) -> Result<RootTable<Ty>, RuntimeError<StrongValue<Ty>>>,
 >
 where
     Ty: CoreTypes,
