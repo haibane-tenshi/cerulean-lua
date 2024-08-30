@@ -951,7 +951,7 @@ pub(crate) mod sealed_upgrade {
 }
 
 pub(crate) mod sealed_allocated {
-    use super::{FullUserdata, Params, Trace, Userdata};
+    use super::{FullUserdata, Params, Userdata};
 
     #[doc(hidden)]
     pub struct ArenaRef<'a, M, P>(pub(crate) &'a dyn super::Arena<M, P>);
@@ -972,8 +972,7 @@ pub(crate) mod sealed_allocated {
 
     impl<T, M, P> Sealed<M, P> for T
     where
-        T: Trace,
-        M: 'static,
+        T: 'static,
         P: Params,
     {
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
@@ -1000,7 +999,6 @@ pub(crate) mod sealed_allocated {
 
     impl<M, P> Sealed<M, P> for dyn FullUserdata<M, P>
     where
-        M: Trace,
         P: Params,
     {
         fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
@@ -1123,20 +1121,14 @@ impl<T: ?Sized> Rooted for Root<T> {}
 
 impl<T, M, P> Allocated<M, P> for T
 where
-    T: Trace,
-    M: 'static,
+    T: 'static,
     P: Params,
 {
 }
 
 impl<M, P> Allocated<M, P> for dyn Userdata<P> where P: Params {}
 
-impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P>
-where
-    M: Trace,
-    P: Params,
-{
-}
+impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P> where P: Params {}
 
 impl<T, M, P> AllocateAs<T, M, P> for T
 where
