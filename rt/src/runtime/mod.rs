@@ -18,7 +18,7 @@ use crate::backtrace::{Backtrace, Location};
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
 use crate::error::{AlreadyDroppedError, RuntimeError};
-use crate::ffi::{LuaFfi, LuaFfiOnce};
+use crate::ffi::LuaFfiOnce;
 use crate::gc::{DisplayWith, Heap};
 use crate::value::{
     CoreTypes, KeyValue, Meta, StrongValue, TypeWithoutMetatable, Value, Weak, WeakValue,
@@ -358,7 +358,7 @@ where
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
-    Ty::RustClosure: LuaFfi<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub fn enter(

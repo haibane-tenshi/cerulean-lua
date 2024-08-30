@@ -87,7 +87,7 @@ where
 impl<Ty, T> LuaFfiOnce<Ty> for GcCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -103,7 +103,7 @@ where
 impl<Ty, T> LuaFfiMut<Ty> for GcCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -113,20 +113,20 @@ where
 impl<Ty, T> LuaFfi<Ty> for GcCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
         let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
-        f.call(rt)
+        f.call_once(rt)
     }
 }
 
 impl<Ty, T> LuaFfiOnce<Ty> for RootCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -142,7 +142,7 @@ where
 impl<Ty, T> LuaFfiMut<Ty> for RootCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -152,18 +152,18 @@ where
 impl<Ty, T> LuaFfi<Ty> for RootCell<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         let f = rt.core.gc.get_root(self).clone();
-        f.call(rt)
+        f.call_once(rt)
     }
 }
 
 impl<Ty, T> LuaFfiOnce<Ty> for Gc<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -179,7 +179,7 @@ where
 impl<Ty, T> LuaFfiMut<Ty> for Gc<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -189,20 +189,20 @@ where
 impl<Ty, T> LuaFfi<Ty> for Gc<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
         let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
-        f.call(rt)
+        f.call_once(rt)
     }
 }
 
 impl<Ty, T> LuaFfiOnce<Ty> for Root<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -218,7 +218,7 @@ where
 impl<Ty, T> LuaFfiMut<Ty> for Root<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         self.call(rt)
@@ -228,11 +228,11 @@ where
 impl<Ty, T> LuaFfi<Ty> for Root<T>
 where
     Ty: CoreTypes,
-    T: Trace + LuaFfi<Ty> + Clone,
+    T: Trace + LuaFfiOnce<Ty> + Clone,
 {
     fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
         let f = rt.core.gc.get_root(self).clone();
-        f.call(rt)
+        f.call_once(rt)
     }
 }
 
@@ -592,7 +592,7 @@ pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::Table: TableIndex<Weak, Ty>,
-    Ty::RustClosure: LuaFfi<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::FullUserdata: gc::index::Allocated<Meta<Ty>, DefaultParams<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
@@ -617,7 +617,7 @@ pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::Table: TableIndex<Weak, Ty>,
-    Ty::RustClosure: LuaFfi<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     Ty::FullUserdata: gc::index::Allocated<Meta<Ty>, DefaultParams<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {

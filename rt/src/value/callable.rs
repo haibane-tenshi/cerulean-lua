@@ -553,7 +553,7 @@ impl<Ty> LuaFfiOnce<Ty> for Callable<Strong, Ty>
 where
     Ty: CoreTypes<LuaClosure = LuaClosure<Ty>>,
     Ty::Table: TableIndex<Weak, Ty>,
-    Ty::RustClosure: LuaFfi<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
@@ -576,7 +576,7 @@ impl<Ty> LuaFfiOnce<Ty> for Callable<Weak, Ty>
 where
     Ty: CoreTypes<LuaClosure = LuaClosure<Ty>>,
     Ty::Table: TableIndex<Weak, Ty>,
-    Ty::RustClosure: LuaFfi<Ty>,
+    Ty::RustClosure: LuaFfiOnce<Ty>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
