@@ -33,7 +33,7 @@ use crate::index::{Access, GcPtr};
 /// garbage collector uses no unsafe code.
 /// However, failure to provide correct implementation will likely cause
 /// some objects to be collected earlier than expected,
-/// leaving *dangling* [`GcCell`]/[`Gc`] *references* behind.
+/// leaving *dangling* [`GcCell`](super::GcCell)/[`Gc`](super::Gc) *references* behind.
 /// Any attempt to dereference such reference is *safe*
 /// but will fail returning `None`.
 ///
