@@ -15,7 +15,7 @@ use std::fmt::{Debug, Display};
 use gc::Root;
 
 use crate::runtime::Interned;
-use crate::value::{CoreTypes, Types, Value};
+use crate::value::{CoreTypes, Strong, Types, Value};
 
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
@@ -27,6 +27,8 @@ pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use upvalue_count_mismatch::UpvalueCountMismatch;
 pub use value::ValueError;
+
+pub type RtError<Ty> = RuntimeError<Value<Strong, Ty>>;
 
 pub enum RuntimeError<Value> {
     Value(ValueError<Value>),

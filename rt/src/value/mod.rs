@@ -224,7 +224,6 @@ where
 impl<Ty> StrongValue<Ty>
 where
     Ty: CoreTypes,
-    Ty::RustClosure: Clone,
 {
     pub fn downgrade(&self) -> WeakValue<Ty> {
         match self {

@@ -88,7 +88,7 @@
 //!
 //! As the result, you must explicitly specify desired representation:
 //!
-//! * [`NilOr<T>`](super::NilOr) holds `T` or `Nil`.
+//! * [`NilOr<T>`] holds `T` or `Nil`.
 //!
 //!     In terms of our parser it matches on a single value.
 //!     `nil` will be greedily matched, other values will be matched against `T`.
@@ -100,7 +100,7 @@
 //!
 //! ### Handling `nil`
 //!
-//! Nullable types can be represented with [`NilOr<T>`](super::NilOr).
+//! Nullable types can be represented with [`NilOr<T>`].
 //!
 //! Also you can match on `nil` directly via [`Nil`](crate::value::Nil) Rust type.
 //! Note that this is not `()`!
@@ -121,11 +121,11 @@
 //! Correct way to write 2-optional parser is `Maybe<(NilOr<A>, Maybe<NilOr<B>>)>`,
 //! this way we can proceed to match `B` only if there is value matching `A` or `nil` in its place.
 //! As you imagine this gets progressively annoying to type and read as number of args increases,
-//! so there exists a convenient shorthand [`Opts`](super::Opts).
+//! so there exists a convenient shorthand [`Opts`].
 //!
 //! `Opts` take single tuple as argument and desugars it into corect chain of `Maybe` and `NilOr`.
 //! For example `Opts<(A, B, C)>` will desugar into `Maybe<(NilOr<A>, Maybe<(NilOr<B>, Maybe<NilOr<<C>>)>)>`.
-//! Additionally, there is [`Split`](super::Split) trait to conveniently convert this monstrosity
+//! Additionally, there is [`Split`] trait to conveniently convert this monstrosity
 //! into tuple of options.
 //!
 //! Note that **non-trailing** optional arguments generally don't match on `nil`!
@@ -164,10 +164,51 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use super::Maybe;
+use super::tuple::Tuple;
 use crate::gc::{Heap, IntoWithGc, TryIntoWithGc};
-use crate::value::{CoreTypes, Types, Value, Weak};
+use crate::value::{CoreTypes, NilOr, Types, Value, Weak};
 use sealed::{BubbleUp, Sealed};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Maybe<T> {
+    #[default]
+    None,
+    Some(T),
+}
+
+impl<T> Maybe<T> {
+    pub fn into_option(self) -> Option<T> {
+        self.into()
+    }
+
+    pub fn take(&mut self) -> Self {
+        std::mem::take(self)
+    }
+}
+
+impl<T> Maybe<NilOr<T>> {
+    pub fn flatten_into_option(self) -> Option<T> {
+        self.into_option().and_then(NilOr::into_option)
+    }
+}
+
+impl<T> From<Option<T>> for Maybe<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(t) => Maybe::Some(t),
+            None => Maybe::None,
+        }
+    }
+}
+
+impl<T> From<Maybe<T>> for Option<T> {
+    fn from(value: Maybe<T>) -> Self {
+        match value {
+            Maybe::None => None,
+            Maybe::Some(t) => Some(t),
+        }
+    }
+}
 
 /// Attempt to parse `Args` out of list of values.
 ///
@@ -600,4 +641,491 @@ mod sealed {
     pub trait Sealed {}
 
     impl<'a, T> Sealed for &'a [T] {}
+}
+
+/// Split [`Opts<T>`] into tuple of options.
+///
+/// Trait provides a convenience method to convert Lua optional arguments
+/// `Opts<(T0, T1,...)>` into more convenient Rustic form of
+/// `(Option<T0>, Option<T1>,...)`.
+pub trait Split: sealed_opts::Sealed {
+    type Output;
+
+    /// Convert [`Opts<(T0, T1,...)>`](Opts) into `(Option<T0>, Option<T1>,...)`.
+    fn split(self) -> Self::Output;
+}
+
+impl Split for Opts<()> {
+    type Output = ();
+
+    fn split(self) -> Self::Output {}
+}
+
+impl<A> Split for Maybe<NilOr<A>> {
+    type Output = (Option<A>,);
+
+    fn split(self) -> Self::Output {
+        (self.flatten_into_option(),)
+    }
+}
+
+impl<A, B> Split for Maybe<(NilOr<A>, Maybe<NilOr<B>>)> {
+    type Output = (Option<A>, Option<B>);
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b,) = rest.split();
+                (a.into_option(), b)
+            }
+        }
+    }
+}
+
+impl<A, B, C> Split for Maybe<(NilOr<A>, Maybe<(NilOr<B>, Maybe<NilOr<C>>)>)> {
+    type Output = (Option<A>, Option<B>, Option<C>);
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c) = rest.split();
+                (a.into_option(), b, c)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(NilOr<B>, Maybe<(NilOr<C>, Maybe<NilOr<D>>)>)>,
+    )>
+{
+    type Output = (Option<A>, Option<B>, Option<C>, Option<D>);
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d) = rest.split();
+                (a.into_option(), b, c, d)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(NilOr<C>, Maybe<(NilOr<D>, Maybe<NilOr<E>>)>)>,
+        )>,
+    )>
+{
+    type Output = (Option<A>, Option<B>, Option<C>, Option<D>, Option<E>);
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e) = rest.split();
+                (a.into_option(), b, c, d, e)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E, F> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(
+                NilOr<C>,
+                Maybe<(NilOr<D>, Maybe<(NilOr<E>, Maybe<NilOr<F>>)>)>,
+            )>,
+        )>,
+    )>
+{
+    type Output = (
+        Option<A>,
+        Option<B>,
+        Option<C>,
+        Option<D>,
+        Option<E>,
+        Option<F>,
+    );
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e, f) = rest.split();
+                (a.into_option(), b, c, d, e, f)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E, F, G> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(
+                NilOr<C>,
+                Maybe<(
+                    NilOr<D>,
+                    Maybe<(NilOr<E>, Maybe<(NilOr<F>, Maybe<NilOr<G>>)>)>,
+                )>,
+            )>,
+        )>,
+    )>
+{
+    type Output = (
+        Option<A>,
+        Option<B>,
+        Option<C>,
+        Option<D>,
+        Option<E>,
+        Option<F>,
+        Option<G>,
+    );
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e, f, g) = rest.split();
+                (a.into_option(), b, c, d, e, f, g)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E, F, G, H> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(
+                NilOr<C>,
+                Maybe<(
+                    NilOr<D>,
+                    Maybe<(
+                        NilOr<E>,
+                        Maybe<(NilOr<F>, Maybe<(NilOr<G>, Maybe<NilOr<H>>)>)>,
+                    )>,
+                )>,
+            )>,
+        )>,
+    )>
+{
+    type Output = (
+        Option<A>,
+        Option<B>,
+        Option<C>,
+        Option<D>,
+        Option<E>,
+        Option<F>,
+        Option<G>,
+        Option<H>,
+    );
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e, f, g, h) = rest.split();
+                (a.into_option(), b, c, d, e, f, g, h)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E, F, G, H, I> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(
+                NilOr<C>,
+                Maybe<(
+                    NilOr<D>,
+                    Maybe<(
+                        NilOr<E>,
+                        Maybe<(
+                            NilOr<F>,
+                            Maybe<(NilOr<G>, Maybe<(NilOr<H>, Maybe<NilOr<I>>)>)>,
+                        )>,
+                    )>,
+                )>,
+            )>,
+        )>,
+    )>
+{
+    type Output = (
+        Option<A>,
+        Option<B>,
+        Option<C>,
+        Option<D>,
+        Option<E>,
+        Option<F>,
+        Option<G>,
+        Option<H>,
+        Option<I>,
+    );
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e, f, g, h, i) = rest.split();
+                (a.into_option(), b, c, d, e, f, g, h, i)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E, F, G, H, I, J> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(
+                NilOr<C>,
+                Maybe<(
+                    NilOr<D>,
+                    Maybe<(
+                        NilOr<E>,
+                        Maybe<(
+                            NilOr<F>,
+                            Maybe<(
+                                NilOr<G>,
+                                Maybe<(NilOr<H>, Maybe<(NilOr<I>, Maybe<NilOr<J>>)>)>,
+                            )>,
+                        )>,
+                    )>,
+                )>,
+            )>,
+        )>,
+    )>
+{
+    type Output = (
+        Option<A>,
+        Option<B>,
+        Option<C>,
+        Option<D>,
+        Option<E>,
+        Option<F>,
+        Option<G>,
+        Option<H>,
+        Option<I>,
+        Option<J>,
+    );
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e, f, g, h, i, j) = rest.split();
+                (a.into_option(), b, c, d, e, f, g, h, i, j)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E, F, G, H, I, J, K> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(
+                NilOr<C>,
+                Maybe<(
+                    NilOr<D>,
+                    Maybe<(
+                        NilOr<E>,
+                        Maybe<(
+                            NilOr<F>,
+                            Maybe<(
+                                NilOr<G>,
+                                Maybe<(
+                                    NilOr<H>,
+                                    Maybe<(NilOr<I>, Maybe<(NilOr<J>, Maybe<NilOr<K>>)>)>,
+                                )>,
+                            )>,
+                        )>,
+                    )>,
+                )>,
+            )>,
+        )>,
+    )>
+{
+    type Output = (
+        Option<A>,
+        Option<B>,
+        Option<C>,
+        Option<D>,
+        Option<E>,
+        Option<F>,
+        Option<G>,
+        Option<H>,
+        Option<I>,
+        Option<J>,
+        Option<K>,
+    );
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e, f, g, h, i, j, k) = rest.split();
+                (a.into_option(), b, c, d, e, f, g, h, i, j, k)
+            }
+        }
+    }
+}
+
+impl<A, B, C, D, E, F, G, H, I, J, K, L> Split
+    for Maybe<(
+        NilOr<A>,
+        Maybe<(
+            NilOr<B>,
+            Maybe<(
+                NilOr<C>,
+                Maybe<(
+                    NilOr<D>,
+                    Maybe<(
+                        NilOr<E>,
+                        Maybe<(
+                            NilOr<F>,
+                            Maybe<(
+                                NilOr<G>,
+                                Maybe<(
+                                    NilOr<H>,
+                                    Maybe<(
+                                        NilOr<I>,
+                                        Maybe<(NilOr<J>, Maybe<(NilOr<K>, Maybe<NilOr<L>>)>)>,
+                                    )>,
+                                )>,
+                            )>,
+                        )>,
+                    )>,
+                )>,
+            )>,
+        )>,
+    )>
+{
+    type Output = (
+        Option<A>,
+        Option<B>,
+        Option<C>,
+        Option<D>,
+        Option<E>,
+        Option<F>,
+        Option<G>,
+        Option<H>,
+        Option<I>,
+        Option<J>,
+        Option<K>,
+        Option<L>,
+    );
+
+    fn split(self) -> Self::Output {
+        match self {
+            Maybe::None => Default::default(),
+            Maybe::Some((a, rest)) => {
+                let (b, c, d, e, f, g, h, i, j, k, l) = rest.split();
+                (a.into_option(), b, c, d, e, f, g, h, i, j, k, l)
+            }
+        }
+    }
+}
+
+mod sealed_opts {
+    use super::{Maybe, NilOr};
+
+    pub trait Sealed {}
+
+    impl Sealed for () {}
+
+    impl<T> Sealed for Maybe<NilOr<T>> {}
+
+    impl<T, U> Sealed for Maybe<(NilOr<T>, U)> where U: Sealed {}
+}
+
+/// Expand tuple into optional Lua arguments.
+///
+/// This typedef provides a shorthand for constructing
+/// [correct parser](self#handling-optional-arguments) for a sequence of optional Lua arguments.
+///
+/// For example, the following expands into
+/// * `Opts<()>` -> `()`
+/// * `Opts<(A,)>` -> `Maybe<NilOr<A>>`
+/// * `Opts<(A, B)>` -> `Maybe<(NilOr<A>, Maybe<NilOr<B>>)>`
+/// * `Opts<(A, B, C)>` -> `Maybe<(NilOr<A>, Maybe<(NilOr<B>, Maybe<NilOr<C>>)>)>`
+/// * etc.
+///
+/// See [`Split`] trait to quickly expand those into tuple of `Option`s.
+pub type Opts<T> = <T as OptsImpl>::Output;
+
+#[doc(hidden)]
+pub trait OptsImpl: Tuple {
+    type Output;
+}
+
+impl OptsImpl for () {
+    type Output = ();
+}
+
+impl<A> OptsImpl for (A,) {
+    type Output = Maybe<NilOr<A>>;
+}
+
+impl<A, B> OptsImpl for (A, B) {
+    type Output = Maybe<(NilOr<A>, Opts<(B,)>)>;
+}
+
+impl<A, B, C> OptsImpl for (A, B, C) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C)>)>;
+}
+
+impl<A, B, C, D> OptsImpl for (A, B, C, D) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D)>)>;
+}
+
+impl<A, B, C, D, E> OptsImpl for (A, B, C, D, E) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E)>)>;
+}
+
+impl<A, B, C, D, E, F> OptsImpl for (A, B, C, D, E, F) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F)>)>;
+}
+
+impl<A, B, C, D, E, F, G> OptsImpl for (A, B, C, D, E, F, G) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G)>)>;
+}
+
+impl<A, B, C, D, E, F, G, H> OptsImpl for (A, B, C, D, E, F, G, H) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H)>)>;
+}
+
+impl<A, B, C, D, E, F, G, H, I> OptsImpl for (A, B, C, D, E, F, G, H, I) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I)>)>;
+}
+
+impl<A, B, C, D, E, F, G, H, I, J> OptsImpl for (A, B, C, D, E, F, G, H, I, J) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J)>)>;
+}
+
+impl<A, B, C, D, E, F, G, H, I, J, K> OptsImpl for (A, B, C, D, E, F, G, H, I, J, K) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J, K)>)>;
+}
+
+impl<A, B, C, D, E, F, G, H, I, J, K, L> OptsImpl for (A, B, C, D, E, F, G, H, I, J, K, L) {
+    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J, K, L)>)>;
 }

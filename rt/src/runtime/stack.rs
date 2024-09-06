@@ -208,7 +208,7 @@ where
     /// If removed slot contains an upvalue you need to see that it is properly evicted (and marker reset).
     ///
     /// There are two reasons for relaxed invariant (compared to keeping length in sync at all times):
-    /// * It is relatevely rare for upvalues to get evicted,
+    /// * It is relatively rare for upvalues to get evicted,
     ///    so most of the time it will boil down to shuffling `false` on and off.
     /// * It simplifies implementation of `TransientStackFrame` as it doesn't need to care about markers anymore.
     upvalue_mark: BitVec,
@@ -219,17 +219,20 @@ where
     /// we only care about updating upvalues for alive closures
     /// so it doesn't matter whether closure is dropped or not.
     ///
-    /// Upvalues referencing stack slots need to be updated when those are dissociated.
+    /// Upvalues referencing stack slots need to be updated when those are detached.
     closures: Vec<GcCell<Closure<Ty>>>,
 
-    /// Upvalues that got dissociated from the stack,
+    /// Upvalues that got detached from the stack,
     /// but that change was not yet propagated to affected closures.
     ///
-    /// We only keep one value for a reason.
+    /// Those should never be directly accessed,
+    /// a synchronization pass is required before those values become available to their respective closures.
+    ///
+    /// We only keep one value per stack slot.
     /// Constructing new closure requires allocation,
     /// therefore stack needs to be synced before that happens.
-    /// It implies that any dissociated upvalues got updated.
-    evicted_upvalues: HashMap<RawStackSlot, WeakValue<Ty>>,
+    /// It implies that any detached upvalues got updated.
+    detached_upvalues: HashMap<RawStackSlot, WeakValue<Ty>>,
 }
 
 impl<Ty> Stack<Ty>
@@ -243,10 +246,13 @@ where
             diff: Default::default(),
             upvalue_mark: Default::default(),
             closures: Default::default(),
-            evicted_upvalues: Default::default(),
+            detached_upvalues: Default::default(),
         }
     }
 
+    /// Synchronize real portion of the stack with rooted mirror.
+    ///
+    /// This function is guaranteed to not allocate.
     fn sync_stack_cache(&mut self, heap: &mut Heap<Ty>) {
         let mirror = &mut heap[&self.root];
         mirror.truncate(self.diff.unsync.0);
@@ -255,9 +261,13 @@ where
         self.diff.sync_on(self.main.next_key());
     }
 
+    /// Move detached upvalues to heap and update all affected closures.
+    ///
+    /// This function *may allocate*.
+    /// You need to ensure that all objects that need to stay alive are properly rooted before calling this function.
     fn sync_upvalue_cache(&mut self, heap: &mut Heap<Ty>) {
         heap.pause(|heap| {
-            let evicted_upvalues = std::mem::take(&mut self.evicted_upvalues);
+            let evicted_upvalues = std::mem::take(&mut self.detached_upvalues);
 
             let reallocated: HashMap<_, _> = evicted_upvalues
                 .into_iter()
@@ -297,13 +307,18 @@ where
         })
     }
 
+    /// Root all transient values (e.g. weak references into heap).
+    ///
+    /// This function is lazy: unnecessary updates will be avoided.
+    /// This applies to upvalue cache as well.
+    /// Use [`sync_upvalues`](Self::sync_upvalues) to force all detached upvalues onto heap.
     fn sync_transient(&mut self, heap: &mut Heap<Ty>) {
         if self.diff.has_transient(self.main.next_key()) {
             self.sync_stack_cache(heap);
         }
 
         if self
-            .evicted_upvalues
+            .detached_upvalues
             .iter()
             .any(|(_, value)| value.is_transient())
         {
@@ -311,8 +326,12 @@ where
         }
     }
 
+    /// Move detached upvalues onto heap and update affected closures.
+    ///
+    /// Other bookkeeping (such as syncing stack with mirror) will be done if necessary
+    /// but are not guaranteed to be performed.
     fn sync_upvalues(&mut self, heap: &mut Heap<Ty>) {
-        if self.evicted_upvalues.is_empty() {
+        if self.detached_upvalues.is_empty() {
             return;
         }
 
@@ -352,8 +371,24 @@ impl<Ty> Stack<Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn guard(&mut self) -> StackGuard<Ty> {
-        StackGuard::new(self)
+    pub(crate) fn guard(&mut self, boundary: RawStackSlot) -> Option<StackGuard<Ty>> {
+        if self.len() > boundary.0 {
+            return None;
+        }
+
+        let r = StackGuard {
+            stack: self,
+            boundary,
+        };
+
+        Some(r)
+    }
+
+    pub(crate) fn full_guard(&mut self) -> StackGuard<Ty> {
+        StackGuard {
+            stack: self,
+            boundary: RawStackSlot(0),
+        }
     }
 
     fn push(&mut self, value: WeakValue<Ty>, source: Source<RawStackSlot>) -> RawStackSlot {
@@ -397,7 +432,7 @@ where
             .map(|slot| (slot, self.main[slot]));
 
         for (slot, value) in iter {
-            let old_value = self.evicted_upvalues.insert(slot, value);
+            let old_value = self.detached_upvalues.insert(slot, value);
             debug_assert!(old_value.is_none());
         }
 
@@ -507,7 +542,7 @@ where
             .field("diff", &self.diff)
             .field("upvalue_mark", &self.upvalue_mark)
             .field("closures", &self.closures)
-            .field("evicted_upvalues", &self.evicted_upvalues)
+            .field("detached_upvalues", &self.detached_upvalues)
             .finish()
     }
 }
@@ -524,33 +559,46 @@ impl<'a, Ty> StackGuard<'a, Ty>
 where
     Ty: CoreTypes,
 {
-    pub(crate) fn new(stack: &'a mut Stack<Ty>) -> Self {
-        StackGuard {
-            stack,
-            boundary: RawStackSlot(0),
-        }
-    }
+    // pub(super) fn guard(&mut self, protected_size: RawStackSlot) -> Option<StackGuard<'_, Ty>> {
+    //     if self.stack.len() < protected_size.0 {
+    //         return None;
+    //     }
 
-    pub(super) fn guard(&mut self, protected_size: RawStackSlot) -> Option<StackGuard<'_, Ty>> {
-        if self.stack.len() < protected_size.0 {
-            return None;
-        }
+    //     let r = StackGuard {
+    //         stack: self.stack,
+    //         boundary: protected_size,
+    //     };
 
-        let r = StackGuard {
-            stack: self.stack,
-            boundary: protected_size,
-        };
+    //     Some(r)
+    // }
 
-        Some(r)
-    }
-
-    fn reborrow(&mut self) -> StackGuard<'_, Ty> {
+    pub(crate) fn reborrow(&mut self) -> StackGuard<'_, Ty> {
         let StackGuard { stack, boundary } = self;
 
         StackGuard {
             stack,
             boundary: *boundary,
         }
+    }
+
+    pub(crate) fn raw_guard_at(&mut self, slot: RawStackSlot) -> Option<StackGuard<Ty>> {
+        if self.stack.len() < slot.0 {
+            return None;
+        }
+
+        let StackGuard { stack, boundary: _ } = self;
+
+        let r = StackGuard {
+            stack,
+            boundary: slot,
+        };
+
+        Some(r)
+    }
+
+    pub fn guard_at(&mut self, slot: StackSlot) -> Option<StackGuard<Ty>> {
+        let slot = self.boundary() + slot;
+        self.raw_guard_at(slot)
     }
 
     pub(super) fn lua_frame(&mut self) -> LuaStackFrame<'_, Ty> {
@@ -591,12 +639,12 @@ where
         self.stack.main[self.boundary..].raw.as_ref()
     }
 
-    pub fn get_slot(&self, slot: StackSlot) -> Option<&WeakValue<Ty>> {
+    pub fn get(&self, slot: StackSlot) -> Option<&WeakValue<Ty>> {
         let slot = self.boundary + slot;
-        self.get_raw_slot(slot)
+        self.get_raw(slot)
     }
 
-    fn get_raw_slot(&self, slot: RawStackSlot) -> Option<&WeakValue<Ty>> {
+    fn get_raw(&self, slot: RawStackSlot) -> Option<&WeakValue<Ty>> {
         self.stack.main.get(slot)
     }
 
@@ -752,12 +800,12 @@ where
         self.0.stack.sync_transient(heap)
     }
 
-    /// Move disassociated upvalues to heap.
+    /// Move detached upvalues to heap.
     ///
     /// Internally when a slot associated with upvalue is removed from stack
     /// it is not moved to heap immediately but placed into special cache.
     /// This function ensures that any upvalues stuck in this cache make their way to heap
-    /// and are properly reassociated.
+    /// and are properly reattached to their respective closures.
     ///
     /// When it comes to upvalue handling there is one invariant that we need to enforce:
     ///
@@ -766,11 +814,11 @@ where
     /// A nice part about this rule that after a frame is constructed,
     /// for that specific frame invariant will stay true as long as the frame exists.
     /// This is because any on-stack upvalues will be positioned somewhere on the stack below
-    /// that frame's stack therefore are impossible to remove, ergo cannot be disassociated.
+    /// that frame's stack and are impossible to remove, ergo cannot be detached.
     /// So, travelling up the call stack cannot violate the invariant.
     ///
     /// However, entering new frames needs to be done with caution:
-    /// closure used to construct the frame might have some of its upvalues disassociated and stuck in the cache.
+    /// closure used to construct the frame might have some of its upvalues still detached and stuck in the cache.
     ///
     /// Therefore, the only place where we must sync upvalue cache is inside [`Frame::new`](super::Frame::new).
     pub(super) fn sync_upvalues(&mut self, heap: &mut Heap<Ty>) {
@@ -795,11 +843,11 @@ where
     }
 
     pub(super) fn get_slot(&self, slot: StackSlot) -> Option<&WeakValue<Ty>> {
-        self.0.get_slot(slot)
+        self.0.get(slot)
     }
 
     pub(super) fn get_raw_slot(&self, slot: RawStackSlot) -> Option<&WeakValue<Ty>> {
-        self.0.get_raw_slot(slot)
+        self.0.get_raw(slot)
     }
 
     pub(super) fn push(&mut self, value: WeakValue<Ty>, source: Source<StackSlot>) {
@@ -1118,7 +1166,7 @@ where
     Ty: CoreTypes,
 {
     pub fn get_mut(&mut self, slot: StackSlot) -> Option<SlotProxy<'_, Ty>> {
-        let value = *self.get_slot(slot)?;
+        let value = *self.get(slot)?;
         let slot = self.boundary + slot;
 
         let r = SlotProxy {

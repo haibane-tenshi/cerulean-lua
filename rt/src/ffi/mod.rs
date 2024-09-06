@@ -1,432 +1,171 @@
+//! Traits defining Lua foreign function interface (FFI) with Rust.
+//!
+//! While runtime is designed to evaluate Lua code primarily,
+//! it also sometimes needs to call into Rust functions.
+//! Conceptually, such calls are part of Lua program call stack,
+//! but they are also forced to be part of host language's call stack as well.
+//! This produces a behavioral rift between Lua code and Rust code invoked through FFI.
+//!
+//! In order to bridge semantic differences between those two modes of execution,
+//! compatible Rust function is required to generate *coroutine object* that serve as its body.
+//! Using coroutines means that Rust-backed frames can be suspended,
+//! which results in a number of advantages:
+//!
+//! * Nested calls to Rust functions don't grow host's program stack
+//! * Rust frames interact nicely with Lua threads
+//! * Error handling is *not* a complete mess
+//!
+//! The downsides are... well, coroutine things:
+//!
+//! * `Pin` noise
+//! * There is no direct support from compiler (yet)
+//! * Doing common actions like calling other functions requires [communicating](delegate#runtime-communication-protocol) with runtime
+//!
+//! Those can be overcome, but are tricky around places.
+//!
+//! # Execution model
+//!
+//! Every Lua execution thread has a *call stack*.
+//! Entries in the stack (*frames*) correspond to individual function calls.
+//! Each of those can be backed either by Lua or Rust code.
+//!
+//! Lua-backed frames are managed internally by runtime and never exposed to the user.
+//!
+//! Rust-backed frames are represented via objects implementing [`Delegate`] trait.
+//! Since runtime cannot interfere with execution of Rust functions
+//! it function behavior is delegated to such an object.
+//!
+//! # `LuaFfi` trait
+//!
+//! Rust functions callable by Lua runtime are represented by [`LuaFfi`] trait.
+//! Invoking it through [`LuaFfi::call`] should generate "body" of the function which must implement [`Delegate`] trait.
+//! See [module-level documentation](delegate) for more details on delegates and their contract.
+//!
+//! ## Unpin optimization
+//!
+//! Using coroutines has a direct downside.
+//! In order to get resumed, coroutine body needs to get [`Pin`]ned.
+//! Behind all fancy words there is simple implication: value cannot move in memory until it is dropped.
+//! For this reason it must be allocated in `Pin<Box<_>>`.
+//!
+//! This is a rather unfortunate consequence for coroutines that don't require `Pin`.
+//! Even a simple callback that never suspends needs to pay the price.
+//!
+//! As a point for optimization, function can optionally provide [`LuaFfi::call_unpin`] implementation.
+//! The output of this function is required to be `Unpin` so it can be freely moved in memory.
+//! When calling `LuaFfi` function runtime will attempt to use unpin version first
+//! which allows to avoid unnecessary allocations.
+//!
+//! However, **this is user's responsibility to ensure that pin and unpin versions have identical behavior**.
+//! Constructors provided by this module are guaranteed to provide correct implementation,
+//! but you should be careful when implementing `LuaFfi` by hand.
+//! There is no way to diagnose incoherency caused by mismatched behavior.
+//!
+//! In case the delegate truly requires to get pinned,
+//! you can set [`LuaFfi::UnpinDelegate`] to [`delegate::Never`] which ensures that it cannot be accidentally used.
+//!
+//! ## `dyn` safety
+//!
+//! [`LuaFfi`] is `dyn`-safe but can be verbose to use as it requires to specify associated types.
+//!
+//! [`DLuaFfi`] is provided as refinement of the trait which sets associated types to typed-erased alternatives.
+//! Those types can also be used independently using [`DynDelegate`] and [`UnpinDynDelegate`].
+//!
+//! # Constructing
+//!
+//! This module provides a few methods to conveniently create [`LuaFfi`] objects out of normal Rust functions.
+//!
+//! * [`from_fn`] - packages `Fn` callback. Requires delegate to be `Unpin`.
+//! * [`from_fn_mut`] - packages `FnMut` callback. Requires delegate to be `Unpin`.
+//! * [`from_fn_pin`] - packages `Fn` callback. Allows for `!Unpin` delegates.
+//! * [`from_fn_mut_pin`] - packages `FnMut` callback. Allows for `!Unpin` delegates.
+
 pub mod arg_parser;
+pub mod coroutine;
+pub mod delegate;
 pub mod signature;
 pub mod tuple;
 
-use std::fmt::{Debug, Display};
-use std::hash::Hash;
+use std::cell::RefCell;
+use std::fmt::Debug;
 use std::path::Path;
+use std::pin::Pin;
 
-use gc::{Gc, GcCell, Root, RootCell, Trace};
+use gc::Trace;
 
 use crate::chunk_cache::ChunkId;
-use crate::error::RuntimeError;
-use crate::gc::{DisplayWith, Heap};
-use crate::runtime::{Closure, RuntimeView, TransientStackFrame};
-use crate::value::{
-    CoreTypes, DefaultParams, Meta, NilOr, StrongValue, TableIndex, Weak, WeakValue,
-};
+use crate::runtime::{Closure, RuntimeView};
+use crate::value::CoreTypes;
 
-use arg_parser::{FormatReturns, ParseArgs};
-use signature::{Signature, SignatureWithFirst};
-use tuple::Tuple;
+use delegate::{Delegate, Never};
 
-pub trait LuaFfiOnce<Ty>
+/// Trait defining Rust functions invokable by Lua runtime.
+pub trait LuaFfi<Ty>: Trace
 where
     Ty: CoreTypes,
 {
-    fn call_once(self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>;
+    type Delegate: Delegate<Ty>;
+    type UnpinDelegate: Delegate<Ty> + Unpin;
+
+    fn call(&self) -> Self::Delegate;
+    fn call_unpin(&self) -> Option<Self::UnpinDelegate> {
+        None
+    }
     fn debug_info(&self) -> DebugInfo;
 }
 
-pub trait LuaFfiMut<Ty>: LuaFfiOnce<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn call_mut(&mut self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>;
-}
-
-pub trait LuaFfi<Ty>: LuaFfiMut<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn call(&self, _: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>;
-}
-
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct DebugInfo {
-    pub name: String,
-}
-
-impl<Ty, F> LuaFfiOnce<Ty> for F
-where
-    Ty: CoreTypes,
-    F: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>,
-{
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        (self)(rt)
-    }
-
-    fn debug_info(&self) -> DebugInfo {
-        DebugInfo {
-            name: std::any::type_name::<F>().to_string(),
-        }
+/// Construct `LuaFfi` object out of `Fn() -> impl (Delegate + Unpin)` function.
+///
+/// Delegate is required to be `Unpin`.
+/// It is currently impossible to automatically identify whether type implements `Unpin` or not
+/// (to correctly generate [`LuaFfi::call_unpin`]).
+/// Use [`from_fn_pin`] instead if the delegate need to be pinned.
+///
+/// Rust closures cannot implement custom traits.
+/// In case closure captures any weak references you should pass them in `trace` argument.
+/// It will be used in [`Trace`] implementation in place of closure itself.
+pub fn from_fn<F, S, T>(f: F, name: S, trace: T) -> FromFn<F, S, T> {
+    FromFn {
+        func: f,
+        name,
+        trace,
     }
 }
 
-impl<Ty, F> LuaFfiMut<Ty> for F
-where
-    Ty: CoreTypes,
-    F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>,
-{
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        (self)(rt)
-    }
-}
-
-impl<Ty, F> LuaFfi<Ty> for F
-where
-    Ty: CoreTypes,
-    F: for<'rt> Fn(RuntimeView<'rt, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>,
-{
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        (self)(rt)
-    }
-}
-
-impl<Ty, T> LuaFfiOnce<Ty> for GcCell<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-
-    fn debug_info(&self) -> DebugInfo {
-        DebugInfo {
-            name: "{gc-allocated rust closure}".to_string(),
-        }
-    }
-}
-
-impl<Ty, T> LuaFfiMut<Ty> for GcCell<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-}
-
-impl<Ty, T> LuaFfi<Ty> for GcCell<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        use crate::error::AlreadyDroppedError;
-
-        let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
-        f.call_once(rt)
-    }
-}
-
-impl<Ty, T> LuaFfiOnce<Ty> for RootCell<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-
-    fn debug_info(&self) -> DebugInfo {
-        DebugInfo {
-            name: "{gc-allocated rust closure}".to_string(),
-        }
-    }
-}
-
-impl<Ty, T> LuaFfiMut<Ty> for RootCell<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-}
-
-impl<Ty, T> LuaFfi<Ty> for RootCell<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        let f = rt.core.gc.get_root(self).clone();
-        f.call_once(rt)
-    }
-}
-
-impl<Ty, T> LuaFfiOnce<Ty> for Gc<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-
-    fn debug_info(&self) -> DebugInfo {
-        DebugInfo {
-            name: "{gc-allocated rust closure}".to_string(),
-        }
-    }
-}
-
-impl<Ty, T> LuaFfiMut<Ty> for Gc<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-}
-
-impl<Ty, T> LuaFfi<Ty> for Gc<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        use crate::error::AlreadyDroppedError;
-
-        let f = rt.core.gc.get(*self).ok_or(AlreadyDroppedError)?.clone();
-        f.call_once(rt)
-    }
-}
-
-impl<Ty, T> LuaFfiOnce<Ty> for Root<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-
-    fn debug_info(&self) -> DebugInfo {
-        DebugInfo {
-            name: "{gc-allocated rust closure}".to_string(),
-        }
-    }
-}
-
-impl<Ty, T> LuaFfiMut<Ty> for Root<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
-    }
-}
-
-impl<Ty, T> LuaFfi<Ty> for Root<T>
-where
-    Ty: CoreTypes,
-    T: Trace + LuaFfiOnce<Ty> + Clone,
-{
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        let f = rt.core.gc.get_root(self).clone();
-        f.call_once(rt)
-    }
-}
-
-pub fn invoke<'rt, Ty, F, Args>(
-    mut rt: RuntimeView<'rt, Ty>,
-    f: F,
-) -> Result<(), RuntimeError<StrongValue<Ty>>>
-where
-    Ty: CoreTypes,
-    F: Signature<Args>,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap<Ty>>,
-    for<'a> TransientStackFrame<'a, Ty>:
-        FormatReturns<Ty, Heap<Ty>, <F as Signature<Args>>::Output>,
-{
-    let args = rt
-        .stack
-        .parse(&mut rt.core.gc)
-        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
-
-    rt.stack.clear();
-
-    let ret = f.call(args);
-
-    rt.core.gc.pause(|heap| {
-        let mut stack = rt.stack.transient_frame();
-        stack.format(heap, ret);
-        stack.sync(heap);
-    });
-
-    Ok(())
-}
-
-pub fn try_invoke<'rt, Ty, F, Args, R>(
-    mut rt: RuntimeView<'rt, Ty>,
-    f: F,
-) -> Result<(), RuntimeError<StrongValue<Ty>>>
-where
-    Ty: CoreTypes,
-    F: Signature<Args, Output = Result<R, RuntimeError<StrongValue<Ty>>>>,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap<Ty>>,
-    for<'a> TransientStackFrame<'a, Ty>: FormatReturns<Ty, Heap<Ty>, R>,
-{
-    let args = rt
-        .stack
-        .parse(&mut rt.core.gc)
-        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
-
-    rt.stack.clear();
-
-    let ret = f.call(args)?;
-
-    rt.core.gc.pause(|heap| {
-        let mut stack = rt.stack.transient_frame();
-        stack.format(heap, ret);
-        stack.sync(heap);
-    });
-
-    Ok(())
-}
-
-pub fn invoke_with_rt<'rt, Ty, F, Args, R>(
-    mut rt: RuntimeView<'rt, Ty>,
-    f: F,
-) -> Result<(), RuntimeError<StrongValue<Ty>>>
-where
-    Ty: CoreTypes,
-    for<'a> F: SignatureWithFirst<RuntimeView<'a, Ty>, Args, Output = R>,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap<Ty>>,
-    for<'a> TransientStackFrame<'a, Ty>:
-        FormatReturns<Ty, Heap<Ty>, <F as SignatureWithFirst<RuntimeView<'a, Ty>, Args>>::Output>,
-{
-    let heap = &mut rt.core.gc;
-
-    let args = rt
-        .stack
-        .parse(heap)
-        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
-
-    rt.stack.clear();
-
-    let ret = f.call(rt.view_full(), args);
-
-    rt.core.gc.pause(|heap| {
-        let mut stack = rt.stack.transient_frame();
-        stack.format(heap, ret);
-        stack.sync(heap);
-    });
-
-    Ok(())
-}
-
-pub fn try_invoke_with_rt<'rt, Ty, F, Args, R>(
-    mut rt: RuntimeView<'rt, Ty>,
-    f: F,
-) -> Result<(), RuntimeError<StrongValue<Ty>>>
-where
-    Ty: CoreTypes,
-    for<'a> F: SignatureWithFirst<
-        RuntimeView<'a, Ty>,
-        Args,
-        Output = Result<R, RuntimeError<StrongValue<Ty>>>,
-    >,
-    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap<Ty>>,
-    for<'a> TransientStackFrame<'a, Ty>: FormatReturns<Ty, Heap<Ty>, R>,
-{
-    let heap = &mut rt.core.gc;
-
-    let args = rt
-        .stack
-        .parse(heap)
-        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
-
-    rt.stack.clear();
-
-    let ret = f.call(rt.view_full(), args)?;
-
-    rt.core.gc.pause(|heap| {
-        let mut stack = rt.stack.transient_frame();
-        stack.format(heap, ret);
-        stack.sync(heap);
-    });
-
-    Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum Maybe<T> {
-    #[default]
-    None,
-    Some(T),
-}
-
-impl<T> Maybe<T> {
-    pub fn into_option(self) -> Option<T> {
-        self.into()
-    }
-
-    pub fn take(&mut self) -> Self {
-        std::mem::take(self)
-    }
-}
-
-impl<T> Maybe<NilOr<T>> {
-    pub fn flatten_into_option(self) -> Option<T> {
-        self.into_option().and_then(NilOr::into_option)
-    }
-}
-
-impl<T> From<Option<T>> for Maybe<T> {
-    fn from(value: Option<T>) -> Self {
-        match value {
-            Some(t) => Maybe::Some(t),
-            None => Maybe::None,
-        }
-    }
-}
-
-impl<T> From<Maybe<T>> for Option<T> {
-    fn from(value: Maybe<T>) -> Self {
-        match value {
-            Maybe::None => None,
-            Maybe::Some(t) => Some(t),
-        }
-    }
-}
-
-pub trait WithName<Ty>: Sized {
-    fn with_name<N>(self, name: N) -> DebugInfoWrap<Self, N>;
-}
-
-impl<F, Ty> WithName<Ty> for F
-where
-    Ty: CoreTypes,
-    F: LuaFfiOnce<Ty>,
-{
-    fn with_name<N>(self, name: N) -> DebugInfoWrap<Self, N> {
-        DebugInfoWrap { func: self, name }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DebugInfoWrap<F, N> {
+pub struct FromFn<F, S, T> {
     func: F,
-    name: N,
+    name: S,
+    trace: T,
 }
 
-impl<Ty, F, N> LuaFfiOnce<Ty> for DebugInfoWrap<F, N>
+impl<F, S, T> Trace for FromFn<F, S, T>
+where
+    F: 'static,
+    S: 'static,
+    T: Trace,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        self.trace.trace(collector);
+    }
+}
+
+impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFn<F, S, T>
 where
     Ty: CoreTypes,
-    F: LuaFfiOnce<Ty>,
-    N: AsRef<str>,
+    F: Fn() -> R + 'static,
+    R: Delegate<Ty> + Unpin,
+    S: AsRef<str> + 'static,
+    T: Trace,
 {
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.func.call_once(rt)
+    type Delegate = R;
+    type UnpinDelegate = R;
+
+    fn call(&self) -> Self::Delegate {
+        (self.func)()
+    }
+
+    fn call_unpin(&self) -> Option<Self::UnpinDelegate> {
+        Some((self.func)())
     }
 
     fn debug_info(&self) -> DebugInfo {
@@ -436,684 +175,329 @@ where
     }
 }
 
-impl<Ty, F, N> LuaFfiMut<Ty> for DebugInfoWrap<F, N>
-where
-    Ty: CoreTypes,
-    F: LuaFfiMut<Ty>,
-    N: AsRef<str>,
-{
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.func.call_mut(rt)
+/// Construct `LuaFfi` object out of `FnMut() -> impl (Delegate + Unpin)` function.
+///
+/// Delegate is required to be `Unpin`.
+/// It is currently impossible to automatically identify whether type implements `Unpin` or not
+/// (to correctly generate [`LuaFfi::call_unpin`]).
+/// Use [`from_fn_pin`] instead if the delegate need to be pinned.
+///
+/// Rust closures cannot implement custom traits.
+/// In case closure captures any weak references you should pass them in `trace` argument.
+/// It will be used in [`Trace`] implementation in place of closure itself.
+pub fn from_fn_mut<F, S, T>(f: F, name: S, trace: T) -> FromFnMut<F, S, T> {
+    FromFnMut {
+        func: RefCell::new(f),
+        name,
+        trace,
     }
 }
 
-impl<Ty, F, N> LuaFfi<Ty> for DebugInfoWrap<F, N>
+pub struct FromFnMut<F, S, T> {
+    func: RefCell<F>,
+    name: S,
+    trace: T,
+}
+
+impl<F, S, T> Trace for FromFnMut<F, S, T>
 where
-    Ty: CoreTypes,
-    F: LuaFfi<Ty>,
-    N: AsRef<str>,
+    F: 'static,
+    S: 'static,
+    T: Trace,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.func.call(rt)
+    fn trace(&self, collector: &mut gc::Collector) {
+        self.trace.trace(collector);
     }
 }
 
-pub struct LuaFfiPtr<Ty>
+impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFnMut<F, S, T>
 where
     Ty: CoreTypes,
+    F: FnMut() -> R + 'static,
+    R: Delegate<Ty> + Unpin,
+    S: AsRef<str> + 'static,
+    T: Trace,
 {
-    func: fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>,
-    name: &'static str,
-}
+    type Delegate = R;
+    type UnpinDelegate = R;
 
-impl<Ty> LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    pub fn new(
-        fn_ptr: fn(RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>>,
-        name: &'static str,
-    ) -> Self {
-        LuaFfiPtr { func: fn_ptr, name }
+    fn call(&self) -> Self::Delegate {
+        (self.func.borrow_mut())()
     }
-}
 
-impl<Ty> Trace for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn trace(&self, _collector: &mut gc::Collector) {}
-}
-
-impl<Ty> Clone for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<Ty> Copy for LuaFfiPtr<Ty> where Ty: CoreTypes {}
-
-impl<Ty> Debug for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LuaFfiFnPtr")
-            .field("func", &self.func)
-            .field("name", &self.name)
-            .finish()
-    }
-}
-
-impl<Ty> Display for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{[rust] fn ptr <{:p}> \"{}\"}}", self.func, self.name)
-    }
-}
-
-impl<Ty> PartialEq for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.func == other.func
-    }
-}
-
-impl<Ty> Eq for LuaFfiPtr<Ty> where Ty: CoreTypes {}
-
-impl<Ty> PartialOrd for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.func.cmp(&other.func))
-    }
-}
-
-impl<Ty> Ord for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.func.cmp(&other.func)
-    }
-}
-
-impl<Ty> Hash for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.func.hash(state);
-    }
-}
-
-impl<Ty> LuaFfiOnce<Ty> for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn call_once(self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
+    fn call_unpin(&self) -> Option<Self::UnpinDelegate> {
+        Some((self.func.borrow_mut())())
     }
 
     fn debug_info(&self) -> DebugInfo {
         DebugInfo {
-            name: self.name.to_string(),
+            name: self.name.as_ref().to_string(),
         }
     }
 }
 
-impl<Ty> LuaFfiMut<Ty> for LuaFfiPtr<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn call_mut(&mut self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        self.call(rt)
+/// Construct `LuaFfi` object out of `Fn() -> impl Delegate` function.
+///
+/// It is currently impossible to automatically identify whether type implements `Unpin` or not
+/// (to correctly generate [`LuaFfi::call_unpin`]).
+/// Use [`from_fn`] instead if the delegate do not require to be pinned.
+///
+/// Rust closures cannot implement custom traits.
+/// In case closure captures any weak references you should pass them in `trace` argument.
+/// It will be used in [`Trace`] implementation in place of closure itself.
+pub fn from_fn_pin<F, S, T>(f: F, name: S, trace: T) -> FromFnPin<F, S, T> {
+    FromFnPin {
+        func: f,
+        name,
+        trace,
     }
 }
 
-impl<Ty> LuaFfi<Ty> for LuaFfiPtr<Ty>
+pub struct FromFnPin<F, S, T> {
+    func: F,
+    name: S,
+    trace: T,
+}
+
+impl<F, S, T> Trace for FromFnPin<F, S, T>
 where
-    Ty: CoreTypes,
+    F: 'static,
+    S: 'static,
+    T: Trace,
 {
-    fn call(&self, rt: RuntimeView<'_, Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        (self.func)(rt)
+    fn trace(&self, collector: &mut gc::Collector) {
+        self.trace.trace(collector);
     }
 }
 
-pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty> + Copy + Send + Sync
+impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFnPin<F, S, T>
+where
+    Ty: CoreTypes,
+    F: Fn() -> R + 'static,
+    R: Delegate<Ty>,
+    S: AsRef<str> + 'static,
+    T: Trace,
+{
+    type Delegate = R;
+    type UnpinDelegate = Never;
+
+    fn call(&self) -> Self::Delegate {
+        (self.func)()
+    }
+
+    fn call_unpin(&self) -> Option<Self::UnpinDelegate> {
+        None
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: self.name.as_ref().to_string(),
+        }
+    }
+}
+
+/// Construct `LuaFfi` object out of `FnMut() -> impl Delegate` function.
+///
+/// It is currently impossible to automatically identify whether type implements `Unpin` or not
+/// (to correctly generate [`LuaFfi::call_unpin`]).
+/// Use [`from_fn`] instead if the delegate do not require to be pinned.
+///
+/// Rust closures cannot implement custom traits.
+/// In case closure captures any weak references you should pass them in `trace` argument.
+/// It will be used in [`Trace`] implementation in place of closure itself.
+pub fn from_fn_mut_pin<F, S, T>(f: F, name: S, trace: T) -> FromFnMutPin<F, S, T> {
+    FromFnMutPin {
+        func: RefCell::new(f),
+        name,
+        trace,
+    }
+}
+
+pub struct FromFnMutPin<F, S, T> {
+    func: RefCell<F>,
+    name: S,
+    trace: T,
+}
+
+impl<F, S, T> Trace for FromFnMutPin<F, S, T>
+where
+    F: 'static,
+    S: 'static,
+    T: Trace,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        self.trace.trace(collector);
+    }
+}
+
+impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFnMutPin<F, S, T>
+where
+    Ty: CoreTypes,
+    F: FnMut() -> R + 'static,
+    R: Delegate<Ty>,
+    S: AsRef<str> + 'static,
+    T: Trace,
+{
+    type Delegate = R;
+    type UnpinDelegate = Never;
+
+    fn call(&self) -> Self::Delegate {
+        (self.func.borrow_mut())()
+    }
+
+    fn call_unpin(&self) -> Option<Self::UnpinDelegate> {
+        None
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            name: self.name.as_ref().to_string(),
+        }
+    }
+}
+
+/// Type-erased pinned `dyn Delegate`.
+pub type DynDelegate<Ty> = Pin<Box<dyn Delegate<Ty>>>;
+
+/// Type-erased unpinned `dyn (Delegate + Unpin)`.
+pub type UnpinDynDelegate<Ty> = Box<dyn Delegate<Ty> + Unpin>;
+
+/// Refinement of `LuaFfi` to be used as trait object (`dyn DLuaFfi`).
+pub trait DLuaFfi<Ty>:
+    LuaFfi<Ty, Delegate = DynDelegate<Ty>, UnpinDelegate = UnpinDynDelegate<Ty>>
+where
+    Ty: CoreTypes,
+{
+}
+
+impl<T, Ty> DLuaFfi<Ty> for T
+where
+    Ty: CoreTypes,
+    T: LuaFfi<
+        Ty,
+        Delegate = Pin<Box<dyn Delegate<Ty>>>,
+        UnpinDelegate = Box<dyn Delegate<Ty> + Unpin>,
+    >,
+{
+}
+
+/// Convert arbitrary `LuaFfi` function to `Box<dyn DLuaFfi>`.
+pub fn boxed<F, Ty>(f: F) -> Box<dyn DLuaFfi<Ty>>
+where
+    Ty: CoreTypes,
+    F: LuaFfi<Ty> + 'static,
+    <F as LuaFfi<Ty>>::Delegate: 'static,
+    <F as LuaFfi<Ty>>::UnpinDelegate: 'static,
+{
+    let inner = BoxedLuaFfiFn { value: f };
+
+    Box::new(inner)
+}
+
+struct BoxedLuaFfiFn<F> {
+    value: F,
+}
+
+impl<F> Trace for BoxedLuaFfiFn<F>
+where
+    F: Trace,
+{
+    fn trace(&self, collector: &mut gc::Collector) {
+        let BoxedLuaFfiFn { value } = self;
+
+        value.trace(collector);
+    }
+}
+
+impl<F, Ty> LuaFfi<Ty> for BoxedLuaFfiFn<F>
+where
+    Ty: CoreTypes,
+    F: LuaFfi<Ty>,
+    <F as LuaFfi<Ty>>::Delegate: 'static,
+    <F as LuaFfi<Ty>>::UnpinDelegate: 'static,
+{
+    type Delegate = Pin<Box<dyn Delegate<Ty>>>;
+    type UnpinDelegate = Box<dyn Delegate<Ty> + Unpin>;
+
+    fn call(&self) -> Self::Delegate {
+        Box::pin(self.value.call())
+    }
+
+    fn call_unpin(&self) -> Option<Self::UnpinDelegate> {
+        Some(Box::new(self.value.call_unpin()?))
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        self.value.debug_info()
+    }
+}
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct DebugInfo {
+    pub name: String,
+}
+
+pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty>
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
-    Ty::Table: TableIndex<Weak, Ty>,
-    Ty::RustClosure: LuaFfiOnce<Ty>,
-    Ty::FullUserdata: gc::index::Allocated<Meta<Ty>, DefaultParams<Ty>>,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
-    let f = move |mut rt: RuntimeView<'_, Ty>| {
+    let f = move || {
+        use crate::gc::LuaPtr;
         use crate::runtime::FunctionPtr;
-        use repr::index::FunctionId;
+        use crate::value::Callable;
+        use delegate::Request;
+        use repr::index::{FunctionId, StackSlot};
 
         let ptr = FunctionPtr {
             chunk_id,
             function_id: FunctionId(0),
         };
 
-        let closure = rt.construct_closure(ptr, [rt.core.global_env.downgrade()])?;
-
-        rt.enter(closure)
+        delegate::yield_1(
+            move |mut rt: RuntimeView<'_, Ty>| {
+                let closure = rt.construct_closure(ptr, [rt.core.global_env.downgrade()])?;
+                let request = Request::Invoke {
+                    callable: Callable::Lua(LuaPtr(closure)),
+                    start: StackSlot(0),
+                };
+                Ok(request)
+            },
+            |_: RuntimeView<'_, Ty>| Ok(()),
+        )
     };
 
-    f.with_name("rt::ffi::call_chunk")
+    from_fn(f, "rt::ffi::call_chunk", ())
 }
 
 pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
-    Ty::Table: TableIndex<Weak, Ty>,
-    Ty::RustClosure: LuaFfiOnce<Ty>,
-    Ty::FullUserdata: gc::index::Allocated<Meta<Ty>, DefaultParams<Ty>>,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
+    Ty: CoreTypes<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    let f = move |mut rt: RuntimeView<Ty>| {
-        let script = script.as_ref();
-        let chunk_id = rt.load_from_file(script)?;
+    let mut script = Some(script.as_ref().to_path_buf());
+    let f = move || {
+        let script = script.take();
+        delegate::yield_1(
+            move |mut rt: RuntimeView<'_, Ty>| {
+                use crate::error::AlreadyDroppedError;
+                use crate::gc::LuaPtr;
+                use crate::value::Callable;
+                use delegate::Request;
+                use repr::index::StackSlot;
 
-        rt.invoke(call_chunk(chunk_id))
+                let script = script.ok_or(AlreadyDroppedError)?;
+                let chunk_id = rt.load_from_file(&script)?;
+                let callback = rt.core.gc.alloc_cell(boxed(call_chunk(chunk_id)));
+                let request = Request::Invoke {
+                    callable: Callable::Rust(LuaPtr(callback)),
+                    start: StackSlot(0),
+                };
+
+                Ok(request)
+            },
+            |_: RuntimeView<'_, Ty>| Ok(()),
+        )
     };
 
-    f.with_name("rt::ffi::call_file")
-}
-
-/// Split [`Opts<T>`] into tuple of options.
-///
-/// Trait provides a convenience method to convert Lua optional arguments
-/// `Opts<(T0, T1,...)>` into more convenient Rustic form of
-/// `(Option<T0>, Option<T1>,...)`.
-pub trait Split: sealed::Sealed {
-    type Output;
-
-    /// Convert [`Opts<(T0, T1,...)>`](Opts) into `(Option<T0>, Option<T1>,...)`.
-    fn split(self) -> Self::Output;
-}
-
-impl Split for Opts<()> {
-    type Output = ();
-
-    fn split(self) -> Self::Output {}
-}
-
-impl<A> Split for Maybe<NilOr<A>> {
-    type Output = (Option<A>,);
-
-    fn split(self) -> Self::Output {
-        (self.flatten_into_option(),)
-    }
-}
-
-impl<A, B> Split for Maybe<(NilOr<A>, Maybe<NilOr<B>>)> {
-    type Output = (Option<A>, Option<B>);
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b,) = rest.split();
-                (a.into_option(), b)
-            }
-        }
-    }
-}
-
-impl<A, B, C> Split for Maybe<(NilOr<A>, Maybe<(NilOr<B>, Maybe<NilOr<C>>)>)> {
-    type Output = (Option<A>, Option<B>, Option<C>);
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c) = rest.split();
-                (a.into_option(), b, c)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(NilOr<B>, Maybe<(NilOr<C>, Maybe<NilOr<D>>)>)>,
-    )>
-{
-    type Output = (Option<A>, Option<B>, Option<C>, Option<D>);
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d) = rest.split();
-                (a.into_option(), b, c, d)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(NilOr<C>, Maybe<(NilOr<D>, Maybe<NilOr<E>>)>)>,
-        )>,
-    )>
-{
-    type Output = (Option<A>, Option<B>, Option<C>, Option<D>, Option<E>);
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e) = rest.split();
-                (a.into_option(), b, c, d, e)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E, F> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(
-                NilOr<C>,
-                Maybe<(NilOr<D>, Maybe<(NilOr<E>, Maybe<NilOr<F>>)>)>,
-            )>,
-        )>,
-    )>
-{
-    type Output = (
-        Option<A>,
-        Option<B>,
-        Option<C>,
-        Option<D>,
-        Option<E>,
-        Option<F>,
-    );
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e, f) = rest.split();
-                (a.into_option(), b, c, d, e, f)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E, F, G> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(
-                NilOr<C>,
-                Maybe<(
-                    NilOr<D>,
-                    Maybe<(NilOr<E>, Maybe<(NilOr<F>, Maybe<NilOr<G>>)>)>,
-                )>,
-            )>,
-        )>,
-    )>
-{
-    type Output = (
-        Option<A>,
-        Option<B>,
-        Option<C>,
-        Option<D>,
-        Option<E>,
-        Option<F>,
-        Option<G>,
-    );
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e, f, g) = rest.split();
-                (a.into_option(), b, c, d, e, f, g)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E, F, G, H> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(
-                NilOr<C>,
-                Maybe<(
-                    NilOr<D>,
-                    Maybe<(
-                        NilOr<E>,
-                        Maybe<(NilOr<F>, Maybe<(NilOr<G>, Maybe<NilOr<H>>)>)>,
-                    )>,
-                )>,
-            )>,
-        )>,
-    )>
-{
-    type Output = (
-        Option<A>,
-        Option<B>,
-        Option<C>,
-        Option<D>,
-        Option<E>,
-        Option<F>,
-        Option<G>,
-        Option<H>,
-    );
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e, f, g, h) = rest.split();
-                (a.into_option(), b, c, d, e, f, g, h)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E, F, G, H, I> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(
-                NilOr<C>,
-                Maybe<(
-                    NilOr<D>,
-                    Maybe<(
-                        NilOr<E>,
-                        Maybe<(
-                            NilOr<F>,
-                            Maybe<(NilOr<G>, Maybe<(NilOr<H>, Maybe<NilOr<I>>)>)>,
-                        )>,
-                    )>,
-                )>,
-            )>,
-        )>,
-    )>
-{
-    type Output = (
-        Option<A>,
-        Option<B>,
-        Option<C>,
-        Option<D>,
-        Option<E>,
-        Option<F>,
-        Option<G>,
-        Option<H>,
-        Option<I>,
-    );
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e, f, g, h, i) = rest.split();
-                (a.into_option(), b, c, d, e, f, g, h, i)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E, F, G, H, I, J> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(
-                NilOr<C>,
-                Maybe<(
-                    NilOr<D>,
-                    Maybe<(
-                        NilOr<E>,
-                        Maybe<(
-                            NilOr<F>,
-                            Maybe<(
-                                NilOr<G>,
-                                Maybe<(NilOr<H>, Maybe<(NilOr<I>, Maybe<NilOr<J>>)>)>,
-                            )>,
-                        )>,
-                    )>,
-                )>,
-            )>,
-        )>,
-    )>
-{
-    type Output = (
-        Option<A>,
-        Option<B>,
-        Option<C>,
-        Option<D>,
-        Option<E>,
-        Option<F>,
-        Option<G>,
-        Option<H>,
-        Option<I>,
-        Option<J>,
-    );
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e, f, g, h, i, j) = rest.split();
-                (a.into_option(), b, c, d, e, f, g, h, i, j)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E, F, G, H, I, J, K> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(
-                NilOr<C>,
-                Maybe<(
-                    NilOr<D>,
-                    Maybe<(
-                        NilOr<E>,
-                        Maybe<(
-                            NilOr<F>,
-                            Maybe<(
-                                NilOr<G>,
-                                Maybe<(
-                                    NilOr<H>,
-                                    Maybe<(NilOr<I>, Maybe<(NilOr<J>, Maybe<NilOr<K>>)>)>,
-                                )>,
-                            )>,
-                        )>,
-                    )>,
-                )>,
-            )>,
-        )>,
-    )>
-{
-    type Output = (
-        Option<A>,
-        Option<B>,
-        Option<C>,
-        Option<D>,
-        Option<E>,
-        Option<F>,
-        Option<G>,
-        Option<H>,
-        Option<I>,
-        Option<J>,
-        Option<K>,
-    );
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e, f, g, h, i, j, k) = rest.split();
-                (a.into_option(), b, c, d, e, f, g, h, i, j, k)
-            }
-        }
-    }
-}
-
-impl<A, B, C, D, E, F, G, H, I, J, K, L> Split
-    for Maybe<(
-        NilOr<A>,
-        Maybe<(
-            NilOr<B>,
-            Maybe<(
-                NilOr<C>,
-                Maybe<(
-                    NilOr<D>,
-                    Maybe<(
-                        NilOr<E>,
-                        Maybe<(
-                            NilOr<F>,
-                            Maybe<(
-                                NilOr<G>,
-                                Maybe<(
-                                    NilOr<H>,
-                                    Maybe<(
-                                        NilOr<I>,
-                                        Maybe<(NilOr<J>, Maybe<(NilOr<K>, Maybe<NilOr<L>>)>)>,
-                                    )>,
-                                )>,
-                            )>,
-                        )>,
-                    )>,
-                )>,
-            )>,
-        )>,
-    )>
-{
-    type Output = (
-        Option<A>,
-        Option<B>,
-        Option<C>,
-        Option<D>,
-        Option<E>,
-        Option<F>,
-        Option<G>,
-        Option<H>,
-        Option<I>,
-        Option<J>,
-        Option<K>,
-        Option<L>,
-    );
-
-    fn split(self) -> Self::Output {
-        match self {
-            Maybe::None => Default::default(),
-            Maybe::Some((a, rest)) => {
-                let (b, c, d, e, f, g, h, i, j, k, l) = rest.split();
-                (a.into_option(), b, c, d, e, f, g, h, i, j, k, l)
-            }
-        }
-    }
-}
-
-mod sealed {
-    use super::{Maybe, NilOr};
-
-    pub trait Sealed {}
-
-    impl Sealed for () {}
-
-    impl<T> Sealed for Maybe<NilOr<T>> {}
-
-    impl<T, U> Sealed for Maybe<(NilOr<T>, U)> where U: Sealed {}
-}
-
-/// Expand tuple into optional Lua arguments.
-///
-/// This typedef provides a shorthand for constructing
-/// [correct parser](arg_parser#handling-optional-arguments) for a sequence of optional Lua arguments.
-///
-/// For example, the following expands into
-/// * `Opts<()>` -> `()`
-/// * `Opts<(A,)>` -> `Maybe<NilOr<A>>`
-/// * `Opts<(A, B)>` -> `Maybe<(NilOr<A>, Maybe<NilOr<B>>)>`
-/// * `Opts<(A, B, C)>` -> `Maybe<(NilOr<A>, Maybe<(NilOr<B>, Maybe<NilOr<C>>)>)>`
-/// * etc.
-///
-/// See [`Split`] trait to quickly expand those into tuple of `Option`s.
-pub type Opts<T> = <T as OptsImpl>::Output;
-
-#[doc(hidden)]
-pub trait OptsImpl: Tuple {
-    type Output;
-}
-
-impl OptsImpl for () {
-    type Output = ();
-}
-
-impl<A> OptsImpl for (A,) {
-    type Output = Maybe<NilOr<A>>;
-}
-
-impl<A, B> OptsImpl for (A, B) {
-    type Output = Maybe<(NilOr<A>, Opts<(B,)>)>;
-}
-
-impl<A, B, C> OptsImpl for (A, B, C) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C)>)>;
-}
-
-impl<A, B, C, D> OptsImpl for (A, B, C, D) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D)>)>;
-}
-
-impl<A, B, C, D, E> OptsImpl for (A, B, C, D, E) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E)>)>;
-}
-
-impl<A, B, C, D, E, F> OptsImpl for (A, B, C, D, E, F) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F)>)>;
-}
-
-impl<A, B, C, D, E, F, G> OptsImpl for (A, B, C, D, E, F, G) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G)>)>;
-}
-
-impl<A, B, C, D, E, F, G, H> OptsImpl for (A, B, C, D, E, F, G, H) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H)>)>;
-}
-
-impl<A, B, C, D, E, F, G, H, I> OptsImpl for (A, B, C, D, E, F, G, H, I) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I)>)>;
-}
-
-impl<A, B, C, D, E, F, G, H, I, J> OptsImpl for (A, B, C, D, E, F, G, H, I, J) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J)>)>;
-}
-
-impl<A, B, C, D, E, F, G, H, I, J, K> OptsImpl for (A, B, C, D, E, F, G, H, I, J, K) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J, K)>)>;
-}
-
-impl<A, B, C, D, E, F, G, H, I, J, K, L> OptsImpl for (A, B, C, D, E, F, G, H, I, J, K, L) {
-    type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J, K, L)>)>;
+    from_fn_mut(f, "rt::ffi::call_file", ())
 }

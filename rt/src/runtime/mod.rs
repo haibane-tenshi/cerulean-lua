@@ -2,31 +2,30 @@ mod dialect;
 mod frame;
 mod frame_stack;
 mod interner;
-mod rust_backtrace_stack;
+mod orchestrator;
 mod stack;
+mod thread;
 
 use std::fmt::Debug;
-use std::ops::{Bound, ControlFlow};
 use std::path::Path;
 
 use enumoid::EnumMap;
 use gc::{Root, RootCell};
-use repr::index::StackSlot;
 use repr::literal::Literal;
 
-use crate::backtrace::{Backtrace, Location};
+use crate::backtrace::Location;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
-use crate::error::{AlreadyDroppedError, RuntimeError};
-use crate::ffi::LuaFfiOnce;
-use crate::gc::{DisplayWith, Heap};
+use crate::error::{AlreadyDroppedError, RtError, RuntimeError};
+use crate::ffi::DLuaFfi;
+use crate::gc::Heap;
 use crate::value::{
-    CoreTypes, KeyValue, Meta, StrongValue, TypeWithoutMetatable, Value, Weak, WeakValue,
+    Callable, CoreTypes, KeyValue, Meta, Strong, StrongValue, TypeWithoutMetatable, Value, Weak,
+    WeakValue,
 };
-use frame::{ChangeFrame, Event, Frame};
-use frame_stack::{FrameStack, FrameStackView};
-use rust_backtrace_stack::{RustBacktraceStack, RustBacktraceStackView};
-use stack::{RawStackSlot, Stack};
+use frame::Event;
+use orchestrator::Orchestrator;
+use thread::Thread;
 
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use frame::{Closure, FunctionPtr};
@@ -67,7 +66,7 @@ where
         }
     }
 
-    pub fn alloc_error_msg(&mut self, msg: impl Into<Ty::String>) -> RuntimeError<StrongValue<Ty>> {
+    pub fn alloc_error_msg(&mut self, msg: impl Into<Ty::String>) -> RtError<Ty> {
         use crate::error::ValueError;
         use crate::gc::LuaPtr;
 
@@ -154,9 +153,7 @@ where
 {
     pub core: Core<Ty>,
     pub chunk_cache: C,
-    frames: FrameStack<Frame<Ty>>,
-    stack: Stack<Ty>,
-    rust_backtrace_stack: RustBacktraceStack,
+    orchestrator: Orchestrator<Ty>,
 }
 
 impl<Ty, C> Runtime<Ty, C>
@@ -164,17 +161,13 @@ where
     Ty: CoreTypes,
     C: Debug,
 {
-    pub fn new(chunk_cache: C, mut core: Core<Ty>) -> Self {
+    pub fn new(chunk_cache: C, core: Core<Ty>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
-
-        let stack = Stack::new(&mut core.gc);
 
         Runtime {
             core,
             chunk_cache,
-            frames: Default::default(),
-            stack,
-            rust_backtrace_stack: Default::default(),
+            orchestrator: Default::default(),
         }
     }
 }
@@ -184,29 +177,33 @@ where
     Ty: CoreTypes,
     C: ChunkCache,
 {
-    pub fn view(&mut self) -> RuntimeView<Ty> {
+    fn context(&mut self) -> (thread::Context<Ty>, &mut Orchestrator<Ty>) {
+        use thread::Context;
+
         let Runtime {
             core,
             chunk_cache,
-            frames,
-            stack,
-            // upvalue_stack,
-            rust_backtrace_stack,
+            orchestrator,
         } = self;
 
-        let frames = frames.view();
-        let stack = stack.guard();
-        // let upvalue_stack = upvalue_stack.view();
-        let rust_backtrace_stack = rust_backtrace_stack.view();
+        let ctx = Context { core, chunk_cache };
 
-        RuntimeView {
-            core,
-            chunk_cache,
-            frames,
-            stack,
-            // upvalue_stack,
-            rust_backtrace_stack,
-        }
+        (ctx, orchestrator)
+    }
+}
+
+impl<Ty, C> Runtime<Ty, C>
+where
+    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty::RustClosure: DLuaFfi<Ty>,
+    C: ChunkCache,
+{
+    pub fn enter(&mut self, callable: Callable<Strong, Ty>) -> Result<(), RtError<Ty>> {
+        let (mut ctx, orchestrator) = self.context();
+        let thread = Thread::from_callable_with(callable, [], ctx.reborrow())?;
+        orchestrator.push(thread);
+
+        orchestrator.enter(ctx)
     }
 }
 
@@ -216,219 +213,58 @@ where
 {
     pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
-    frames: FrameStackView<'rt, Frame<Ty>>,
     pub stack: StackGuard<'rt, Ty>,
-    rust_backtrace_stack: RustBacktraceStackView<'rt>,
 }
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn view_full(&mut self) -> RuntimeView<'_, Ty> {
-        self.view(StackSlot(0)).unwrap()
-    }
-
-    pub fn view(&mut self, start: StackSlot) -> Option<RuntimeView<'_, Ty>> {
-        let start = self.stack.boundary() + start;
-        self.view_raw(start)
-    }
-
-    fn view_raw(&mut self, start: RawStackSlot) -> Option<RuntimeView<'_, Ty>> {
+    pub fn reborrow(&mut self) -> RuntimeView<'_, Ty> {
         let RuntimeView {
             core,
             chunk_cache,
-            frames,
             stack,
-            rust_backtrace_stack,
         } = self;
 
-        let stack = stack.guard(start)?;
-        let frames = frames.view();
-        let rust_backtrace_stack = rust_backtrace_stack.view_over();
-
-        let r = RuntimeView {
-            core,
+        RuntimeView {
+            core: *core,
             chunk_cache: *chunk_cache,
-            frames,
-            stack,
-            rust_backtrace_stack,
-        };
-
-        Some(r)
-    }
-}
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: CoreTypes,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
-{
-    pub fn invoke_at(
-        &mut self,
-        f: impl LuaFfiOnce<Ty>,
-        start: StackSlot,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        use crate::error::OutOfBoundsStack;
-
-        let rt = self.view(start).ok_or(OutOfBoundsStack)?;
-        rt.invoke(f)
-    }
-
-    pub fn invoke(mut self, f: impl LuaFfiOnce<Ty>) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        use crate::backtrace::{BacktraceFrame, FrameSource};
-        use rust_backtrace_stack::RustFrame;
-
-        let rust_frame = RustFrame {
-            position: self.frames.next_raw_id(),
-            backtrace: BacktraceFrame {
-                source: FrameSource::Rust,
-                name: Some(f.debug_info().name),
-                location: None,
-            },
-        };
-
-        // Do an extra protective view.
-        // We cannot reasonably expect `self` to be in consistent state
-        // because caller might have caught `RuntimeError` and immediately passed
-        // the runtime to us.
-        let mut view = self.view_full();
-        view.rust_backtrace_stack.push(rust_frame);
-
-        tracing::trace!(
-            stack = view.stack.to_pretty_string(&view.core.gc),
-            "entering Rust function"
-        );
-
-        let r = f.call_once(view.view_full());
-
-        // Forcefully clean up.
-        // It is possible that Rust function called Lua panic but forgot to reset the runtime.
-        // This guarantees that it is always safe to return control to caller when panic is not propagated.
-        if r.is_ok() {
-            view.soft_reset();
-        }
-
-        r
-    }
-}
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: CoreTypes,
-{
-    fn soft_reset(&mut self) {
-        self.frames.clear();
-        self.rust_backtrace_stack.clear();
-    }
-}
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: CoreTypes,
-{
-    /// Return runtime into consistent state.
-    ///
-    /// This function is useful in case you caught Lua panic
-    /// (one of the methods returned `RuntimeError`)
-    /// and you want to continue executing code inside this runtime.
-    /// Lua panic may interrupt execution at arbitrary point
-    /// potentially leaving internal structures in inconsistent state.
-    /// Resuming execution on such runtime results *Lua undefined behavior*.
-    ///
-    /// Invoking `reset` will purge stack and bring internals into consistent state
-    /// making it safe to execute Lua code once again.
-    /// As such you should collect any useful information about error (e.g. backtrace)
-    /// before resetting in case you need it.
-    ///
-    /// Note that the "consistency" part applies only to runtime itself but not to Lua constructs!
-    /// It is entirely possible for Lua to panic while modifying some state
-    /// and since most things (tables, closures, etc.) are shared through references,
-    /// this corrupted state may be observed by outside code.
-    /// If that code doesn't expect to find malformed data it may lead to weird and/or buggy behavior.
-    /// There is nothing runtime can do to help you.
-    /// In case this presents an issue,
-    /// the best course of action is to discard the runtime and construct a fresh one.
-    pub fn reset(&mut self) {
-        self.stack.lua_frame().clear();
-        self.soft_reset();
-    }
-}
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
-    Ty::RustClosure: LuaFfiOnce<Ty>,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
-{
-    pub fn enter(
-        mut self,
-        closure: RootCell<Closure<Ty>>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
-        use crate::error::OutOfBoundsStack;
-        use crate::gc::LuaPtr;
-        use crate::value::callable::Callable;
-
-        let frame = Frame::new(&mut self, closure, None)?;
-
-        let mut active_frame = frame.activate(&mut self)?;
-
-        loop {
-            match active_frame.step() {
-                Ok(ControlFlow::Break(ChangeFrame::Return(slot))) => {
-                    active_frame.exit(slot)?;
-
-                    let Some(frame) = self.frames.pop() else {
-                        break Ok(());
-                    };
-
-                    active_frame = frame.activate(&mut self)?;
-                }
-                Ok(ControlFlow::Break(ChangeFrame::Invoke(event, callable, start))) => {
-                    let frame = active_frame.suspend();
-                    self.frames.push(frame);
-
-                    let mut rt = self.view_raw(start).ok_or(OutOfBoundsStack)?;
-                    // Ensure that stack space passed to another function no longer hosts upvalues.
-                    rt.stack.lua_frame().evict_upvalues();
-
-                    match callable {
-                        Callable::Lua(LuaPtr(closure)) => {
-                            let frame = Frame::new(&mut rt, closure, event)?;
-                            active_frame = frame.activate(&mut self)?;
-                        }
-                        Callable::Rust(closure) => {
-                            rt.stack.lua_frame().sync_transient(&mut rt.core.gc);
-                            rt.invoke(closure)?;
-
-                            if let Some(event) = event {
-                                let mut stack = self.stack.guard(start).expect(
-                                    "stack space below invocation bound should be untouched",
-                                );
-                                stack.lua_frame().adjust_event_returns(event);
-                            }
-
-                            let frame = self
-                                .frames
-                                .pop()
-                                .expect("suspended frame should still exist");
-
-                            active_frame = frame.activate(&mut self)?;
-                        }
-                    }
-                }
-                Ok(ControlFlow::Continue(())) => (),
-                Err(err) => {
-                    // Make sure to preserve current frame in case opcode panicked.
-                    let frame = active_frame.suspend();
-                    self.frames.push(frame);
-
-                    break Err(err.into());
-                }
-            }
+            stack: stack.reborrow(),
         }
     }
 }
+
+// impl<'rt, Ty> RuntimeView<'rt, Ty>
+// where
+//     Ty: CoreTypes,
+// {
+/// Return runtime into consistent state.
+///
+/// This function is useful in case you caught Lua panic
+/// (one of the methods returned `RuntimeError`)
+/// and you want to continue executing code inside this runtime.
+/// Lua panic may interrupt execution at arbitrary point
+/// potentially leaving internal structures in inconsistent state.
+/// Resuming execution on such runtime results *Lua undefined behavior*.
+///
+/// Invoking `reset` will purge stack and bring internals into consistent state
+/// making it safe to execute Lua code once again.
+/// As such you should collect any useful information about error (e.g. backtrace)
+/// before resetting in case you need it.
+///
+/// Note that the "consistency" part applies only to runtime itself but not to Lua constructs!
+/// It is entirely possible for Lua to panic while modifying some state
+/// and since most things (tables, closures, etc.) are shared through references,
+/// this corrupted state may be observed by outside code.
+/// If that code doesn't expect to find malformed data it may lead to weird and/or buggy behavior.
+/// There is nothing runtime can do to help you.
+/// In case this presents an issue,
+/// the best course of action is to discard the runtime and construct a fresh one.
+// pub fn reset(&mut self) {
+//     self.stack.lua_frame().clear();
+//     self.soft_reset();
+// }
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
@@ -438,7 +274,7 @@ where
         &mut self,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<RootCell<Closure<Ty>>, RuntimeError<StrongValue<Ty>>> {
+    ) -> Result<RootCell<Closure<Ty>>, RtError<Ty>> {
         Closure::new(self, fn_ptr, upvalues)
     }
 
@@ -481,10 +317,7 @@ where
         Ok(chunk_id)
     }
 
-    pub fn load_from_file(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<ChunkId, RuntimeError<StrongValue<Ty>>>
+    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RtError<Ty>>
     where
         Ty::String: From<String>,
     {
@@ -510,145 +343,122 @@ impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
     Ty: CoreTypes,
 {
-    pub fn backtrace(&self) -> Backtrace {
-        use rust_backtrace_stack::RustFrame;
+    // pub fn backtrace(&self) -> Backtrace {
+    //     use rust_backtrace_stack::RustFrame;
 
-        let mut start = self.frames.boundary();
-        let mut frames = Vec::new();
+    //     let mut start = self.frames.boundary();
+    //     let mut frames = Vec::new();
 
-        for rust_frame in self.rust_backtrace_stack.iter() {
-            let RustFrame {
-                position,
-                backtrace,
-            } = rust_frame;
+    //     for rust_frame in self.rust_backtrace_stack.iter() {
+    //         let RustFrame {
+    //             position,
+    //             backtrace,
+    //         } = rust_frame;
 
-            frames.extend(
-                self.frames
-                    .range(start..*position)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|frame| frame.backtrace(&self.core.gc, self.chunk_cache)),
-            );
-            frames.push(backtrace.clone());
-            start = *position
-        }
+    //         frames.extend(
+    //             self.frames
+    //                 .range(start..*position)
+    //                 .unwrap_or_default()
+    //                 .iter()
+    //                 .map(|frame| frame.backtrace(&self.core.gc, self.chunk_cache)),
+    //         );
+    //         frames.push(backtrace.clone());
+    //         start = *position
+    //     }
 
-        frames.extend(
-            self.frames
-                .range(start..)
-                .unwrap_or_default()
-                .iter()
-                .map(|frame| frame.backtrace(&self.core.gc, self.chunk_cache)),
-        );
+    //     frames.extend(
+    //         self.frames
+    //             .range(start..)
+    //             .unwrap_or_default()
+    //             .iter()
+    //             .map(|frame| frame.backtrace(&self.core.gc, self.chunk_cache)),
+    //     );
 
-        Backtrace { frames }
-    }
+    //     Backtrace { frames }
+    // }
 
-    pub fn into_diagnostic(&self, err: RuntimeError<StrongValue<Ty>>) -> Diagnostic
-    where
-        Ty::String: AsRef<[u8]>,
-        StrongValue<Ty>: DisplayWith<Heap<Ty>>,
-    {
-        use codespan_reporting::files::SimpleFile;
+    // pub fn into_diagnostic(&self, err: RuntimeRtError<Ty>) -> Diagnostic
+    // where
+    //     Ty::String: AsRef<[u8]>,
+    //     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
+    // {
+    //     use codespan_reporting::files::SimpleFile;
 
-        let message = match err {
-            RuntimeError::Value(err) => err.into_diagnostic(&self.core.gc),
-            RuntimeError::Borrow(err) => err.into_diagnostic(),
-            RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
-            RuntimeError::Immutable(err) => err.into_diagnostic(),
-            RuntimeError::Diagnostic(diag) => return *diag,
-            RuntimeError::MissingChunk(err) => err.into_diagnostic(),
-            RuntimeError::MissingFunction(err) => err.into_diagnostic(),
-            RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
-            RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
-            RuntimeError::OpCode(err) => {
-                if let Some(frame) = self.frames.last() {
-                    let ip = frame.current_ip();
-                    let fn_ptr = self.core.gc[frame.closure()].fn_ptr();
-                    let chunk = self
-                        .chunk_cache
-                        .chunk(fn_ptr.chunk_id)
-                        .expect("closure should be constructed out of existing chunk");
-                    let function = chunk
-                        .get_function(fn_ptr.function_id)
-                        .expect("closure should be constructed out of existing function");
+    //     let message = match err {
+    //         RuntimeError::Value(err) => err.into_diagnostic(&self.core.gc),
+    //         RuntimeError::Borrow(err) => err.into_diagnostic(),
+    //         RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
+    //         RuntimeError::Immutable(err) => err.into_diagnostic(),
+    //         RuntimeError::Diagnostic(diag) => return *diag,
+    //         RuntimeError::MissingChunk(err) => err.into_diagnostic(),
+    //         RuntimeError::MissingFunction(err) => err.into_diagnostic(),
+    //         RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
+    //         RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
+    //         RuntimeError::OpCode(err) => {
+    //             if let Some(frame) = self.frames.last() {
+    //                 let ip = frame.current_ip();
+    //                 let fn_ptr = self.core.gc[frame.closure()].fn_ptr();
+    //                 let chunk = self
+    //                     .chunk_cache
+    //                     .chunk(fn_ptr.chunk_id)
+    //                     .expect("closure should be constructed out of existing chunk");
+    //                 let function = chunk
+    //                     .get_function(fn_ptr.function_id)
+    //                     .expect("closure should be constructed out of existing function");
 
-                    let opcode = *function
-                        .opcodes
-                        .get(ip)
-                        .expect("error should be constructed out of existing opcode");
+    //                 let opcode = *function
+    //                     .opcodes
+    //                     .get(ip)
+    //                     .expect("error should be constructed out of existing opcode");
 
-                    let debug_info = chunk
-                        .debug_info
-                        .as_ref()
-                        .and_then(|info| info.functions.get(fn_ptr.function_id))
-                        .and_then(|info| info.opcodes.get(ip))
-                        .cloned();
+    //                 let debug_info = chunk
+    //                     .debug_info
+    //                     .as_ref()
+    //                     .and_then(|info| info.functions.get(fn_ptr.function_id))
+    //                     .and_then(|info| info.opcodes.get(ip))
+    //                     .cloned();
 
-                    err.into_diagnostic((), opcode, debug_info)
-                } else {
-                    use crate::error::ExtraDiagnostic;
-                    use codespan_reporting::diagnostic::Diagnostic;
+    //                 err.into_diagnostic((), opcode, debug_info)
+    //             } else {
+    //                 use crate::error::ExtraDiagnostic;
+    //                 use codespan_reporting::diagnostic::Diagnostic;
 
-                    let mut diag = Diagnostic::error()
-                        .with_message("opcode error failed to generate diagnostic");
+    //                 let mut diag = Diagnostic::error()
+    //                     .with_message("opcode error failed to generate diagnostic");
 
-                    diag.with_help([
-                        "opcode-related errors only carry the cause of failure, all additional information is left inside runtime",
-                        "if you see this error, most likely runtime was reset before diagnostic was generated"
-                    ]);
+    //                 diag.with_help([
+    //                     "opcode-related errors only carry the cause of failure, all additional information is left inside runtime",
+    //                     "if you see this error, most likely runtime was reset before diagnostic was generated"
+    //                 ]);
 
-                    diag
-                }
-            }
-        };
+    //                 diag
+    //             }
+    //         }
+    //     };
 
-        let (name, source) = self
-            .frames
-            .last()
-            .map(|frame| {
-                let ptr = self.core.gc[frame.closure()].fn_ptr();
+    //     let (name, source) = self
+    //         .frames
+    //         .last()
+    //         .map(|frame| {
+    //             let ptr = self.core.gc[frame.closure()].fn_ptr();
 
-                let source = self.chunk_cache.source(ptr.chunk_id);
-                let name = self
-                    .chunk_cache
-                    .location(ptr.chunk_id)
-                    .map(|location| location.file);
+    //             let source = self.chunk_cache.source(ptr.chunk_id);
+    //             let name = self
+    //                 .chunk_cache
+    //                 .location(ptr.chunk_id)
+    //                 .map(|location| location.file);
 
-                (name, source)
-            })
-            .unwrap_or_default();
+    //             (name, source)
+    //         })
+    //         .unwrap_or_default();
 
-        let name = name.unwrap_or_else(|| "<unnamed>".to_string());
-        let source = source.unwrap_or_default();
+    //     let name = name.unwrap_or_else(|| "<unnamed>".to_string());
+    //     let source = source.unwrap_or_default();
 
-        let files = SimpleFile::new(name, source);
+    //     let files = SimpleFile::new(name, source);
 
-        Diagnostic { files, message }
-    }
-}
-
-trait MapBound<F> {
-    type Output;
-
-    fn mapb(self, f: F) -> Self::Output;
-}
-
-impl<F, T, U> MapBound<F> for Bound<T>
-where
-    F: FnOnce(T) -> U,
-{
-    type Output = Bound<U>;
-
-    fn mapb(self, f: F) -> Self::Output {
-        use Bound::*;
-
-        match self {
-            Included(t) => Included(f(t)),
-            Excluded(t) => Excluded(f(t)),
-            Unbounded => Unbounded,
-        }
-    }
+    //     Diagnostic { files, message }
+    // }
 }
 
 #[derive(Debug)]

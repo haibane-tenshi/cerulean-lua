@@ -4,10 +4,10 @@ use std::hash::Hash;
 use gc::index::Allocated;
 use gc::{Gc, GcCell, Root, RootCell, Trace};
 
-use super::callable::RustCallable;
 use super::string::PossiblyUtf8Vec;
 use super::userdata::{DefaultParams, FullUserdata};
 use super::{KeyValue, Value};
+use crate::ffi::DLuaFfi;
 use crate::gc::LuaPtr;
 use crate::runtime::{Closure, Interned};
 
@@ -53,7 +53,7 @@ pub trait CoreTypes: Sized + 'static {
         + From<&'static str>
         + AsRef<[u8]>;
     type LuaClosure: Trace;
-    type RustClosure: Clone + PartialEq + Trace;
+    type RustClosure: Trace;
     type Table: Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
     type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
         + Allocated<Meta<Self>, DefaultParams<Self>>
@@ -67,7 +67,7 @@ pub struct DefaultTypes;
 impl CoreTypes for DefaultTypes {
     type String = PossiblyUtf8Vec;
     type LuaClosure = Closure<Self>;
-    type RustClosure = RustCallable<Self>;
+    type RustClosure = Box<dyn DLuaFfi<Self>>;
     type Table = super::Table<Weak, Self>;
     type FullUserdata = dyn FullUserdata<Meta<Self>, DefaultParams<Self>>;
 }

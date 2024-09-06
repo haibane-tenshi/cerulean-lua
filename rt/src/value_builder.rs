@@ -131,7 +131,7 @@ impl<P> ValueBuilder<P> {
         let recipe_ids = recipe_start..recipe_end;
 
         let builder = move |mut rt: RuntimeView<Ty>, chunk_id: ChunkId, value: T| {
-            let value = builder(rt.view_full(), chunk_id, value)?;
+            let value = builder(rt.reborrow(), chunk_id, value)?;
 
             let chunk_part = ChunkRange {
                 chunk_id,

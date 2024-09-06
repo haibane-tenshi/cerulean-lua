@@ -7,9 +7,8 @@ use gc::index::{Access, Allocated, GcPtr, RootPtr};
 use gc::userdata::Params;
 use gc::{Gc, GcCell, Heap as TrueHeap, Root, RootCell, Trace};
 
-use crate::ffi::{LuaFfi, LuaFfiMut, LuaFfiOnce};
 use crate::value::userdata::DefaultParams;
-use crate::value::{CoreTypes, Meta};
+use crate::value::Meta;
 
 pub type Heap<Ty> = TrueHeap<Meta<Ty>, DefaultParams<Ty>>;
 
@@ -226,49 +225,6 @@ where
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.location().hash(state);
-    }
-}
-
-impl<Ty, P> LuaFfiOnce<Ty> for LuaPtr<P>
-where
-    Ty: CoreTypes,
-    P: LuaFfiOnce<Ty>,
-{
-    fn call_once(
-        self,
-        rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
-        self.0.call_once(rt)
-    }
-
-    fn debug_info(&self) -> crate::ffi::DebugInfo {
-        self.0.debug_info()
-    }
-}
-
-impl<Ty, P> LuaFfiMut<Ty> for LuaPtr<P>
-where
-    Ty: CoreTypes,
-    P: LuaFfiMut<Ty>,
-{
-    fn call_mut(
-        &mut self,
-        rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
-        self.0.call_mut(rt)
-    }
-}
-
-impl<Ty, P> LuaFfi<Ty> for LuaPtr<P>
-where
-    Ty: CoreTypes,
-    P: LuaFfi<Ty>,
-{
-    fn call(
-        &self,
-        rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
-        self.0.call(rt)
     }
 }
 

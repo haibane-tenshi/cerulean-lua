@@ -3,10 +3,10 @@ use std::marker::PhantomData;
 
 use gc::userdata::Params;
 
-use crate::error::{BorrowError, RuntimeError};
+use crate::error::{BorrowError, RtError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
-use crate::value::{CoreTypes, StrongValue};
+use crate::value::CoreTypes;
 
 pub use gc::userdata::{FullUserdata, Userdata};
 
@@ -24,7 +24,7 @@ where
 {
     type Id<'id> = MethodId<'id>;
     type Rt<'rt> = RuntimeView<'rt, Ty>;
-    type Res = Result<(), RuntimeError<StrongValue<Ty>>>;
+    type Res = Result<(), RtError<Ty>>;
 }
 
 pub enum Method<Ref, Mut, Val> {
@@ -45,21 +45,9 @@ where
 
     fn dispatch_method(name: &str) -> Option<Method<Self::Ref, Self::Mut, Self::Val>>;
 
-    fn call(
-        &self,
-        method: Self::Ref,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
-    fn call_mut(
-        &mut self,
-        method: Self::Mut,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
-    fn call_once(
-        self,
-        method: Self::Val,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>>;
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>>;
+    fn call_mut(&mut self, method: Self::Mut, rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>>;
+    fn call_once(self, method: Self::Val, rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>>;
 }
 
 impl<Marker, Ty, T> DispatchMethod<Marker, Ty> for RefCell<T>
@@ -87,11 +75,7 @@ where
         Some(r)
     }
 
-    fn call(
-        &self,
-        method: Self::Ref,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>> {
         match method {
             Method::Ref(m) => self.try_borrow().map_err(|_| BorrowError::Ref)?.call(m, rt),
             Method::Mut(m) => self
@@ -102,19 +86,11 @@ where
         }
     }
 
-    fn call_mut(
-        &mut self,
-        method: Self::Mut,
-        _rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    fn call_mut(&mut self, method: Self::Mut, _rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>> {
         match method {}
     }
 
-    fn call_once(
-        self,
-        method: Self::Val,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    fn call_once(self, method: Self::Val, rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>> {
         self.into_inner().call_once(method, rt)
     }
 }
@@ -145,11 +121,7 @@ where
         Some(r)
     }
 
-    fn call(
-        &self,
-        method: Self::Ref,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    fn call(&self, method: Self::Ref, rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>> {
         use crate::error::AlreadyDroppedError;
 
         let Some(value) = self else {
@@ -159,11 +131,7 @@ where
         value.call(method, rt)
     }
 
-    fn call_mut(
-        &mut self,
-        method: Self::Mut,
-        rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    fn call_mut(&mut self, method: Self::Mut, rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>> {
         use crate::error::AlreadyDroppedError;
 
         match method {
@@ -185,11 +153,7 @@ where
         }
     }
 
-    fn call_once(
-        self,
-        method: Self::Val,
-        _rt: RuntimeView<'_, Ty>,
-    ) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    fn call_once(self, method: Self::Val, _rt: RuntimeView<'_, Ty>) -> Result<(), RtError<Ty>> {
         match method {}
     }
 }
@@ -203,7 +167,7 @@ where
         &self,
         id: MethodId,
         rt: RuntimeView<'_, Ty>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>>;
+    ) -> Option<Result<(), RtError<Ty>>>;
 }
 
 impl<Ty, T> DispatchTrait<(), Ty> for T
@@ -214,7 +178,7 @@ where
         &self,
         _id: MethodId,
         _rt: RuntimeView<'_, Ty>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
+    ) -> Option<Result<(), RtError<Ty>>> {
         None
     }
 }
@@ -230,7 +194,7 @@ where
         &self,
         id: MethodId,
         rt: RuntimeView<'_, Ty>,
-    ) -> Option<Result<(), RuntimeError<StrongValue<Ty>>>> {
+    ) -> Option<Result<(), RtError<Ty>>> {
         if id.scope == T::SCOPE_NAME {
             if let Some(method) = T::dispatch_method(id.name) {
                 let r = if let Method::Ref(f) = method {

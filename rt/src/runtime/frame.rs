@@ -17,17 +17,41 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
-use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RuntimeError};
+use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, RuntimeError};
 use crate::gc::{DisplayWith, Heap, LuaPtr, TryIntoWithGc};
 use crate::value::callable::Callable;
 use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, WeakValue};
+
+pub(crate) struct Context<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(crate) core: &'a mut Core<Ty>,
+    pub(crate) chunk_cache: &'a dyn ChunkCache,
+    pub(crate) stack: StackGuard<'a, Ty>,
+}
+
+impl<'a, Ty> Context<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(crate) fn new(ctx: super::thread::Context<'a, Ty>, stack: StackGuard<'a, Ty>) -> Self {
+        let super::thread::Context { core, chunk_cache } = ctx;
+
+        Context {
+            core,
+            chunk_cache,
+            stack,
+        }
+    }
+}
 
 pub(crate) enum ChangeFrame<Ty>
 where
     Ty: CoreTypes,
 {
     Return(StackSlot),
-    Invoke(Option<Event>, Callable<Strong, Ty>, RawStackSlot),
+    Invoke(Option<Event>, Callable<Strong, Ty>, StackSlot),
 }
 
 trait MapControlFlow<F> {
@@ -97,7 +121,7 @@ where
         rt: &mut RuntimeView<Ty>,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<RootCell<Self>, RuntimeError<StrongValue<Ty>>> {
+    ) -> Result<RootCell<Self>, RtError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let upvalue_count = rt
@@ -130,10 +154,6 @@ impl<Ty> Closure<Ty>
 where
     Ty: CoreTypes,
 {
-    pub(crate) fn fn_ptr(&self) -> FunctionPtr {
-        self.fn_ptr
-    }
-
     pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
         &self.upvalues
     }
@@ -151,13 +171,7 @@ where
 {
     closure: RootCell<Closure<Ty>>,
     ip: InstrId,
-    stack_start: RawStackSlot,
     register_variadic: Vec<StrongValue<Ty>>,
-    /// Whether frame was created as result of evaluating metamethod.
-    ///
-    /// Metamethods in general mimic builtin behavior of opcodes,
-    /// therefore need cleanup to ensure correct stack state after frame is exited.
-    event: Option<Event>,
 }
 
 impl<Ty> Frame<Ty>
@@ -166,16 +180,15 @@ where
     StrongValue<Ty>: Clone,
 {
     pub(crate) fn new(
-        rt: &mut RuntimeView<Ty>,
         closure: RootCell<Closure<Ty>>,
-        event: Option<Event>,
-    ) -> Result<Self, RuntimeError<StrongValue<Ty>>> {
+        mut ctx: Context<Ty>,
+    ) -> Result<Self, RtError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
         use repr::chunk::Function;
 
-        let cls = &rt.core.gc[&closure];
+        let cls = &ctx.core.gc[&closure];
 
-        let function = rt
+        let function = ctx
             .chunk_cache
             .chunk(cls.fn_ptr.chunk_id)
             .ok_or(MissingChunk(cls.fn_ptr.chunk_id))?
@@ -196,29 +209,26 @@ where
         }
 
         // Adjust stack, move varargs into register if needed.
-        let mut stack = rt.stack.lua_frame();
+        let mut stack = ctx.stack.lua_frame();
         let call_height = StackSlot(0) + signature.arg_count;
-        let stack_start = stack.boundary();
 
         let register_variadic = if signature.is_variadic {
             stack
                 .adjust_height(call_height)
-                .map(|value| value.try_into_with_gc(&mut rt.core.gc))
+                .map(|value| value.try_into_with_gc(&mut ctx.core.gc))
                 .collect::<Result<_, _>>()?
         } else {
             let _ = stack.adjust_height(call_height);
             Default::default()
         };
 
-        // Ensure that disassociated upvalues are properly reassociated.
-        stack.sync_upvalues(&mut rt.core.gc);
+        // Ensure that disassociated upvalues are properly reattached.
+        stack.sync_upvalues(&mut ctx.core.gc);
 
         let r = Frame {
             closure,
             ip: Default::default(),
-            stack_start,
             register_variadic,
-            event,
         };
 
         Ok(r)
@@ -242,42 +252,44 @@ impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
 {
-    pub(crate) fn activate<'a>(
-        self,
-        rt: &'a mut RuntimeView<Ty>,
-    ) -> Result<ActiveFrame<'a, Ty>, RuntimeError<StrongValue<Ty>>>
+    pub(crate) fn activate(self, ctx: Context<Ty>) -> Result<ActiveFrame<Ty>, (Self, RtError<Ty>)>
     where
         WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     {
         use crate::error::{MissingChunk, MissingFunction};
 
-        let RuntimeView {
+        let Context {
             core,
             chunk_cache,
             stack,
-            ..
-        } = rt;
+        } = ctx;
+
+        let fn_ptr = core.gc[&self.closure].fn_ptr;
+
+        let r = (|| {
+            let chunk = chunk_cache
+                .chunk(fn_ptr.chunk_id)
+                .ok_or(MissingChunk(fn_ptr.chunk_id))?;
+            let function = chunk
+                .get_function(fn_ptr.function_id)
+                .ok_or(MissingFunction(fn_ptr))?;
+            Ok((chunk, function))
+        })();
+
+        let (chunk, function) = match r {
+            Ok(t) => t,
+            Err(err) => return Err((self, err)),
+        };
 
         let Frame {
             closure,
             ip,
-            stack_start,
             register_variadic,
-            event,
         } = self;
-
-        let fn_ptr = core.gc[&closure].fn_ptr;
-
-        let chunk = chunk_cache
-            .chunk(fn_ptr.chunk_id)
-            .ok_or(MissingChunk(fn_ptr.chunk_id))?;
-        let function = chunk
-            .get_function(fn_ptr.function_id)
-            .ok_or(MissingFunction(fn_ptr))?;
 
         let constants = &chunk.constants;
         let opcodes = &function.opcodes;
-        let stack = stack.guard(stack_start).unwrap();
+        // let stack = stack.guard(stack_start).unwrap();
 
         tracing::trace!(
             stack = stack.to_pretty_string(&core.gc),
@@ -293,7 +305,6 @@ where
             ip,
             stack,
             register_variadic,
-            event,
         };
 
         Ok(r)
@@ -363,9 +374,7 @@ where
         f.debug_struct("Frame")
             .field("closure", &self.closure)
             .field("ip", &self.ip)
-            .field("stack_start", &self.stack_start)
             .field("register_variadic", &self.register_variadic)
-            .field("event", &self.event)
             .finish()
     }
 }
@@ -382,11 +391,6 @@ where
     ip: InstrId,
     stack: StackGuard<'rt, Ty>,
     register_variadic: Vec<StrongValue<Ty>>,
-    /// Whether frame was created as result of evaluating metamethod.
-    ///
-    /// Metamethods in general mimic builtin behavior of opcodes,
-    /// therefore need cleanup to ensure correct stack state after frame is exited.
-    event: Option<Event>,
 }
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
@@ -398,7 +402,7 @@ where
     }
 
     fn get_stack(&self, index: StackSlot) -> Result<&WeakValue<Ty>, MissingStackSlot> {
-        self.stack.get_slot(index).ok_or(MissingStackSlot(index))
+        self.stack.get(index).ok_or(MissingStackSlot(index))
     }
 
     fn upvalue(
@@ -439,6 +443,16 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
+    pub(crate) fn enter(&mut self) -> Result<ChangeFrame<Ty>, RefAccessOrError<opcode_err::Error>> {
+        loop {
+            match self.step() {
+                Ok(ControlFlow::Continue(())) => (),
+                Ok(ControlFlow::Break(command)) => break Ok(command),
+                Err(err) => break Err(err),
+            }
+        }
+    }
+
     pub(super) fn step(
         &mut self,
     ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Error>> {
@@ -482,7 +496,7 @@ where
                     .prepare_invoke(value, slot)
                     .map_err(|err| err.map_other(|_| opcode_err::Invoke(type_).into()))?;
 
-                let start = self.stack.boundary() + slot;
+                let start = slot;
 
                 ControlFlow::Break(ChangeFrame::Invoke(None, callable, start))
             }
@@ -578,7 +592,6 @@ where
                 self.exec_una_op(args, op)
                     .map_err(|err| err.map_other(Into::into))?
                     .map_br(|(event, callable, start)| {
-                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(event), callable, start)
                     })
             }
@@ -587,7 +600,6 @@ where
                 self.exec_bin_op(args, op)
                     .map_err(|err| err.map_other(Into::into))?
                     .map_br(|(event, callable, start)| {
-                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(event), callable, start)
                     })
             }
@@ -628,7 +640,6 @@ where
                 self.exec_tab_get(args)
                     .map_err(|err| err.map_other(Cause::TabGet))?
                     .map_br(|(callable, start)| {
-                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(Event::Index), callable, start)
                     })
             }
@@ -637,7 +648,6 @@ where
                 self.exec_tab_set(args)
                     .map_err(|err| err.map_other(Cause::TabSet))?
                     .map_br(|(callable, start)| {
-                        let start = self.stack.boundary() + start;
                         ChangeFrame::Invoke(Some(Event::NewIndex), callable, start)
                     })
             }
@@ -1353,33 +1363,23 @@ where
         let ActiveFrame {
             closure,
             ip,
-            stack,
             register_variadic,
-            event,
             ..
         } = self;
-
-        let stack_start = stack.boundary();
 
         Frame {
             closure,
             ip,
-            stack_start,
             register_variadic,
-            event,
         }
     }
 
-    pub(crate) fn exit(mut self, returns: StackSlot) -> Result<(), RuntimeError<StrongValue<Ty>>> {
+    pub(crate) fn exit(mut self, returns: StackSlot) {
         let mut stack = self.stack.lua_frame();
 
         // All upvalues need to be gone.
         stack.evict_upvalues();
         let _ = stack.drain(StackSlot(0)..returns);
-
-        if let Some(event) = self.event {
-            stack.adjust_event_returns(event);
-        }
 
         // Sync on exit.
         // If some values were rooted by current frame
@@ -1387,8 +1387,6 @@ where
         // it is possible that its last root is going to get dropped right now.
         // Currently we don't track value origins with sufficient precision to avoid this scenario.
         stack.sync_transient(&mut self.core.gc);
-
-        Ok(())
     }
 }
 
@@ -1409,7 +1407,6 @@ where
             .field("ip", &self.ip)
             .field("stack", &self.stack)
             .field("register_variadic", &self.register_variadic)
-            .field("event", &self.event)
             .finish()
     }
 }
