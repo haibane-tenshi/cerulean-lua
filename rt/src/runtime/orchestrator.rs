@@ -28,7 +28,7 @@ where
 {
     pub(crate) fn enter(&mut self, mut ctx: Context<Ty>) -> Result<(), RtError<Ty>> {
         while let Some(mut thread) = self.threads.pop() {
-            thread.enter(ctx.reborrow())?;
+            thread.activate(ctx.reborrow()).enter()?;
         }
 
         Ok(())

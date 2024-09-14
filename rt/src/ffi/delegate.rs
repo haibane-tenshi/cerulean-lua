@@ -178,12 +178,13 @@ where
 }
 
 /// Result of performing previously requested action.
+#[derive(Debug)]
 pub enum Response<Ty>
 where
     Ty: CoreTypes,
 {
     Resume,
-    Returned(Result<(), RtError<Ty>>),
+    Evaluated(Result<(), RtError<Ty>>),
 }
 
 /// Coroutine capable of being executed by Lua runtime.
@@ -193,7 +194,11 @@ where
 ///
 /// See [module-level](super::delegate) documentation for details.
 pub trait Delegate<Ty>:
-    for<'a> Coroutine<RuntimeView<'a, Ty>, Yielded = Request<Ty>, Complete = Result<(), RtError<Ty>>>
+    for<'a> Coroutine<
+    (RuntimeView<'a, Ty>, Response<Ty>),
+    Yielded = Request<Ty>,
+    Complete = Result<(), RtError<Ty>>,
+>
 where
     Ty: CoreTypes,
 {
@@ -203,7 +208,7 @@ impl<Ty, T> Delegate<Ty> for T
 where
     Ty: CoreTypes,
     T: for<'a> Coroutine<
-        RuntimeView<'a, Ty>,
+        (RuntimeView<'a, Ty>, Response<Ty>),
         Yielded = Request<Ty>,
         Complete = Result<(), RtError<Ty>>,
     >,
@@ -216,7 +221,7 @@ where
 /// which ensures that this coroutine cannot be entered or resumed even by accident.
 pub enum Never {}
 
-impl<'a, Ty> Coroutine<RuntimeView<'a, Ty>> for Never
+impl<'a, Ty> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for Never
 where
     Ty: CoreTypes,
 {
@@ -225,7 +230,7 @@ where
 
     fn resume(
         self: Pin<&mut Self>,
-        _args: RuntimeView<'a, Ty>,
+        _args: (RuntimeView<'a, Ty>, Response<Ty>),
     ) -> State<Self::Yielded, Self::Complete> {
         match *Pin::into_inner(self) {}
     }
@@ -250,7 +255,7 @@ where
 
 pub struct FromMut<F>(F);
 
-impl<'a, F, Ty> Coroutine<RuntimeView<'a, Ty>> for FromMut<F>
+impl<'a, F, Ty> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for FromMut<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
@@ -260,10 +265,12 @@ where
 
     fn resume(
         self: Pin<&mut Self>,
-        args: RuntimeView<'a, Ty>,
+        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
     ) -> State<Self::Yielded, Self::Complete> {
+        debug_assert!(matches!(response, Response::Resume));
+
         let func = &mut Pin::into_inner(self).0;
-        let r = (func)(args);
+        let r = (func)(rt);
         State::Complete(r)
     }
 }
@@ -284,7 +291,7 @@ where
 
 pub struct FromOnce<F>(Option<F>);
 
-impl<'a, F, Ty> Coroutine<RuntimeView<'a, Ty>> for FromOnce<F>
+impl<'a, F, Ty> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for FromOnce<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
@@ -294,13 +301,15 @@ where
 
     fn resume(
         self: Pin<&mut Self>,
-        args: RuntimeView<'a, Ty>,
+        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
     ) -> State<Self::Yielded, Self::Complete> {
         use crate::error::AlreadyDroppedError;
 
+        debug_assert!(matches!(response, Response::Resume));
+
         let func = Pin::into_inner(self).0.take();
         let r = if let Some(func) = func {
-            (func)(args)
+            (func)(rt)
         } else {
             Err(RtError::AlreadyDropped(AlreadyDroppedError))
         };
@@ -309,6 +318,8 @@ where
 }
 
 /// Construct reenterable delegate out of `FnMut(_) -> State<_, _>` closure.
+///
+/// Lua panics will be automatically propagated.
 pub fn repeat<F, Ty>(f: F) -> Repeat<F>
 where
     Ty: CoreTypes,
@@ -321,7 +332,7 @@ where
 
 pub struct Repeat<F>(F);
 
-impl<'a, Ty, F> Coroutine<RuntimeView<'a, Ty>> for Repeat<F>
+impl<'a, Ty, F> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for Repeat<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> State<Request<Ty>, Result<(), RtError<Ty>>> + Unpin,
@@ -331,9 +342,15 @@ where
 
     fn resume(
         self: Pin<&mut Self>,
-        args: RuntimeView<'a, Ty>,
+        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
     ) -> State<Self::Yielded, Self::Complete> {
-        (Pin::into_inner(self).0)(args)
+        match response {
+            Response::Resume => (),
+            Response::Evaluated(Ok(())) => (),
+            Response::Evaluated(Err(err)) => return State::Complete(Err(err)),
+        }
+
+        (Pin::into_inner(self).0)(rt)
     }
 }
 
@@ -342,6 +359,8 @@ where
 /// Unlike [`repeat`] accepted callback returns `Result`,
 /// so that you can use your favorite `?` to short-circuit.
 /// The output will be rearranged to be compatible with [`Delegate`].
+///
+/// Lua panics will be automatically propagated.
 pub fn try_repeat<F, Ty>(f: F) -> TryRepeat<F>
 where
     Ty: CoreTypes,
@@ -354,7 +373,7 @@ where
 
 pub struct TryRepeat<F>(F);
 
-impl<'a, Ty, F> Coroutine<RuntimeView<'a, Ty>> for TryRepeat<F>
+impl<'a, Ty, F> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for TryRepeat<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<State<Request<Ty>, ()>, RtError<Ty>> + Unpin,
@@ -364,9 +383,15 @@ where
 
     fn resume(
         self: Pin<&mut Self>,
-        args: RuntimeView<'a, Ty>,
+        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
     ) -> State<Self::Yielded, Self::Complete> {
-        match (Pin::into_inner(self).0)(args) {
+        match response {
+            Response::Resume => (),
+            Response::Evaluated(Ok(())) => (),
+            Response::Evaluated(Err(err)) => return State::Complete(Err(err)),
+        }
+
+        match (Pin::into_inner(self).0)(rt) {
             Ok(State::Yielded(t)) => State::Yielded(t),
             Ok(State::Complete(t)) => State::Complete(Ok(t)),
             Err(t) => State::Complete(Err(t)),
@@ -399,7 +424,7 @@ enum Yield1State<F0, F1> {
 
 pub struct Yield1<F0, F1>(Yield1State<F0, F1>);
 
-impl<'a, Ty, F0, F1> Coroutine<RuntimeView<'a, Ty>> for Yield1<F0, F1>
+impl<'a, Ty, F0, F1> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for Yield1<F0, F1>
 where
     Ty: CoreTypes,
     F0: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<Request<Ty>, RtError<Ty>> + Unpin,
@@ -410,25 +435,32 @@ where
 
     fn resume(
         mut self: Pin<&mut Self>,
-        args: RuntimeView<'a, Ty>,
+        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
     ) -> State<Self::Yielded, Self::Complete> {
         use crate::error::AlreadyDroppedError;
 
         let state = std::mem::replace(&mut self.0, Yield1State::Completed);
 
-        match state {
-            Yield1State::Point0(f0, f1) => match (f0)(args) {
+        match (state, response) {
+            (Yield1State::Point0(f0, f1), Response::Resume) => match (f0)(rt) {
                 Ok(request) => {
                     self.0 = Yield1State::Point1(f1);
                     State::Yielded(request)
                 }
                 Err(err) => State::Complete(Err(err)),
             },
-            Yield1State::Point1(f1) => {
+            (Yield1State::Point0(..), Response::Evaluated(..)) => unreachable!(),
+            (Yield1State::Point1(f1), response) => {
+                match response {
+                    Response::Resume => (),
+                    Response::Evaluated(Ok(())) => (),
+                    Response::Evaluated(Err(err)) => return State::Complete(Err(err)),
+                }
+
                 self.0 = Yield1State::Completed;
-                State::Complete((f1)(args))
+                State::Complete((f1)(rt))
             }
-            Yield1State::Completed => State::Complete(Err(AlreadyDroppedError.into())),
+            (Yield1State::Completed, _) => State::Complete(Err(AlreadyDroppedError.into())),
         }
     }
 }

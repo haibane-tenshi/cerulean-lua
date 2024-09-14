@@ -252,7 +252,10 @@ impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
 {
-    pub(crate) fn activate(self, ctx: Context<Ty>) -> Result<ActiveFrame<Ty>, (Self, RtError<Ty>)>
+    pub(crate) fn activate<'a>(
+        &'a mut self,
+        ctx: Context<'a, Ty>,
+    ) -> Result<ActiveFrame<'a, Ty>, RtError<Ty>>
     where
         WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     {
@@ -278,7 +281,7 @@ where
 
         let (chunk, function) = match r {
             Ok(t) => t,
-            Err(err) => return Err((self, err)),
+            Err(err) => return Err(err),
         };
 
         let Frame {
@@ -383,14 +386,16 @@ pub struct ActiveFrame<'rt, Ty>
 where
     Ty: CoreTypes,
 {
-    closure: RootCell<Closure<Ty>>,
+    closure: &'rt RootCell<Closure<Ty>>,
     core: &'rt mut Core<Ty>,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
-    ip: InstrId,
+    // Not sure about this one.
+    // It might be better to keep a copy internally and only sync when frame is deactivated.
+    ip: &'rt mut InstrId,
     stack: StackGuard<'rt, Ty>,
-    register_variadic: Vec<StrongValue<Ty>>,
+    register_variadic: &'rt [StrongValue<Ty>],
 }
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
@@ -409,7 +414,7 @@ where
         &self,
         index: UpvalueSlot,
     ) -> Result<UpvaluePlace<GcCell<WeakValue<Ty>>>, MissingUpvalue> {
-        let closure = &self.core.gc[&self.closure];
+        let closure = &self.core.gc[self.closure];
 
         closure
             .upvalues()
@@ -419,21 +424,21 @@ where
     }
 
     fn increment_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
-        let err = IpOutOfBounds(self.ip);
+        let err = IpOutOfBounds(*self.ip);
 
         let new_ip = self.ip.checked_add(offset).ok_or(err)?;
         if new_ip > self.opcodes.next_key() {
             Err(err)
         } else {
-            self.ip = new_ip;
+            *self.ip = new_ip;
             Ok(())
         }
     }
 
     fn decrement_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
-        let err = IpOutOfBounds(self.ip);
+        let err = IpOutOfBounds(*self.ip);
 
-        self.ip = self.ip.checked_sub_offset(offset).ok_or(err)?;
+        *self.ip = self.ip.checked_sub_offset(offset).ok_or(err)?;
         Ok(())
     }
 }
@@ -604,7 +609,7 @@ where
                     })
             }
             Jump { offset } => {
-                self.ip -= InstrOffset(1);
+                *self.ip -= InstrOffset(1);
                 self.increment_ip(offset)?;
 
                 ControlFlow::Continue(())
@@ -613,14 +618,14 @@ where
                 let [value] = self.stack.lua_frame().take1()?;
 
                 if value.to_bool() == cond {
-                    self.ip -= InstrOffset(1);
+                    *self.ip -= InstrOffset(1);
                     self.increment_ip(offset)?;
                 }
 
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
-                self.ip -= InstrOffset(1);
+                *self.ip -= InstrOffset(1);
                 self.decrement_ip(offset)?;
 
                 ControlFlow::Continue(())
@@ -1292,11 +1297,11 @@ where
     }
 
     pub fn next_opcode(&mut self) -> Option<OpCode> {
-        let r = *self.opcodes.get(self.ip)?;
+        let r = *self.opcodes.get(*self.ip)?;
 
         tracing::trace!(ip = self.ip.0, opcode = %r, "next opcode");
 
-        self.ip += 1;
+        *self.ip += 1;
 
         Some(r)
     }
@@ -1315,7 +1320,7 @@ where
             upvalues,
         } = recipe;
 
-        let chunk_id = self.core.gc[&self.closure].fn_ptr.chunk_id;
+        let chunk_id = self.core.gc[self.closure].fn_ptr.chunk_id;
 
         let fn_ptr = FunctionPtr {
             chunk_id,
@@ -1323,7 +1328,7 @@ where
         };
 
         let stack = self.stack.lua_frame();
-        let closure = &self.core.gc[&self.closure];
+        let closure = &self.core.gc[self.closure];
         let upvalues = upvalues
             .iter()
             .map(|&source| -> Result<_, opcode_err::Cause> {
@@ -1357,21 +1362,6 @@ where
             .register_closure(&closure, &self.core.gc);
 
         Ok(closure)
-    }
-
-    pub(crate) fn suspend(self) -> Frame<Ty> {
-        let ActiveFrame {
-            closure,
-            ip,
-            register_variadic,
-            ..
-        } = self;
-
-        Frame {
-            closure,
-            ip,
-            register_variadic,
-        }
     }
 
     pub(crate) fn exit(mut self, returns: StackSlot) {
