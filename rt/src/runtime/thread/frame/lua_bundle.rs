@@ -1,8 +1,6 @@
 use std::fmt::Debug;
-use std::hash::Hash;
 use std::ops::ControlFlow;
 
-use enumoid::Enumoid;
 use gc::{Collector, GcCell, RootCell, Trace};
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
@@ -10,8 +8,7 @@ use repr::literal::Literal;
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
 use repr::tivec::{TiSlice, TiVec};
 
-use super::stack::{RawStackSlot, StackGuard};
-use super::{Core, RuntimeView};
+use super::super::stack::{RawStackSlot, StackGuard};
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::opcode::{
@@ -19,8 +16,11 @@ use crate::error::opcode::{
 };
 use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, RuntimeError};
 use crate::gc::{DisplayWith, Heap, LuaPtr, TryIntoWithGc};
+use crate::runtime::{Core, RuntimeView};
 use crate::value::callable::Callable;
 use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, WeakValue};
+
+use super::Event;
 
 pub(crate) struct Context<'a, Ty>
 where
@@ -29,21 +29,6 @@ where
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a dyn ChunkCache,
     pub(crate) stack: StackGuard<'a, Ty>,
-}
-
-impl<'a, Ty> Context<'a, Ty>
-where
-    Ty: CoreTypes,
-{
-    pub(crate) fn new(ctx: super::thread::Context<'a, Ty>, stack: StackGuard<'a, Ty>) -> Self {
-        let super::thread::Context { core, chunk_cache } = ctx;
-
-        Context {
-            core,
-            chunk_cache,
-            stack,
-        }
-    }
 }
 
 pub(crate) enum ChangeFrame<Ty>
@@ -177,7 +162,6 @@ where
 impl<Ty> Frame<Ty>
 where
     Ty: CoreTypes,
-    StrongValue<Ty>: Clone,
 {
     pub(crate) fn new(
         closure: RootCell<Closure<Ty>>,
@@ -475,7 +459,7 @@ where
         &mut self,
         opcode: OpCode,
     ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Cause>> {
-        use super::stack::Source;
+        use super::super::stack::Source;
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -675,7 +659,7 @@ where
         ControlFlow<(Event, Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::UnaOpCause>,
     > {
-        use super::stack::Source;
+        use super::super::stack::Source;
         use crate::value::{Float, Int};
         use ControlFlow::*;
 
@@ -690,7 +674,7 @@ where
                 args => Break((Event::Neg, args)),
             },
             UnaOp::BitNot => {
-                use super::CoerceArgs;
+                use crate::runtime::CoerceArgs;
 
                 let args =
                     <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_una_op_bit(&self.core.dialect, args);
@@ -786,7 +770,7 @@ where
         std::ops::ControlFlow<(Event, Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::BinOpCause>,
     > {
-        use super::stack::Source;
+        use super::super::stack::Source;
 
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
@@ -890,7 +874,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: StrBinOp,
     ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
-        use super::CoerceArgs;
+        use crate::runtime::dialect::CoerceArgs;
 
         self.stack.lua_frame().sync_transient(&mut self.core.gc);
         let dialect = self.core.dialect;
@@ -924,7 +908,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: EqBinOp,
     ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use super::CoerceArgs;
+        use crate::runtime::dialect::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
@@ -956,7 +940,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: RelBinOp,
     ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
-        use super::CoerceArgs;
+        use crate::runtime::dialect::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
         use Value::*;
@@ -1000,7 +984,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: BitBinOp,
     ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use super::CoerceArgs;
+        use crate::runtime::dialect::CoerceArgs;
         use crate::value::Int;
 
         let args = <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_bin_op_bit(&self.core.dialect, op, args);
@@ -1024,7 +1008,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: AriBinOp,
     ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use super::CoerceArgs;
+        use crate::runtime::dialect::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
 
@@ -1065,8 +1049,8 @@ where
         ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
-        use super::stack::Source;
-        use super::CoerceArgs;
+        use super::super::stack::Source;
+        use crate::runtime::dialect::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 
@@ -1162,8 +1146,8 @@ where
         ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
-        use super::stack::Source;
-        use super::CoerceArgs;
+        use super::super::stack::Source;
+        use crate::runtime::dialect::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 
@@ -1262,7 +1246,7 @@ where
         mut callable: WeakValue<Ty>,
         start: StackSlot,
     ) -> Result<Callable<Strong, Ty>, RefAccessOrError<NotCallableError>> {
-        use super::stack::Source;
+        use super::super::stack::Source;
 
         loop {
             callable = match callable {
@@ -1398,187 +1382,6 @@ where
             .field("stack", &self.stack)
             .field("register_variadic", &self.register_variadic)
             .finish()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Enumoid)]
-pub(crate) enum Event {
-    Neg,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    FloorDiv,
-    Rem,
-    Pow,
-    BitNot,
-    BitAnd,
-    BitOr,
-    BitXor,
-    ShL,
-    ShR,
-    Concat,
-    Len,
-    Eq,
-    Neq,
-    Lt,
-    LtEq,
-    Index,
-    NewIndex,
-    Call,
-}
-
-impl Event {
-    pub(crate) fn to_metamethod(self) -> BuiltinMetamethod {
-        use BuiltinMetamethod as M;
-        use Event::*;
-
-        match self {
-            Neg => M::Neg,
-            Add => M::Add,
-            Sub => M::Sub,
-            Mul => M::Mul,
-            Div => M::Div,
-            FloorDiv => M::FloorDiv,
-            Rem => M::Rem,
-            Pow => M::Pow,
-            BitNot => M::BitNot,
-            BitAnd => M::BitAnd,
-            BitOr => M::BitOr,
-            BitXor => M::BitXor,
-            ShL => M::ShL,
-            ShR => M::ShR,
-            Concat => M::Concat,
-            Len => M::Len,
-            Eq => M::Eq,
-            Neq => M::Eq,
-            Lt => M::Lt,
-            LtEq => M::LtEq,
-            Index => M::Index,
-            NewIndex => M::NewIndex,
-            Call => M::Call,
-        }
-    }
-}
-
-impl From<BinOp> for Event {
-    fn from(value: BinOp) -> Self {
-        match value {
-            BinOp::Ari(t) => t.into(),
-            BinOp::Bit(t) => t.into(),
-            BinOp::Str(t) => t.into(),
-            BinOp::Eq(t) => t.into(),
-            BinOp::Rel(t) => t.into(),
-        }
-    }
-}
-
-impl From<AriBinOp> for Event {
-    fn from(value: AriBinOp) -> Self {
-        match value {
-            AriBinOp::Add => Event::Add,
-            AriBinOp::Sub => Event::Sub,
-            AriBinOp::Mul => Event::Mul,
-            AriBinOp::Div => Event::Div,
-            AriBinOp::FloorDiv => Event::FloorDiv,
-            AriBinOp::Rem => Event::Rem,
-            AriBinOp::Pow => Event::Pow,
-        }
-    }
-}
-
-impl From<BitBinOp> for Event {
-    fn from(value: BitBinOp) -> Self {
-        match value {
-            BitBinOp::And => Event::BitAnd,
-            BitBinOp::Or => Event::BitOr,
-            BitBinOp::Xor => Event::BitXor,
-            BitBinOp::ShL => Event::ShL,
-            BitBinOp::ShR => Event::ShR,
-        }
-    }
-}
-
-impl From<StrBinOp> for Event {
-    fn from(value: StrBinOp) -> Self {
-        match value {
-            StrBinOp::Concat => Event::Concat,
-        }
-    }
-}
-
-impl From<EqBinOp> for Event {
-    fn from(value: EqBinOp) -> Self {
-        match value {
-            EqBinOp::Eq => Event::Eq,
-            EqBinOp::Neq => Event::Neq,
-        }
-    }
-}
-
-impl From<RelBinOp> for Event {
-    fn from(value: RelBinOp) -> Self {
-        match value {
-            RelBinOp::Gt | RelBinOp::Lt => Event::Lt,
-            RelBinOp::GtEq | RelBinOp::LtEq => Event::LtEq,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Enumoid)]
-pub(crate) enum BuiltinMetamethod {
-    Neg,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    FloorDiv,
-    Rem,
-    Pow,
-    BitNot,
-    BitAnd,
-    BitOr,
-    BitXor,
-    ShL,
-    ShR,
-    Concat,
-    Len,
-    Eq,
-    Lt,
-    LtEq,
-    Index,
-    NewIndex,
-    Call,
-}
-
-impl BuiltinMetamethod {
-    pub(crate) fn to_str(self) -> &'static str {
-        use BuiltinMetamethod::*;
-
-        match self {
-            Neg => "__unm",
-            Add => "__add",
-            Sub => "__sub",
-            Mul => "__mul",
-            Div => "__div",
-            FloorDiv => "__idiv",
-            Rem => "__mod",
-            Pow => "__pow",
-            BitNot => "__bnot",
-            BitAnd => "__band",
-            BitOr => "__bor",
-            BitXor => "__bxor",
-            ShL => "__shl",
-            ShR => "__shr",
-            Concat => "__concat",
-            Len => "__len",
-            Eq => "__eq",
-            Lt => "__lt",
-            LtEq => "__le",
-            Index => "__index",
-            NewIndex => "__newindex",
-            Call => "__call",
-        }
     }
 }
 

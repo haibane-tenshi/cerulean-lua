@@ -1,9 +1,7 @@
 mod dialect;
-mod frame;
 mod frame_stack;
 mod interner;
 mod orchestrator;
-mod stack;
 mod thread;
 
 use std::fmt::Debug;
@@ -23,14 +21,14 @@ use crate::value::{
     Callable, CoreTypes, KeyValue, Meta, Strong, StrongValue, TypeWithoutMetatable, Value, Weak,
     WeakValue,
 };
-use frame::Event;
 use orchestrator::Orchestrator;
-use thread::Thread;
+use thread::frame::Event;
 
 pub use dialect::{CoerceArgs, DialectBuilder};
-pub use frame::{Closure, FunctionPtr};
 pub use interner::{Interned, Interner};
-pub use stack::{StackFrame, StackGuard, TransientStackFrame};
+pub use orchestrator::ThreadId;
+pub use thread::frame::lua_bundle::{Closure, FunctionPtr};
+pub use thread::stack::{StackFrame, StackGuard, TransientStackFrame};
 
 pub struct Core<Ty>
 where
@@ -200,8 +198,8 @@ where
 {
     pub fn enter(&mut self, callable: Callable<Strong, Ty>) -> Result<(), RtError<Ty>> {
         let (mut ctx, orchestrator) = self.context();
-        let thread = Thread::from_callable_with(callable, [], ctx.reborrow())?;
-        orchestrator.push(thread);
+        let id = orchestrator.new_thread(ctx.reborrow(), callable);
+        orchestrator.push(id);
 
         orchestrator.enter(ctx)
     }

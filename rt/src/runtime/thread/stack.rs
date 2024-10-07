@@ -7,8 +7,8 @@ use gc::{GcCell, RootCell};
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
-use super::frame::{Closure, UpvaluePlace};
-use super::Event;
+use super::frame::lua_bundle::{Closure, UpvaluePlace};
+use super::frame::Event;
 use crate::error::opcode::MissingArgsError;
 use crate::gc::{DisplayWith, Heap};
 use crate::value::{CoreTypes, Value, WeakValue};
@@ -473,7 +473,7 @@ where
         self.main.drain(start..end)
     }
 
-    fn truncate(&mut self, slot: RawStackSlot) {
+    pub(crate) fn truncate(&mut self, slot: RawStackSlot) {
         // Values are drained on drop.
         let _ = self.drain(slot..);
     }

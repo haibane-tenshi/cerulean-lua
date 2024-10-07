@@ -7,7 +7,7 @@ use gc::userdata::Params;
 use gc::{Gc, Heap, Root, Trace};
 use hashbrown::HashTable;
 
-use super::frame::BuiltinMetamethod;
+use super::thread::frame::BuiltinMetamethod;
 
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Interned<T>(T);
