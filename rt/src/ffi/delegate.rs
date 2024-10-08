@@ -162,6 +162,7 @@ use repr::index::StackSlot;
 
 use crate::error::RtError;
 use crate::runtime::RuntimeView;
+use crate::runtime::ThreadId;
 use crate::value::{Callable, CoreTypes, Strong};
 
 use super::coroutine::{Coroutine, State};
@@ -173,6 +174,13 @@ where
 {
     Invoke {
         callable: Callable<Strong, Ty>,
+        start: StackSlot,
+    },
+    Resume {
+        thread: ThreadId,
+        start: StackSlot,
+    },
+    Yield {
         start: StackSlot,
     },
 }

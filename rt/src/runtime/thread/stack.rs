@@ -7,10 +7,10 @@ use gc::{GcCell, RootCell};
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
-use super::frame::lua_bundle::{Closure, UpvaluePlace};
 use super::frame::Event;
 use crate::error::opcode::MissingArgsError;
 use crate::gc::{DisplayWith, Heap};
+use crate::runtime::closure::{Closure, UpvaluePlace};
 use crate::value::{CoreTypes, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -372,7 +372,7 @@ where
     Ty: CoreTypes,
 {
     pub(crate) fn guard(&mut self, boundary: RawStackSlot) -> Option<StackGuard<Ty>> {
-        if self.len() > boundary.0 {
+        if self.len() > boundary {
             return None;
         }
 
@@ -410,8 +410,8 @@ where
         }
     }
 
-    fn len(&self) -> usize {
-        self.main.len()
+    pub(crate) fn len(&self) -> RawStackSlot {
+        RawStackSlot(self.main.len())
     }
 
     /// Evict upvalues in range from the stack.
@@ -582,7 +582,7 @@ where
     }
 
     pub(crate) fn raw_guard_at(&mut self, slot: RawStackSlot) -> Option<StackGuard<Ty>> {
-        if self.stack.len() < slot.0 {
+        if self.stack.len() < slot {
             return None;
         }
 
@@ -660,8 +660,7 @@ where
     }
 
     pub fn next_slot(&self) -> StackSlot {
-        let val = self.stack.len() - self.boundary.0;
-        StackSlot(val)
+        self.stack.len() - self.boundary
     }
 
     fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
@@ -693,7 +692,7 @@ where
     }
 
     pub fn pop(&mut self) -> Option<WeakValue<Ty>> {
-        if self.stack.len() <= self.boundary.0 {
+        if self.stack.len() <= self.boundary {
             return None;
         }
 

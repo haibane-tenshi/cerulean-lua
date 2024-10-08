@@ -1,22 +1,23 @@
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
-use gc::{Collector, GcCell, RootCell, Trace};
+use gc::{GcCell, RootCell};
 use repr::chunk::{Chunk, ClosureRecipe};
-use repr::index::{ConstId, FunctionId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
+use repr::index::{ConstId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 use repr::literal::Literal;
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
-use repr::tivec::{TiSlice, TiVec};
+use repr::tivec::TiSlice;
 
-use super::super::stack::{RawStackSlot, StackGuard};
+use super::super::stack::StackGuard;
 use crate::backtrace::BacktraceFrame;
-use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::chunk_cache::ChunkCache;
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, RuntimeError};
 use crate::gc::{DisplayWith, Heap, LuaPtr, TryIntoWithGc};
-use crate::runtime::{Core, RuntimeView};
+use crate::runtime::closure::UpvaluePlace;
+use crate::runtime::{Closure, Core};
 use crate::value::callable::Callable;
 use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, WeakValue};
 
@@ -59,97 +60,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct FunctionPtr {
-    pub chunk_id: ChunkId,
-    pub function_id: FunctionId,
-}
-
-impl Trace for FunctionPtr {
-    fn trace(&self, _collector: &mut Collector) {}
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum UpvaluePlace<Value> {
-    Stack(RawStackSlot),
-    Place(Value),
-}
-
-#[derive(Debug, Clone)]
-pub struct Closure<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn_ptr: FunctionPtr,
-    upvalues: TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>,
-}
-
-impl<Ty> Trace for Closure<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn trace(&self, collector: &mut Collector) {
-        for upvalue in &self.upvalues {
-            match upvalue {
-                UpvaluePlace::Place(value) => value.trace(collector),
-                UpvaluePlace::Stack(_) => (),
-            }
-        }
-    }
-}
-
-impl<Ty> Closure<Ty>
-where
-    Ty: CoreTypes,
-{
-    pub(crate) fn new(
-        rt: &mut RuntimeView<Ty>,
-        fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<RootCell<Self>, RtError<Ty>> {
-        use crate::error::{MissingChunk, MissingFunction};
-
-        let upvalue_count = rt
-            .chunk_cache
-            .chunk(fn_ptr.chunk_id)
-            .ok_or(MissingChunk(fn_ptr.chunk_id))?
-            .get_function(fn_ptr.function_id)
-            .ok_or(MissingFunction(fn_ptr))?
-            .signature
-            .upvalue_count;
-
-        let closure = rt.core.gc.pause(|heap| {
-            let upvalues = upvalues
-                .into_iter()
-                .chain(std::iter::repeat_with(|| Value::Nil))
-                .take(upvalue_count)
-                .map(|value| heap.alloc_as(value).downgrade())
-                .map(UpvaluePlace::Place)
-                .collect();
-
-            let closure = Closure { fn_ptr, upvalues };
-            heap.alloc_cell(closure)
-        });
-
-        Ok(closure)
-    }
-}
-
-impl<Ty> Closure<Ty>
-where
-    Ty: CoreTypes,
-{
-    pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
-        &self.upvalues
-    }
-
-    pub(crate) fn upvalues_mut(
-        &mut self,
-    ) -> &mut TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
-        &mut self.upvalues
-    }
-}
-
 pub(crate) struct Frame<Ty>
 where
     Ty: CoreTypes,
@@ -171,22 +81,23 @@ where
         use repr::chunk::Function;
 
         let cls = &ctx.core.gc[&closure];
+        let fn_ptr = cls.fn_ptr();
 
         let function = ctx
             .chunk_cache
-            .chunk(cls.fn_ptr.chunk_id)
-            .ok_or(MissingChunk(cls.fn_ptr.chunk_id))?
-            .get_function(cls.fn_ptr.function_id)
-            .ok_or(MissingFunction(cls.fn_ptr))?;
+            .chunk(fn_ptr.chunk_id)
+            .ok_or(MissingChunk(fn_ptr.chunk_id))?
+            .get_function(fn_ptr.function_id)
+            .ok_or(MissingFunction(fn_ptr))?;
 
         let Function { signature, .. } = function;
 
         // Verify that closure provides exact same number of upvalues
         // that is expected by the function.
-        if signature.upvalue_count != cls.upvalues.len() {
+        if signature.upvalue_count != cls.upvalues().len() {
             let err = UpvalueCountMismatch {
                 expected: signature.upvalue_count,
-                closure: cls.upvalues.len(),
+                closure: cls.upvalues().len(),
             };
 
             return Err(err.into());
@@ -251,7 +162,7 @@ where
             stack,
         } = ctx;
 
-        let fn_ptr = core.gc[&self.closure].fn_ptr;
+        let fn_ptr = core.gc[&self.closure].fn_ptr();
 
         let r = (|| {
             let chunk = chunk_cache
@@ -304,7 +215,7 @@ where
     ) -> BacktraceFrame {
         use crate::backtrace::{FrameSource, Location};
 
-        let ptr = heap[&self.closure].fn_ptr;
+        let ptr = heap[&self.closure].fn_ptr();
         // Instruction pointer always points at the *next* instruction.
         let ip = self.ip - 1;
         let (name, location) = chunk_cache
@@ -1294,6 +1205,8 @@ where
         &mut self,
         recipe_id: RecipeId,
     ) -> Result<RootCell<Closure<Ty>>, opcode_err::Cause> {
+        use crate::runtime::FunctionPtr;
+
         let recipe = self
             .chunk
             .get_recipe(recipe_id)
@@ -1304,7 +1217,7 @@ where
             upvalues,
         } = recipe;
 
-        let chunk_id = self.core.gc[self.closure].fn_ptr.chunk_id;
+        let chunk_id = self.core.gc[self.closure].fn_ptr().chunk_id;
 
         let fn_ptr = FunctionPtr {
             chunk_id,
@@ -1324,7 +1237,7 @@ where
                         Ok(UpvaluePlace::Stack(stack.boundary() + slot))
                     }
                     UpvalueSource::Upvalue(slot) => closure
-                        .upvalues
+                        .upvalues()
                         .get(slot)
                         .copied()
                         .ok_or(opcode_err::MissingUpvalue(slot).into()),
@@ -1332,7 +1245,7 @@ where
             })
             .collect::<Result<_, _>>()?;
 
-        let closure = Closure { fn_ptr, upvalues };
+        let closure = Closure::from_raw_parts(fn_ptr, upvalues);
 
         // Make sure to sync the stack before allocating.
         // Sync itself may allocate, but there is no need to pause.

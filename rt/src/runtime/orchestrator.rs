@@ -4,7 +4,7 @@ use crate::error::RtError;
 use crate::ffi::DLuaFfi;
 use crate::value::{Callable, CoreTypes, Strong};
 
-use super::thread::{Context, Thread, ThreadImpetus};
+use super::thread::{Context, Thread, ThreadControl, ThreadImpetus};
 use super::Closure;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -80,15 +80,48 @@ where
     }
 
     pub(crate) fn enter(&mut self, mut ctx: Context<Ty>) -> Result<(), RtError<Ty>> {
-        while let Some(id) = self.stack.pop() {
+        use crate::ffi::delegate::Response;
+
+        let Some(mut current) = self.stack.pop() else {
+            return Ok(());
+        };
+        let mut response = Response::Resume;
+
+        loop {
             let thread = self
-                .thread_mut(ctx.reborrow(), id)
+                .thread_mut(ctx.reborrow(), current)
                 .expect("active thread should exist")?;
 
-            thread.activate(ctx.reborrow()).enter()?;
+            let request = thread.activate(ctx.reborrow()).enter(response);
+            match request {
+                Ok(ThreadControl::Resume { thread }) => {
+                    self.stack.push(current);
+                    current = thread;
+                    response = Response::Resume;
+                }
+                Ok(ThreadControl::Yield) => {
+                    current = match self.stack.pop() {
+                        Some(thread) => thread,
+                        None => break Ok(()),
+                    };
+                    response = Response::Evaluated(Ok(()));
+                }
+                Ok(ThreadControl::Return) => {
+                    current = match self.stack.pop() {
+                        Some(thread) => thread,
+                        None => break Ok(()),
+                    };
+                    response = Response::Evaluated(Ok(()))
+                }
+                Err(err) => {
+                    current = match self.stack.pop() {
+                        Some(thread) => thread,
+                        None => break Err(err),
+                    };
+                    response = Response::Evaluated(Err(err))
+                }
+            }
         }
-
-        Ok(())
     }
 }
 

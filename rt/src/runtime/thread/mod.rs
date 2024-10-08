@@ -8,9 +8,10 @@ use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{Callable, CoreTypes, Strong};
 
+use super::orchestrator::ThreadId;
 use super::{Closure, Core};
-use frame::{Context as FrameContext, Frame, FrameControl};
-use stack::{RawStackSlot, Stack};
+use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl};
+use stack::{RawStackSlot, Stack, StackGuard};
 
 pub(crate) struct Context<'a, Ty>
 where
@@ -53,6 +54,15 @@ where
 {
     frames: Vec<Frame<Ty>>,
     stack: Stack<Ty>,
+
+    /// Denotes range `0..protected` where stack is protected and cannot be accessed externally.
+    ///
+    /// # Invariants
+    ///
+    /// ```rust,ignore
+    /// assert!(protected <= stack.len());
+    /// ```
+    protected: RawStackSlot,
 }
 
 impl<Ty> Thread<Ty>
@@ -60,26 +70,54 @@ where
     Ty: CoreTypes,
 {
     pub(crate) fn activate<'a>(&'a mut self, ctx: Context<'a, Ty>) -> ActiveThread<'a, Ty> {
-        let Thread { frames, stack } = self;
+        let Thread {
+            frames,
+            stack,
+            protected,
+        } = self;
 
-        ActiveThread { ctx, frames, stack }
+        ActiveThread {
+            ctx,
+            frames,
+            stack,
+            protected,
+        }
+    }
+
+    pub(crate) fn stack(&mut self) -> StackGuard<'_, Ty> {
+        self.stack.guard(self.protected).unwrap()
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ThreadState {
+enum Prompt {
     Resume,
     Evaluated,
 }
 
-impl<Ty> From<ThreadState> for Response<Ty>
+impl<Ty> From<Prompt> for Response<Ty>
 where
     Ty: CoreTypes,
 {
-    fn from(value: ThreadState) -> Self {
+    fn from(value: Prompt) -> Self {
         match value {
-            ThreadState::Resume => Response::Resume,
-            ThreadState::Evaluated => Response::Evaluated(Ok(())),
+            Prompt::Resume => Response::Resume,
+            Prompt::Evaluated => Response::Evaluated(Ok(())),
+        }
+    }
+}
+
+impl<Ty> TryFrom<Response<Ty>> for Prompt
+where
+    Ty: CoreTypes,
+{
+    type Error = RtError<Ty>;
+
+    fn try_from(value: Response<Ty>) -> Result<Self, Self::Error> {
+        match value {
+            Response::Resume => Ok(Prompt::Resume),
+            Response::Evaluated(Ok(())) => Ok(Prompt::Evaluated),
+            Response::Evaluated(Err(err)) => Err(err),
         }
     }
 }
@@ -91,6 +129,7 @@ where
     ctx: Context<'a, Ty>,
     frames: &'a mut Vec<Frame<Ty>>,
     stack: &'a mut Stack<Ty>,
+    protected: &'a mut RawStackSlot,
 }
 
 impl<'a, Ty> ActiveThread<'a, Ty>
@@ -98,38 +137,72 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(crate) fn enter(&mut self) -> Result<(), RtError<Ty>> {
-        let mut state = ThreadState::Resume;
+    pub(crate) fn enter(&mut self, response: Response<Ty>) -> Result<ThreadControl, RtError<Ty>> {
+        let mut prompt = match response.try_into() {
+            Ok(prompt) => prompt,
+            Err(err) => match self.unwind(err)? {
+                Control::Frame(prompt) => prompt,
+                Control::Thread(ctrl) => return Ok(ctrl),
+            },
+        };
 
         loop {
             let Some(frame) = self.frames.last_mut() else {
-                // TODO: I believe Lua expects this to be an error instead.
-                break Ok(());
+                *self.protected = Default::default();
+                break Ok(ThreadControl::Return);
             };
 
             let ctx = self.ctx.frame_context(self.stack);
-            let request = frame.enter(ctx, state);
+            let request = frame.enter(ctx, prompt);
 
             let result = match request {
-                Ok(ctrl) => self.modify_call_stack(ctrl),
+                Ok(ctrl) => match self.process_control(ctrl) {
+                    Ok(Control::Frame(prompt)) => Ok(prompt),
+                    Ok(Control::Thread(ctrl)) => break Ok(ctrl),
+                    Err(err) => Err(err),
+                },
                 Err(err) => Err(err),
             };
 
-            state = match result {
+            prompt = match result {
                 Ok(state) => state,
-                Err(err) => self.unwind(err)?,
+                Err(err) => match self.unwind(err)? {
+                    Control::Frame(prompt) => prompt,
+                    Control::Thread(ctrl) => break Ok(ctrl),
+                },
             }
         }
     }
 
-    fn modify_call_stack(&mut self, ctrl: FrameControl<Ty>) -> Result<ThreadState, RtError<Ty>> {
+    fn process_control(
+        &mut self,
+        ctrl: Control<FrameControl<Ty>, DelegateThreadControl>,
+    ) -> Result<Control<Prompt, ThreadControl>, RtError<Ty>> {
+        use crate::error::OutOfBoundsStack;
+
         match ctrl {
-            FrameControl::Pop => {
+            Control::Frame(ctrl) => self.modify_call_stack(ctrl).map(Control::Frame),
+            Control::Thread(ctrl) => {
+                let (ctrl, start) = ctrl.into_thread_control();
+
+                if start > self.stack.len() {
+                    return Err(OutOfBoundsStack.into());
+                }
+
+                *self.protected = start;
+                Ok(Control::Thread(ctrl))
+            }
+        }
+    }
+
+    fn modify_call_stack(&mut self, ctrl: FrameControl<Ty>) -> Result<Prompt, RtError<Ty>> {
+        match ctrl {
+            FrameControl::Return => {
                 self.frames.pop();
 
-                Ok(ThreadState::Evaluated)
+                Ok(Prompt::Evaluated)
             }
-            FrameControl::Push {
+            FrameControl::InitAndEnter {
                 event,
                 callable,
                 start,
@@ -139,13 +212,16 @@ where
 
                 self.frames.push(frame);
 
-                Ok(ThreadState::Resume)
+                Ok(Prompt::Resume)
             }
         }
     }
 
     #[inline(never)]
-    fn unwind(&mut self, mut error: RtError<Ty>) -> Result<ThreadState, RtError<Ty>> {
+    fn unwind(
+        &mut self,
+        mut error: RtError<Ty>,
+    ) -> Result<Control<Prompt, ThreadControl>, RtError<Ty>> {
         // Unwinding loop.
         // One problem here is that we actually invoke Rust frames in the process,
         // which may leave us with more requests to process,
@@ -153,7 +229,7 @@ where
         // This situation is unlikely and I'm not sure if this is the best way to approach it.
         loop {
             let ctrl = self.propagate_error(error)?;
-            match self.modify_call_stack(ctrl) {
+            match self.process_control(ctrl) {
                 Ok(state) => break Ok(state),
                 Err(err) => {
                     error = err;
@@ -188,7 +264,10 @@ where
     /// On success function returns request made by the frame that handled the error.
     ///
     /// On failure function the error object (possibly transformed by Rust frames during propagation).
-    fn propagate_error(&mut self, mut error: RtError<Ty>) -> Result<FrameControl<Ty>, RtError<Ty>> {
+    fn propagate_error(
+        &mut self,
+        mut error: RtError<Ty>,
+    ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
         if self.frames.is_empty() {
             return Err(error);
         }
@@ -258,12 +337,25 @@ where
 
         let ctx = ctx.frame_context(&mut stack);
         let frame = Frame::new(first_callable, RawStackSlot::default(), None, ctx)?;
+        let protected = stack.len();
 
         let r = Thread {
             frames: vec![frame],
             stack,
+            protected,
         };
 
         Ok(r)
     }
+}
+
+pub(super) enum Control<F, T> {
+    Frame(F),
+    Thread(T),
+}
+
+pub(crate) enum ThreadControl {
+    Resume { thread: ThreadId },
+    Yield,
+    Return,
 }

@@ -1,5 +1,5 @@
+mod closure;
 mod dialect;
-mod frame_stack;
 mod interner;
 mod orchestrator;
 mod thread;
@@ -24,10 +24,10 @@ use crate::value::{
 use orchestrator::Orchestrator;
 use thread::frame::Event;
 
+pub use closure::{Closure, FunctionPtr};
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use interner::{Interned, Interner};
 pub use orchestrator::ThreadId;
-pub use thread::frame::lua_bundle::{Closure, FunctionPtr};
 pub use thread::stack::{StackFrame, StackGuard, TransientStackFrame};
 
 pub struct Core<Ty>

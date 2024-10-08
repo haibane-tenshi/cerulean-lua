@@ -1,4 +1,4 @@
-pub(crate) mod lua_bundle;
+mod lua_bundle;
 mod rust_bundle;
 
 use enumoid::Enumoid;
@@ -11,8 +11,9 @@ use crate::ffi::DLuaFfi;
 use crate::runtime::{Closure, Core, RuntimeView};
 use crate::value::{Callable, CoreTypes, Strong};
 
+use super::super::orchestrator::ThreadId;
 use super::stack::{RawStackSlot, Stack};
-use super::ThreadState;
+use super::{Control, Prompt, ThreadControl};
 
 use lua_bundle::{Context as FrameContext, Frame as LuaBundle};
 use rust_bundle::RustBundle;
@@ -31,14 +32,14 @@ where
             ChangeFrame::Return(slot) => {
                 active_frame.exit(slot);
 
-                FrameControl::Pop
+                FrameControl::Return
             }
             ChangeFrame::Invoke(event, callable, start) => {
                 // Ensure that stack space passed to another function no longer hosts upvalues.
                 // active_frame.stack.lua_frame().evict_upvalues();
 
                 let start = boundary + start;
-                FrameControl::Push {
+                FrameControl::InitAndEnter {
                     event,
                     callable,
                     start,
@@ -84,7 +85,7 @@ where
         &mut self,
         mut ctx: Context<Ty>,
         err: RtError<Ty>,
-    ) -> Result<FrameControl<Ty>, RtError<Ty>> {
+    ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
         use crate::ffi::delegate::Response;
 
         let Bundle::Rust(rust_bundle) = &mut self.bundle else {
@@ -139,8 +140,8 @@ where
     pub(super) fn enter(
         &mut self,
         mut ctx: Context<Ty>,
-        resume: ThreadState,
-    ) -> Result<FrameControl<Ty>, RtError<Ty>> {
+        resume: Prompt,
+    ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
         let Frame {
             bundle,
             stack_start,
@@ -154,7 +155,7 @@ where
                 let ctx = ctx
                     .lua_context(stack_start)
                     .expect("thread should preserve stack space of suspended frames");
-                frame.enter(ctx)
+                frame.enter(ctx).map(Control::Frame)
             }
             Bundle::Rust(frame) => {
                 let rt = ctx
@@ -164,7 +165,7 @@ where
             }
         }?;
 
-        if matches!(result, FrameControl::Pop) {
+        if matches!(result, Control::Frame(FrameControl::Return)) {
             if let Some(event) = *event {
                 ctx.stack
                     .guard(stack_start)
@@ -176,18 +177,6 @@ where
 
         Ok(result)
     }
-}
-
-pub(super) enum FrameControl<Ty>
-where
-    Ty: CoreTypes,
-{
-    Pop,
-    Push {
-        callable: Callable<Strong, Ty>,
-        start: RawStackSlot,
-        event: Option<Event>,
-    },
 }
 
 pub(super) struct Context<'a, Ty>
@@ -236,6 +225,39 @@ where
 
         Some(r)
     }
+}
+
+pub(super) enum DelegateThreadControl {
+    Resume {
+        thread: ThreadId,
+        start: RawStackSlot,
+    },
+    Yield {
+        start: RawStackSlot,
+    },
+}
+
+impl DelegateThreadControl {
+    pub(super) fn into_thread_control(self) -> (ThreadControl, RawStackSlot) {
+        match self {
+            DelegateThreadControl::Resume { thread, start } => {
+                (ThreadControl::Resume { thread }, start)
+            }
+            DelegateThreadControl::Yield { start } => (ThreadControl::Yield, start),
+        }
+    }
+}
+
+pub(super) enum FrameControl<Ty>
+where
+    Ty: CoreTypes,
+{
+    InitAndEnter {
+        callable: Callable<Strong, Ty>,
+        start: RawStackSlot,
+        event: Option<Event>,
+    },
+    Return,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Enumoid)]
