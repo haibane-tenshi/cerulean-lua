@@ -53,6 +53,16 @@ use userdata_store::Views;
 /// Alternatively it can be called manually via [`gc`](Heap::gc) method.
 ///
 /// Implementation uses standard mark-and-sweep strategy.
+///
+/// # Avoiding garbage collection
+///
+/// There are situations where you may not want to trigger a gc pass while allocating objects.
+/// There are currently two APIs available to this purpose:
+///
+/// * [`pause`](Heap::pause) will suspend garbage collection during the execution of provided closure
+/// * `try_*` APIs ([`try_alloc`](Heap::try_alloc), [`try_alloc_cell`](Heap::try_alloc_cell), [`try_alloc_as`](Heap::try_alloc_as))
+///     are fallible but will never trigger gc pass.
+///     Those function will attempt to reuse existing space (without any additional allocations) and fail otherwise.
 pub struct Heap<M, P> {
     type_map: HashMap<TypeId, TypeIndex>,
     arenas: TiVec<TypeIndex, Box<dyn Arena<M, P>>>,
@@ -109,6 +119,18 @@ where
         };
 
         (addr, ty, counter)
+    }
+
+    pub(crate) fn try_alloc_inner<T>(&mut self, value: T) -> Result<(Addr, TypeIndex, Counter), T>
+    where
+        T: Trace + Views<M, P>,
+    {
+        let (ty, arena) = self.arena_or_insert::<T>();
+        arena
+            .cast_as_mut()
+            .unwrap()
+            .try_insert(value)
+            .map(|(addr, counter)| (addr, ty, counter))
     }
 
     /// Convenience function to allocate `T` as [`Root<T>`].
@@ -207,6 +229,87 @@ where
         let (addr, ty, counter) = self.alloc_inner(value);
 
         RootPtr::new(addr, ty, counter)
+    }
+
+    /// Convenience function to allocate `T` as [`Root<T>`].
+    ///
+    /// This function will never trigger garbage collection.
+    /// It will use preallocated free space to allocate the value,
+    /// otherwise original object will be returned.
+    ///
+    /// `Root`s only permit immutable access to value.
+    /// If you intend to mutate it later consider using [`Heap::try_alloc_cell`].
+    ///
+    /// If you intend to allocate value as userdata consider using [`Heap::try_alloc_as`] or [`Heap::alloc_full_userdata`].
+    pub fn try_alloc<T>(&mut self, value: T) -> Result<Root<T>, T>
+    where
+        T: Trace,
+    {
+        self.try_alloc_as(value)
+    }
+
+    /// Convenience function to allocate `T` as [`RootCell<T>`].
+    ///
+    /// This function will never trigger garbage collection.
+    /// It will use preallocated free space to allocate the value,
+    /// otherwise original object will be returned.
+    ///
+    /// `RootCell`s permit both mutable and immutable access to value.
+    /// If you don't intend to mutate it later consider using [`Heap::alloc`].
+    ///
+    /// If you intend to allocate value as userdata consider using [`Heap::alloc_as`] or [`Heap::alloc_full_userdata`].
+    pub fn try_alloc_cell<T>(&mut self, value: T) -> Result<RootCell<T>, T>
+    where
+        T: Trace,
+    {
+        self.try_alloc_as(value)
+    }
+
+    /// Allocate an object.
+    ///
+    /// This function will never trigger garbage collection.
+    /// It will use preallocated free space to allocate the value,
+    /// otherwise original object will be returned.
+    ///
+    /// This function can output one of 6 different pointers:
+    ///
+    /// * `Root<T>`
+    /// * `RootCell<T>`
+    /// * `Root<dyn Userdata<P>>`
+    /// * `RootCell<dyn Userdata<P>>`
+    /// * `Root<dyn FullUserdata<M, P>>`
+    /// * `RootCell<dyn FullUserdata<M, P>>`
+    ///
+    /// As such it requires type annotations when used since compiler cannot always deduce intended type.
+    ///
+    /// [`Root`]s reference immutable values, whereas [`RootCell`]s reference mutable values.
+    ///
+    /// # On userdata
+    ///
+    /// Userdata is mechanism for Lua to ineract with foreign types.
+    /// See [module-level explanations](crate::userdata#userdata-design) for more details.
+    ///
+    /// When allocating userdata through this method other parts will be configured for you:
+    ///
+    /// * All values of one type share dispacher function by design.
+    ///    Currently configured function will be used, otherwise a default "do nothing" dispacher will be set.
+    ///    Dispacher method needs to be configured separately using [`set_dispatcher`](Heap::set_dispatcher) method.
+    /// * `FullUserdata` will use metatable for the type if configured, otherwise no metatable will be set.
+    ///
+    /// Alternatively full userdata can be allocated using [`alloc_full_userdata`](Heap::alloc_full_userdata) which allows you to set its metatable immediately.
+    /// Note that [`Metatable::set_metatable`](crate::userdata::Metatable::set_metatable) requires mutable access,
+    /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
+    pub fn try_alloc_as<U, T, A>(&mut self, value: T) -> Result<RootPtr<U, A>, T>
+    where
+        T: Trace + AllocateAs<U, M, P>,
+        U: ?Sized,
+        A: Access,
+    {
+        use crate::index::sealed_allocate_as::{Addr, Counter, TypeIndex};
+
+        let (Addr(addr), TypeIndex(ty), Counter(counter)) = value.try_alloc_into(self)?;
+
+        Ok(RootPtr::new(addr, ty, counter))
     }
 
     /// Get `&T` out of weak reference such as [`GcCell`] or [`Gc`].
@@ -481,6 +584,8 @@ where
     }
 
     /// Execute closure with paused garbage collection.
+    ///
+    /// Calls to `pause` can be safely nested, only the outermost will perform garbage collection if necessary.
     pub fn pause<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         let was_running = self.status.is_running();
 

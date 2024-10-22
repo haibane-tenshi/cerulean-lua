@@ -1024,9 +1024,12 @@ pub(crate) mod sealed_allocate_as {
     #[doc(hidden)]
     pub struct Counter(pub(crate) super::Counter);
 
-    pub trait Sealed<T: ?Sized, M, P> {
+    pub trait Sealed<T: ?Sized, M, P>: Sized {
         #[doc(hidden)]
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter);
+
+        #[doc(hidden)]
+        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self>;
     }
 
     impl<T, M, P> Sealed<T, M, P> for T
@@ -1042,6 +1045,15 @@ pub(crate) mod sealed_allocate_as {
             let (addr, ty, counter) = heap.alloc_inner(value);
             (Addr(addr), TypeIndex(ty), Counter(counter))
         }
+
+        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
+            use crate::heap::userdata_store::Concrete;
+
+            let value = Concrete::new(self);
+
+            let (addr, ty, counter) = heap.try_alloc_inner(value).map_err(|t| t.value)?;
+            Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
+        }
     }
 
     impl<T, M, P> Sealed<dyn Userdata<P>, M, P> for T
@@ -1056,6 +1068,15 @@ pub(crate) mod sealed_allocate_as {
 
             let (addr, ty, counter) = heap.alloc_inner(value);
             (Addr(addr), TypeIndex(ty), Counter(counter))
+        }
+
+        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
+            use crate::heap::userdata_store::LightUd;
+
+            let value = LightUd::new(self);
+
+            let (addr, ty, counter) = heap.try_alloc_inner(value).map_err(|t| t.value)?;
+            Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
 
@@ -1073,6 +1094,16 @@ pub(crate) mod sealed_allocate_as {
 
             let (addr, ty, counter) = heap.alloc_inner(value);
             (Addr(addr), TypeIndex(ty), Counter(counter))
+        }
+
+        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
+            use crate::heap::userdata_store::FullUd;
+
+            let metatable = heap.metatable_of::<T>();
+            let value = FullUd::new(self, metatable.cloned());
+
+            let (addr, ty, counter) = heap.try_alloc_inner(value).map_err(|t| t.value)?;
+            Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
 }
