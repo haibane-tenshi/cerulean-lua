@@ -1,5 +1,6 @@
 pub(crate) mod frame;
 pub(crate) mod stack;
+pub(crate) mod upvalue_register;
 
 use crate::chunk_cache::ChunkCache;
 use crate::error::RtError;
@@ -8,10 +9,11 @@ use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{Callable, CoreTypes, Strong};
 
-use super::orchestrator::ThreadId;
+use super::orchestrator::{Context as OrchestratorContext, ThreadId, ThreadStore};
 use super::{Closure, Core};
 use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl};
 use stack::{RawStackSlot, Stack, StackGuard};
+use upvalue_register::UpvalueRegister;
 
 pub(crate) struct Context<'a, Ty>
 where
@@ -19,6 +21,9 @@ where
 {
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
+    pub(crate) current_thread_id: ThreadId,
+    pub(crate) thread_store: &'a mut ThreadStore<Ty>,
+    pub(crate) upvalue_cache: &'a mut UpvalueRegister<Ty>,
 }
 
 impl<'a, Ty> Context<'a, Ty>
@@ -26,11 +31,20 @@ where
     Ty: CoreTypes,
 {
     pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
-        let Context { core, chunk_cache } = self;
+        let Context {
+            core,
+            chunk_cache,
+            current_thread_id,
+            thread_store,
+            upvalue_cache,
+        } = self;
 
         Context {
             core: *core,
             chunk_cache: *chunk_cache,
+            current_thread_id: *current_thread_id,
+            thread_store,
+            upvalue_cache,
         }
     }
 
@@ -38,11 +52,20 @@ where
         &'b mut self,
         stack: &'b mut Stack<Ty>,
     ) -> FrameContext<'b, Ty> {
-        let Context { core, chunk_cache } = self;
+        let Context {
+            core,
+            chunk_cache,
+            current_thread_id,
+            thread_store,
+            upvalue_cache,
+        } = self;
 
         FrameContext {
             core,
             chunk_cache: *chunk_cache,
+            current_thread_id: *current_thread_id,
+            thread_store,
+            upvalue_cache,
             stack,
         }
     }
@@ -207,8 +230,16 @@ where
                 callable,
                 start,
             } => {
-                let ctx = self.ctx.frame_context(self.stack);
-                let frame = Frame::new(callable, start, event, ctx)?;
+                use crate::error::OutOfBoundsStack;
+
+                let stack = self.stack.guard(start).ok_or(OutOfBoundsStack)?;
+                let frame = Frame::new(
+                    callable,
+                    event,
+                    &self.ctx.core.gc,
+                    self.ctx.chunk_cache,
+                    stack,
+                )?;
 
                 self.frames.push(frame);
 
@@ -322,6 +353,10 @@ where
             stack: Stack::new(heap),
         }
     }
+
+    pub(super) fn stack(&mut self) -> StackGuard<'_, Ty> {
+        self.stack.full_guard()
+    }
 }
 
 impl<Ty> ThreadImpetus<Ty>
@@ -329,14 +364,19 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(super) fn init(self, mut ctx: Context<Ty>) -> Result<Thread<Ty>, RtError<Ty>> {
+    pub(super) fn init(self, ctx: OrchestratorContext<Ty>) -> Result<Thread<Ty>, RtError<Ty>> {
         let ThreadImpetus {
             first_callable,
             mut stack,
         } = self;
 
-        let ctx = ctx.frame_context(&mut stack);
-        let frame = Frame::new(first_callable, RawStackSlot::default(), None, ctx)?;
+        let frame = Frame::new(
+            first_callable,
+            None,
+            &ctx.core.gc,
+            ctx.chunk_cache,
+            stack.full_guard(),
+        )?;
         let protected = stack.len();
 
         let r = Thread {

@@ -1,0 +1,104 @@
+use bitvec::prelude::BitVec;
+
+use gc::GcCell;
+use repr::index::UpvalueSlot;
+use repr::tivec::TiVec;
+
+use crate::runtime::closure::UpvaluePlace;
+use crate::runtime::thread::stack::StackGuard;
+use crate::runtime::Heap;
+use crate::value::{CoreTypes, WeakValue};
+
+pub(crate) struct UpvalueRegister<Ty>
+where
+    Ty: CoreTypes,
+{
+    values: TiVec<UpvalueSlot, WeakValue<Ty>>,
+    write_tag: BitVec,
+}
+
+impl<Ty> UpvalueRegister<Ty>
+where
+    Ty: CoreTypes,
+{
+    // pub(super) fn new() -> Self {
+    //     Default::default()
+    // }
+
+    // pub(super) fn clear(&mut self) {
+    //     self.values.clear();
+    //     self.write_tag.clear();
+    // }
+
+    pub(super) fn fill(&mut self, values: impl IntoIterator<Item = WeakValue<Ty>>) {
+        debug_assert_eq!(self.values.len(), self.write_tag.len());
+
+        self.values.extend(values);
+        self.write_tag.resize(self.values.len(), false);
+    }
+
+    pub(super) fn drain_written(
+        &mut self,
+    ) -> impl Iterator<Item = (UpvalueSlot, WeakValue<Ty>)> + use<'_, Ty> {
+        self.values
+            .drain_enumerated(..)
+            .zip(self.write_tag.drain(..))
+            .filter_map(|(pair, is_written)| is_written.then_some(pair))
+    }
+
+    pub(crate) fn load(&self, index: UpvalueSlot) -> Option<WeakValue<Ty>> {
+        self.values.get(index).copied()
+    }
+
+    pub(crate) fn store(
+        &mut self,
+        index: UpvalueSlot,
+        value: WeakValue<Ty>,
+    ) -> Result<(), WeakValue<Ty>> {
+        let Some(place) = self.values.get_mut(index) else {
+            return Err(value);
+        };
+
+        let mut bit_place = self
+            .write_tag
+            .get_mut(index.0)
+            .expect("write tag should have the same length as values");
+        let bit = *bit_place | (*place == value);
+
+        *place = value;
+        *bit_place = bit;
+
+        Ok(())
+    }
+}
+
+impl<Ty> Default for UpvalueRegister<Ty>
+where
+    Ty: CoreTypes,
+{
+    fn default() -> Self {
+        Self {
+            values: Default::default(),
+            write_tag: Default::default(),
+        }
+    }
+}
+
+pub(super) fn preload_upvalues<'a, 'b, 'c, Ty>(
+    upvalues: &'a [UpvaluePlace<GcCell<WeakValue<Ty>>>],
+    mut stack: StackGuard<'b, Ty>,
+    heap: &'c Heap<Ty>,
+) -> impl Iterator<Item = WeakValue<Ty>> + use<'a, 'b, 'c, Ty>
+where
+    Ty: CoreTypes,
+{
+    upvalues.iter().map(move |place| match *place {
+        UpvaluePlace::Stack(slot) => *stack
+            .lua_frame()
+            .get_raw_slot(slot)
+            .expect("upvalues allocated on thread stack should be protected"),
+        UpvaluePlace::Place(ptr) => *heap
+            .get(ptr)
+            .expect("detached upavlues should still be allocated"),
+    })
+}

@@ -175,8 +175,8 @@ where
     Ty: CoreTypes,
     C: ChunkCache,
 {
-    fn context(&mut self) -> (thread::Context<Ty>, &mut Orchestrator<Ty>) {
-        use thread::Context;
+    fn context(&mut self) -> (orchestrator::Context<Ty>, &mut Orchestrator<Ty>) {
+        use orchestrator::Context;
 
         let Runtime {
             core,

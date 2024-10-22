@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 
 use gc::{GcCell, RootCell};
 use repr::chunk::{Chunk, ClosureRecipe};
-use repr::index::{ConstId, InstrId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
+use repr::index::{ConstId, InstrId, InstrOffset, RecipeId, StackSlot};
 use repr::literal::Literal;
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
 use repr::tivec::TiSlice;
@@ -17,10 +17,12 @@ use crate::error::opcode::{
 use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, RuntimeError};
 use crate::gc::{DisplayWith, Heap, LuaPtr, TryIntoWithGc};
 use crate::runtime::closure::UpvaluePlace;
-use crate::runtime::{Closure, Core};
+use crate::runtime::orchestrator::ThreadStore;
+use crate::runtime::{Closure, Core, ThreadId};
 use crate::value::callable::Callable;
 use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, WeakValue};
 
+use super::super::upvalue_register::UpvalueRegister;
 use super::Event;
 
 pub(crate) struct Context<'a, Ty>
@@ -29,7 +31,35 @@ where
 {
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a dyn ChunkCache,
+    pub(crate) current_thread_id: ThreadId,
+    pub(crate) thread_store: &'a mut ThreadStore<Ty>,
     pub(crate) stack: StackGuard<'a, Ty>,
+    pub(crate) upvalues: &'a mut UpvalueRegister<Ty>,
+}
+
+impl<'a, Ty> Context<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
+        let Context {
+            core,
+            chunk_cache,
+            current_thread_id,
+            thread_store,
+            stack,
+            upvalues,
+        } = self;
+
+        Context {
+            core,
+            chunk_cache: *chunk_cache,
+            current_thread_id: *current_thread_id,
+            thread_store,
+            stack: stack.reborrow(),
+            upvalues,
+        }
+    }
 }
 
 pub(crate) enum ChangeFrame<Ty>
@@ -75,16 +105,17 @@ where
 {
     pub(crate) fn new(
         closure: RootCell<Closure<Ty>>,
-        mut ctx: Context<Ty>,
+        heap: &Heap<Ty>,
+        chunk_cache: &dyn ChunkCache,
+        mut stack: StackGuard<Ty>,
     ) -> Result<Self, RtError<Ty>> {
         use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
         use repr::chunk::Function;
 
-        let cls = &ctx.core.gc[&closure];
+        let cls = &heap[&closure];
         let fn_ptr = cls.fn_ptr();
 
-        let function = ctx
-            .chunk_cache
+        let function = chunk_cache
             .chunk(fn_ptr.chunk_id)
             .ok_or(MissingChunk(fn_ptr.chunk_id))?
             .get_function(fn_ptr.function_id)
@@ -104,21 +135,22 @@ where
         }
 
         // Adjust stack, move varargs into register if needed.
-        let mut stack = ctx.stack.lua_frame();
+        let mut stack = stack.lua_frame();
         let call_height = StackSlot(0) + signature.arg_count;
 
         let register_variadic = if signature.is_variadic {
             stack
                 .adjust_height(call_height)
-                .map(|value| value.try_into_with_gc(&mut ctx.core.gc))
-                .collect::<Result<_, _>>()?
+                .map(|value| value.upgrade(heap))
+                .collect::<Option<_>>()
+                .ok_or(AlreadyDroppedError)?
         } else {
             let _ = stack.adjust_height(call_height);
             Default::default()
         };
 
         // Ensure that disassociated upvalues are properly reattached.
-        stack.sync_upvalues(&mut ctx.core.gc);
+        // stack.sync_upvalues(heap);
 
         let r = Frame {
             closure,
@@ -154,15 +186,21 @@ where
     where
         WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     {
+        use super::super::upvalue_register::preload_upvalues;
         use crate::error::{MissingChunk, MissingFunction};
 
         let Context {
             core,
             chunk_cache,
-            stack,
+            current_thread_id,
+            thread_store,
+            mut stack,
+            upvalues,
         } = ctx;
 
-        let fn_ptr = core.gc[&self.closure].fn_ptr();
+        let closure_body = &core.gc[&self.closure];
+        let fn_ptr = closure_body.fn_ptr();
+        let origin = closure_body.origin_thread();
 
         let r = (|| {
             let chunk = chunk_cache
@@ -189,12 +227,30 @@ where
         let opcodes = &function.opcodes;
         // let stack = stack.guard(stack_start).unwrap();
 
+        let register_upvalue = {
+            let stack = if origin == current_thread_id {
+                stack.reborrow()
+            } else {
+                thread_store
+                    .stack_of(origin)
+                    .expect("threads should never get deallocated")
+            };
+
+            upvalues.fill(preload_upvalues(
+                closure_body.upvalues().as_ref(),
+                stack,
+                &core.gc,
+            ));
+            upvalues
+        };
+
         tracing::trace!(
             stack = stack.to_pretty_string(&core.gc),
             "activated Lua frame"
         );
 
         let r = ActiveFrame {
+            current_thread_id,
             core,
             closure,
             chunk,
@@ -202,6 +258,7 @@ where
             opcodes,
             ip,
             stack,
+            register_upvalue,
             register_variadic,
         };
 
@@ -281,6 +338,7 @@ pub struct ActiveFrame<'rt, Ty>
 where
     Ty: CoreTypes,
 {
+    current_thread_id: ThreadId,
     closure: &'rt RootCell<Closure<Ty>>,
     core: &'rt mut Core<Ty>,
     chunk: &'rt Chunk,
@@ -290,6 +348,7 @@ where
     // It might be better to keep a copy internally and only sync when frame is deactivated.
     ip: &'rt mut InstrId,
     stack: StackGuard<'rt, Ty>,
+    register_upvalue: &'rt mut UpvalueRegister<Ty>,
     register_variadic: &'rt [StrongValue<Ty>],
 }
 
@@ -303,19 +362,6 @@ where
 
     fn get_stack(&self, index: StackSlot) -> Result<&WeakValue<Ty>, MissingStackSlot> {
         self.stack.get(index).ok_or(MissingStackSlot(index))
-    }
-
-    fn upvalue(
-        &self,
-        index: UpvalueSlot,
-    ) -> Result<UpvaluePlace<GcCell<WeakValue<Ty>>>, MissingUpvalue> {
-        let closure = &self.core.gc[self.closure];
-
-        closure
-            .upvalues()
-            .get(index)
-            .ok_or(MissingUpvalue(index))
-            .cloned()
     }
 
     fn increment_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
@@ -448,42 +494,24 @@ where
                 ControlFlow::Continue(())
             }
             LoadUpvalue(slot) => {
-                let upvalue = self.upvalue(slot)?;
-
+                let value = self
+                    .register_upvalue
+                    .load(slot)
+                    .ok_or(MissingUpvalue(slot))?;
                 let mut stack = self.stack.lua_frame();
 
-                let (value, source) = match upvalue {
-                    UpvaluePlace::Place(place) => {
-                        let value = *self.core.gc.get(place).ok_or(AlreadyDroppedError)?;
-
-                        (value, Source::TrustedIsRooted(true))
-                    }
-                    UpvaluePlace::Stack(stack_slot) => {
-                        let value = *stack.get_raw_slot(stack_slot).ok_or(MissingUpvalue(slot))?;
-
-                        (value, Source::StackSlot(stack_slot))
-                    }
-                };
-
-                stack.push_raw(value, source);
+                // Source tracking is to be removed.
+                stack.push_raw(value, Source::TrustedIsRooted(false));
 
                 ControlFlow::Continue(())
             }
             StoreUpvalue(slot) => {
-                let upvalue = self.upvalue(slot)?;
                 let mut stack = self.stack.lua_frame();
                 let [value] = stack.take1()?;
 
-                match upvalue {
-                    UpvaluePlace::Place(place) => {
-                        let place = self.core.gc.get_mut(place).ok_or(AlreadyDroppedError)?;
-
-                        *place = value;
-                    }
-                    UpvaluePlace::Stack(slot) => {
-                        stack.set_raw(slot, value, Source::StackSlot(stack.next_slot()));
-                    }
-                }
+                self.register_upvalue
+                    .store(slot, value)
+                    .map_err(|_| MissingUpvalue(slot))?;
 
                 ControlFlow::Continue(())
             }
@@ -1245,7 +1273,7 @@ where
             })
             .collect::<Result<_, _>>()?;
 
-        let closure = Closure::from_raw_parts(fn_ptr, upvalues);
+        let closure = Closure::from_raw_parts(fn_ptr, self.current_thread_id, upvalues);
 
         // Make sure to sync the stack before allocating.
         // Sync itself may allocate, but there is no need to pause.

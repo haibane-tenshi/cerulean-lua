@@ -8,11 +8,13 @@ use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp};
 use crate::chunk_cache::ChunkCache;
 use crate::error::RtError;
 use crate::ffi::DLuaFfi;
-use crate::runtime::{Closure, Core, RuntimeView};
+use crate::runtime::closure::UpvaluePlace;
+use crate::runtime::{Closure, Core, Heap, RuntimeView};
 use crate::value::{Callable, CoreTypes, Strong};
 
-use super::super::orchestrator::ThreadId;
-use super::stack::{RawStackSlot, Stack};
+use super::super::orchestrator::{ThreadId, ThreadStore};
+use super::stack::{RawStackSlot, Stack, StackGuard};
+use super::UpvalueRegister;
 use super::{Control, Prompt, ThreadControl};
 
 use lua_bundle::{Context as FrameContext, Frame as LuaBundle};
@@ -22,32 +24,71 @@ impl<Ty> LuaBundle<Ty>
 where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
 {
-    fn enter(&mut self, ctx: FrameContext<Ty>) -> Result<FrameControl<Ty>, RtError<Ty>> {
+    fn enter(&mut self, mut ctx: FrameContext<Ty>) -> Result<FrameControl<Ty>, RtError<Ty>> {
         use lua_bundle::ChangeFrame;
 
         let boundary = ctx.stack.boundary();
-        let mut active_frame = self.activate(ctx)?;
+        let mut active_frame = self.activate(ctx.reborrow())?;
 
-        let r = match active_frame.enter()? {
-            ChangeFrame::Return(slot) => {
-                active_frame.exit(slot);
+        let r = active_frame
+            .enter()
+            .map(|request| match request {
+                ChangeFrame::Return(slot) => {
+                    active_frame.exit(slot);
 
-                FrameControl::Return
-            }
-            ChangeFrame::Invoke(event, callable, start) => {
-                // Ensure that stack space passed to another function no longer hosts upvalues.
-                // active_frame.stack.lua_frame().evict_upvalues();
-
-                let start = boundary + start;
-                FrameControl::InitAndEnter {
-                    event,
-                    callable,
-                    start,
+                    FrameControl::Return
                 }
-            }
-        };
+                ChangeFrame::Invoke(event, callable, start) => {
+                    // Ensure that stack space passed to another function no longer hosts upvalues.
+                    // active_frame.stack.lua_frame().evict_upvalues();
 
-        Ok(r)
+                    let start = boundary + start;
+                    FrameControl::InitAndEnter {
+                        event,
+                        callable,
+                        start,
+                    }
+                }
+            })
+            .map_err(Into::into);
+
+        // Propagate upvalue changes
+        {
+            let closure = ctx.core.gc.get_root(self.closure());
+            let origin = closure.origin_thread();
+            let mut stack = if origin == ctx.current_thread_id {
+                ctx.stack
+            } else {
+                ctx.thread_store
+                    .stack_of(origin)
+                    .expect("threads should never get deallocated")
+            };
+            let mut stack = stack.lua_frame();
+
+            for (slot, value) in ctx.upvalues.drain_written() {
+                let upvalue = *ctx
+                    .core
+                    .gc
+                    .get_root(self.closure())
+                    .upvalues()
+                    .get(slot)
+                    .unwrap();
+                match upvalue {
+                    UpvaluePlace::Place(ptr) => {
+                        let place = ctx.core.gc.get_mut(ptr).unwrap();
+                        *place = value;
+                    }
+                    UpvaluePlace::Stack(slot) => {
+                        use super::stack::Source;
+                        stack.set_raw(slot, value, Source::TrustedIsRooted(false));
+                    }
+                };
+            }
+
+            stack.sync_transient(&mut ctx.core.gc);
+        }
+
+        r
     }
 }
 
@@ -104,21 +145,21 @@ where
 {
     pub(super) fn new(
         callable: Callable<Strong, Ty>,
-        stack_start: RawStackSlot,
         event: Option<Event>,
-        mut ctx: Context<Ty>,
+        heap: &Heap<Ty>,
+        chunk_cache: &dyn ChunkCache,
+        stack: StackGuard<Ty>,
     ) -> Result<Self, RtError<Ty>> {
-        use crate::error::OutOfBoundsStack;
         use crate::gc::LuaPtr;
 
-        let ctx = ctx.lua_context(stack_start).ok_or(OutOfBoundsStack)?;
+        let stack_start = stack.boundary();
         let bundle = match callable {
             Callable::Lua(LuaPtr(closure)) => {
-                let frame = LuaBundle::new(closure, ctx)?;
+                let frame = LuaBundle::new(closure, heap, chunk_cache, stack)?;
                 Bundle::Lua(frame)
             }
             Callable::Rust(LuaPtr(closure)) => {
-                let frame = RustBundle::new(&ctx.core.gc[&closure]);
+                let frame = RustBundle::new(&heap[&closure]);
                 Bundle::Rust(frame)
             }
         };
@@ -179,12 +220,15 @@ where
     }
 }
 
-pub(super) struct Context<'a, Ty>
+pub(crate) struct Context<'a, Ty>
 where
     Ty: CoreTypes,
 {
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
+    pub(crate) current_thread_id: ThreadId,
+    pub(crate) thread_store: &'a mut ThreadStore<Ty>,
+    pub(crate) upvalue_cache: &'a mut UpvalueRegister<Ty>,
     pub(crate) stack: &'a mut Stack<Ty>,
 }
 
@@ -196,13 +240,20 @@ where
         let Context {
             core,
             chunk_cache,
+            current_thread_id,
+            thread_store,
+            upvalue_cache,
             stack,
         } = self;
+
         let stack = stack.guard(stack_start)?;
 
         let r = FrameContext {
             core,
             chunk_cache: *chunk_cache,
+            current_thread_id: *current_thread_id,
+            thread_store,
+            upvalues: upvalue_cache,
             stack,
         };
 
@@ -214,6 +265,7 @@ where
             core,
             chunk_cache,
             stack,
+            ..
         } = self;
         let stack = stack.guard(stack_start)?;
 

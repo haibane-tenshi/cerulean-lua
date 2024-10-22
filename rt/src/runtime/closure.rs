@@ -7,7 +7,7 @@ use repr::tivec::{TiSlice, TiVec};
 use super::thread::stack::RawStackSlot;
 use crate::chunk_cache::ChunkId;
 use crate::error::RtError;
-use crate::runtime::RuntimeView;
+use crate::runtime::{RuntimeView, ThreadId};
 use crate::value::{CoreTypes, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -32,6 +32,7 @@ where
     Ty: CoreTypes,
 {
     fn_ptr: FunctionPtr,
+    origin: ThreadId,
     upvalues: TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>,
 }
 
@@ -78,7 +79,16 @@ where
                 .map(UpvaluePlace::Place)
                 .collect();
 
-            let closure = Closure { fn_ptr, upvalues };
+            // Use dummy id.
+            // Thread with this id is guaranteed to exist which is the only property that matters:
+            // all provided upvalues start detached.
+            let origin = ThreadId::dummy();
+
+            let closure = Closure {
+                fn_ptr,
+                origin,
+                upvalues,
+            };
             heap.alloc_cell(closure)
         });
 
@@ -92,13 +102,22 @@ where
 {
     pub(crate) fn from_raw_parts(
         fn_ptr: FunctionPtr,
+        origin: ThreadId,
         upvalues: TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>,
     ) -> Self {
-        Closure { fn_ptr, upvalues }
+        Closure {
+            fn_ptr,
+            origin,
+            upvalues,
+        }
     }
 
     pub(crate) fn fn_ptr(&self) -> FunctionPtr {
         self.fn_ptr
+    }
+
+    pub(crate) fn origin_thread(&self) -> ThreadId {
+        self.origin
     }
 
     pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
