@@ -8,7 +8,7 @@ use crate::value::{Callable, CoreTypes, Strong};
 use super::thread::stack::StackGuard;
 use super::thread::upvalue_register::UpvalueRegister;
 use super::thread::{Context as ThreadContext, Thread, ThreadControl, ThreadImpetus};
-use super::{Closure, Core};
+use super::{Closure, Core, Heap};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ThreadId(usize);
@@ -196,9 +196,16 @@ where
 
 impl<Ty> Orchestrator<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
-    Ty::RustClosure: DLuaFfi<Ty>,
+    Ty: CoreTypes,
 {
+    pub(crate) fn new(heap: &mut Heap<Ty>) -> Self {
+        Orchestrator {
+            stack: Default::default(),
+            store: Default::default(),
+            upvalue_cache: UpvalueRegister::new(heap),
+        }
+    }
+
     pub fn new_thread(&mut self, ctx: Context<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
         self.store.new_thread(ctx, callable)
     }
@@ -206,7 +213,13 @@ where
     pub(crate) fn push(&mut self, id: ThreadId) {
         self.stack.push(id);
     }
+}
 
+impl<Ty> Orchestrator<Ty>
+where
+    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty::RustClosure: DLuaFfi<Ty>,
+{
     pub(crate) fn enter(&mut self, mut ctx: Context<Ty>) -> Result<(), RtError<Ty>> {
         use crate::ffi::delegate::Response;
 
@@ -258,19 +271,6 @@ where
                 .place(thread)
                 .ok() // Thread doesn't implement Debug for a moment.
                 .expect("evaluating thread should not get overwritten");
-        }
-    }
-}
-
-impl<Ty> Default for Orchestrator<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn default() -> Self {
-        Self {
-            stack: Default::default(),
-            store: Default::default(),
-            upvalue_cache: Default::default(),
         }
     }
 }

@@ -169,7 +169,7 @@ where
             },
         };
 
-        loop {
+        let r = loop {
             let Some(frame) = self.frames.last_mut() else {
                 *self.protected = Default::default();
                 break Ok(ThreadControl::Return);
@@ -194,7 +194,13 @@ where
                     Control::Thread(ctrl) => break Ok(ctrl),
                 },
             }
-        }
+        };
+
+        // Ensure that stack is properly synced before exiting.
+        // Suspended frames are expected to not cause trouble.
+        self.stack.sync(&mut self.ctx.core.gc);
+
+        r
     }
 
     fn process_control(

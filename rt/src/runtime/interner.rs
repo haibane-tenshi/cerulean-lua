@@ -84,19 +84,19 @@ where
     T: Trace + Hash + Eq + AsRef<[u8]>,
     H: BuildHasher,
 {
-    pub(crate) fn insert<M, P>(&mut self, value: T, heap: &mut Heap<M, P>) -> Root<Interned<T>>
+    fn get<M, P>(&self, value: &T, heap: &Heap<M, P>) -> Option<Root<Interned<T>>>
     where
         P: Params,
     {
         // All metamethods are prefixed with two underscores.
         // Quick check to avoid going through events on every occasion.
-        if value.as_ref().strip_prefix(&[b'_', b'_']).is_some() {
+        if value.as_ref().strip_prefix(b"__").is_some() {
             let event = self.events.iter().find_map(|(event, ptr)| {
                 (event.to_str().as_bytes() == value.as_ref()).then(|| ptr.clone())
             });
 
             if let Some(event) = event {
-                return event;
+                return Some(event);
             }
         }
 
@@ -104,16 +104,24 @@ where
 
         let found = self.hash_table.find(hash, |&ptr| {
             heap.get(ptr)
-                .map(|other| value == *other.as_ref())
+                .map(|other| value == other.as_ref())
                 .unwrap_or(false)
         });
 
-        if let Some(&ptr) = found {
-            return heap.upgrade(ptr).unwrap();
-        };
+        found.map(|ptr| heap.upgrade(*ptr).unwrap())
+    }
+
+    pub(crate) fn insert<M, P>(&mut self, value: T, heap: &mut Heap<M, P>) -> Root<Interned<T>>
+    where
+        P: Params,
+    {
+        if let Some(value) = self.get(&value, heap) {
+            return value;
+        }
 
         // This can trigger gc pass.
         // Make sure we do it before sweeping dead references from table.
+        let hash = self.hasher.hash_one(&value);
         let value = heap.alloc(Interned(value));
 
         // Remove dead references.
@@ -123,7 +131,35 @@ where
             .insert_unique(hash, value.downgrade(), |&ptr| {
                 self.hasher.hash_one(heap.get(ptr).unwrap())
             });
+
         value
+    }
+
+    pub(crate) fn try_insert<M, P>(
+        &mut self,
+        value: T,
+        heap: &mut Heap<M, P>,
+    ) -> Result<Root<Interned<T>>, T>
+    where
+        P: Params,
+    {
+        if let Some(value) = self.get(&value, heap) {
+            return Ok(value);
+        }
+
+        // This can never trigger gc pass.
+        let hash = self.hasher.hash_one(&value);
+        let value = match heap.try_alloc(Interned(value)) {
+            Ok(t) => t,
+            Err(Interned(value)) => return Err(value),
+        };
+
+        self.hash_table
+            .insert_unique(hash, value.downgrade(), |&ptr| {
+                self.hasher.hash_one(heap.get(ptr).unwrap())
+            });
+
+        Ok(value)
     }
 
     pub(crate) fn event(&self, metamethod: BuiltinMetamethod) -> Gc<Interned<T>> {

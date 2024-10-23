@@ -159,13 +159,14 @@ where
     Ty: CoreTypes,
     C: Debug,
 {
-    pub fn new(chunk_cache: C, core: Core<Ty>) -> Self {
+    pub fn new(chunk_cache: C, mut core: Core<Ty>) -> Self {
         tracing::trace!(?chunk_cache, "constructed runtime");
 
+        let orchestrator = Orchestrator::new(&mut core.gc);
         Runtime {
             core,
             chunk_cache,
-            orchestrator: Default::default(),
+            orchestrator,
         }
     }
 }

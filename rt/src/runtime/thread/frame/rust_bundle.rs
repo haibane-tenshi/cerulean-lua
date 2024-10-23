@@ -33,7 +33,7 @@ where
 {
     pub(super) fn enter(
         &mut self,
-        ctx: RuntimeView<Ty>,
+        mut ctx: RuntimeView<Ty>,
         response: Response<Ty>,
     ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
         use super::{DelegateThreadControl, FrameControl};
@@ -41,6 +41,12 @@ where
         use crate::ffi::delegate::Request;
 
         let boundary = ctx.stack.boundary();
+
+        // Ensure that stack is properly synced before entering Rust frame.
+        // It doesn't matter much if we sync it after, however:
+        // if the next frame is Rust frame we will sync it on entry,
+        // if the next frame is Lua frame it will sync it when necessary.
+        ctx.stack.lua_frame().sync(&mut ctx.core.gc);
 
         match self.delegate.as_mut().resume((ctx, response)) {
             State::Complete(Ok(())) => Ok(Control::Frame(FrameControl::Return)),

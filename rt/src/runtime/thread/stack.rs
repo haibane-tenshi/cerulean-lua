@@ -54,26 +54,6 @@ impl From<RawStackSlot> for usize {
     }
 }
 
-pub(super) enum Source<T> {
-    StackSlot(T),
-    TrustedIsRooted(bool),
-}
-
-impl<T> Source<T> {
-    fn map<U>(self, f: impl FnOnce(T) -> U) -> Source<U> {
-        match self {
-            Source::StackSlot(t) => Source::StackSlot(f(t)),
-            Source::TrustedIsRooted(t) => Source::TrustedIsRooted(t),
-        }
-    }
-}
-
-impl<T> Default for Source<T> {
-    fn default() -> Self {
-        Source::TrustedIsRooted(false)
-    }
-}
-
 /// Struct tracking change between main portion of the stack and rooted mirror.
 ///
 /// # Invariants
@@ -153,13 +133,6 @@ impl Diff {
 
     fn has_transient(&self, len: RawStackSlot) -> bool {
         self.transient < len
-    }
-
-    fn is_transient(&self, source: Source<RawStackSlot>) -> bool {
-        match source {
-            Source::StackSlot(slot) => self.transient <= slot,
-            Source::TrustedIsRooted(is_rooted) => !is_rooted,
-        }
     }
 }
 
@@ -307,25 +280,6 @@ where
         })
     }
 
-    /// Root all transient values (e.g. weak references into heap).
-    ///
-    /// This function is lazy: unnecessary updates will be avoided.
-    /// This applies to upvalue cache as well.
-    /// Use [`sync_upvalues`](Self::sync_upvalues) to force all detached upvalues onto heap.
-    fn sync_transient(&mut self, heap: &mut Heap<Ty>) {
-        if self.diff.has_transient(self.main.next_key()) {
-            self.sync_stack_cache(heap);
-        }
-
-        if self
-            .detached_upvalues
-            .iter()
-            .any(|(_, value)| value.is_transient())
-        {
-            self.sync_upvalue_cache(heap);
-        }
-    }
-
     /// Move detached upvalues onto heap and update affected closures.
     ///
     /// Other bookkeeping (such as syncing stack with mirror) will be done if necessary
@@ -340,6 +294,17 @@ where
         }
 
         self.sync_upvalue_cache(heap);
+    }
+
+    /// Sync the main portion of the stack and flush detached upvalues.
+    pub(crate) fn sync(&mut self, heap: &mut Heap<Ty>) {
+        if self.diff.has_transient(self.main.next_key()) {
+            self.sync_stack_cache(heap);
+        }
+
+        if !self.detached_upvalues.is_empty() {
+            self.sync_upvalue_cache(heap);
+        }
     }
 
     fn register_closure(&mut self, closure_ref: &RootCell<Closure<Ty>>, heap: &Heap<Ty>) {
@@ -391,19 +356,19 @@ where
         }
     }
 
-    fn push(&mut self, value: WeakValue<Ty>, source: Source<RawStackSlot>) -> RawStackSlot {
+    fn push(&mut self, value: WeakValue<Ty>) -> RawStackSlot {
         debug_assert!(self.upvalue_mark.len() <= self.main.len());
 
         let slot = self.main.next_key();
-        let is_transient = value.is_transient() && self.diff.is_transient(source);
+        let is_transient = value.is_transient();
         self.diff.push(slot, is_transient);
 
         self.main.push_and_get_key(value)
     }
 
-    fn set(&mut self, slot: RawStackSlot, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
+    fn set(&mut self, slot: RawStackSlot, value: WeakValue<Ty>) {
         if let Some(place) = self.main.get_mut(slot) {
-            let is_transient = value.is_transient() && self.diff.is_transient(source);
+            let is_transient = value.is_transient();
             self.diff.modify(slot, is_transient);
 
             *place = value;
@@ -441,8 +406,8 @@ where
         }
     }
 
-    fn insert(&mut self, slot: RawStackSlot, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
-        let is_transient = value.is_transient() && self.diff.is_transient(source);
+    fn insert(&mut self, slot: RawStackSlot, value: WeakValue<Ty>) {
+        let is_transient = value.is_transient();
         self.diff.insert(slot, is_transient);
 
         // Internally inserting happens only in one case:
@@ -648,25 +613,22 @@ where
         self.stack.main.get(slot)
     }
 
-    fn push(&mut self, value: WeakValue<Ty>, source: Source<StackSlot>) {
-        let source = source.map(|slot| self.boundary + slot);
-        self.stack.push(value, source);
+    fn push(&mut self, value: WeakValue<Ty>) {
+        self.stack.push(value);
     }
 
-    fn set(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
+    fn set(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
         let slot = self.boundary + slot;
-        let source = source.map(|slot| self.boundary + slot);
-        self.stack.set(slot, value, source)
+        self.stack.set(slot, value)
     }
 
     pub fn next_slot(&self) -> StackSlot {
         self.stack.len() - self.boundary
     }
 
-    fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
+    fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
         let slot = self.boundary + slot;
-        let source = source.map(|slot| self.boundary + slot);
-        self.stack.insert(slot, value, source)
+        self.stack.insert(slot, value)
     }
 
     pub fn drain(
@@ -794,11 +756,6 @@ impl<'a, Ty> LuaStackFrame<'a, Ty>
 where
     Ty: CoreTypes,
 {
-    /// Ensure that all values on the stack are rooted.
-    pub(super) fn sync_transient(&mut self, heap: &mut Heap<Ty>) {
-        self.0.stack.sync_transient(heap)
-    }
-
     /// Move detached upvalues to heap.
     ///
     /// Internally when a slot associated with upvalue is removed from stack
@@ -822,6 +779,11 @@ where
     /// Therefore, the only place where we must sync upvalue cache is inside [`Frame::new`](super::Frame::new).
     pub(super) fn sync_upvalues(&mut self, heap: &mut Heap<Ty>) {
         self.0.stack.sync_upvalues(heap)
+    }
+
+    /// Ensure that all values on the stack are rooted and move any detached upvalues to the heap.
+    pub(super) fn sync(&mut self, heap: &mut Heap<Ty>) {
+        self.0.stack.sync(heap);
     }
 
     pub(super) fn register_closure(
@@ -849,39 +811,28 @@ where
         self.0.get_raw(slot)
     }
 
-    pub(super) fn push(&mut self, value: WeakValue<Ty>, source: Source<StackSlot>) {
-        self.0.push(value, source)
+    pub(super) fn push(&mut self, value: WeakValue<Ty>) {
+        self.0.push(value)
     }
 
-    pub(super) fn push_raw(&mut self, value: WeakValue<Ty>, source: Source<RawStackSlot>) {
-        self.0.stack.push(value, source);
+    pub(super) fn push_raw(&mut self, value: WeakValue<Ty>) {
+        self.0.stack.push(value);
     }
 
-    pub(super) fn set(&mut self, slot: StackSlot, value: WeakValue<Ty>, source: Source<StackSlot>) {
-        self.0.set(slot, value, source)
+    pub(super) fn set(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
+        self.0.set(slot, value)
     }
 
-    pub(super) fn set_raw(
-        &mut self,
-        slot: RawStackSlot,
-        value: WeakValue<Ty>,
-        source: Source<StackSlot>,
-    ) {
-        let source = source.map(|slot| self.boundary() + slot);
-        self.0.stack.set(slot, value, source)
+    pub(super) fn set_raw(&mut self, slot: RawStackSlot, value: WeakValue<Ty>) {
+        self.0.stack.set(slot, value)
     }
 
     pub(super) fn next_slot(&self) -> StackSlot {
         self.0.next_slot()
     }
 
-    pub(super) fn insert(
-        &mut self,
-        slot: StackSlot,
-        value: WeakValue<Ty>,
-        source: Source<StackSlot>,
-    ) {
-        self.0.insert(slot, value, source)
+    pub(super) fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
+        self.0.insert(slot, value)
     }
 
     pub(super) fn drain(
@@ -986,16 +937,13 @@ where
             Eq | Lt | LtEq => {
                 let _ = self.adjust_height(StackSlot(1));
                 let value = self.pop().unwrap();
-                self.push(Value::Bool(value.to_bool()), Source::TrustedIsRooted(false));
+                self.push(Value::Bool(value.to_bool()));
             }
             // Not-equal additionally needs to inverse the resulting boolean.
             Neq => {
                 let _ = self.adjust_height(StackSlot(1));
                 let value = self.pop().unwrap();
-                self.push(
-                    Value::Bool(!value.to_bool()),
-                    Source::TrustedIsRooted(false),
-                );
+                self.push(Value::Bool(!value.to_bool()));
             }
             // Index getter results in single value.
             Index => {
@@ -1107,7 +1055,7 @@ where
 {
     pub fn sync(&mut self, heap: &mut Heap<Ty>) {
         // There are no on-stack upvalues by construction.
-        self.stack.sync_transient(heap)
+        self.stack.sync(heap)
     }
 }
 
@@ -1178,12 +1126,11 @@ where
     }
 
     pub fn push(&mut self, value: WeakValue<Ty>) {
-        self.guard.push(value, Source::TrustedIsRooted(false));
+        self.guard.push(value);
     }
 
     pub fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
-        self.guard
-            .insert(slot, value, Source::TrustedIsRooted(false))
+        self.guard.insert(slot, value)
     }
 }
 
@@ -1214,7 +1161,7 @@ where
     fn drop(&mut self) {
         // Since frame holds mutable borrow to heap there are no possible gc passes that can happen.
         // We only need to sync stack when `StackFrame` goes out of scope.
-        self.guard.stack.sync_transient(self.heap);
+        self.guard.stack.sync(self.heap);
     }
 }
 
@@ -1252,8 +1199,7 @@ where
     Ty: CoreTypes,
 {
     fn drop(&mut self) {
-        self.stack
-            .set(self.slot, self.value.take(), Source::TrustedIsRooted(false));
+        self.stack.set(self.slot, self.value.take());
     }
 }
 

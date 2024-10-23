@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
-use gc::{GcCell, RootCell};
+use gc::{GcCell, Root, RootCell};
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::index::{ConstId, InstrId, InstrOffset, RecipeId, StackSlot};
 use repr::literal::Literal;
@@ -18,7 +18,7 @@ use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, Ru
 use crate::gc::{DisplayWith, Heap, LuaPtr, TryIntoWithGc};
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
-use crate::runtime::{Closure, Core, ThreadId};
+use crate::runtime::{Closure, Core, Interned, ThreadId};
 use crate::value::callable::Callable;
 use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, WeakValue};
 
@@ -382,6 +382,44 @@ where
         *self.ip = self.ip.checked_sub_offset(offset).ok_or(err)?;
         Ok(())
     }
+
+    fn sync(&mut self) {
+        self.register_upvalue.sync(&mut self.core.gc);
+        self.stack.lua_frame().sync(&mut self.core.gc);
+    }
+
+    fn alloc_literal(&mut self, literal: Literal) -> StrongValue<Ty> {
+        match literal {
+            Literal::Nil => Value::Nil,
+            Literal::Bool(t) => Value::Bool(t),
+            Literal::Int(t) => Value::Int(t),
+            Literal::Float(t) => Value::Float(t),
+            Literal::String(s) => {
+                let ptr = self.alloc_string(s.into());
+                Value::String(LuaPtr(ptr))
+            }
+        }
+    }
+
+    fn alloc_string(&mut self, s: Ty::String) -> Root<Interned<Ty::String>> {
+        match self.core.string_interner.try_insert(s, &mut self.core.gc) {
+            Ok(ptr) => ptr,
+            Err(value) => {
+                self.sync();
+                self.core.string_interner.insert(value, &mut self.core.gc)
+            }
+        }
+    }
+
+    fn alloc_table(&mut self) -> RootCell<Ty::Table> {
+        match self.core.gc.try_alloc_cell(Default::default()) {
+            Ok(ptr) => ptr,
+            Err(value) => {
+                self.sync();
+                self.core.gc.alloc_cell(value)
+            }
+        }
+    }
 }
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
@@ -416,7 +454,6 @@ where
         &mut self,
         opcode: OpCode,
     ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Cause>> {
-        use super::super::stack::Source;
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -450,20 +487,16 @@ where
             MakeClosure(fn_id) => {
                 let closure = self.construct_closure(fn_id)?;
 
-                self.stack.lua_frame().push(
-                    Value::Function(Callable::Lua(LuaPtr(closure.downgrade()))),
-                    Source::TrustedIsRooted(false),
-                );
+                self.stack
+                    .lua_frame()
+                    .push(Value::Function(Callable::Lua(LuaPtr(closure.downgrade()))));
 
                 ControlFlow::Continue(())
             }
             LoadConstant(index) => {
                 let constant = self.get_constant(index)?.clone();
-                self.stack.lua_frame().sync_transient(&mut self.core.gc);
-                let value = self.core.alloc_literal(constant);
-                self.stack
-                    .lua_frame()
-                    .push(value.downgrade(), Source::TrustedIsRooted(false));
+                let value = self.alloc_literal(constant);
+                self.stack.lua_frame().push(value.downgrade());
 
                 ControlFlow::Continue(())
             }
@@ -477,14 +510,14 @@ where
             }
             LoadStack(slot) => {
                 let value = *self.get_stack(slot)?;
-                self.stack.lua_frame().push(value, Source::StackSlot(slot));
+                self.stack.lua_frame().push(value);
 
                 ControlFlow::Continue(())
             }
             StoreStack(slot) => {
                 let mut stack = self.stack.lua_frame();
                 let [value] = stack.take1()?;
-                stack.set(slot, value, Source::StackSlot(slot));
+                stack.set(slot, value);
 
                 ControlFlow::Continue(())
             }
@@ -501,7 +534,7 @@ where
                 let mut stack = self.stack.lua_frame();
 
                 // Source tracking is to be removed.
-                stack.push_raw(value, Source::TrustedIsRooted(false));
+                stack.push_raw(value);
 
                 ControlFlow::Continue(())
             }
@@ -554,12 +587,9 @@ where
                 ControlFlow::Continue(())
             }
             TabCreate => {
-                self.stack.lua_frame().sync_transient(&mut self.core.gc);
-                let value = self.core.gc.alloc_cell(Default::default()).downgrade();
+                let value = self.alloc_table().downgrade();
 
-                self.stack
-                    .lua_frame()
-                    .push(Value::Table(LuaPtr(value)), Source::TrustedIsRooted(false));
+                self.stack.lua_frame().push(Value::Table(LuaPtr(value)));
 
                 ControlFlow::Continue(())
             }
@@ -598,7 +628,6 @@ where
         ControlFlow<(Event, Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::UnaOpCause>,
     > {
-        use super::super::stack::Source;
         use crate::value::{Float, Int};
         use ControlFlow::*;
 
@@ -615,8 +644,7 @@ where
             UnaOp::BitNot => {
                 use crate::runtime::CoerceArgs;
 
-                let args =
-                    <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_una_op_bit(&self.core.dialect, args);
+                let args = self.core.dialect.coerce_una_op_bit(args);
 
                 match args {
                     [Value::Int(val)] => Continue((!Int(val)).into()),
@@ -638,9 +666,7 @@ where
             UnaOp::LogNot => {
                 let [arg] = args;
                 let r = Value::Bool(!arg.to_bool());
-                self.stack
-                    .lua_frame()
-                    .push(r, Source::TrustedIsRooted(false));
+                self.stack.lua_frame().push(r);
 
                 return Ok(Continue(()));
             }
@@ -649,9 +675,7 @@ where
         match eval {
             Continue(value) => {
                 // Value contains no reference in this case.
-                self.stack
-                    .lua_frame()
-                    .push(value, Source::TrustedIsRooted(false));
+                self.stack.lua_frame().push(value);
                 Ok(Continue(()))
             }
             Break((event, args)) => {
@@ -659,7 +683,7 @@ where
 
                 let metatable = self.core.metatable_of(arg)?;
                 let key = self.core.lookup_event(event);
-                let heap = &mut self.core.gc;
+                let heap = &self.core.gc;
                 let metavalue = metatable
                     .map(|mt| {
                         heap.get(mt)
@@ -674,9 +698,7 @@ where
                         // Trigger table len builtin on failed metamethod lookup.
                         (UnaOp::StrLen, [Value::Table(LuaPtr(tab))]) => {
                             let border = heap.get(tab).ok_or(AlreadyDroppedError)?.border();
-                            self.stack
-                                .lua_frame()
-                                .push(Value::Int(border), Source::TrustedIsRooted(false));
+                            self.stack.lua_frame().push(Value::Int(border));
 
                             Ok(Continue(()))
                         }
@@ -687,7 +709,7 @@ where
 
                         let [arg] = args;
                         let mut stack = self.stack.lua_frame();
-                        stack.push(arg, Source::StackSlot(stack.next_slot()));
+                        stack.push(arg);
                         let callable = metavalue;
                         let callable = self
                             .prepare_invoke(callable, start)
@@ -709,8 +731,6 @@ where
         std::ops::ControlFlow<(Event, Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::BinOpCause>,
     > {
-        use super::super::stack::Source;
-
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
             rhs: args[1].type_(),
@@ -727,9 +747,7 @@ where
         match eval {
             ControlFlow::Continue(Some(value)) => {
                 // Value contains no reference in this case.
-                self.stack
-                    .lua_frame()
-                    .push(value, Source::TrustedIsRooted(false));
+                self.stack.lua_frame().push(value);
                 Ok(ControlFlow::Continue(()))
             }
             ControlFlow::Continue(None) => Err(err.into()),
@@ -781,9 +799,7 @@ where
                         };
 
                         if let Some(r) = fallback_result {
-                            self.stack
-                                .lua_frame()
-                                .push(r, Source::TrustedIsRooted(false));
+                            self.stack.lua_frame().push(r);
                             Ok(ControlFlow::Continue(()))
                         } else {
                             Err(err.into())
@@ -792,8 +808,8 @@ where
                     metavalue => {
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
-                        stack.push(lhs, Source::StackSlot(stack.next_slot()));
-                        stack.push(rhs, Source::StackSlot(stack.next_slot() + 1));
+                        stack.push(lhs);
+                        stack.push(rhs);
 
                         let callable = metavalue;
                         let callable = self
@@ -815,9 +831,8 @@ where
     ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
         use crate::runtime::dialect::CoerceArgs;
 
-        self.stack.lua_frame().sync_transient(&mut self.core.gc);
         let dialect = self.core.dialect;
-        let args = dialect.coerce_bin_op_str(op, args, self.core);
+        let args = dialect.coerce_bin_op_str(op, args, |value| self.alloc_string(value));
 
         match args {
             [Value::String(LuaPtr(lhs)), Value::String(LuaPtr(rhs))] => match op {
@@ -832,8 +847,7 @@ where
                     let rhs = self.core.gc.get(rhs).ok_or(AlreadyDroppedError)?;
                     r.concat(rhs.as_ref());
 
-                    self.stack.lua_frame().sync_transient(&mut self.core.gc);
-                    let s = self.core.alloc_string(r).downgrade();
+                    let s = self.alloc_string(r).downgrade();
 
                     Ok(ControlFlow::Continue(Some(Value::String(LuaPtr(s)))))
                 }
@@ -851,7 +865,7 @@ where
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
-        let cmp = <_ as CoerceArgs<Ty, Core<Ty>>>::cmp_float_and_int(&self.core.dialect);
+        let cmp = <_ as CoerceArgs<Ty>>::cmp_float_and_int(&self.core.dialect);
 
         let equal = match args {
             [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
@@ -884,7 +898,7 @@ where
         use RelBinOp::*;
         use Value::*;
 
-        let cmp = <_ as CoerceArgs<Ty, Core<Ty>>>::cmp_float_and_int(&self.core.dialect);
+        let cmp = <_ as CoerceArgs<Ty>>::cmp_float_and_int(&self.core.dialect);
 
         let ord = match &args {
             [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
@@ -926,7 +940,7 @@ where
         use crate::runtime::dialect::CoerceArgs;
         use crate::value::Int;
 
-        let args = <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_bin_op_bit(&self.core.dialect, op, args);
+        let args = self.core.dialect.coerce_bin_op_bit(op, args);
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
@@ -952,7 +966,7 @@ where
         use AriBinOp::*;
 
         // Coercions.
-        let args = <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_bin_op_ari(&self.core.dialect, op, args);
+        let args = self.core.dialect.coerce_bin_op_ari(op, args);
 
         let r = match args {
             [Value::Int(lhs), Value::Int(rhs)] => match op {
@@ -988,7 +1002,6 @@ where
         ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
-        use super::super::stack::Source;
         use crate::runtime::dialect::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -998,8 +1011,7 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(LuaPtr(table)) = &table {
-                let index =
-                    <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_tab_get(&self.core.dialect, index);
+                let index = self.core.dialect.coerce_tab_get(index);
 
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = *table;
@@ -1014,7 +1026,7 @@ where
                 if value != Value::Nil {
                     // We know that the value originated from the table in this slot.
                     let mut stack = self.stack.lua_frame();
-                    stack.push(value, Source::StackSlot(stack.next_slot()));
+                    stack.push(value);
                     return Ok(Continue(()));
                 }
             };
@@ -1043,9 +1055,7 @@ where
                             // Third: Fallback to producing nil.
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
-                            self.stack
-                                .lua_frame()
-                                .push(Value::Nil, Source::TrustedIsRooted(false));
+                            self.stack.lua_frame().push(Value::Nil);
                             return Ok(Continue(()));
                         } else {
                             return Err(TableTypeMismatch(table.type_()).into());
@@ -1062,8 +1072,8 @@ where
                         let callable = callable.try_into_with_gc(&mut self.core.gc)?;
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
-                        stack.push(table, Source::StackSlot(stack.next_slot()));
-                        stack.push(index, Source::StackSlot(stack.next_slot() + 1));
+                        stack.push(table);
+                        stack.push(index);
 
                         return Ok(Break((callable, start)));
                     }
@@ -1085,7 +1095,6 @@ where
         ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
-        use super::super::stack::Source;
         use crate::runtime::dialect::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
@@ -1095,8 +1104,7 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(LuaPtr(table)) = &table {
-                let index =
-                    <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_tab_set(&self.core.dialect, index);
+                let index = self.core.dialect.coerce_tab_set(index);
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = self.core.gc.get_mut(*table).ok_or(AlreadyDroppedError)?;
 
@@ -1136,10 +1144,7 @@ where
                             // Third: Fallback to raw assignment.
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
-                            let index = <_ as CoerceArgs<Ty, Core<Ty>>>::coerce_tab_set(
-                                &self.core.dialect,
-                                index,
-                            );
+                            let index = self.core.dialect.coerce_tab_set(index);
                             let key = index.try_into().map_err(InvalidKey)?;
 
                             self.core
@@ -1164,9 +1169,9 @@ where
                         let callable = callable.try_into_with_gc(&mut self.core.gc)?;
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
-                        stack.push(table, Source::StackSlot(stack.next_slot()));
-                        stack.push(index, Source::StackSlot(stack.next_slot() + 1));
-                        stack.push(value, Source::StackSlot(stack.next_slot() + 2));
+                        stack.push(table);
+                        stack.push(index);
+                        stack.push(value);
 
                         return Ok(Break((callable, start)));
                     }
@@ -1185,8 +1190,6 @@ where
         mut callable: WeakValue<Ty>,
         start: StackSlot,
     ) -> Result<Callable<Strong, Ty>, RefAccessOrError<NotCallableError>> {
-        use super::super::stack::Source;
-
         loop {
             callable = match callable {
                 Value::Function(r) => return Ok(r.try_into_with_gc(&mut self.core.gc)?),
@@ -1212,9 +1215,7 @@ where
                 return Err(RefAccessOrError::Other(NotCallableError));
             }
 
-            self.stack
-                .lua_frame()
-                .insert(start, callable, Source::StackSlot(start));
+            self.stack.lua_frame().insert(start, callable);
             callable = new_callable;
         }
     }
@@ -1275,33 +1276,21 @@ where
 
         let closure = Closure::from_raw_parts(fn_ptr, self.current_thread_id, upvalues);
 
-        // Make sure to sync the stack before allocating.
-        // Sync itself may allocate, but there is no need to pause.
-        // All Gc references inside the closure are copies of upvalues of current frame
-        // which are definitely rooted.
-        self.stack.lua_frame().sync_transient(&mut self.core.gc);
-        let closure = self.core.gc.alloc_cell(closure);
+        let closure = match self.core.gc.try_alloc_cell(closure) {
+            Ok(ptr) => ptr,
+            Err(closure) => {
+                // All Gc references inside the closure are copies of upvalues of current frame
+                // which are going to be rooted in the process.
+                self.sync();
+                self.core.gc.alloc_cell(closure)
+            }
+        };
 
         self.stack
             .lua_frame()
             .register_closure(&closure, &self.core.gc);
 
         Ok(closure)
-    }
-
-    pub(crate) fn exit(mut self, returns: StackSlot) {
-        let mut stack = self.stack.lua_frame();
-
-        // All upvalues need to be gone.
-        stack.evict_upvalues();
-        let _ = stack.drain(StackSlot(0)..returns);
-
-        // Sync on exit.
-        // If some values were rooted by current frame
-        // (e.g. originated from upvalues or variadics)
-        // it is possible that its last root is going to get dropped right now.
-        // Currently we don't track value origins with sufficient precision to avoid this scenario.
-        stack.sync_transient(&mut self.core.gc);
     }
 }
 

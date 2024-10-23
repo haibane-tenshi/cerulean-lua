@@ -1,6 +1,6 @@
 use bitvec::prelude::BitVec;
 
-use gc::GcCell;
+use gc::{GcCell, RootCell};
 use repr::index::UpvalueSlot;
 use repr::tivec::TiVec;
 
@@ -15,15 +15,22 @@ where
 {
     values: TiVec<UpvalueSlot, WeakValue<Ty>>,
     write_tag: BitVec,
+    unsync_tag: BitVec,
+    mirror: RootCell<Vec<WeakValue<Ty>>>,
 }
 
 impl<Ty> UpvalueRegister<Ty>
 where
     Ty: CoreTypes,
 {
-    // pub(super) fn new() -> Self {
-    //     Default::default()
-    // }
+    pub(crate) fn new(heap: &mut Heap<Ty>) -> Self {
+        UpvalueRegister {
+            values: Default::default(),
+            write_tag: Default::default(),
+            unsync_tag: Default::default(),
+            mirror: heap.alloc_cell(Default::default()),
+        }
+    }
 
     // pub(super) fn clear(&mut self) {
     //     self.values.clear();
@@ -32,9 +39,11 @@ where
 
     pub(super) fn fill(&mut self, values: impl IntoIterator<Item = WeakValue<Ty>>) {
         debug_assert_eq!(self.values.len(), self.write_tag.len());
+        debug_assert_eq!(self.values.len(), self.unsync_tag.len());
 
         self.values.extend(values);
         self.write_tag.resize(self.values.len(), false);
+        self.unsync_tag.resize(self.values.len(), false);
     }
 
     pub(super) fn drain_written(
@@ -59,28 +68,35 @@ where
             return Err(value);
         };
 
-        let mut bit_place = self
+        let mut unsync_place = self
+            .unsync_tag
+            .get_mut(index.0)
+            .expect("unsync tags should have the same length as values");
+        let unsync_bit = (*place == value) && value.is_transient();
+
+        let mut write_place = self
             .write_tag
             .get_mut(index.0)
-            .expect("write tag should have the same length as values");
-        let bit = *bit_place | (*place == value);
+            .expect("write tags should have the same length as values");
+        let write_bit = *place == value;
 
         *place = value;
-        *bit_place = bit;
+        *write_place |= write_bit;
+        *unsync_place |= unsync_bit;
 
         Ok(())
     }
-}
 
-impl<Ty> Default for UpvalueRegister<Ty>
-where
-    Ty: CoreTypes,
-{
-    fn default() -> Self {
-        Self {
-            values: Default::default(),
-            write_tag: Default::default(),
+    pub(crate) fn sync(&mut self, heap: &mut Heap<Ty>) {
+        if self.unsync_tag.not_any() {
+            return;
         }
+
+        let mirror = heap.get_root_mut(&self.mirror);
+        mirror.clear();
+        mirror.extend_from_slice(self.values.as_ref());
+
+        self.unsync_tag.fill(false);
     }
 }
 

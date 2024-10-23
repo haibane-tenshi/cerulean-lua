@@ -26,6 +26,7 @@ where
 {
     fn enter(&mut self, mut ctx: FrameContext<Ty>) -> Result<FrameControl<Ty>, RtError<Ty>> {
         use lua_bundle::ChangeFrame;
+        use repr::index::StackSlot;
 
         let boundary = ctx.stack.boundary();
         let mut active_frame = self.activate(ctx.reborrow())?;
@@ -34,13 +35,22 @@ where
             .enter()
             .map(|request| match request {
                 ChangeFrame::Return(slot) => {
-                    active_frame.exit(slot);
+                    let mut stack = ctx.stack.lua_frame();
+                    stack.evict_upvalues();
+                    let _ = stack.drain(StackSlot(0)..slot);
 
                     FrameControl::Return
                 }
                 ChangeFrame::Invoke(event, callable, start) => {
                     // Ensure that stack space passed to another function no longer hosts upvalues.
-                    // active_frame.stack.lua_frame().evict_upvalues();
+                    ctx.stack
+                        .guard_at(start)
+                        .unwrap()
+                        .lua_frame()
+                        .evict_upvalues();
+
+                    // Make sure that detached upvalues are properly allocated before entering a new frame.
+                    ctx.stack.lua_frame().sync_upvalues(&mut ctx.core.gc);
 
                     let start = boundary + start;
                     FrameControl::InitAndEnter {
@@ -79,13 +89,12 @@ where
                         *place = value;
                     }
                     UpvaluePlace::Stack(slot) => {
-                        use super::stack::Source;
-                        stack.set_raw(slot, value, Source::TrustedIsRooted(false));
+                        stack.set_raw(slot, value);
                     }
                 };
             }
 
-            stack.sync_transient(&mut ctx.core.gc);
+            stack.sync(&mut ctx.core.gc);
         }
 
         r

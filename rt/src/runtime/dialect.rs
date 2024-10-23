@@ -1,6 +1,7 @@
+use gc::Root;
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
-use super::Core;
+use super::{Core, Interned};
 use crate::value::{CoreTypes, Value, WeakValue};
 
 /// Define fine aspects of runtime behavior.
@@ -311,22 +312,25 @@ impl DialectBuilder {
     }
 }
 
-pub trait CoerceArgs<Ty: CoreTypes, Core>: sealed::Sealed {
+pub trait CoerceArgs<Ty: CoreTypes>: sealed::Sealed {
     fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
     fn coerce_bin_op_bit(&self, op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
-    fn coerce_bin_op_str(
+    fn coerce_bin_op_str<F>(
         &self,
         op: StrBinOp,
         args: [WeakValue<Ty>; 2],
-        gc: &mut Core,
-    ) -> [WeakValue<Ty>; 2];
+        f: F,
+    ) -> [WeakValue<Ty>; 2]
+    where
+        F: FnMut(Ty::String) -> Root<Interned<Ty::String>>;
+
     fn coerce_una_op_bit(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1];
     fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
     fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
     fn cmp_float_and_int(&self) -> bool;
 }
 
-impl<Ty> CoerceArgs<Ty, Core<Ty>> for DialectBuilder
+impl<Ty> CoerceArgs<Ty> for DialectBuilder
 where
     Ty: CoreTypes,
     Ty::String: From<String>,
@@ -383,38 +387,71 @@ where
         }
     }
 
-    fn coerce_bin_op_str(
+    fn coerce_bin_op_str<F>(
         &self,
         op: StrBinOp,
         args: [WeakValue<Ty>; 2],
-        core: &mut Core<Ty>,
-    ) -> [WeakValue<Ty>; 2] {
+        mut alloc: F,
+    ) -> [WeakValue<Ty>; 2]
+    where
+        F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
+    {
         match op {
             StrBinOp::Concat => {
-                use crate::gc::LuaPtr;
+                use crate::value::StrongValue;
                 use Value::*;
 
-                let flt_to_string = |x: f64, core: &mut Core<_>| {
-                    let value = core.alloc_string(x.to_string().into()).downgrade();
-                    Value::String(LuaPtr(value))
-                };
+                fn conv<T, Ty, F>(x: T, alloc: &mut F) -> StrongValue<Ty>
+                where
+                    T: ToString,
+                    Ty: CoreTypes,
+                    F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
+                {
+                    use crate::gc::LuaPtr;
+                    String(LuaPtr(alloc(x.to_string().into())))
+                }
 
-                let int_to_string = |x: i64, core: &mut Core<_>| {
-                    let value = core.alloc_string(x.to_string().into()).downgrade();
-                    Value::String(LuaPtr(value))
-                };
+                let alloc = &mut alloc;
 
+                // Important: downgrade only after both arguments are converted.
+                // Otherwise allocation of second arg may gc the first arg.
                 match args {
-                    [Int(lhs), Int(rhs)] => [int_to_string(lhs, core), int_to_string(rhs, core)],
-                    [Int(lhs), Float(rhs)] => [int_to_string(lhs, core), flt_to_string(rhs, core)],
-                    [Int(lhs), String(rhs)] => [int_to_string(lhs, core), String(rhs)],
-                    [Float(lhs), Int(rhs)] => [flt_to_string(lhs, core), int_to_string(rhs, core)],
-                    [Float(lhs), Float(rhs)] => {
-                        [flt_to_string(lhs, core), flt_to_string(rhs, core)]
+                    [Int(lhs), Int(rhs)] => {
+                        let lhs = conv(lhs, alloc);
+                        let rhs = conv(rhs, alloc);
+                        [lhs.downgrade(), rhs.downgrade()]
                     }
-                    [Float(lhs), String(rhs)] => [flt_to_string(lhs, core), String(rhs)],
-                    [String(lhs), Int(rhs)] => [String(lhs), int_to_string(rhs, core)],
-                    [String(lhs), Float(rhs)] => [String(lhs), flt_to_string(rhs, core)],
+                    [Int(lhs), Float(rhs)] => {
+                        let lhs = conv(lhs, alloc);
+                        let rhs = conv(rhs, alloc);
+                        [lhs.downgrade(), rhs.downgrade()]
+                    }
+                    [Int(lhs), String(rhs)] => {
+                        let lhs = conv(lhs, alloc);
+                        [lhs.downgrade(), String(rhs)]
+                    }
+                    [Float(lhs), Int(rhs)] => {
+                        let lhs = conv(lhs, alloc);
+                        let rhs = conv(rhs, alloc);
+                        [lhs.downgrade(), rhs.downgrade()]
+                    }
+                    [Float(lhs), Float(rhs)] => {
+                        let lhs = conv(lhs, alloc);
+                        let rhs = conv(rhs, alloc);
+                        [lhs.downgrade(), rhs.downgrade()]
+                    }
+                    [Float(lhs), String(rhs)] => {
+                        let lhs = conv(lhs, alloc);
+                        [lhs.downgrade(), String(rhs)]
+                    }
+                    [String(lhs), Int(rhs)] => {
+                        let rhs = conv(rhs, alloc);
+                        [String(lhs), rhs.downgrade()]
+                    }
+                    [String(lhs), Float(rhs)] => {
+                        let rhs = conv(rhs, alloc);
+                        [String(lhs), rhs.downgrade()]
+                    }
                     args => args,
                 }
             }
