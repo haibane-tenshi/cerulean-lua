@@ -165,7 +165,7 @@ use crate::runtime::RuntimeView;
 use crate::runtime::ThreadId;
 use crate::value::{Callable, CoreTypes, Strong};
 
-use super::coroutine::{Coroutine, State};
+use super::coroutine::State;
 
 /// Request runtime to perform specific action.
 pub enum Request<Ty>
@@ -201,26 +201,89 @@ where
 /// You need to implement [`Coroutine`] trait instead.
 ///
 /// See [module-level](super::delegate) documentation for details.
-pub trait Delegate<Ty>:
-    for<'a> Coroutine<
-    (RuntimeView<'a, Ty>, Response<Ty>),
-    Yielded = Request<Ty>,
-    Complete = Result<(), RtError<Ty>>,
->
+pub trait Delegate<Ty>
 where
     Ty: CoreTypes,
 {
+    fn resume(
+        self: Pin<&mut Self>,
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>>;
 }
 
-impl<Ty, T> Delegate<Ty> for T
+// impl<Ty, T> Delegate<Ty> for T
+// where
+//     Ty: CoreTypes,
+//     T: for<'a> Coroutine<
+//         (RuntimeView<'a, Ty>, Response<Ty>),
+//         Yielded = Request<Ty>,
+//         Complete = Result<(), RtError<Ty>>,
+//     >,
+// {
+//     fn resume(self: Pin<&mut Self>, rt: RuntimeView<'_, Ty>, response: Response<Ty>) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
+//         <_ as Coroutine<_>>::resume(self, (rt, response))
+//     }
+// }
+
+impl<Ty, T> Delegate<Ty> for &mut T
 where
     Ty: CoreTypes,
-    T: for<'a> Coroutine<
-        (RuntimeView<'a, Ty>, Response<Ty>),
-        Yielded = Request<Ty>,
-        Complete = Result<(), RtError<Ty>>,
-    >,
+    T: Delegate<Ty> + Unpin + ?Sized,
 {
+    fn resume(
+        mut self: Pin<&mut Self>,
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
+        let this: Pin<&mut T> = Pin::new(*self);
+        this.resume(rt, response)
+    }
+}
+
+impl<Ty, T> Delegate<Ty> for Pin<&mut T>
+where
+    Ty: CoreTypes,
+    T: Delegate<Ty> + ?Sized,
+{
+    fn resume(
+        mut self: Pin<&mut Self>,
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
+        let this: Pin<&mut T> = (*self).as_mut();
+        Delegate::resume(this, rt, response)
+    }
+}
+
+impl<Ty, T> Delegate<Ty> for Box<T>
+where
+    Ty: CoreTypes,
+    T: Delegate<Ty> + Unpin + ?Sized,
+{
+    fn resume(
+        mut self: Pin<&mut Self>,
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
+        let this: Pin<&mut T> = Pin::new((*self).as_mut());
+        Delegate::resume(this, rt, response)
+    }
+}
+
+impl<Ty, T> Delegate<Ty> for Pin<Box<T>>
+where
+    Ty: CoreTypes,
+    T: Delegate<Ty> + ?Sized,
+{
+    fn resume(
+        self: Pin<&mut Self>,
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
+        let this: Pin<&mut T> = Pin::into_inner(self).as_mut();
+        Delegate::resume(this, rt, response)
+    }
 }
 
 /// Surrogate `!` type, implementing `Delegate`.
@@ -229,17 +292,15 @@ where
 /// which ensures that this coroutine cannot be entered or resumed even by accident.
 pub enum Never {}
 
-impl<'a, Ty> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for Never
+impl<Ty> Delegate<Ty> for Never
 where
     Ty: CoreTypes,
 {
-    type Yielded = Request<Ty>;
-    type Complete = Result<(), RtError<Ty>>;
-
     fn resume(
         self: Pin<&mut Self>,
-        _args: (RuntimeView<'a, Ty>, Response<Ty>),
-    ) -> State<Self::Yielded, Self::Complete> {
+        _rt: RuntimeView<'_, Ty>,
+        _response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
         match *Pin::into_inner(self) {}
     }
 }
@@ -263,18 +324,16 @@ where
 
 pub struct FromMut<F>(F);
 
-impl<'a, F, Ty> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for FromMut<F>
+impl<F, Ty> Delegate<Ty> for FromMut<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
-    type Yielded = Request<Ty>;
-    type Complete = Result<(), RtError<Ty>>;
-
     fn resume(
         self: Pin<&mut Self>,
-        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
-    ) -> State<Self::Yielded, Self::Complete> {
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
         debug_assert!(matches!(response, Response::Resume));
 
         let func = &mut Pin::into_inner(self).0;
@@ -299,18 +358,16 @@ where
 
 pub struct FromOnce<F>(Option<F>);
 
-impl<'a, F, Ty> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for FromOnce<F>
+impl<F, Ty> Delegate<Ty> for FromOnce<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
-    type Yielded = Request<Ty>;
-    type Complete = Result<(), RtError<Ty>>;
-
     fn resume(
         self: Pin<&mut Self>,
-        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
-    ) -> State<Self::Yielded, Self::Complete> {
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
         debug_assert!(matches!(response, Response::Resume));
@@ -340,18 +397,16 @@ where
 
 pub struct Repeat<F>(F);
 
-impl<'a, Ty, F> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for Repeat<F>
+impl<Ty, F> Delegate<Ty> for Repeat<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> State<Request<Ty>, Result<(), RtError<Ty>>> + Unpin,
 {
-    type Yielded = Request<Ty>;
-    type Complete = Result<(), RtError<Ty>>;
-
     fn resume(
         self: Pin<&mut Self>,
-        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
-    ) -> State<Self::Yielded, Self::Complete> {
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
         match response {
             Response::Resume => (),
             Response::Evaluated(Ok(())) => (),
@@ -381,18 +436,16 @@ where
 
 pub struct TryRepeat<F>(F);
 
-impl<'a, Ty, F> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for TryRepeat<F>
+impl<Ty, F> Delegate<Ty> for TryRepeat<F>
 where
     Ty: CoreTypes,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<State<Request<Ty>, ()>, RtError<Ty>> + Unpin,
 {
-    type Yielded = Request<Ty>;
-    type Complete = Result<(), RtError<Ty>>;
-
     fn resume(
         self: Pin<&mut Self>,
-        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
-    ) -> State<Self::Yielded, Self::Complete> {
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
         match response {
             Response::Resume => (),
             Response::Evaluated(Ok(())) => (),
@@ -432,19 +485,17 @@ enum Yield1State<F0, F1> {
 
 pub struct Yield1<F0, F1>(Yield1State<F0, F1>);
 
-impl<'a, Ty, F0, F1> Coroutine<(RuntimeView<'a, Ty>, Response<Ty>)> for Yield1<F0, F1>
+impl<Ty, F0, F1> Delegate<Ty> for Yield1<F0, F1>
 where
     Ty: CoreTypes,
     F0: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<Request<Ty>, RtError<Ty>> + Unpin,
     F1: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
-    type Yielded = Request<Ty>;
-    type Complete = Result<(), RtError<Ty>>;
-
     fn resume(
         mut self: Pin<&mut Self>,
-        (rt, response): (RuntimeView<'a, Ty>, Response<Ty>),
-    ) -> State<Self::Yielded, Self::Complete> {
+        rt: RuntimeView<'_, Ty>,
+        response: Response<Ty>,
+    ) -> State<Request<Ty>, Result<(), RtError<Ty>>> {
         use crate::error::AlreadyDroppedError;
 
         let state = std::mem::replace(&mut self.0, Yield1State::Completed);

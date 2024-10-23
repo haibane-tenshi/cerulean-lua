@@ -48,7 +48,7 @@ where
         // if the next frame is Lua frame it will sync it when necessary.
         ctx.stack.lua_frame().sync(&mut ctx.core.gc);
 
-        match self.delegate.as_mut().resume((ctx, response)) {
+        match self.delegate.as_mut().resume(ctx, response) {
             State::Complete(Ok(())) => Ok(Control::Frame(FrameControl::Return)),
             State::Complete(Err(err)) => Err(err),
             State::Yielded(request) => match request {
