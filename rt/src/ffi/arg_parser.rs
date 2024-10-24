@@ -166,6 +166,7 @@ use std::fmt::{Debug, Display};
 
 use super::tuple::Tuple;
 use crate::gc::{Heap, IntoWithGc, TryIntoWithGc};
+use crate::runtime::{StackGuard, TransientStackFrame};
 use crate::value::{CoreTypes, NilOr, Types, Value, Weak};
 use sealed::{BubbleUp, Sealed};
 
@@ -610,6 +611,22 @@ where
     fn format(&mut self, gc: &mut Heap<Ty>, value: R) {
         let value = value.into_with_gc(gc);
         self.extend([value]);
+    }
+}
+
+impl<'a, Ty> StackGuard<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    pub fn format<R>(&mut self, gc: &mut Heap<Ty>, value: R)
+    where
+        for<'b> TransientStackFrame<'b, Ty>: FormatReturns<Ty, Heap<Ty>, R>,
+    {
+        gc.pause(|heap| {
+            let mut stack = self.transient_frame();
+            FormatReturns::format(&mut stack, heap, value);
+            stack.sync(heap);
+        });
     }
 }
 
