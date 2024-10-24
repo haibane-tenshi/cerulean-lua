@@ -364,6 +364,10 @@ where
         self.stack.get(index).ok_or(MissingStackSlot(index))
     }
 
+    fn current_ip(&self) -> InstrId {
+        *self.ip - 1
+    }
+
     fn increment_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
         let err = IpOutOfBounds(*self.ip);
 
@@ -446,8 +450,13 @@ where
             )));
         };
 
-        self.exec(opcode)
-            .map_err(|cause| cause.map_other(|cause| opcode_err::Error { cause }))
+        self.exec(opcode).map_err(|cause| {
+            cause.map_other(|cause| opcode_err::Error {
+                fn_ptr: self.core.gc.get_root(self.closure).fn_ptr(),
+                ip: self.current_ip(),
+                cause,
+            })
+        })
     }
 
     fn exec(

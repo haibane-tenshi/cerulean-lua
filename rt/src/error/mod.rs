@@ -14,8 +14,10 @@ use std::fmt::{Debug, Display};
 
 use gc::Root;
 
+use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::gc::{DisplayWith, Heap};
 use crate::runtime::Interned;
-use crate::value::{CoreTypes, Strong, Types, Value};
+use crate::value::{CoreTypes, Strong, StrongValue, Types, Value};
 
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
@@ -57,6 +59,53 @@ where
 impl<Value> RuntimeError<Value> {
     pub fn from_value(value: Value) -> Self {
         RuntimeError::Value(ValueError(value))
+    }
+
+    fn chunk_id(&self) -> Option<ChunkId> {
+        if let RuntimeError::OpCode(err) = self {
+            Some(err.fn_ptr.chunk_id)
+        } else {
+            None
+        }
+    }
+}
+
+impl<Ty> RuntimeError<StrongValue<Ty>>
+where
+    Ty: CoreTypes,
+{
+    pub fn into_diagnostic(self, heap: &Heap<Ty>, chunk_cache: &dyn ChunkCache) -> Diagnostic
+    where
+        Ty::String: AsRef<[u8]>,
+        StrongValue<Ty>: DisplayWith<Heap<Ty>>,
+    {
+        use codespan_reporting::files::SimpleFile;
+
+        let chunk_id = self.chunk_id();
+
+        let message = match self {
+            RuntimeError::Value(err) => err.into_diagnostic(heap),
+            RuntimeError::Borrow(err) => err.into_diagnostic(),
+            RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
+            RuntimeError::Immutable(err) => err.into_diagnostic(),
+            RuntimeError::Diagnostic(diag) => return *diag,
+            RuntimeError::MissingChunk(err) => err.into_diagnostic(),
+            RuntimeError::MissingFunction(err) => err.into_diagnostic(),
+            RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
+            RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
+            RuntimeError::OpCode(err) => err.into_diagnostic((), chunk_cache),
+        };
+
+        let source = chunk_id
+            .and_then(|id| chunk_cache.source(id))
+            .unwrap_or_default();
+        let name = chunk_id
+            .and_then(|id| chunk_cache.location(id).map(|location| location.file))
+            .unwrap_or_else(|| "<unnamed>".to_string());
+
+        let files = SimpleFile::new(name, source);
+
+        Diagnostic { files, message }
     }
 }
 
