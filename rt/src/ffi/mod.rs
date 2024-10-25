@@ -114,6 +114,23 @@ where
     fn debug_info(&self) -> DebugInfo;
 }
 
+impl<Ty, T> LuaFfi<Ty> for Box<T>
+where
+    Ty: CoreTypes,
+    T: LuaFfi<Ty> + ?Sized,
+{
+    type Delegate = <T as LuaFfi<Ty>>::Delegate;
+    type UnpinDelegate = <T as LuaFfi<Ty>>::UnpinDelegate;
+
+    fn call(&self) -> Self::Delegate {
+        LuaFfi::call(self.as_ref())
+    }
+
+    fn debug_info(&self) -> DebugInfo {
+        self.as_ref().debug_info()
+    }
+}
+
 /// Construct `LuaFfi` object out of `Fn() -> impl (Delegate + Unpin)` function.
 ///
 /// Delegate is required to be `Unpin`.

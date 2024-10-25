@@ -104,12 +104,11 @@ impl<Ty> ThreadStore<Ty>
 where
     Ty: CoreTypes,
 {
-    fn new_thread(&mut self, ctx: Context<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
+    fn new_thread(&mut self, heap: &mut Heap<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
         let id = ThreadId(self.threads.len());
 
         self.threads.push(ThreadState::Startup);
-        self.nursery
-            .insert(id, ThreadImpetus::new(callable, &mut ctx.core.gc));
+        self.nursery.insert(id, ThreadImpetus::new(callable, heap));
 
         id
     }
@@ -176,7 +175,7 @@ where
     }
 }
 
-pub(crate) struct Orchestrator<Ty>
+pub struct Orchestrator<Ty>
 where
     Ty: CoreTypes,
 {
@@ -206,12 +205,8 @@ where
         }
     }
 
-    pub fn new_thread(&mut self, ctx: Context<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
-        self.store.new_thread(ctx, callable)
-    }
-
-    pub(crate) fn push(&mut self, id: ThreadId) {
-        self.stack.push(id);
+    pub fn new_thread(&mut self, heap: &mut Heap<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
+        self.store.new_thread(heap, callable)
     }
 }
 
@@ -220,12 +215,18 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(crate) fn enter(&mut self, mut ctx: Context<Ty>) -> Result<(), RtError<Ty>> {
+    pub(crate) fn enter(
+        &mut self,
+        mut ctx: Context<Ty>,
+        thread_id: ThreadId,
+    ) -> Result<(), RtError<Ty>> {
         use crate::ffi::delegate::Response;
 
-        let Some(mut current) = self.stack.pop() else {
-            return Ok(());
-        };
+        if !self.stack.is_empty() {
+            todo!()
+        }
+
+        let mut current = thread_id;
         let mut response = Response::Resume;
 
         loop {

@@ -151,7 +151,7 @@ where
 {
     pub core: Core<Ty>,
     pub chunk_cache: C,
-    orchestrator: Orchestrator<Ty>,
+    pub orchestrator: Orchestrator<Ty>,
 }
 
 impl<Ty, C> Runtime<Ty, C>
@@ -168,6 +168,15 @@ where
             chunk_cache,
             orchestrator,
         }
+    }
+}
+
+impl<Ty, C> Runtime<Ty, C>
+where
+    Ty: CoreTypes,
+{
+    pub fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
+        self.orchestrator.new_thread(&mut self.core.gc, callable)
     }
 }
 
@@ -197,12 +206,9 @@ where
     Ty::RustClosure: DLuaFfi<Ty>,
     C: ChunkCache,
 {
-    pub fn enter(&mut self, callable: Callable<Strong, Ty>) -> Result<(), RtError<Ty>> {
-        let (mut ctx, orchestrator) = self.context();
-        let id = orchestrator.new_thread(ctx.reborrow(), callable);
-        orchestrator.push(id);
-
-        orchestrator.enter(ctx)
+    pub fn resume(&mut self, thread_id: ThreadId) -> Result<(), RtError<Ty>> {
+        let (ctx, orchestrator) = self.context();
+        orchestrator.enter(ctx, thread_id)
     }
 }
 
