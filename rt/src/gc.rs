@@ -46,11 +46,11 @@ where
     }
 }
 
-pub trait FromWithGc<T, Gc> {
+pub trait ConvertFrom<T, Gc> {
     fn from_with_gc(value: T, gc: &mut Gc) -> Self;
 }
 
-impl<T, Gc, U> FromWithGc<T, Gc> for U
+impl<T, Gc, U> ConvertFrom<T, Gc> for U
 where
     T: TryConvertInto<U, Gc, Error = std::convert::Infallible>,
 {
@@ -62,13 +62,13 @@ where
     }
 }
 
-pub trait IntoWithGc<T, Gc> {
+pub trait ConvertInto<T, Gc> {
     fn into_with_gc(self, gc: &mut Gc) -> T;
 }
 
-impl<T, Gc, U> IntoWithGc<T, Gc> for U
+impl<T, Gc, U> ConvertInto<T, Gc> for U
 where
-    T: FromWithGc<U, Gc>,
+    T: ConvertFrom<U, Gc>,
 {
     fn into_with_gc(self, gc: &mut Gc) -> T {
         T::from_with_gc(self, gc)

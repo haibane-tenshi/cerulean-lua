@@ -165,7 +165,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use super::tuple::Tuple;
-use crate::gc::{Heap, IntoWithGc, TryConvertInto};
+use crate::gc::{ConvertInto, Heap, TryConvertInto};
 use crate::runtime::{StackGuard, TransientStackFrame};
 use crate::value::{CoreTypes, NilOr, Types, Value, Weak};
 use sealed::{BubbleUp, Sealed};
@@ -606,7 +606,7 @@ impl<Ty, T, R> FormatReturns<Ty, Heap<Ty>, R> for T
 where
     Ty: CoreTypes,
     T: Extend<Value<Weak, Ty>>,
-    R: IntoWithGc<Value<Weak, Ty>, Heap<Ty>>,
+    R: ConvertInto<Value<Weak, Ty>, Heap<Ty>>,
 {
     fn format(&mut self, gc: &mut Heap<Ty>, value: R) {
         let value = value.into_with_gc(gc);
