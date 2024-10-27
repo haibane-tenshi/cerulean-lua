@@ -337,7 +337,7 @@ where
     Ty: CoreTypes,
 {
     pub(crate) fn guard(&mut self, boundary: RawStackSlot) -> Option<StackGuard<Ty>> {
-        if self.len() > boundary {
+        if self.len() < boundary {
             return None;
         }
 
