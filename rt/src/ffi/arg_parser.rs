@@ -165,7 +165,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use super::tuple::Tuple;
-use crate::gc::{Heap, IntoWithGc, TryIntoWithGc};
+use crate::gc::{Heap, IntoWithGc, TryConvertInto};
 use crate::runtime::{StackGuard, TransientStackFrame};
 use crate::value::{CoreTypes, NilOr, Types, Value, Weak};
 use sealed::{BubbleUp, Sealed};
@@ -430,10 +430,10 @@ impl<'a, Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &'a [Value<Rf, Ty>]
 where
     Rf: Types,
     Ty: CoreTypes,
-    Value<Rf, Ty>: Clone + TryIntoWithGc<T, Heap<Ty>>,
-    <Value<Rf, Ty> as TryIntoWithGc<T, Heap<Ty>>>::Error: Error,
+    Value<Rf, Ty>: Clone + TryConvertInto<T, Heap<Ty>>,
+    <Value<Rf, Ty> as TryConvertInto<T, Heap<Ty>>>::Error: Error,
 {
-    type Error = MissingArg<<Value<Rf, Ty> as TryIntoWithGc<T, Heap<Ty>>>::Error>;
+    type Error = MissingArg<<Value<Rf, Ty> as TryConvertInto<T, Heap<Ty>>>::Error>;
 
     fn extract(self, gc: &mut Heap<Ty>) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;

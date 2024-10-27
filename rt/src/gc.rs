@@ -12,13 +12,13 @@ use crate::value::Meta;
 
 pub type Heap<Ty> = TrueHeap<Meta<Ty>, DefaultParams<Ty>>;
 
-pub trait TryFromWithGc<T, Gc>: Sized {
+pub trait TryConvertFrom<T, Gc>: Sized {
     type Error;
 
     fn try_from_with_gc(value: T, gc: &mut Gc) -> Result<Self, Self::Error>;
 }
 
-impl<T, Gc, U> TryFromWithGc<T, Gc> for U
+impl<T, Gc, U> TryConvertFrom<T, Gc> for U
 where
     T: TryInto<U>,
 {
@@ -29,17 +29,17 @@ where
     }
 }
 
-pub trait TryIntoWithGc<T, Gc> {
+pub trait TryConvertInto<T, Gc> {
     type Error;
 
     fn try_into_with_gc(self, gc: &mut Gc) -> Result<T, Self::Error>;
 }
 
-impl<T, Gc, U> TryIntoWithGc<T, Gc> for U
+impl<T, Gc, U> TryConvertInto<T, Gc> for U
 where
-    T: TryFromWithGc<U, Gc>,
+    T: TryConvertFrom<U, Gc>,
 {
-    type Error = <T as TryFromWithGc<U, Gc>>::Error;
+    type Error = <T as TryConvertFrom<U, Gc>>::Error;
 
     fn try_into_with_gc(self, gc: &mut Gc) -> Result<T, Self::Error> {
         T::try_from_with_gc(self, gc)
@@ -52,7 +52,7 @@ pub trait FromWithGc<T, Gc> {
 
 impl<T, Gc, U> FromWithGc<T, Gc> for U
 where
-    T: TryIntoWithGc<U, Gc, Error = std::convert::Infallible>,
+    T: TryConvertInto<U, Gc, Error = std::convert::Infallible>,
 {
     fn from_with_gc(value: T, gc: &mut Gc) -> Self {
         match value.try_into_with_gc(gc) {

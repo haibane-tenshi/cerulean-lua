@@ -15,7 +15,7 @@ use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, RuntimeError};
-use crate::gc::{DisplayWith, Heap, LuaPtr, TryIntoWithGc};
+use crate::gc::{DisplayWith, Heap, LuaPtr, TryConvertInto};
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
 use crate::runtime::{Closure, Core, Interned, ThreadId};

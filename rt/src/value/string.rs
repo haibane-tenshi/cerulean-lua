@@ -6,17 +6,17 @@ use std::path::PathBuf;
 use gc::Trace;
 
 use super::{Concat, CoreTypes, Len, TypeMismatchOrError, Types, Value};
-use crate::gc::{TryFromWithGc, TryIntoWithGc};
+use crate::gc::{TryConvertFrom, TryConvertInto};
 
 pub struct LuaString<T>(pub T);
 
-impl<T, Rf, Ty, Gc> TryFromWithGc<Value<Rf, Ty>, Gc> for LuaString<T>
+impl<T, Rf, Ty, Gc> TryConvertFrom<Value<Rf, Ty>, Gc> for LuaString<T>
 where
     Rf: Types,
     Ty: CoreTypes,
-    Rf::String<Ty::String>: TryIntoWithGc<T, Gc>,
+    Rf::String<Ty::String>: TryConvertInto<T, Gc>,
 {
-    type Error = TypeMismatchOrError<<Rf::String<Ty::String> as TryIntoWithGc<T, Gc>>::Error>;
+    type Error = TypeMismatchOrError<<Rf::String<Ty::String> as TryConvertInto<T, Gc>>::Error>;
 
     fn try_from_with_gc(value: Value<Rf, Ty>, gc: &mut Gc) -> Result<Self, Self::Error> {
         match value {

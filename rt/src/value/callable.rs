@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use gc::Trace;
 
-use crate::gc::{Heap, TryFromWithGc};
+use crate::gc::{Heap, TryConvertFrom};
 
 use super::{CoreTypes, Strong, TypeMismatchError, Types, Value, Weak};
 
@@ -50,7 +50,7 @@ where
     }
 }
 
-impl<Ty> TryFromWithGc<Callable<Weak, Ty>, Heap<Ty>> for Callable<Strong, Ty>
+impl<Ty> TryConvertFrom<Callable<Weak, Ty>, Heap<Ty>> for Callable<Strong, Ty>
 where
     Ty: CoreTypes,
 {

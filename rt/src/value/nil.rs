@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use super::{CoreTypes, Type, TypeMismatchError, Types, Value};
-use crate::gc::{TryFromWithGc, TryIntoWithGc};
+use crate::gc::{TryConvertFrom, TryConvertInto};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Nil;
@@ -85,13 +85,13 @@ impl<T> From<NilOr<T>> for Option<T> {
     }
 }
 
-impl<T, Rf, Ty, Gc> TryFromWithGc<Value<Rf, Ty>, Gc> for NilOr<T>
+impl<T, Rf, Ty, Gc> TryConvertFrom<Value<Rf, Ty>, Gc> for NilOr<T>
 where
     Rf: Types,
     Ty: CoreTypes,
-    Value<Rf, Ty>: TryIntoWithGc<T, Gc>,
+    Value<Rf, Ty>: TryConvertInto<T, Gc>,
 {
-    type Error = <Value<Rf, Ty> as TryIntoWithGc<T, Gc>>::Error;
+    type Error = <Value<Rf, Ty> as TryConvertInto<T, Gc>>::Error;
 
     fn try_from_with_gc(value: Value<Rf, Ty>, gc: &mut Gc) -> Result<NilOr<T>, Self::Error> {
         match value {

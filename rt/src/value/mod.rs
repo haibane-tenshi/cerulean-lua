@@ -14,7 +14,7 @@ use std::fmt::{Debug, Display};
 use enumoid::Enumoid;
 use gc::Trace;
 
-use crate::gc::{DisplayWith, Heap, TryFromWithGc};
+use crate::gc::{DisplayWith, Heap, TryConvertFrom};
 
 pub use boolean::Boolean;
 pub use callable::Callable;
@@ -288,7 +288,7 @@ where
     }
 }
 
-impl<Ty> TryFromWithGc<WeakValue<Ty>, Heap<Ty>> for StrongValue<Ty>
+impl<Ty> TryConvertFrom<WeakValue<Ty>, Heap<Ty>> for StrongValue<Ty>
 where
     Ty: CoreTypes,
 {
