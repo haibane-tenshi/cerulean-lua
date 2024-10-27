@@ -49,6 +49,8 @@ where
     pub(super) fn drain_written(
         &mut self,
     ) -> impl Iterator<Item = (UpvalueSlot, WeakValue<Ty>)> + use<'_, Ty> {
+        self.unsync_tag.clear();
+
         self.values
             .drain_enumerated(..)
             .zip(self.write_tag.drain(..))
