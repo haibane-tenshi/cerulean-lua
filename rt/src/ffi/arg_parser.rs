@@ -1,10 +1,7 @@
 //! Convert Lua [`Value`] stack from/to Rust arguments.
 //!
 //! The purpose of traits in this module to provide a way to automatically
-//! generate conversion layer between Lua ABI and some Rust functions.
-//!
-//! Not all Rust functions are can benefit from the mechanism.
-//! If you are interested in constructing such functions, read below.
+//! generate conversion layer between a pile of Lua values and strongly typed Rust.
 //!
 //! # Parsing arguments
 //!
@@ -17,14 +14,11 @@
 //!
 //! Parser definitions are provided for the following types.
 //!
-//! Terminal parsers:
-//! * Any `T` where `T: TryFrom<Value>`.
+//! Atom parsers:
+//! * Any `T` where `T: ParseAtom<Value, Heap>`.
 //!
 //!     The parser will attempt to match on single `Value`, failing when conversion fails.
-//!
 //!     This is your primary way to extend the parser.
-//!     You only need to provide [`From`]/[`TryFrom`] implementation in order for your type to be parseable.
-//!     Remember to implement [`Error`] for the error type!
 //!
 //! Combinator parsers:
 //! * Tuples `()`, `(T0,)`, ..., `(T0, T1, ..., T11)` of up to 12 elements.
@@ -46,6 +40,41 @@
 //!     It never fails.
 //!
 //! Combinator parsers accept any parsers as input including combinator parsers.
+//!
+//! ## Atom parsers
+//!
+//! This module includes a number of atom types for common situations.
+//!
+//! Lua values can be extracted verbatim using
+//!
+//! * [`Nil`]
+//! * [`Boolean`]
+//! * [`Int`]
+//! * [`Float`]
+//! * [`LuaString`]
+//! * [`LuaTable`]
+//!
+//! Those wrappers perform no additional conversions, their purpose is to ensure that you are provided with correct `Value` enum item.
+//!
+//! Additionally, there is
+//!
+//! * [`NilOr`] to help represent optional values,
+//!     although refer to section about [handling optional arguments](#handling-optional-arguments) for caveats.
+//! * [`FromLuaString`] to help construct string-y Rust types.
+//!     
+//!     `FromLuaString` will attempt to convert underlying value to desired representation.
+//!     It is most useful when you intend to pass Lua string to Rust code which expects to find a "proper" string type
+//!     such as `String`, `PathBuf` or `OsString`.
+//!
+//!     Implementation is generic: it can be used to extract any type with suitable `TryInto` impl.
+//!     For example you can also attempt to convert to `Vec<u8>` when string is expected to contain binary data.
+//!
+//!     Unfortunately, generic parsing API is basically incompatible with borrowing so only owned types can be acquired in such way.
+//!
+//!     You should note that Lua claims to be [encoding-agnostic][lua#2.1] so such conversion may implicate string reencoding.
+//!     See discussion about encodings (link - TODO) in documentation of `value::string` module.
+//!
+//! [lua#2.1]: https://www.lua.org/manual/5.4/manual.html#2.1
 //!
 //! ## Common parsing situations
 //!
@@ -75,7 +104,7 @@
 //! Another issue is ambiguity in meaning.
 //!
 //! Lua typically represents optional values as either `nil` or absence of value.
-//! This is possible because runtime can stelthily adjust its own stack via spawning
+//! This is possible because runtime can stealthily adjust its own stack via spawning
 //! extra `nil` values from thin air when needed (and ignore them otherwise).
 //!
 //! So, what does `None` represent?
@@ -102,8 +131,8 @@
 //!
 //! Nullable types can be represented with [`NilOr<T>`].
 //!
-//! Also you can match on `nil` directly via [`Nil`](crate::value::Nil) Rust type.
-//! Note that this is not `()`!
+//! Also you can match on `nil` directly via [`Nil`] Rust type.
+//! Note that this is different from `()`!
 //! `()` is an empty parser that matches on 0 values.
 //!
 //! ### Handling optional arguments
@@ -165,10 +194,13 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use super::tuple::Tuple;
-use crate::gc::{ConvertInto, Heap, TryConvertInto};
-use crate::runtime::{StackGuard, TransientStackFrame};
-use crate::value::{CoreTypes, NilOr, Types, Value, Weak};
+// use crate::gc::{ConvertInto, Heap, TryConvertInto, TryConvertFrom};
+use crate::error::AlreadyDroppedError;
+use crate::gc::Heap;
+use crate::value::{CoreTypes, Strong, Type, Types, Value, Weak};
 use sealed::{BubbleUp, Sealed};
+
+pub use crate::value::{Boolean, Callable, Float, Int, Nil};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum Maybe<T> {
@@ -215,7 +247,7 @@ impl<T> From<Maybe<T>> for Option<T> {
 ///
 /// See module level [documentation](self#parsing-arguments) for usage explanation.
 pub trait ParseArgs<Values, Gc>: Sealed {
-    type Error: Error;
+    type Error;
 
     fn parse(self, gc: &mut Gc) -> Result<Values, ParseError<Self::Error>>;
 }
@@ -223,7 +255,7 @@ pub trait ParseArgs<Values, Gc>: Sealed {
 impl<'a, Value, Values, Gc> ParseArgs<Values, Gc> for &'a [Value]
 where
     Self: ExtractArgs<Values, Gc>,
-    <<Self as ExtractArgs<Values, Gc>>::Error as BubbleUp>::Output: Error,
+    // <<Self as ExtractArgs<Values, Gc>>::Error as BubbleUp>::Output: Error,
 {
     type Error = <<Self as ExtractArgs<Values, Gc>>::Error as BubbleUp>::Output;
 
@@ -430,22 +462,120 @@ impl<'a, Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &'a [Value<Rf, Ty>]
 where
     Rf: Types,
     Ty: CoreTypes,
-    Value<Rf, Ty>: Clone + TryConvertInto<T, Heap<Ty>>,
-    <Value<Rf, Ty> as TryConvertInto<T, Heap<Ty>>>::Error: Error,
+    Value<Rf, Ty>: Clone,
+    T: ParseAtom<Value<Rf, Ty>, Heap<Ty>>,
 {
-    type Error = MissingArg<<Value<Rf, Ty> as TryConvertInto<T, Heap<Ty>>>::Error>;
+    type Error = MissingArg<<T as ParseAtom<Value<Rf, Ty>, Heap<Ty>>>::Error>;
 
     fn extract(self, gc: &mut Heap<Ty>) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;
-        let value = value
-            .clone()
-            .try_into_with_gc(gc)
-            .map_err(|err| MissingArg::Other {
-                leftover_args: view.len() + 1,
-                err,
-            })?;
+        let value = ParseAtom::parse_atom(value.clone(), gc).map_err(|err| MissingArg::Other {
+            leftover_args: view.len() + 1,
+            err,
+        })?;
 
         Ok((view, value))
+    }
+}
+
+/// Convert single value.
+pub trait ParseAtom<T, Ex>: Sized {
+    type Error;
+
+    fn parse_atom(value: T, extra: &mut Ex) -> Result<Self, Self::Error>;
+}
+
+impl<T, Ex> ParseAtom<T, Ex> for T {
+    type Error = std::convert::Infallible;
+
+    fn parse_atom(value: T, _: &mut Ex) -> Result<Self, Self::Error> {
+        Ok(value)
+    }
+}
+
+impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Nil
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Boolean
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Int
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Float
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl<Rf, Ty, Ex, T> ParseAtom<Value<Rf, Ty>, Ex> for LuaString<T>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Into<T>,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl<Rf, Ty, Ex, T> ParseAtom<Value<Rf, Ty>, Ex> for LuaTable<T>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::Table<Ty::Table>: Into<T>,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Callable<Rf, Ty>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+        value.try_into()
     }
 }
 
@@ -522,36 +652,36 @@ impl<E> MissingArg<E> {
 /// Render type into iterator of Lua [`Value`]s.
 ///
 /// See module-level [documentation](self#formatting-returns) for usage explanation.
-pub trait FormatReturns<Ty, Gc, R> {
-    fn format(&mut self, gc: &mut Gc, value: R);
+pub trait FormatReturns<Ty, R> {
+    fn format(&mut self, value: R);
 }
 
-impl<Ty, Gc, T> FormatReturns<Ty, Gc, ()> for T {
-    fn format(&mut self, _gc: &mut Gc, (): ()) {}
+impl<Ty, T> FormatReturns<Ty, ()> for T {
+    fn format(&mut self, (): ()) {}
 }
 
-impl<Ty, Gc, T, A> FormatReturns<Ty, Gc, (A,)> for T
+impl<Ty, T, A> FormatReturns<Ty, (A,)> for T
 where
-    T: FormatReturns<Ty, Gc, A>,
+    T: FormatReturns<Ty, A>,
 {
-    fn format(&mut self, gc: &mut Gc, value: (A,)) {
+    fn format(&mut self, value: (A,)) {
         let (a,) = value;
-        self.format(gc, a);
+        self.format(a);
     }
 }
 
 macro_rules! format_tuple {
     ($first:ident, $($t:ident),*) => {
-        impl<Ty, Gc, T, $first, $($t),*> FormatReturns<Ty, Gc, ($first, $($t),*)> for T
+        impl<Ty, T, $first, $($t),*> FormatReturns<Ty, ($first, $($t),*)> for T
         where
-            T: FormatReturns<Ty, Gc, $first>,
-            $(T: FormatReturns<Ty, Gc, $t>,)*
+            T: FormatReturns<Ty, $first>,
+            $(T: FormatReturns<Ty, $t>,)*
         {
-            fn format(&mut self, gc: &mut Gc, value: ($first, $($t),*)) {
+            fn format(&mut self, value: ($first, $($t),*)) {
                 #[allow(non_snake_case)]
                 let ($first, $($t,)*) = value;
-                self.format(gc, $first);
-                $(self.format(gc, $t);)*
+                self.format($first);
+                $(self.format($t);)*
             }
         }
     };
@@ -569,64 +699,48 @@ format_tuple!(A, B, C, D, E, F, G, H, I, J);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K);
 format_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
-impl<Ty, Gc, T, R> FormatReturns<Ty, Gc, Maybe<R>> for T
+impl<Ty, T, R> FormatReturns<Ty, Maybe<R>> for T
 where
-    T: FormatReturns<Ty, Gc, R>,
+    T: FormatReturns<Ty, R>,
 {
-    fn format(&mut self, gc: &mut Gc, value: Maybe<R>) {
+    fn format(&mut self, value: Maybe<R>) {
         if let Some(value) = value.into_option() {
-            self.format(gc, value);
+            self.format(value);
         }
     }
 }
 
-impl<Ty, Gc, T, R, const N: usize> FormatReturns<Ty, Gc, [R; N]> for T
+impl<Ty, T, R, const N: usize> FormatReturns<Ty, [R; N]> for T
 where
-    T: FormatReturns<Ty, Gc, R>,
+    T: FormatReturns<Ty, R>,
 {
-    fn format(&mut self, gc: &mut Gc, values: [R; N]) {
+    fn format(&mut self, values: [R; N]) {
         for value in values {
-            self.format(gc, value);
+            self.format(value);
         }
     }
 }
 
-impl<Ty, Gc, T, R> FormatReturns<Ty, Gc, Vec<R>> for T
+impl<Ty, T, R> FormatReturns<Ty, Vec<R>> for T
 where
-    T: FormatReturns<Ty, Gc, R>,
+    T: FormatReturns<Ty, R>,
 {
-    fn format(&mut self, gc: &mut Gc, values: Vec<R>) {
+    fn format(&mut self, values: Vec<R>) {
         for value in values {
-            self.format(gc, value);
+            self.format(value);
         }
     }
 }
 
-impl<Ty, T, R> FormatReturns<Ty, Heap<Ty>, R> for T
+impl<Ty, T, R> FormatReturns<Ty, R> for T
 where
     Ty: CoreTypes,
     T: Extend<Value<Weak, Ty>>,
-    R: ConvertInto<Value<Weak, Ty>, Heap<Ty>>,
+    R: Into<Value<Weak, Ty>>,
 {
-    fn format(&mut self, gc: &mut Heap<Ty>, value: R) {
-        let value = value.into_with_gc(gc);
+    fn format(&mut self, value: R) {
+        let value = value.into();
         self.extend([value]);
-    }
-}
-
-impl<'a, Ty> StackGuard<'a, Ty>
-where
-    Ty: CoreTypes,
-{
-    pub fn format<R>(&mut self, gc: &mut Heap<Ty>, value: R)
-    where
-        for<'b> TransientStackFrame<'b, Ty>: FormatReturns<Ty, Heap<Ty>, R>,
-    {
-        gc.pause(|heap| {
-            let mut stack = self.transient_frame();
-            FormatReturns::format(&mut stack, heap, value);
-            stack.sync(heap);
-        });
     }
 }
 
@@ -1146,3 +1260,298 @@ impl<A, B, C, D, E, F, G, H, I, J, K> OptsImpl for (A, B, C, D, E, F, G, H, I, J
 impl<A, B, C, D, E, F, G, H, I, J, K, L> OptsImpl for (A, B, C, D, E, F, G, H, I, J, K, L) {
     type Output = Maybe<(NilOr<A>, Opts<(B, C, D, E, F, G, H, I, J, K, L)>)>;
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum NilOr<T> {
+    #[default]
+    Nil,
+    Some(T),
+}
+
+impl<T> NilOr<T> {
+    pub fn into_option(self) -> Option<T> {
+        self.into()
+    }
+}
+
+impl<T> From<Option<T>> for NilOr<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(t) => NilOr::Some(t),
+            None => NilOr::Nil,
+        }
+    }
+}
+
+impl<T> From<NilOr<T>> for Option<T> {
+    fn from(value: NilOr<T>) -> Self {
+        match value {
+            NilOr::Nil => None,
+            NilOr::Some(t) => Some(t),
+        }
+    }
+}
+
+impl<T> From<Nil> for NilOr<T> {
+    fn from(Nil: Nil) -> Self {
+        NilOr::Nil
+    }
+}
+
+impl<T, Rf, Ty> From<NilOr<T>> for Value<Rf, Ty>
+where
+    T: Into<Value<Rf, Ty>>,
+    Rf: Types,
+    Ty: CoreTypes,
+{
+    fn from(value: NilOr<T>) -> Self {
+        match value {
+            NilOr::Nil => Value::Nil,
+            NilOr::Some(value) => value.into(),
+        }
+    }
+}
+
+impl<T, Rf, Ty> TryFrom<Value<Rf, Ty>> for NilOr<T>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    Value<Rf, Ty>: TryInto<T>,
+{
+    type Error = <Value<Rf, Ty> as TryInto<T>>::Error;
+
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Nil => Ok(NilOr::Nil),
+            value => value.try_into().map(NilOr::Some),
+        }
+    }
+}
+
+impl<Rf, Ty, Ex, T> ParseAtom<Value<Rf, Ty>, Ex> for NilOr<T>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    T: ParseAtom<Value<Rf, Ty>, Ex>,
+{
+    type Error = <T as ParseAtom<Value<Rf, Ty>, Ex>>::Error;
+
+    fn parse_atom(value: Value<Rf, Ty>, extra: &mut Ex) -> Result<Self, Self::Error> {
+        match value {
+            Value::Nil => Ok(NilOr::Nil),
+            value => ParseAtom::parse_atom(value, extra).map(NilOr::Some),
+        }
+    }
+}
+
+pub struct FromLuaString<T>(pub T);
+
+impl<Ty, T> ParseAtom<Value<Strong, Ty>, Heap<Ty>> for FromLuaString<T>
+where
+    Ty: CoreTypes,
+    Ty::String: TryInto<T>,
+{
+    type Error = StrongConvertError<<Ty::String as TryInto<T>>::Error>;
+
+    fn parse_atom(value: Value<Strong, Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+        use crate::gc::LuaPtr;
+
+        let Value::String(LuaPtr(ptr)) = value else {
+            let err = TypeMismatchError {
+                expected: Type::String,
+                found: value.type_(),
+            };
+
+            return Err(err.into());
+        };
+
+        extra
+            .get_root(ptr)
+            .as_ref()
+            .clone()
+            .try_into()
+            .map(FromLuaString)
+            .map_err(StrongConvertError::Other)
+    }
+}
+
+impl<Ty, T> ParseAtom<Value<Weak, Ty>, Heap<Ty>> for FromLuaString<T>
+where
+    Ty: CoreTypes,
+    Ty::String: TryInto<T>,
+{
+    type Error = WeakConvertError<<Ty::String as TryInto<T>>::Error>;
+
+    fn parse_atom(value: Value<Weak, Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+        use crate::gc::LuaPtr;
+
+        let Value::String(LuaPtr(ptr)) = value else {
+            let err = TypeMismatchError {
+                expected: Type::String,
+                found: value.type_(),
+            };
+
+            return Err(err.into());
+        };
+
+        extra
+            .get(ptr)
+            .ok_or(AlreadyDroppedError)?
+            .as_ref()
+            .clone()
+            .try_into()
+            .map(FromLuaString)
+            .map_err(WeakConvertError::Other)
+    }
+}
+
+pub struct LuaString<T>(pub T);
+
+impl<T, Rf, Ty> From<LuaString<T>> for Value<Rf, Ty>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    T: Into<Rf::String<Ty::String>>,
+{
+    fn from(value: LuaString<T>) -> Self {
+        let LuaString(value) = value;
+
+        Value::String(value.into())
+    }
+}
+
+impl<T, Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaString<T>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::String<Ty::String>: Into<T>,
+{
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(value) => Ok(LuaString(value.into())),
+            value => {
+                let err = TypeMismatchError {
+                    expected: Type::String,
+                    found: value.type_(),
+                };
+
+                Err(err)
+            }
+        }
+    }
+}
+
+pub struct LuaTable<T>(pub T);
+
+impl<Rf, Ty, T> From<LuaTable<T>> for Value<Rf, Ty>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::Table<Ty::Table>: From<T>,
+{
+    fn from(value: LuaTable<T>) -> Self {
+        let LuaTable(value) = value;
+        Value::Table(value.into())
+    }
+}
+
+impl<Rf, Ty, T> TryFrom<Value<Rf, Ty>> for LuaTable<T>
+where
+    Rf: Types,
+    Ty: CoreTypes,
+    Rf::Table<Ty::Table>: Into<T>,
+{
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<Rf, Ty>) -> Result<LuaTable<T>, Self::Error> {
+        match value {
+            Value::Table(t) => Ok(LuaTable(t.into())),
+            value => {
+                let err = TypeMismatchError {
+                    found: value.type_(),
+                    expected: Type::Table,
+                };
+
+                Err(err)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TypeMismatchError {
+    pub found: Type,
+    pub expected: Type,
+}
+
+impl Display for TypeMismatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let TypeMismatchError { found, expected } = self;
+
+        write!(f, "expected value of type `{expected}`, found `{found}`")
+    }
+}
+
+impl Error for TypeMismatchError {}
+
+#[derive(Debug, Clone, Copy)]
+pub enum StrongConvertError<E> {
+    TypeMismatch(TypeMismatchError),
+    Other(E),
+}
+
+impl<E> From<TypeMismatchError> for StrongConvertError<E> {
+    fn from(value: TypeMismatchError) -> Self {
+        StrongConvertError::TypeMismatch(value)
+    }
+}
+
+impl<E> Display for StrongConvertError<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StrongConvertError::TypeMismatch(err) => write!(f, "{err}"),
+            StrongConvertError::Other(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl<E> Error for StrongConvertError<E> where Self: Debug + Display {}
+
+#[derive(Debug, Clone, Copy)]
+pub enum WeakConvertError<E> {
+    TypeMismatch(TypeMismatchError),
+    AlreadyDropped(AlreadyDroppedError),
+    Other(E),
+}
+
+impl<E> From<TypeMismatchError> for WeakConvertError<E> {
+    fn from(value: TypeMismatchError) -> Self {
+        WeakConvertError::TypeMismatch(value)
+    }
+}
+
+impl<E> From<AlreadyDroppedError> for WeakConvertError<E> {
+    fn from(value: AlreadyDroppedError) -> Self {
+        WeakConvertError::AlreadyDropped(value)
+    }
+}
+
+impl<E> Display for WeakConvertError<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WeakConvertError::TypeMismatch(err) => write!(f, "{err}"),
+            WeakConvertError::AlreadyDropped(err) => write!(f, "{err}"),
+            WeakConvertError::Other(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl<E> Error for WeakConvertError<E> where Self: Debug + Display {}

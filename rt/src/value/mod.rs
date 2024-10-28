@@ -8,21 +8,19 @@ pub mod table;
 pub mod traits;
 pub mod userdata;
 
-use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use enumoid::Enumoid;
 use gc::Trace;
 
-use crate::gc::{DisplayWith, Heap, TryConvertFrom};
+use crate::gc::{DisplayWith, Heap};
 
 pub use boolean::Boolean;
 pub use callable::Callable;
 pub use float::Float;
 pub use int::Int;
-pub use nil::{Nil, NilOr};
-pub use string::LuaString;
-pub use table::{KeyValue, LuaTable, Table};
+pub use nil::Nil;
+pub use table::{KeyValue, Table};
 pub use traits::{Concat, CoreTypes, Len, Meta, Metatable, Strong, TableIndex, Types, Weak};
 pub use userdata::DefaultParams;
 
@@ -288,18 +286,18 @@ where
     }
 }
 
-impl<Ty> TryConvertFrom<WeakValue<Ty>, Heap<Ty>> for StrongValue<Ty>
-where
-    Ty: CoreTypes,
-{
-    type Error = crate::error::AlreadyDroppedError;
+// impl<Ty> TryConvertFrom<WeakValue<Ty>, Heap<Ty>> for StrongValue<Ty>
+// where
+//     Ty: CoreTypes,
+// {
+//     type Error = crate::error::AlreadyDroppedError;
 
-    fn try_from_with_gc(value: WeakValue<Ty>, heap: &mut Heap<Ty>) -> Result<Self, Self::Error> {
-        use crate::error::AlreadyDroppedError;
+//     fn try_from_with_gc(value: WeakValue<Ty>, heap: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+//         use crate::error::AlreadyDroppedError;
 
-        value.upgrade(heap).ok_or(AlreadyDroppedError)
-    }
-}
+//         value.upgrade(heap).ok_or(AlreadyDroppedError)
+//     }
+// }
 
 impl<Rf, Ty> Trace for Value<Rf, Ty>
 where
@@ -509,39 +507,3 @@ where
         ValueWith(self, extra)
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-pub struct TypeMismatchError {
-    pub found: Type,
-    pub expected: Type,
-}
-
-impl Display for TypeMismatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let TypeMismatchError { found, expected } = self;
-
-        write!(f, "expected value of type `{expected}`, found `{found}`")
-    }
-}
-
-impl Error for TypeMismatchError {}
-
-#[derive(Debug, Clone, Copy)]
-pub enum TypeMismatchOrError<E> {
-    TypeMismatch(TypeMismatchError),
-    Other(E),
-}
-
-impl<E> Display for TypeMismatchOrError<E>
-where
-    E: Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TypeMismatchOrError::TypeMismatch(err) => write!(f, "{err}"),
-            TypeMismatchOrError::Other(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl<E> Error for TypeMismatchOrError<E> where Self: Debug + Display {}

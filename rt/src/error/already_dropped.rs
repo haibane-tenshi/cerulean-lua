@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display};
 
 use codespan_reporting::diagnostic::Diagnostic;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct AlreadyDroppedError;
 
 impl AlreadyDroppedError {

@@ -3,9 +3,9 @@ use std::hash::Hash;
 
 use gc::Trace;
 
-use crate::gc::{Heap, TryConvertFrom};
-
-use super::{CoreTypes, Strong, TypeMismatchError, Types, Value, Weak};
+use super::{CoreTypes, Strong, Types, Value, Weak};
+use crate::ffi::arg_parser::TypeMismatchError;
+use crate::gc::Heap;
 
 pub use crate::runtime::{Closure as LuaClosure, RuntimeView};
 
@@ -47,22 +47,6 @@ where
             Callable::Rust(t) => Callable::Rust(t.downgrade()),
             Callable::Lua(t) => Callable::Lua(t.downgrade()),
         }
-    }
-}
-
-impl<Ty> TryConvertFrom<Callable<Weak, Ty>, Heap<Ty>> for Callable<Strong, Ty>
-where
-    Ty: CoreTypes,
-{
-    type Error = crate::error::AlreadyDroppedError;
-
-    fn try_from_with_gc(
-        value: Callable<Weak, Ty>,
-        heap: &mut Heap<Ty>,
-    ) -> Result<Self, Self::Error> {
-        use crate::error::AlreadyDroppedError;
-
-        value.upgrade(heap).ok_or(AlreadyDroppedError)
     }
 }
 

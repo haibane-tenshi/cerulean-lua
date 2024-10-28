@@ -1,7 +1,8 @@
 use std::fmt::Display;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-use super::{CoreTypes, Type, TypeMismatchError, Types, Value};
+use super::{CoreTypes, Type, Types, Value};
+use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Boolean(pub bool);
@@ -93,6 +94,7 @@ where
         }
     }
 }
+
 impl<Rf, Ty> From<Boolean> for Value<Rf, Ty>
 where
     Rf: Types,

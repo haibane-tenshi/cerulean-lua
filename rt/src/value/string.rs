@@ -5,51 +5,7 @@ use std::path::PathBuf;
 
 use gc::Trace;
 
-use super::{Concat, CoreTypes, Len, TypeMismatchOrError, Types, Value};
-use crate::gc::{TryConvertFrom, TryConvertInto};
-
-pub struct LuaString<T>(pub T);
-
-impl<T, Rf, Ty, Gc> TryConvertFrom<Value<Rf, Ty>, Gc> for LuaString<T>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: TryConvertInto<T, Gc>,
-{
-    type Error = TypeMismatchOrError<<Rf::String<Ty::String> as TryConvertInto<T, Gc>>::Error>;
-
-    fn try_from_with_gc(value: Value<Rf, Ty>, gc: &mut Gc) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(t) => {
-                let r = t.try_into_with_gc(gc).map_err(TypeMismatchOrError::Other)?;
-                Ok(LuaString(r))
-            }
-            value => {
-                use super::{Type, TypeMismatchError};
-
-                let err = TypeMismatchError {
-                    expected: Type::String,
-                    found: value.type_(),
-                };
-
-                Err(TypeMismatchOrError::TypeMismatch(err))
-            }
-        }
-    }
-}
-
-impl<T, Rf, Ty> From<LuaString<T>> for Value<Rf, Ty>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    T: Into<Rf::String<Ty::String>>,
-{
-    fn from(value: LuaString<T>) -> Self {
-        let LuaString(value) = value;
-
-        Value::String(value.into())
-    }
-}
+use super::{Concat, Len};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct PossiblyUtf8Vec(pub Vec<u8>);

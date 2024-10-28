@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
-use gc::{GcCell, Root, RootCell};
+use gc::{Root, RootCell};
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::index::{ConstId, InstrId, InstrOffset, RecipeId, StackSlot};
 use repr::literal::Literal;
@@ -15,7 +15,7 @@ use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, RuntimeError};
-use crate::gc::{DisplayWith, Heap, LuaPtr, TryConvertInto};
+use crate::gc::{DisplayWith, Heap, LuaPtr};
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
 use crate::runtime::{Closure, Core, Interned, ThreadId};
@@ -1078,7 +1078,8 @@ where
                     // Function is invoked with table and *original* (before coercions!) index.
                     // It only picks up the latest "table" value which metamethod we tried to look up.
                     Value::Function(callable) => {
-                        let callable = callable.try_into_with_gc(&mut self.core.gc)?;
+                        let callable =
+                            callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
                         stack.push(table);
@@ -1175,7 +1176,9 @@ where
                     // Function is invoked with table, *original* (before coercions!) index and value.
                     // It only picks up the latest "table" value which metamethod we tried to look up.
                     Value::Function(callable) => {
-                        let callable = callable.try_into_with_gc(&mut self.core.gc)?;
+                        let callable = callable
+                            .upgrade(&mut self.core.gc)
+                            .ok_or(AlreadyDroppedError)?;
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
                         stack.push(table);
@@ -1201,7 +1204,12 @@ where
     ) -> Result<Callable<Strong, Ty>, RefAccessOrError<NotCallableError>> {
         loop {
             callable = match callable {
-                Value::Function(r) => return Ok(r.try_into_with_gc(&mut self.core.gc)?),
+                Value::Function(callable) => {
+                    let r = callable
+                        .upgrade(&mut self.core.gc)
+                        .ok_or(AlreadyDroppedError)?;
+                    return Ok(r);
+                }
                 t => t,
             };
 

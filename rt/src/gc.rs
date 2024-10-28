@@ -12,69 +12,6 @@ use crate::value::Meta;
 
 pub type Heap<Ty> = TrueHeap<Meta<Ty>, DefaultParams<Ty>>;
 
-pub trait TryConvertFrom<T, Gc>: Sized {
-    type Error;
-
-    fn try_from_with_gc(value: T, gc: &mut Gc) -> Result<Self, Self::Error>;
-}
-
-impl<T, Gc, U> TryConvertFrom<T, Gc> for U
-where
-    T: TryInto<U>,
-{
-    type Error = <T as TryInto<U>>::Error;
-
-    fn try_from_with_gc(value: T, _gc: &mut Gc) -> Result<Self, Self::Error> {
-        value.try_into()
-    }
-}
-
-pub trait TryConvertInto<T, Gc> {
-    type Error;
-
-    fn try_into_with_gc(self, gc: &mut Gc) -> Result<T, Self::Error>;
-}
-
-impl<T, Gc, U> TryConvertInto<T, Gc> for U
-where
-    T: TryConvertFrom<U, Gc>,
-{
-    type Error = <T as TryConvertFrom<U, Gc>>::Error;
-
-    fn try_into_with_gc(self, gc: &mut Gc) -> Result<T, Self::Error> {
-        T::try_from_with_gc(self, gc)
-    }
-}
-
-pub trait ConvertFrom<T, Gc> {
-    fn from_with_gc(value: T, gc: &mut Gc) -> Self;
-}
-
-impl<T, Gc, U> ConvertFrom<T, Gc> for U
-where
-    T: TryConvertInto<U, Gc, Error = std::convert::Infallible>,
-{
-    fn from_with_gc(value: T, gc: &mut Gc) -> Self {
-        match value.try_into_with_gc(gc) {
-            Ok(t) => t,
-            Err(err) => match err {},
-        }
-    }
-}
-
-pub trait ConvertInto<T, Gc> {
-    fn into_with_gc(self, gc: &mut Gc) -> T;
-}
-
-impl<T, Gc, U> ConvertInto<T, Gc> for U
-where
-    T: ConvertFrom<U, Gc>,
-{
-    fn into_with_gc(self, gc: &mut Gc) -> T {
-        T::from_with_gc(self, gc)
-    }
-}
-
 pub trait DisplayWith<Gc> {
     type Output<'a>: Display
     where

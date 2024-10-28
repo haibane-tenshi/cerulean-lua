@@ -5,7 +5,8 @@ use std::ops::{
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
-use super::{CoreTypes, Float, Type, TypeMismatchError, Types, Value};
+use super::{CoreTypes, Float, Type, Types, Value};
+use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int(pub i64);

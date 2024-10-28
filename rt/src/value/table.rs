@@ -6,9 +6,7 @@ use gc::Trace;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::{
-    CoreTypes, Meta, Metatable, TableIndex, TypeMismatchError, TypeMismatchOrError, Types, Value,
-};
+use super::{CoreTypes, Meta, Metatable, TableIndex, Types, Value};
 
 pub struct Table<Rf, Ty>
 where
@@ -351,47 +349,5 @@ where
             KeyValue::Table(t) => Value::Table(t),
             KeyValue::Userdata(t) => Value::Userdata(t),
         }
-    }
-}
-
-pub struct LuaTable<T>(pub T);
-
-impl<Rf, Ty, T> TryInto<LuaTable<T>> for Value<Rf, Ty>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::Table<Ty::Table>: TryInto<T>,
-{
-    type Error = TypeMismatchOrError<<Rf::Table<Ty::Table> as TryInto<T>>::Error>;
-
-    fn try_into(self) -> Result<LuaTable<T>, Self::Error> {
-        match self {
-            Value::Table(t) => t
-                .try_into()
-                .map(LuaTable)
-                .map_err(TypeMismatchOrError::Other),
-            value => {
-                use super::Type;
-
-                let err = TypeMismatchError {
-                    found: value.type_(),
-                    expected: Type::Table,
-                };
-
-                Err(TypeMismatchOrError::TypeMismatch(err))
-            }
-        }
-    }
-}
-
-impl<Rf, Ty, T> From<LuaTable<T>> for Value<Rf, Ty>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::Table<Ty::Table>: From<T>,
-{
-    fn from(value: LuaTable<T>) -> Self {
-        let LuaTable(value) = value;
-        Value::Table(value.into())
     }
 }

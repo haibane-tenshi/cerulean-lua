@@ -4,7 +4,8 @@ use std::ops::{
     Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
 };
 
-use super::{CoreTypes, Int, Type, TypeMismatchError, Types, Value};
+use super::{CoreTypes, Int, Type, Types, Value};
+use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Float(pub f64);
