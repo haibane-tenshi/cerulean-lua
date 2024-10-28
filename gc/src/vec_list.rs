@@ -101,6 +101,11 @@ where
 
     pub(crate) fn remove(&mut self, index: I) -> Option<T> {
         let place = self.values.get_mut(index)?;
+
+        if !place.is_occupied() {
+            return None;
+        }
+
         let r = place.remove(self.head);
 
         if place.is_open() {
