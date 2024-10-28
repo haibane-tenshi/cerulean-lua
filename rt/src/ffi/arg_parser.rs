@@ -541,11 +541,10 @@ where
     }
 }
 
-impl<Rf, Ty, Ex, T> ParseAtom<Value<Rf, Ty>, Ex> for LuaString<T>
+impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for LuaString<Rf::String<Ty::String>>
 where
     Rf: Types,
     Ty: CoreTypes,
-    Rf::String<Ty::String>: Into<T>,
 {
     type Error = TypeMismatchError;
 
@@ -554,11 +553,10 @@ where
     }
 }
 
-impl<Rf, Ty, Ex, T> ParseAtom<Value<Rf, Ty>, Ex> for LuaTable<T>
+impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for LuaTable<Rf::Table<Ty::Table>>
 where
     Rf: Types,
     Ty: CoreTypes,
-    Rf::Table<Ty::Table>: Into<T>,
 {
     type Error = TypeMismatchError;
 
@@ -1420,17 +1418,16 @@ where
     }
 }
 
-impl<T, Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaString<T>
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaString<Rf::String<Ty::String>>
 where
     Rf: Types,
     Ty: CoreTypes,
-    Rf::String<Ty::String>: Into<T>,
 {
     type Error = TypeMismatchError;
 
     fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         match value {
-            Value::String(value) => Ok(LuaString(value.into())),
+            Value::String(value) => Ok(LuaString(value)),
             value => {
                 let err = TypeMismatchError {
                     expected: Type::String,
@@ -1457,17 +1454,16 @@ where
     }
 }
 
-impl<Rf, Ty, T> TryFrom<Value<Rf, Ty>> for LuaTable<T>
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaTable<Rf::Table<Ty::Table>>
 where
     Rf: Types,
     Ty: CoreTypes,
-    Rf::Table<Ty::Table>: Into<T>,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<LuaTable<T>, Self::Error> {
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         match value {
-            Value::Table(t) => Ok(LuaTable(t.into())),
+            Value::Table(t) => Ok(LuaTable(t)),
             value => {
                 let err = TypeMismatchError {
                     found: value.type_(),
