@@ -449,6 +449,16 @@ where
     }
 }
 
+pub fn dyn_ffi<F, Ty>(f: F) -> impl DLuaFfi<Ty>
+where
+    Ty: CoreTypes,
+    F: LuaFfi<Ty> + 'static,
+    <F as LuaFfi<Ty>>::Delegate: 'static,
+    <F as LuaFfi<Ty>>::UnpinDelegate: 'static,
+{
+    BoxedLuaFfiFn { value: f }
+}
+
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct DebugInfo {

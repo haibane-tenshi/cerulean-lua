@@ -14,7 +14,7 @@ use repr::literal::Literal;
 use crate::backtrace::Location;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::diagnostic::Diagnostic;
-use crate::error::{AlreadyDroppedError, RtError, RuntimeError};
+use crate::error::{AlreadyDroppedError, RtError, RuntimeError, ThreadError};
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{
@@ -256,7 +256,7 @@ where
     Ty::RustClosure: DLuaFfi<Ty>,
     C: ChunkCache,
 {
-    pub fn resume(&mut self, thread_id: ThreadId) -> Result<(), RtError<Ty>> {
+    pub fn resume(&mut self, thread_id: ThreadId) -> Result<(), ThreadError> {
         let (ctx, orchestrator) = self.context();
         orchestrator.enter(ctx, thread_id)
     }

@@ -471,29 +471,79 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(super) fn init(self, ctx: OrchestratorContext<Ty>) -> Result<Thread<Ty>, RtError<Ty>> {
+    pub(super) fn init(self, ctx: OrchestratorContext<Ty>) -> Thread<Ty> {
+        use crate::gc::LuaPtr;
+        use crate::runtime::RuntimeView;
+        use crate::value::Value;
+
         let ThreadImpetus {
             first_callable,
             mut stack,
         } = self;
 
-        let frame = Frame::new(
-            first_callable,
-            None,
-            &mut ctx.core.gc,
-            ctx.chunk_cache,
-            stack.full_guard(),
-        )?;
+        let frame = match first_callable {
+            Callable::Rust(LuaPtr(callable)) => {
+                let closure = &ctx.core.gc[&callable];
+                Frame::from_rust(closure, None, stack.full_guard())
+            }
+            callable @ Callable::Lua(_) => {
+                // When callable is Lua closure we don't invoke it directly,
+                // instead we do so through a trampoline Rust function.
+                // This is because constructing Lua closures is a fallible operation and
+                // failing here is rather inconvenient going as far as affecting our public APIs.
+                // If construction of Lua frame is bound fail it is still going happen
+                // but at a later point where it will be evaluated when executing an already existing thread.
+                // At that time runtime is prepared to handle such occurrence.
+
+                let mut stack = stack.full_guard();
+                {
+                    let mut stack = stack.transient_frame();
+                    stack.push(callable.downgrade().into());
+                    stack.sync(&mut ctx.core.gc);
+                }
+
+                // TODO: replace this with tail call when it becomes available.
+                let trampoline = crate::ffi::from_fn(
+                    || {
+                        crate::ffi::delegate::yield_1(
+                            |mut rt: RuntimeView<'_, Ty>| {
+                                use crate::ffi::delegate::Request;
+                                use repr::index::StackSlot;
+
+                                let Some(Value::Function(callable)) = rt.stack.pop() else {
+                                    unreachable!(
+                                        "trampoline should receive target function through stack"
+                                    );
+                                };
+                                let callable = callable.upgrade(&rt.core.gc).unwrap();
+
+                                let request = Request::Invoke {
+                                    callable,
+                                    start: StackSlot(0),
+                                };
+
+                                Ok(request)
+                            },
+                            |_| Ok(()),
+                        )
+                    },
+                    "{trampoline}",
+                    (),
+                );
+                let trampoline = crate::ffi::dyn_ffi(trampoline);
+
+                Frame::from_rust(&trampoline, None, stack)
+            }
+        };
+
         let protected = stack.len();
 
-        let r = Thread {
+        Thread {
             frames: vec![frame],
             stack,
             protected,
             panicked_with: None,
-        };
-
-        Ok(r)
+        }
     }
 }
 

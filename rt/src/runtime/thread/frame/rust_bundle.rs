@@ -20,9 +20,8 @@ where
 impl<Ty> RustBundle<Ty>
 where
     Ty: CoreTypes,
-    Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(super) fn new(closure: &Ty::RustClosure) -> Self {
+    pub(super) fn new(closure: &dyn DLuaFfi<Ty>) -> Self {
         let delegate = closure.call();
         let debug_info = closure.debug_info();
 

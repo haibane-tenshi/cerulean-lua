@@ -7,7 +7,7 @@ use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp};
 
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::ChunkCache;
-use crate::error::RtError;
+use crate::error::{MalformedClosureError, RtError};
 use crate::ffi::DLuaFfi;
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::{Closure, Core, Heap, RuntimeView};
@@ -171,7 +171,7 @@ where
         heap: &mut Heap<Ty>,
         chunk_cache: &dyn ChunkCache,
         stack: StackGuard<Ty>,
-    ) -> Result<Self, RtError<Ty>> {
+    ) -> Result<Self, MalformedClosureError> {
         use crate::gc::LuaPtr;
 
         let stack_start = stack.boundary();
@@ -193,6 +193,21 @@ where
         };
 
         Ok(r)
+    }
+
+    pub(super) fn from_rust(
+        callable: &dyn DLuaFfi<Ty>,
+        event: Option<Event>,
+        stack: StackGuard<Ty>,
+    ) -> Self {
+        let stack_start = stack.boundary();
+        let bundle = Bundle::Rust(RustBundle::new(callable));
+
+        Frame {
+            bundle,
+            stack_start,
+            event,
+        }
     }
 }
 

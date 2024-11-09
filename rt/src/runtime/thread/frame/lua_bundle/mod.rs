@@ -17,7 +17,9 @@ use crate::chunk_cache::ChunkCache;
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
-use crate::error::{AlreadyDroppedError, BorrowError, RefAccessError, RtError, RuntimeError};
+use crate::error::{
+    AlreadyDroppedError, BorrowError, MalformedClosureError, RefAccessError, RuntimeError,
+};
 use crate::gc::{DisplayWith, Heap, LuaPtr};
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
@@ -112,7 +114,7 @@ where
         heap: &mut Heap<Ty>,
         chunk_cache: &dyn ChunkCache,
         mut stack: StackGuard<Ty>,
-    ) -> Result<Self, RtError<Ty>> {
+    ) -> Result<Self, MalformedClosureError> {
         use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
         use repr::chunk::Function;
 
@@ -184,7 +186,7 @@ where
     pub(crate) fn activate<'a>(
         &'a mut self,
         ctx: Context<'a, Ty>,
-    ) -> Result<ActiveFrame<'a, Ty>, RtError<Ty>>
+    ) -> Result<ActiveFrame<'a, Ty>, MalformedClosureError>
     where
         WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     {
@@ -1178,9 +1180,8 @@ where
                     // Function is invoked with table, *original* (before coercions!) index and value.
                     // It only picks up the latest "table" value which metamethod we tried to look up.
                     Value::Function(callable) => {
-                        let callable = callable
-                            .upgrade(&mut self.core.gc)
-                            .ok_or(AlreadyDroppedError)?;
+                        let callable =
+                            callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
                         let start = self.stack.next_slot();
                         let mut stack = self.stack.lua_frame();
                         stack.push(table);
@@ -1207,9 +1208,7 @@ where
         loop {
             callable = match callable {
                 Value::Function(callable) => {
-                    let r = callable
-                        .upgrade(&mut self.core.gc)
-                        .ok_or(AlreadyDroppedError)?;
+                    let r = callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
                     return Ok(r);
                 }
                 t => t,

@@ -60,3 +60,21 @@ pub enum MalformedClosureError {
     MissingFunction(MissingFunction),
     CapturesMismatch(UpvalueCountMismatch),
 }
+
+impl From<MissingChunk> for MalformedClosureError {
+    fn from(value: MissingChunk) -> Self {
+        MalformedClosureError::MissingChunk(value)
+    }
+}
+
+impl From<MissingFunction> for MalformedClosureError {
+    fn from(value: MissingFunction) -> Self {
+        MalformedClosureError::MissingFunction(value)
+    }
+}
+
+impl From<UpvalueCountMismatch> for MalformedClosureError {
+    fn from(value: UpvalueCountMismatch) -> Self {
+        MalformedClosureError::CapturesMismatch(value)
+    }
+}

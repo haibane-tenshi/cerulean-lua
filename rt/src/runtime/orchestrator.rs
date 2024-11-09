@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::chunk_cache::ChunkCache;
-use crate::error::RtError;
+use crate::error::ThreadError;
 use crate::ffi::DLuaFfi;
 use crate::value::{Callable, CoreTypes, Strong};
 
@@ -156,11 +156,7 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    fn take_thread(
-        &mut self,
-        id: ThreadId,
-        ctx: Context<Ty>,
-    ) -> Option<Result<Thread<Ty>, RtError<Ty>>> {
+    fn take_thread(&mut self, id: ThreadId, ctx: Context<Ty>) -> Option<Thread<Ty>> {
         let place = self.threads.get_mut(id.0)?;
 
         if place.is_starting() {
@@ -168,10 +164,7 @@ where
                 .nursery
                 .remove(&id)
                 .expect("starting threads should be placed in nursery");
-            let thread = match impetus.init(ctx) {
-                Ok(thread) => thread,
-                Err(err) => return Some(Err(err)),
-            };
+            let thread = impetus.init(ctx);
 
             *place = ThreadState::Running(thread);
         }
@@ -180,7 +173,7 @@ where
             .take()
             .expect("there should be only one thread under evaluation");
 
-        Some(Ok(thread))
+        Some(thread)
     }
 }
 
@@ -270,7 +263,7 @@ where
         &mut self,
         mut ctx: Context<Ty>,
         thread_id: ThreadId,
-    ) -> Result<(), RtError<Ty>> {
+    ) -> Result<(), ThreadError> {
         use crate::ffi::delegate::Response;
 
         if !self.stack.is_empty() {
@@ -284,7 +277,7 @@ where
             let mut thread = self
                 .store
                 .take_thread(current, ctx.reborrow())
-                .expect("active thread should exist")?;
+                .expect("active thread should exist");
 
             let mut ctx = ctx.thread_context(current, &mut self.store, &mut self.upvalue_cache);
             match ctx.eval(&mut thread, response) {
