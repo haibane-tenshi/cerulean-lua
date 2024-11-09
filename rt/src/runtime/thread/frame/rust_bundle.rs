@@ -1,8 +1,9 @@
 use std::pin::Pin;
 
+use crate::backtrace::BacktraceFrame;
 use crate::error::RtError;
 use crate::ffi::delegate::{Delegate as RustDelegate, Response};
-use crate::ffi::{DLuaFfi, LuaFfi};
+use crate::ffi::{DLuaFfi, DebugInfo, LuaFfi};
 use crate::runtime::RuntimeView;
 use crate::value::CoreTypes;
 
@@ -13,6 +14,7 @@ where
     Ty: CoreTypes,
 {
     delegate: Pin<Box<dyn RustDelegate<Ty>>>,
+    debug_info: DebugInfo,
 }
 
 impl<Ty> RustBundle<Ty>
@@ -21,9 +23,13 @@ where
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(super) fn new(closure: &Ty::RustClosure) -> Self {
-        let sequence = closure.call();
+        let delegate = closure.call();
+        let debug_info = closure.debug_info();
 
-        RustBundle { delegate: sequence }
+        RustBundle {
+            delegate,
+            debug_info,
+        }
     }
 }
 
@@ -73,6 +79,18 @@ where
                     Ok(Control::Thread(request))
                 }
             },
+        }
+    }
+
+    pub(super) fn backtrace(&self) -> BacktraceFrame {
+        use crate::backtrace::FrameSource;
+
+        let name = Some(self.debug_info.name.clone());
+
+        BacktraceFrame {
+            source: FrameSource::Rust,
+            name,
+            location: None,
         }
     }
 }

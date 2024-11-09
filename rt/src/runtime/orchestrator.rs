@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 
 use crate::chunk_cache::ChunkCache;
 use crate::error::RtError;
@@ -16,6 +17,12 @@ pub struct ThreadId(usize);
 impl ThreadId {
     pub(crate) fn dummy() -> Self {
         ThreadId(0)
+    }
+}
+
+impl Display for ThreadId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -128,6 +135,20 @@ where
             ThreadState::Evaluating => None,
         }
     }
+
+    fn thread(&self, thread_id: ThreadId) -> Option<&Thread<Ty>> {
+        self.threads.get(thread_id.0).and_then(|state| {
+            if let ThreadState::Running(thread) = state {
+                Some(thread)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn contains(&self, thread_id: ThreadId) -> bool {
+        (0..self.threads.len()).contains(&thread_id.0)
+    }
 }
 
 impl<Ty> ThreadStore<Ty>
@@ -207,6 +228,36 @@ where
 
     pub fn new_thread(&mut self, heap: &mut Heap<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
         self.store.new_thread(heap, callable)
+    }
+
+    pub(crate) fn status_of(&self, thread_id: ThreadId) -> Option<ThreadStatus> {
+        use super::thread::Status;
+
+        let r = match self.store.threads.get(thread_id.0)? {
+            ThreadState::Evaluating => ThreadStatus::Current,
+            ThreadState::Startup => ThreadStatus::Suspended,
+            ThreadState::Running(thread) => match thread.status() {
+                Status::Finished => ThreadStatus::Finished,
+                Status::Panicked => ThreadStatus::Panicked,
+                Status::Normal => {
+                    if self.stack.contains(&thread_id) {
+                        ThreadStatus::Active
+                    } else {
+                        ThreadStatus::Suspended
+                    }
+                }
+            },
+        };
+
+        Some(r)
+    }
+
+    pub(crate) fn contains(&self, thread_id: ThreadId) -> bool {
+        self.store.contains(thread_id)
+    }
+
+    pub(crate) fn thread(&self, thread_id: ThreadId) -> Option<&Thread<Ty>> {
+        self.store.thread(thread_id)
     }
 }
 
@@ -315,10 +366,25 @@ where
     }
 }
 
+/// Status of a Lua thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ThreadStatus {
+    /// The thread is currently executing.
     Current,
+
+    /// The thread is suspended as part of thread stack.
+    ///
+    /// Note that Lua considers it ill-formed to resume active threads.
     Active,
+
+    /// The thread is suspended and can be resumed.
     Suspended,
+
+    /// The thread's entry function is driven to completion.
+    ///
+    /// Note that Lua considers it ill-formed to resume finished threads.
     Finished,
+
+    /// The thread received a runtime error and it wasn't handled.
     Panicked,
 }

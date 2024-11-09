@@ -2,6 +2,7 @@ pub(crate) mod frame;
 pub(crate) mod stack;
 pub(crate) mod upvalue_register;
 
+use crate::backtrace::Backtrace;
 use crate::chunk_cache::ChunkCache;
 use crate::error::{RtError, ThreadError, ThreadPanicked};
 use crate::ffi::delegate::Response;
@@ -9,7 +10,7 @@ use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{Callable, CoreTypes, Strong};
 
-use super::orchestrator::{Context as OrchestratorContext, ThreadId, ThreadStore};
+use super::orchestrator::{Context as OrchestratorContext, ThreadId, ThreadStatus, ThreadStore};
 use super::{Closure, Core};
 use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl};
 use stack::{RawStackSlot, Stack, StackGuard};
@@ -162,13 +163,21 @@ where
     pub(crate) fn panic_origin(&self) -> Option<ThreadId> {
         use crate::error::RuntimeError;
 
-        self.panicked_with.as_ref().and_then(|errors| {
-            let RuntimeError::Thread(err) = &errors.original else {
+        self.original_error().and_then(|err| {
+            let RuntimeError::Thread(err) = err else {
                 return None;
             };
 
             err.panic_origin()
         })
+    }
+
+    pub(crate) fn error(&self) -> Option<&RtError<Ty>> {
+        self.panicked_with.as_ref().map(|errors| &errors.processed)
+    }
+
+    pub(crate) fn original_error(&self) -> Option<&RtError<Ty>> {
+        self.panicked_with.as_ref().map(|errors| &errors.original)
     }
 }
 
@@ -499,4 +508,73 @@ pub(crate) enum ThreadControl {
     Resume { thread: ThreadId },
     Yield,
     Return,
+}
+
+pub struct ThreadGuard<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    pub(super) thread_id: ThreadId,
+
+    /// Body of the thread.
+    ///
+    /// Note that it may not exist yet:
+    /// newly constructed threads exist as `ThreadImpetus` objects inside orchestrator.
+    pub(super) thread: Option<&'a Thread<Ty>>,
+    pub(super) heap: &'a Heap<Ty>,
+    pub(super) chunk_cache: &'a dyn ChunkCache,
+    pub(super) status: ThreadStatus,
+}
+
+impl<'a, Ty> ThreadGuard<'a, Ty>
+where
+    Ty: CoreTypes,
+{
+    /// Thread backtrace.
+    pub fn backtrace(&self) -> Backtrace {
+        let frames = self
+            .thread
+            .map(|thread| thread.frames.iter())
+            .unwrap_or_default()
+            .map(|frame| frame.backtrace(self.heap, self.chunk_cache))
+            .collect();
+
+        Backtrace {
+            thread_id: self.thread_id,
+            frames,
+        }
+    }
+
+    /// Thread status.
+    ///
+    /// See [`ThreadStatus`] enum variants for more information.
+    pub fn status(&self) -> ThreadStatus {
+        self.status
+    }
+
+    /// Id of another thread that caused this one to panic.
+    ///
+    /// In case another thread was resumed, panicked and that panic was not handled there,
+    /// it will propagate to current thread, causing it to unwind.
+    /// If the current thread ended up panicking as the result,
+    /// it will also remember `ThreadId` of the thread it received panic from.
+    /// This way it is possible to reconstruct the entire thread stack.
+    pub fn panic_origin(&self) -> Option<ThreadId> {
+        self.thread?.panic_origin()
+    }
+
+    /// The final error that the thread panicked with.
+    ///
+    /// This value will be `None` for non-panicked threads.
+    pub fn error(&self) -> Option<&RtError<Ty>> {
+        self.thread?.error()
+    }
+
+    /// The original error that caused unwinding.
+    ///
+    /// Note that this error can be different from one provided by [.error()](Self::error) function:
+    /// it is possible that Rust frames and/or error handler modified the value while processing it.
+    pub fn original_error(&self) -> Option<&RtError<Ty>> {
+        self.thread?.original_error()
+    }
 }

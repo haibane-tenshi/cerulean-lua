@@ -5,6 +5,7 @@ use enumoid::Enumoid;
 
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp};
 
+use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::ChunkCache;
 use crate::error::RtError;
 use crate::ffi::DLuaFfi;
@@ -144,6 +145,17 @@ where
 
         let ctx = ctx.runtime_view(self.stack_start).unwrap();
         rust_bundle.enter(ctx, Response::Evaluated(Err(err)))
+    }
+
+    pub(super) fn backtrace(
+        &self,
+        heap: &Heap<Ty>,
+        chunk_cache: &dyn ChunkCache,
+    ) -> BacktraceFrame {
+        match &self.bundle {
+            Bundle::Lua(frame) => frame.backtrace(heap, chunk_cache),
+            Bundle::Rust(frame) => frame.backtrace(),
+        }
     }
 }
 

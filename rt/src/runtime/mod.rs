@@ -29,6 +29,7 @@ pub use dialect::{CoerceArgs, DialectBuilder};
 pub use interner::{Interned, Interner};
 pub use orchestrator::ThreadId;
 pub use thread::stack::{StackFrame, StackGuard, TransientStackFrame};
+pub use thread::ThreadGuard;
 
 pub struct Core<Ty>
 where
@@ -197,6 +198,55 @@ where
         let ctx = Context { core, chunk_cache };
 
         (ctx, orchestrator)
+    }
+
+    pub fn thread(&self, thread_id: ThreadId) -> Option<ThreadGuard<'_, Ty>> {
+        let status = self.orchestrator.status_of(thread_id)?;
+        // There may not be actual thread constructed yet if it is still in `ThreadImpetus` state.
+        let thread = self.orchestrator.thread(thread_id);
+
+        let guard = ThreadGuard {
+            thread_id,
+            thread,
+            heap: &self.core.gc,
+            chunk_cache: &self.chunk_cache,
+            status,
+        };
+
+        Some(guard)
+    }
+
+    /// Produce iterator over a stack of panicked threads.
+    ///
+    /// Threads which receive runtime error but don't handle it are called *panicked* threads.
+    /// Panicked threads cannot be resumed but you can safely inspect them (e.g. by constructing backtrace)
+    /// to identify the problem.
+    ///
+    /// However, Lua threads form a stack so when a thread panics, the error is propagated to its parent.
+    /// In case the parent cannot handle it and panics too, it remembers id of the child thread that caused the issue.
+    /// This way panicked threads form a singly-linked list which allows you to reconstruct the entire panicked thread stack.
+    ///
+    /// This method is a convenience function to assist you in doing exactly that.
+    /// Resulting iterator will follow all panicked threads from parent to child starting from the one you specified.
+    ///
+    /// The iterator will be empty if thread with `thread_id` doesn't exist or is not panicked.
+    pub fn panic_stack(&self, thread_id: ThreadId) -> impl Iterator<Item = ThreadGuard<'_, Ty>> {
+        use orchestrator::ThreadStatus;
+
+        let mut next = self.thread(thread_id).and_then(|thread| {
+            if thread.status() == ThreadStatus::Panicked {
+                Some(thread_id)
+            } else {
+                None
+            }
+        });
+
+        std::iter::from_fn(move || {
+            let thread = self.thread(next.take()?)?;
+            debug_assert_eq!(thread.status(), ThreadStatus::Panicked);
+            next = thread.panic_origin();
+            Some(thread)
+        })
     }
 }
 

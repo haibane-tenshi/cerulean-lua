@@ -265,7 +265,7 @@ where
         Ok(r)
     }
 
-    pub(crate) fn backtrace(
+    pub(super) fn backtrace(
         &self,
         heap: &Heap<Ty>,
         chunk_cache: &dyn ChunkCache,
@@ -274,7 +274,7 @@ where
 
         let ptr = heap[&self.closure].fn_ptr();
         // Instruction pointer always points at the *next* instruction.
-        let ip = self.ip - 1;
+        let ip = self.current_ip();
         let (name, location) = chunk_cache
             .chunk(ptr.chunk_id)
             .and_then(|chunk| chunk.debug_info.as_ref())
