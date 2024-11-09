@@ -1225,3 +1225,21 @@ fn map_range(
 
     start..end
 }
+
+/// Move all available values from `from` to `to`.
+///
+/// Target stack will get unconditionally synced.
+pub(crate) fn copy<Ty>(
+    mut from: StackGuard<'_, Ty>,
+    mut to: StackGuard<'_, Ty>,
+    heap: &mut Heap<Ty>,
+) where
+    Ty: CoreTypes,
+{
+    let mut to = to.transient_frame();
+
+    to.extend(from.iter().copied());
+
+    to.sync(heap);
+    from.clear();
+}
