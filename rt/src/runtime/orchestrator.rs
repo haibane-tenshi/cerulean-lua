@@ -235,8 +235,8 @@ where
                 .take_thread(current, ctx.reborrow())
                 .expect("active thread should exist")?;
 
-            let ctx = ctx.thread_context(current, &mut self.store, &mut self.upvalue_cache);
-            match thread.activate(ctx).enter(response) {
+            let mut ctx = ctx.thread_context(current, &mut self.store, &mut self.upvalue_cache);
+            match ctx.eval(&mut thread, response) {
                 Ok(ThreadControl::Resume { thread }) => {
                     self.stack.push(current);
                     current = thread;
@@ -259,9 +259,9 @@ where
                 Err(err) => {
                     current = match self.stack.pop() {
                         Some(thread) => thread,
-                        None => break Err(err),
+                        None => break Err(err.into()),
                     };
-                    response = Response::Evaluated(Err(err))
+                    response = Response::Evaluated(Err(err.into()))
                 }
             }
 

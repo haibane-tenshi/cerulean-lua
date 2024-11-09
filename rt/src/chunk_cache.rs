@@ -6,7 +6,7 @@ pub use main::MainCache;
 pub use single::SingleChunk;
 pub use vec::VecCache;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ImmutableCacheError;
 
 impl ImmutableCacheError {

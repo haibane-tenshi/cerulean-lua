@@ -3,7 +3,7 @@ use codespan_reporting::files::{Error, SimpleFile};
 use codespan_reporting::term::termcolor::WriteColor;
 use codespan_reporting::term::Config;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub files: SimpleFile<String, String>,
     pub message: Message<()>,

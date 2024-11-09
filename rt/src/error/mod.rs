@@ -5,6 +5,7 @@ pub mod missing_chunk;
 pub mod missing_function;
 pub mod opcode;
 pub mod out_of_bounds_stack;
+pub mod thread;
 pub mod upvalue_count_mismatch;
 pub mod value;
 
@@ -27,11 +28,13 @@ pub use missing_chunk::MissingChunk;
 pub use missing_function::MissingFunction;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
+pub use thread::{ResumeDeadThread, ThreadError, ThreadPanicked};
 pub use upvalue_count_mismatch::UpvalueCountMismatch;
 pub use value::ValueError;
 
 pub type RtError<Ty> = RuntimeError<Value<Strong, Ty>>;
 
+#[derive(Debug, Clone)]
 pub enum RuntimeError<Value> {
     Value(ValueError<Value>),
     Borrow(BorrowError),
@@ -42,6 +45,7 @@ pub enum RuntimeError<Value> {
     MissingFunction(MissingFunction),
     OutOfBoundsStack(OutOfBoundsStack),
     UpvalueCountMismatch(UpvalueCountMismatch),
+    Thread(ThreadError),
     OpCode(OpCodeError),
 }
 
@@ -93,6 +97,7 @@ where
             RuntimeError::MissingFunction(err) => err.into_diagnostic(),
             RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
             RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
+            RuntimeError::Thread(err) => err.into_diagnostic(),
             RuntimeError::OpCode(err) => err.into_diagnostic((), chunk_cache),
         };
 
@@ -157,25 +162,9 @@ impl<Value> From<OpCodeError> for RuntimeError<Value> {
     }
 }
 
-impl<Value> Debug for RuntimeError<Value>
-where
-    Value: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
-            Self::Borrow(arg0) => f.debug_tuple("Borrow").field(arg0).finish(),
-            Self::AlreadyDropped(arg0) => f.debug_tuple("AlreadyDropped").field(arg0).finish(),
-            Self::Immutable(arg0) => f.debug_tuple("Immutable").field(arg0).finish(),
-            Self::Diagnostic(arg0) => f.debug_tuple("Diagnostic").field(arg0).finish(),
-            Self::MissingChunk(arg0) => f.debug_tuple("MissingChunk").field(arg0).finish(),
-            Self::MissingFunction(arg0) => f.debug_tuple("MissingFunction").field(arg0).finish(),
-            Self::OutOfBoundsStack(arg0) => f.debug_tuple("OutOfBoundsStack").field(arg0).finish(),
-            Self::UpvalueCountMismatch(arg0) => {
-                f.debug_tuple("UpvalueCountMismatch").field(arg0).finish()
-            }
-            Self::OpCode(arg0) => f.debug_tuple("OpCode").field(arg0).finish(),
-        }
+impl<Value> From<ThreadError> for RuntimeError<Value> {
+    fn from(value: ThreadError) -> Self {
+        RuntimeError::Thread(value)
     }
 }
 

@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use crate::gc::{DisplayWith, Heap};
 use crate::value::{CoreTypes, StrongValue};
 
+#[derive(Debug, Clone, Copy)]
 pub struct ValueError<Value>(pub Value);
 
 impl<Ty> ValueError<StrongValue<Ty>>
@@ -50,14 +51,5 @@ where
 impl<Value> From<Value> for ValueError<Value> {
     fn from(value: Value) -> Self {
         ValueError(value)
-    }
-}
-
-impl<Value> Debug for ValueError<Value>
-where
-    Value: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Value").field(&self.0).finish()
     }
 }

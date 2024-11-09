@@ -3,7 +3,7 @@ use std::fmt::Display;
 
 use codespan_reporting::diagnostic::Diagnostic;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum BorrowError {
     Ref,
     Mut,

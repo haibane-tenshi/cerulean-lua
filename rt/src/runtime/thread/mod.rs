@@ -3,7 +3,7 @@ pub(crate) mod stack;
 pub(crate) mod upvalue_register;
 
 use crate::chunk_cache::ChunkCache;
-use crate::error::RtError;
+use crate::error::{RtError, ThreadError, ThreadPanicked};
 use crate::ffi::delegate::Response;
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
@@ -14,6 +14,12 @@ use super::{Closure, Core};
 use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl};
 use stack::{RawStackSlot, Stack, StackGuard};
 use upvalue_register::UpvalueRegister;
+
+pub(crate) enum Status {
+    Normal,
+    Finished,
+    Panicked,
+}
 
 pub(crate) struct Context<'a, Ty>
 where
@@ -71,6 +77,47 @@ where
     }
 }
 
+impl<'a, Ty> Context<'a, Ty>
+where
+    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty::RustClosure: DLuaFfi<Ty>,
+{
+    pub(crate) fn eval(
+        &mut self,
+        thread: &mut Thread<Ty>,
+        response: Response<Ty>,
+    ) -> Result<ThreadControl, ThreadError> {
+        let mut active = ActiveThread {
+            ctx: self.reborrow(),
+            thread,
+        };
+
+        active.enter(response)
+    }
+}
+
+struct Errors<Ty>
+where
+    Ty: CoreTypes,
+{
+    /// Error object that triggered unwinding.
+    ///
+    /// We want to keep this one around, because Rust frames (and error handler) can arbitrarily modify error while processing it.
+    /// It is important to preserve original in case error is propagated from another thread.
+    ///
+    /// In our unwinding scheme errors never cross thread boundaries,
+    /// instead parent thread receives `ThreadPanicked` which contains `ThreadId` of the other thread.
+    /// This way panic threads form a (singly) linked list and allows us to reconstruct entire thread stack that panicked.
+    /// Unfortunately it is not possible to preserve this information in another way.
+    /// Orchestrator *have* to clear out its own thread stack because after propagating error to another thread
+    /// it can never be sure whether a panic was properly handled or not and
+    /// whether an error from the other thread (if there is any) is part of the same panic instance.
+    original: RtError<Ty>,
+
+    /// Final error object.
+    processed: RtError<Ty>,
+}
+
 pub(crate) struct Thread<Ty>
 where
     Ty: CoreTypes,
@@ -86,29 +133,42 @@ where
     /// assert!(protected <= stack.len());
     /// ```
     protected: RawStackSlot,
+
+    /// Error values the thread panicked with.
+    ///
+    /// This field is set to `None` for non-panicked threads.
+    panicked_with: Option<Errors<Ty>>,
 }
 
 impl<Ty> Thread<Ty>
 where
     Ty: CoreTypes,
 {
-    pub(crate) fn activate<'a>(&'a mut self, ctx: Context<'a, Ty>) -> ActiveThread<'a, Ty> {
-        let Thread {
-            frames,
-            stack,
-            protected,
-        } = self;
+    pub(crate) fn stack(&mut self) -> StackGuard<'_, Ty> {
+        self.stack.guard(self.protected).unwrap()
+    }
 
-        ActiveThread {
-            ctx,
-            frames,
-            stack,
-            protected,
+    pub(crate) fn status(&self) -> Status {
+        if self.panicked_with.is_some() {
+            Status::Panicked
+        } else if self.frames.is_empty() {
+            Status::Finished
+        } else {
+            Status::Normal
         }
     }
 
-    pub(crate) fn stack(&mut self) -> StackGuard<'_, Ty> {
-        self.stack.guard(self.protected).unwrap()
+    /// Id of the other thread that caused this thread to panic.
+    pub(crate) fn panic_origin(&self) -> Option<ThreadId> {
+        use crate::error::RuntimeError;
+
+        self.panicked_with.as_ref().and_then(|errors| {
+            let RuntimeError::Thread(err) = &errors.original else {
+                return None;
+            };
+
+            err.panic_origin()
+        })
     }
 }
 
@@ -145,14 +205,12 @@ where
     }
 }
 
-pub(crate) struct ActiveThread<'a, Ty>
+struct ActiveThread<'a, Ty>
 where
     Ty: CoreTypes,
 {
     ctx: Context<'a, Ty>,
-    frames: &'a mut Vec<Frame<Ty>>,
-    stack: &'a mut Stack<Ty>,
-    protected: &'a mut RawStackSlot,
+    thread: &'a mut Thread<Ty>,
 }
 
 impl<'a, Ty> ActiveThread<'a, Ty>
@@ -160,7 +218,27 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(crate) fn enter(&mut self, response: Response<Ty>) -> Result<ThreadControl, RtError<Ty>> {
+    fn enter(&mut self, response: Response<Ty>) -> Result<ThreadControl, ThreadError> {
+        use crate::error::thread::ThreadStatus;
+
+        // Check it thread is resumable.
+        let dead_status = match self.thread.status() {
+            Status::Normal => None,
+            Status::Finished => Some(ThreadStatus::Finished),
+            Status::Panicked => Some(ThreadStatus::Panicked),
+        };
+
+        if let Some(status) = dead_status {
+            use crate::error::thread::ResumeDeadThread;
+
+            let err = ResumeDeadThread {
+                thread_id: self.ctx.current_thread_id,
+                status,
+            };
+
+            return Err(err.into());
+        }
+
         let mut prompt = match response.try_into() {
             Ok(prompt) => prompt,
             Err(err) => match self.unwind(err)? {
@@ -170,12 +248,12 @@ where
         };
 
         let r = loop {
-            let Some(frame) = self.frames.last_mut() else {
-                *self.protected = Default::default();
+            let Some(frame) = self.thread.frames.last_mut() else {
+                self.thread.protected = Default::default();
                 break Ok(ThreadControl::Return);
             };
 
-            let ctx = self.ctx.frame_context(self.stack);
+            let ctx = self.ctx.frame_context(&mut self.thread.stack);
             let request = frame.enter(ctx, prompt);
 
             let result = match request {
@@ -197,8 +275,8 @@ where
         };
 
         // Ensure that stack is properly synced before exiting.
-        // Suspended frames are expected to not cause trouble.
-        self.stack.sync(&mut self.ctx.core.gc);
+        // Suspended threads are expected to not cause trouble.
+        self.thread.stack.sync(&mut self.ctx.core.gc);
 
         r
     }
@@ -214,11 +292,11 @@ where
             Control::Thread(ctrl) => {
                 let (ctrl, start) = ctrl.into_thread_control();
 
-                if start > self.stack.len() {
+                if start > self.thread.stack.len() {
                     return Err(OutOfBoundsStack.into());
                 }
 
-                *self.protected = start;
+                self.thread.protected = start;
                 Ok(Control::Thread(ctrl))
             }
         }
@@ -227,7 +305,7 @@ where
     fn modify_call_stack(&mut self, ctrl: FrameControl<Ty>) -> Result<Prompt, RtError<Ty>> {
         match ctrl {
             FrameControl::Return => {
-                self.frames.pop();
+                self.thread.frames.pop();
 
                 Ok(Prompt::Evaluated)
             }
@@ -238,7 +316,7 @@ where
             } => {
                 use crate::error::OutOfBoundsStack;
 
-                let stack = self.stack.guard(start).ok_or(OutOfBoundsStack)?;
+                let stack = self.thread.stack.guard(start).ok_or(OutOfBoundsStack)?;
                 let frame = Frame::new(
                     callable,
                     event,
@@ -247,7 +325,7 @@ where
                     stack,
                 )?;
 
-                self.frames.push(frame);
+                self.thread.frames.push(frame);
 
                 Ok(Prompt::Resume)
             }
@@ -258,14 +336,30 @@ where
     fn unwind(
         &mut self,
         mut error: RtError<Ty>,
-    ) -> Result<Control<Prompt, ThreadControl>, RtError<Ty>> {
+    ) -> Result<Control<Prompt, ThreadControl>, ThreadPanicked> {
         // Unwinding loop.
         // One problem here is that we actually invoke Rust frames in the process,
         // which may leave us with more requests to process,
         // which may fail and cause us to unwind again.
-        // This situation is unlikely and I'm not sure if this is the best way to approach it.
         loop {
-            let ctrl = self.propagate_error(error)?;
+            let ctrl = match self.propagate_error(error.clone()) {
+                Ok(ctrl) => ctrl,
+                Err(err) => {
+                    use crate::error::thread::ThreadPanicked;
+
+                    debug_assert!(self.thread.panicked_with.is_none());
+
+                    // Record error value inside thread and replace it with general `ThreadPanicked`.
+                    let errors = Errors {
+                        original: error,
+                        processed: err,
+                    };
+                    self.thread.panicked_with = Some(errors);
+
+                    let err = ThreadPanicked(self.ctx.current_thread_id);
+                    break Err(err);
+                }
+            };
             match self.process_control(ctrl) {
                 Ok(state) => break Ok(state),
                 Err(err) => {
@@ -294,24 +388,24 @@ where
     /// Upon successfully handling the error this function will clean up the call stack before returning.
     /// Otherwise call stack will be left intact.
     ///
-    /// Temporaries' stack is always cleaned up since it is required to be brought into correct state for delegate to execution.
+    /// Temporaries' stack is always cleaned up since it is required to be brought into correct state for delegate to execute.
     ///
     /// # Returns
     ///
-    /// On success function returns request made by the frame that handled the error.
+    /// On success returns request made by the frame that handled the error.
     ///
-    /// On failure function the error object (possibly transformed by Rust frames during propagation).
+    /// On failure returns the error object (possibly transformed by Rust frames during propagation).
     fn propagate_error(
         &mut self,
         mut error: RtError<Ty>,
     ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
-        if self.frames.is_empty() {
+        if self.thread.frames.is_empty() {
             return Err(error);
         }
 
-        let mut iter = self.frames.iter_mut().enumerate().rev();
-        // The last frame is the one that invoked the panic.
-        // We need to skip it.
+        let mut iter = self.thread.frames.iter_mut().enumerate().rev();
+        // The last frame is the one that invoked panic.
+        // Skip it.
         let upper_bound = iter.next().unwrap().1.stack_start();
         let mut iter = iter.scan(upper_bound, |upper_bound, (i, frame)| {
             let r = *upper_bound;
@@ -325,12 +419,12 @@ where
             };
 
             // Clear portion of the stack belonging to other functions.
-            self.stack.truncate(upper_bound);
+            self.thread.stack.truncate(upper_bound);
 
-            let ctx = self.ctx.frame_context(self.stack);
+            let ctx = self.ctx.frame_context(&mut self.thread.stack);
             match frame.process_error(ctx, error) {
                 Ok(request) => {
-                    self.frames.truncate(i + 1);
+                    self.thread.frames.truncate(i + 1);
                     break Ok(request);
                 }
                 Err(err) => {
@@ -389,6 +483,7 @@ where
             frames: vec![frame],
             stack,
             protected,
+            panicked_with: None,
         };
 
         Ok(r)
