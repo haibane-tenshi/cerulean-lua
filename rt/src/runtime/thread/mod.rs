@@ -9,7 +9,7 @@ use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{Callable, CoreTypes, Strong};
 
-use super::orchestrator::{Context as OrchestratorContext, ThreadId, ThreadStatus, ThreadStore};
+use super::orchestrator::{ThreadId, ThreadStatus, ThreadStore};
 use super::{Closure, Core};
 use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl, UpvalueRegister};
 use stack::{RawStackSlot, Stack, StackGuard};
@@ -471,7 +471,7 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(super) fn init(self, ctx: OrchestratorContext<Ty>) -> Thread<Ty> {
+    pub(super) fn init(self, heap: &mut Heap<Ty>) -> Thread<Ty> {
         use crate::gc::LuaPtr;
         use crate::runtime::RuntimeView;
         use crate::value::Value;
@@ -483,7 +483,7 @@ where
 
         let frame = match first_callable {
             Callable::Rust(LuaPtr(callable)) => {
-                let closure = &ctx.core.gc[&callable];
+                let closure = &heap[&callable];
                 Frame::from_rust(closure, None, stack.full_guard())
             }
             callable @ Callable::Lua(_) => {
@@ -499,7 +499,7 @@ where
                 {
                     let mut stack = stack.transient_frame();
                     stack.push(callable.downgrade().into());
-                    stack.sync(&mut ctx.core.gc);
+                    stack.sync(heap);
                 }
 
                 // TODO: replace this with tail call when it becomes available.

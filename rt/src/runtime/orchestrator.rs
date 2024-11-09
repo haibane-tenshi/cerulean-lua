@@ -149,6 +149,31 @@ where
     fn contains(&self, thread_id: ThreadId) -> bool {
         (0..self.threads.len()).contains(&thread_id.0)
     }
+
+    fn with_current<R>(
+        &mut self,
+        thread_id: ThreadId,
+        f: impl FnOnce(&mut Self, &mut Thread<Ty>) -> R,
+    ) -> R {
+        let mut thread = self
+            .threads
+            .get_mut(thread_id.0)
+            // TODO: this is technically observable, convert it to error.
+            .expect("thread should exist")
+            .take()
+            .expect("thread should be initialized to enter");
+
+        let res = f(self, &mut thread);
+
+        self.threads
+            .get_mut(thread_id.0)
+            .expect("thread should exist")
+            .place(thread)
+            .ok()
+            .expect("current thread should not get overwritten");
+
+        res
+    }
 }
 
 impl<Ty> ThreadStore<Ty>
@@ -156,24 +181,22 @@ where
     Ty: CoreTypes<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    fn take_thread(&mut self, id: ThreadId, ctx: Context<Ty>) -> Option<Thread<Ty>> {
-        let place = self.threads.get_mut(id.0)?;
+    fn init(&mut self, thread_id: ThreadId, heap: &mut Heap<Ty>) {
+        let Some(place) = self.threads.get_mut(thread_id.0) else {
+            return;
+        };
 
-        if place.is_starting() {
-            let impetus = self
-                .nursery
-                .remove(&id)
-                .expect("starting threads should be placed in nursery");
-            let thread = impetus.init(ctx);
-
-            *place = ThreadState::Running(thread);
+        if !place.is_starting() {
+            return;
         }
 
-        let thread = place
-            .take()
-            .expect("there should be only one thread under evaluation");
+        let impetus = self
+            .nursery
+            .remove(&thread_id)
+            .expect("starting threads should be placed in nursery");
+        let thread = impetus.init(heap);
 
-        Some(thread)
+        *place = ThreadState::Running(thread);
     }
 }
 
@@ -265,6 +288,7 @@ where
         thread_id: ThreadId,
     ) -> Result<(), ThreadError> {
         use crate::ffi::delegate::Response;
+        use std::ops::ControlFlow;
 
         if !self.stack.is_empty() {
             todo!()
@@ -274,48 +298,33 @@ where
         let mut response = Response::Resume;
 
         loop {
-            let mut thread = self
-                .store
-                .take_thread(current, ctx.reborrow())
-                .expect("active thread should exist");
+            self.store.init(current, &mut ctx.core.gc);
+            let r = self.store.with_current(current, |store, thread| {
+                let mut ctx = ctx.thread_context(current, store, &mut self.upvalue_cache);
+                match ctx.eval(thread, response) {
+                    Ok(ThreadControl::Resume { thread }) => {
+                        self.stack.push(current);
+                        ControlFlow::Continue((thread, Response::Resume))
+                    }
+                    Ok(ThreadControl::Yield | ThreadControl::Return) => match self.stack.pop() {
+                        Some(thread) => {
+                            ControlFlow::Continue((thread, Response::Evaluated(Ok(()))))
+                        }
+                        None => ControlFlow::Break(Ok(())),
+                    },
+                    Err(err) => match self.stack.pop() {
+                        Some(thread) => {
+                            ControlFlow::Continue((thread, Response::Evaluated(Err(err.into()))))
+                        }
+                        None => ControlFlow::Break(Err(err)),
+                    },
+                }
+            });
 
-            let mut ctx = ctx.thread_context(current, &mut self.store, &mut self.upvalue_cache);
-            match ctx.eval(&mut thread, response) {
-                Ok(ThreadControl::Resume { thread }) => {
-                    self.stack.push(current);
-                    current = thread;
-                    response = Response::Resume;
-                }
-                Ok(ThreadControl::Yield) => {
-                    current = match self.stack.pop() {
-                        Some(thread) => thread,
-                        None => break Ok(()),
-                    };
-                    response = Response::Evaluated(Ok(()));
-                }
-                Ok(ThreadControl::Return) => {
-                    current = match self.stack.pop() {
-                        Some(thread) => thread,
-                        None => break Ok(()),
-                    };
-                    response = Response::Evaluated(Ok(()))
-                }
-                Err(err) => {
-                    current = match self.stack.pop() {
-                        Some(thread) => thread,
-                        None => break Err(err.into()),
-                    };
-                    response = Response::Evaluated(Err(err.into()))
-                }
-            }
-
-            self.store
-                .threads
-                .get_mut(current.0)
-                .expect("active thread should exist")
-                .place(thread)
-                .ok() // Thread doesn't implement Debug for a moment.
-                .expect("evaluating thread should not get overwritten");
+            (current, response) = match r {
+                ControlFlow::Break(res) => break res,
+                ControlFlow::Continue(t) => t,
+            };
         }
     }
 }
