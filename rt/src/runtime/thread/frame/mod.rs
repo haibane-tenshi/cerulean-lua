@@ -15,11 +15,12 @@ use crate::value::{Callable, CoreTypes, Strong};
 
 use super::super::orchestrator::{ThreadId, ThreadStore};
 use super::stack::{RawStackSlot, Stack, StackGuard};
-use super::UpvalueRegister;
 use super::{Control, Prompt, ThreadControl};
 
 use lua_bundle::{Context as FrameContext, Frame as LuaBundle};
 use rust_bundle::RustBundle;
+
+pub(crate) use lua_bundle::UpvalueRegister;
 
 impl<Ty> LuaBundle<Ty>
 where
@@ -167,7 +168,7 @@ where
     pub(super) fn new(
         callable: Callable<Strong, Ty>,
         event: Option<Event>,
-        heap: &Heap<Ty>,
+        heap: &mut Heap<Ty>,
         chunk_cache: &dyn ChunkCache,
         stack: StackGuard<Ty>,
     ) -> Result<Self, RtError<Ty>> {

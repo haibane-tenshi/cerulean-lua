@@ -46,7 +46,7 @@ where
         self.unsync_tag.resize(self.values.len(), false);
     }
 
-    pub(super) fn drain_written(
+    pub(crate) fn drain_written(
         &mut self,
     ) -> impl Iterator<Item = (UpvalueSlot, WeakValue<Ty>)> + use<'_, Ty> {
         self.unsync_tag.clear();

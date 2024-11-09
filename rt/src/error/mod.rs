@@ -1,12 +1,10 @@
 pub mod already_dropped;
 pub mod borrow;
+mod closure;
 pub mod diagnostic;
-pub mod missing_chunk;
-pub mod missing_function;
 pub mod opcode;
 pub mod out_of_bounds_stack;
 pub mod thread;
-pub mod upvalue_count_mismatch;
 pub mod value;
 
 use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
@@ -23,13 +21,11 @@ use crate::value::{CoreTypes, Strong, StrongValue, Types, Value};
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
 pub use borrow::BorrowError;
+pub use closure::{MalformedClosureError, MissingChunk, MissingFunction, UpvalueCountMismatch};
 pub use diagnostic::Diagnostic;
-pub use missing_chunk::MissingChunk;
-pub use missing_function::MissingFunction;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use thread::{ResumeDeadThread, ThreadError, ThreadPanicked};
-pub use upvalue_count_mismatch::UpvalueCountMismatch;
 pub use value::ValueError;
 
 pub type RtError<Ty> = RuntimeError<Value<Strong, Ty>>;
@@ -165,6 +161,16 @@ impl<Value> From<OpCodeError> for RuntimeError<Value> {
 impl<Value> From<ThreadError> for RuntimeError<Value> {
     fn from(value: ThreadError) -> Self {
         RuntimeError::Thread(value)
+    }
+}
+
+impl<Value> From<MalformedClosureError> for RuntimeError<Value> {
+    fn from(value: MalformedClosureError) -> Self {
+        match value {
+            MalformedClosureError::MissingChunk(err) => RuntimeError::MissingChunk(err),
+            MalformedClosureError::MissingFunction(err) => RuntimeError::MissingFunction(err),
+            MalformedClosureError::CapturesMismatch(err) => RuntimeError::UpvalueCountMismatch(err),
+        }
     }
 }
 

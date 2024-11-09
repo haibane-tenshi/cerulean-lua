@@ -6,8 +6,8 @@ use crate::error::RtError;
 use crate::ffi::DLuaFfi;
 use crate::value::{Callable, CoreTypes, Strong};
 
+use super::thread::frame::UpvalueRegister;
 use super::thread::stack::StackGuard;
-use super::thread::upvalue_register::UpvalueRegister;
 use super::thread::{Context as ThreadContext, Thread, ThreadControl, ThreadImpetus};
 use super::{Closure, Core, Heap};
 

@@ -1,6 +1,5 @@
 pub(crate) mod frame;
 pub(crate) mod stack;
-pub(crate) mod upvalue_register;
 
 use crate::backtrace::Backtrace;
 use crate::chunk_cache::ChunkCache;
@@ -12,9 +11,8 @@ use crate::value::{Callable, CoreTypes, Strong};
 
 use super::orchestrator::{Context as OrchestratorContext, ThreadId, ThreadStatus, ThreadStore};
 use super::{Closure, Core};
-use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl};
+use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl, UpvalueRegister};
 use stack::{RawStackSlot, Stack, StackGuard};
-use upvalue_register::UpvalueRegister;
 
 pub(crate) enum Status {
     Normal,
@@ -329,7 +327,7 @@ where
                 let frame = Frame::new(
                     callable,
                     event,
-                    &self.ctx.core.gc,
+                    &mut self.ctx.core.gc,
                     self.ctx.chunk_cache,
                     stack,
                 )?;
@@ -482,7 +480,7 @@ where
         let frame = Frame::new(
             first_callable,
             None,
-            &ctx.core.gc,
+            &mut ctx.core.gc,
             ctx.chunk_cache,
             stack.full_guard(),
         )?;

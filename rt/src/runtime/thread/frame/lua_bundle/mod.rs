@@ -1,3 +1,6 @@
+mod upvalue_register;
+mod variadic_register;
+
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
@@ -22,8 +25,9 @@ use crate::runtime::{Closure, Core, Interned, ThreadId};
 use crate::value::callable::Callable;
 use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, WeakValue};
 
-use super::super::upvalue_register::UpvalueRegister;
 use super::Event;
+pub(crate) use upvalue_register::UpvalueRegister;
+use variadic_register::VariadicRegister;
 
 pub(crate) struct Context<'a, Ty>
 where
@@ -96,7 +100,7 @@ where
 {
     closure: RootCell<Closure<Ty>>,
     ip: InstrId,
-    register_variadic: Vec<StrongValue<Ty>>,
+    register_variadic: VariadicRegister<Ty>,
 }
 
 impl<Ty> Frame<Ty>
@@ -105,7 +109,7 @@ where
 {
     pub(crate) fn new(
         closure: RootCell<Closure<Ty>>,
-        heap: &Heap<Ty>,
+        heap: &mut Heap<Ty>,
         chunk_cache: &dyn ChunkCache,
         mut stack: StackGuard<Ty>,
     ) -> Result<Self, RtError<Ty>> {
@@ -138,16 +142,14 @@ where
         let mut stack = stack.lua_frame();
         let call_height = StackSlot(0) + signature.arg_count;
 
-        let register_variadic = if signature.is_variadic {
-            stack
-                .adjust_height(call_height)
-                .map(|value| value.upgrade(heap))
-                .collect::<Option<_>>()
-                .ok_or(AlreadyDroppedError)?
+        let varargs: Vec<_> = if signature.is_variadic {
+            stack.adjust_height(call_height).collect()
         } else {
             let _ = stack.adjust_height(call_height);
             Default::default()
         };
+
+        let register_variadic = VariadicRegister::new(varargs, heap);
 
         // Ensure that disassociated upvalues are properly reattached.
         // stack.sync_upvalues(heap);
@@ -186,8 +188,8 @@ where
     where
         WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     {
-        use super::super::upvalue_register::preload_upvalues;
         use crate::error::{MissingChunk, MissingFunction};
+        use upvalue_register::preload_upvalues;
 
         let Context {
             core,
@@ -243,6 +245,7 @@ where
             ));
             upvalues
         };
+        let register_variadic = register_variadic.values();
 
         tracing::trace!(
             stack = stack.to_pretty_string(&core.gc),
@@ -349,7 +352,7 @@ where
     ip: &'rt mut InstrId,
     stack: StackGuard<'rt, Ty>,
     register_upvalue: &'rt mut UpvalueRegister<Ty>,
-    register_variadic: &'rt [StrongValue<Ty>],
+    register_variadic: &'rt [WeakValue<Ty>],
 }
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
@@ -510,10 +513,9 @@ where
                 ControlFlow::Continue(())
             }
             LoadVariadic => {
-                self.stack.lua_frame().extend(
-                    self.register_variadic.iter().map(|value| value.downgrade()),
-                    true,
-                );
+                self.stack
+                    .lua_frame()
+                    .extend(self.register_variadic.iter().copied(), true);
 
                 ControlFlow::Continue(())
             }
