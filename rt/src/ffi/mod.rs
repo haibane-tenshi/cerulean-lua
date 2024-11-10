@@ -1,4 +1,4 @@
-//! Traits defining Lua foreign function interface (FFI) with Rust.
+//! Traits defining foreign function interface (FFI) between Lua and Rust.
 //!
 //! While runtime is designed to evaluate Lua code primarily,
 //! it also sometimes needs to call into Rust functions.
