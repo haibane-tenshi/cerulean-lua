@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::path::Path;
 
 use enumoid::EnumMap;
-use gc::{Root, RootCell};
+use gc::{GcCell, Root, RootCell};
 use repr::literal::Literal;
 
 use crate::backtrace::Location;
@@ -18,8 +18,7 @@ use crate::error::{AlreadyDroppedError, RtError, RuntimeError, ThreadError};
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{
-    Callable, KeyValue, Meta, Strong, StrongValue, TypeWithoutMetatable, Types, Value, Weak,
-    WeakValue,
+    Callable, KeyValue, Meta, SolitaryType, Strong, StrongValue, Types, Value, Weak, WeakValue,
 };
 use orchestrator::Orchestrator;
 use thread::frame::Event;
@@ -31,12 +30,50 @@ pub use orchestrator::ThreadId;
 pub use thread::stack::{StackFrame, StackGuard, TransientStackFrame};
 pub use thread::ThreadGuard;
 
+pub struct MetatableRegistry<T> {
+    values: EnumMap<SolitaryType, Option<RootCell<T>>>,
+}
+
+impl<T> MetatableRegistry<T> {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn get(&self, type_: SolitaryType) -> Option<&RootCell<T>> {
+        self.values.get(type_).as_ref()
+    }
+
+    pub fn get_gc(&self, type_: SolitaryType) -> Option<GcCell<T>> {
+        self.get(type_).map(|ptr| ptr.downgrade())
+    }
+
+    pub fn set(&mut self, type_: SolitaryType, value: RootCell<T>) -> Option<RootCell<T>> {
+        self.values.get_mut(type_).replace(value)
+    }
+}
+
+impl<T> Default for MetatableRegistry<T> {
+    fn default() -> Self {
+        Self {
+            values: Default::default(),
+        }
+    }
+}
+
+impl<T> Debug for MetatableRegistry<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MetatableRegistry")
+            .field("values", &self.values)
+            .finish()
+    }
+}
+
 pub struct Core<Ty>
 where
     Ty: Types,
 {
     pub global_env: StrongValue<Ty>,
-    pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<RootCell<Ty::Table>>>,
+    pub metatable_registry: MetatableRegistry<Ty::Table>,
     pub dialect: DialectBuilder,
     pub gc: Heap<Ty>,
     pub string_interner: Interner<Ty::String>,
@@ -94,38 +131,13 @@ where
         &self,
         value: &WeakValue<Ty>,
     ) -> Result<Option<Meta<Ty>>, AlreadyDroppedError> {
-        use crate::gc::LuaPtr;
-        use crate::value::Metatable;
-        use TypeWithoutMetatable::*;
-
         let Core {
-            primitive_metatables,
-            gc: heap,
+            metatable_registry,
+            gc,
             ..
         } = self;
 
-        let r = match value {
-            Value::Nil => primitive_metatables[Nil].as_ref().map(|t| t.downgrade()),
-            Value::Bool(_) => primitive_metatables[Bool].as_ref().map(|t| t.downgrade()),
-            Value::Int(_) => primitive_metatables[Int].as_ref().map(|t| t.downgrade()),
-            Value::Float(_) => primitive_metatables[Float].as_ref().map(|t| t.downgrade()),
-            Value::String(_) => primitive_metatables[String].as_ref().map(|t| t.downgrade()),
-            Value::Function(_) => primitive_metatables[Function]
-                .as_ref()
-                .map(|t| t.downgrade()),
-            Value::Table(LuaPtr(t)) => heap
-                .get(*t)
-                .ok_or(AlreadyDroppedError)?
-                .metatable()
-                .copied(),
-            Value::Userdata(LuaPtr(t)) => heap
-                .get(*t)
-                .ok_or(AlreadyDroppedError)?
-                .metatable()
-                .copied(),
-        };
-
-        Ok(r)
+        value.metatable(gc, metatable_registry)
     }
 }
 
@@ -138,7 +150,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Core")
             .field("global_env", &self.global_env)
-            .field("primitive_metatables", &self.primitive_metatables)
+            .field("metatable_registry", &self.metatable_registry)
             .field("dialect", &self.dialect)
             .field("gc", &self.gc)
             .field("string_interner", &self.string_interner)

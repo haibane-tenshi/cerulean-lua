@@ -13,7 +13,9 @@ use std::fmt::{Debug, Display};
 use enumoid::Enumoid;
 use gc::Trace;
 
+use crate::error::AlreadyDroppedError;
 use crate::gc::{DisplayWith, Heap};
+use crate::runtime::MetatableRegistry;
 
 pub use boolean::Boolean;
 pub use callable::Callable;
@@ -84,15 +86,15 @@ impl Display for Type {
     }
 }
 
-impl From<TypeWithoutMetatable> for Type {
-    fn from(value: TypeWithoutMetatable) -> Self {
+impl From<SolitaryType> for Type {
+    fn from(value: SolitaryType) -> Self {
         match value {
-            TypeWithoutMetatable::Nil => Type::Nil,
-            TypeWithoutMetatable::Bool => Type::Bool,
-            TypeWithoutMetatable::Int => Type::Int,
-            TypeWithoutMetatable::Float => Type::Float,
-            TypeWithoutMetatable::String => Type::String,
-            TypeWithoutMetatable::Function => Type::Function,
+            SolitaryType::Nil => Type::Nil,
+            SolitaryType::Bool => Type::Bool,
+            SolitaryType::Int => Type::Int,
+            SolitaryType::Float => Type::Float,
+            SolitaryType::String => Type::String,
+            SolitaryType::Function => Type::Function,
         }
     }
 }
@@ -145,21 +147,22 @@ impl From<Type> for LuaType {
     }
 }
 
-impl From<TypeWithoutMetatable> for LuaType {
-    fn from(value: TypeWithoutMetatable) -> Self {
+impl From<SolitaryType> for LuaType {
+    fn from(value: SolitaryType) -> Self {
         match value {
-            TypeWithoutMetatable::Nil => LuaType::Nil,
-            TypeWithoutMetatable::Bool => LuaType::Boolean,
-            TypeWithoutMetatable::Int => LuaType::Number,
-            TypeWithoutMetatable::Float => LuaType::Number,
-            TypeWithoutMetatable::String => LuaType::String,
-            TypeWithoutMetatable::Function => LuaType::Function,
+            SolitaryType::Nil => LuaType::Nil,
+            SolitaryType::Bool => LuaType::Boolean,
+            SolitaryType::Int => LuaType::Number,
+            SolitaryType::Float => LuaType::Number,
+            SolitaryType::String => LuaType::String,
+            SolitaryType::Function => LuaType::Function,
         }
     }
 }
 
+/// Lua type which doesn't carry a metatable.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Enumoid)]
-pub enum TypeWithoutMetatable {
+pub enum SolitaryType {
     Nil,
     Bool,
     Int,
@@ -168,14 +171,14 @@ pub enum TypeWithoutMetatable {
     Function,
 }
 
-impl TypeWithoutMetatable {
+impl SolitaryType {
     pub fn to_str(self) -> &'static str {
         let ty: LuaType = self.into();
         ty.to_str()
     }
 }
 
-impl Display for TypeWithoutMetatable {
+impl Display for SolitaryType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_str())
     }
@@ -253,6 +256,32 @@ where
             Value::Userdata(t) => Value::Userdata(t.downgrade()),
         }
     }
+
+    /// Produce metatable reference.
+    ///
+    /// If the value carries a metatable (it is table or userdata), that metatable will be returned.
+    /// Heap is required to follow through reference.
+    ///
+    /// If the value doesn't carry a metatable (e.g. one of [`SolitaryType`]), metatable will be taken from the registry.
+    pub fn metatable(
+        &self,
+        heap: &Heap<Ty>,
+        registry: &MetatableRegistry<Ty::Table>,
+    ) -> Option<Meta<Ty>> {
+        use crate::gc::LuaPtr;
+        use SolitaryType::*;
+
+        match self {
+            Value::Nil => registry.get_gc(Nil),
+            Value::Bool(_) => registry.get_gc(Bool),
+            Value::Int(_) => registry.get_gc(Int),
+            Value::Float(_) => registry.get_gc(Float),
+            Value::String(_) => registry.get_gc(String),
+            Value::Function(_) => registry.get_gc(Function),
+            Value::Table(LuaPtr(t)) => heap.get_root(t).metatable().copied(),
+            Value::Userdata(LuaPtr(t)) => heap.get_root(t).metatable().copied(),
+        }
+    }
 }
 
 impl<Ty> WeakValue<Ty>
@@ -273,6 +302,37 @@ where
         };
 
         Some(r)
+    }
+
+    /// Produce metatable reference.
+    ///
+    /// If the value carries a metatable (it is table or userdata), that metatable will be returned.
+    /// Heap is required to follow through reference.
+    /// Error will be returned if the value behind reference was garbage collected.
+    ///
+    /// If the value doesn't carry a metatable (e.g. one of [`SolitaryType`]), metatable will be taken from the registry.
+    pub fn metatable(
+        &self,
+        heap: &Heap<Ty>,
+        registry: &MetatableRegistry<Ty::Table>,
+    ) -> Result<Option<Meta<Ty>>, AlreadyDroppedError> {
+        use crate::gc::LuaPtr;
+        use SolitaryType::*;
+
+        let r = match self {
+            Value::Nil => registry.get_gc(Nil),
+            Value::Bool(_) => registry.get_gc(Bool),
+            Value::Int(_) => registry.get_gc(Int),
+            Value::Float(_) => registry.get_gc(Float),
+            Value::String(_) => registry.get_gc(String),
+            Value::Function(_) => registry.get_gc(Function),
+            Value::Table(LuaPtr(t)) => heap.get(t).ok_or(AlreadyDroppedError)?.metatable().copied(),
+            Value::Userdata(LuaPtr(t)) => {
+                heap.get(t).ok_or(AlreadyDroppedError)?.metatable().copied()
+            }
+        };
+
+        Ok(r)
     }
 }
 
