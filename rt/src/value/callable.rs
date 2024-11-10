@@ -144,6 +144,44 @@ where
 {
 }
 
+impl<Rf, Ty> PartialOrd for Callable<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+    Rf::LuaCallable<Ty::LuaClosure>: PartialOrd,
+    Rf::RustCallable<Ty::RustClosure>: PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+
+        match (self, other) {
+            (Callable::Lua(lhs), Callable::Lua(rhs)) => lhs.partial_cmp(rhs),
+            (Callable::Rust(lhs), Callable::Rust(rhs)) => lhs.partial_cmp(rhs),
+            (Callable::Lua(_), Callable::Rust(_)) => Some(Ordering::Less),
+            (Callable::Rust(_), Callable::Lua(_)) => Some(Ordering::Greater),
+        }
+    }
+}
+
+impl<Rf, Ty> Ord for Callable<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+    Rf::LuaCallable<Ty::LuaClosure>: Ord,
+    Rf::RustCallable<Ty::RustClosure>: Ord,
+{
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        match (self, other) {
+            (Callable::Lua(lhs), Callable::Lua(rhs)) => lhs.cmp(rhs),
+            (Callable::Rust(lhs), Callable::Rust(rhs)) => lhs.cmp(rhs),
+            (Callable::Lua(_), Callable::Rust(_)) => Ordering::Less,
+            (Callable::Rust(_), Callable::Lua(_)) => Ordering::Greater,
+        }
+    }
+}
+
 impl<Rf, Ty> Hash for Callable<Rf, Ty>
 where
     Rf: Refs,

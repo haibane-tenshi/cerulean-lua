@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -6,14 +6,14 @@ use gc::Trace;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::{Meta, Metatable, Refs, TableIndex, Types, Value};
+use super::{Meta, Metatable, Refs, TableIndex, Type, Types, Value};
 
 pub struct Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
 {
-    data: HashMap<KeyValue<Rf, Ty>, Value<Rf, Ty>>,
+    data: BTreeMap<KeyValue<Rf, Ty>, Value<Rf, Ty>>,
     metatable: Option<Meta<Ty>>,
 }
 
@@ -21,7 +21,7 @@ impl<Rf, Ty> TableIndex<Rf, Ty> for Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
-    KeyValue<Rf, Ty>: Hash + Eq,
+    KeyValue<Rf, Ty>: Ord,
     Value<Rf, Ty>: Clone,
 {
     fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty> {
@@ -52,7 +52,7 @@ impl<Rf, Ty> Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
-    KeyValue<Rf, Ty>: Hash + Eq,
+    KeyValue<Rf, Ty>: Ord,
 {
     pub fn get_ref<'s>(&'s self, key: &KeyValue<Rf, Ty>) -> Option<&'s Value<Rf, Ty>> {
         self.data.get(key)
@@ -153,6 +153,24 @@ pub enum KeyValue<Rf: Refs, Ty: Types> {
     Function(Callable<Rf, Ty>),
     Table(Rf::Table<Ty::Table>),
     Userdata(Rf::FullUserdata<Ty::FullUserdata>),
+}
+
+impl<Rf, Ty> KeyValue<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+{
+    pub fn type_(&self) -> Type {
+        match self {
+            KeyValue::Bool(_) => Type::Bool,
+            KeyValue::Int(_) => Type::Int,
+            KeyValue::Float(_) => Type::Float,
+            KeyValue::String(_) => Type::String,
+            KeyValue::Function(_) => Type::Function,
+            KeyValue::Table(_) => Type::Table,
+            KeyValue::Userdata(_) => Type::Userdata,
+        }
+    }
 }
 
 impl<Rf, Ty> Trace for KeyValue<Rf, Ty>
@@ -265,6 +283,70 @@ where
     Rf::Table<Ty::Table>: Eq,
     Rf::FullUserdata<Ty::FullUserdata>: Eq,
 {
+}
+
+impl<Rf, Ty> PartialOrd for KeyValue<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+    Rf::String<Ty::String>: PartialOrd,
+    Callable<Rf, Ty>: PartialOrd,
+    Rf::Table<Ty::Table>: PartialOrd,
+    Rf::FullUserdata<Ty::FullUserdata>: PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use KeyValue::*;
+
+        match (self, other) {
+            (Bool(lhs), Bool(rhs)) => lhs.partial_cmp(rhs),
+            (Int(lhs), Int(rhs)) => lhs.partial_cmp(rhs),
+            (Float(lhs), Float(rhs)) => lhs.partial_cmp(rhs),
+            (String(lhs), String(rhs)) => lhs.partial_cmp(rhs),
+            (Function(lhs), Function(rhs)) => lhs.partial_cmp(rhs),
+            (Table(lhs), Table(rhs)) => lhs.partial_cmp(rhs),
+            (Userdata(lhs), Userdata(rhs)) => lhs.partial_cmp(rhs),
+            (lhs, rhs) => {
+                let lhs = lhs.type_();
+                let rhs = rhs.type_();
+
+                let res = lhs.cmp(rhs);
+                debug_assert_ne!(res, std::cmp::Ordering::Equal);
+                Some(res)
+            }
+        }
+    }
+}
+
+impl<Rf, Ty> Ord for KeyValue<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+    Rf::String<Ty::String>: Ord,
+    Callable<Rf, Ty>: Ord,
+    Rf::Table<Ty::Table>: Ord,
+    Rf::FullUserdata<Ty::FullUserdata>: Ord,
+{
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use KeyValue::*;
+
+        match (self, other) {
+            (Bool(lhs), Bool(rhs)) => lhs.cmp(rhs),
+            (Int(lhs), Int(rhs)) => lhs.cmp(rhs),
+            (Float(lhs), Float(rhs)) => lhs.cmp(rhs),
+            (String(lhs), String(rhs)) => lhs.cmp(rhs),
+            (Function(lhs), Function(rhs)) => lhs.cmp(rhs),
+            (Table(lhs), Table(rhs)) => lhs.cmp(rhs),
+            (Userdata(lhs), Userdata(rhs)) => lhs.cmp(rhs),
+            (lhs, rhs) => {
+                let lhs = lhs.type_();
+                let rhs = rhs.type_();
+
+                let res = lhs.cmp(rhs);
+                debug_assert_ne!(res, std::cmp::Ordering::Equal);
+                res
+            }
+        }
+    }
 }
 
 impl<Rf, Ty> Hash for KeyValue<Rf, Ty>

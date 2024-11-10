@@ -48,6 +48,23 @@ impl Type {
         let ty: LuaType = self.into();
         ty.to_str()
     }
+
+    pub(crate) fn cmp(self, other: Self) -> std::cmp::Ordering {
+        fn to_discr(value: Type) -> u8 {
+            match value {
+                Type::Nil => 0,
+                Type::Bool => 1,
+                Type::Int => 2,
+                Type::Float => 3,
+                Type::String => 4,
+                Type::Function => 5,
+                Type::Table => 6,
+                Type::Userdata => 7,
+            }
+        }
+
+        to_discr(self).cmp(&to_discr(other))
+    }
 }
 
 impl Display for Type {
