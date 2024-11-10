@@ -25,7 +25,7 @@ pub struct Strong;
 
 impl Refs for Strong {
     type String<T> = LuaPtr<Root<Interned<T>>>;
-    type LuaCallable<T> = LuaPtr<RootCell<T>>;
+    type LuaCallable<T> = LuaPtr<Root<T>>;
     type RustCallable<T> = LuaPtr<RootCell<T>>;
     type Table<T> = LuaPtr<RootCell<T>>;
     type FullUserdata<T: ?Sized> = LuaPtr<RootCell<T>>;
@@ -35,7 +35,7 @@ pub struct Weak;
 
 impl Refs for Weak {
     type String<T> = LuaPtr<Gc<Interned<T>>>;
-    type LuaCallable<T> = LuaPtr<GcCell<T>>;
+    type LuaCallable<T> = LuaPtr<Gc<T>>;
     type RustCallable<T> = LuaPtr<GcCell<T>>;
     type Table<T> = LuaPtr<GcCell<T>>;
     type FullUserdata<T: ?Sized> = LuaPtr<GcCell<T>>;

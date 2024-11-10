@@ -100,7 +100,7 @@ pub(crate) struct Frame<Ty>
 where
     Ty: Types,
 {
-    closure: RootCell<Closure<Ty>>,
+    closure: Root<Closure<Ty>>,
     ip: InstrId,
     register_variadic: VariadicRegister<Ty>,
 }
@@ -110,7 +110,7 @@ where
     Ty: Types,
 {
     pub(crate) fn new(
-        closure: RootCell<Closure<Ty>>,
+        closure: Root<Closure<Ty>>,
         heap: &mut Heap<Ty>,
         chunk_cache: &dyn ChunkCache,
         mut stack: StackGuard<Ty>,
@@ -170,7 +170,7 @@ impl<Ty> Frame<Ty>
 where
     Ty: Types,
 {
-    pub(crate) fn closure(&self) -> &RootCell<Closure<Ty>> {
+    pub(crate) fn closure(&self) -> &Root<Closure<Ty>> {
         &self.closure
     }
 
@@ -344,7 +344,7 @@ where
     Ty: Types,
 {
     current_thread_id: ThreadId,
-    closure: &'rt RootCell<Closure<Ty>>,
+    closure: &'rt Root<Closure<Ty>>,
     core: &'rt mut Core<Ty>,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
@@ -1251,7 +1251,7 @@ where
     pub(crate) fn construct_closure(
         &mut self,
         recipe_id: RecipeId,
-    ) -> Result<RootCell<Closure<Ty>>, opcode_err::Cause> {
+    ) -> Result<Root<Closure<Ty>>, opcode_err::Cause> {
         use crate::runtime::FunctionPtr;
 
         let recipe = self
@@ -1294,13 +1294,13 @@ where
 
         let closure = Closure::from_raw_parts(fn_ptr, self.current_thread_id, upvalues);
 
-        let closure = match self.core.gc.try_alloc_cell(closure) {
+        let closure = match self.core.gc.try_alloc(closure) {
             Ok(ptr) => ptr,
             Err(closure) => {
                 // All Gc references inside the closure are copies of upvalues of current frame
                 // which are going to be rooted in the process.
                 self.sync();
-                self.core.gc.alloc_cell(closure)
+                self.core.gc.alloc(closure)
             }
         };
 

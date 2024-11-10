@@ -1,12 +1,13 @@
+use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::Debug;
 
-use gc::{Collector, GcCell, RootCell, Trace};
+use gc::{Collector, GcCell, Root, Trace};
 use repr::index::{FunctionId, UpvalueSlot};
-use repr::tivec::{TiSlice, TiVec};
+use repr::tivec::TiVec;
 
 use super::thread::stack::RawStackSlot;
 use crate::chunk_cache::ChunkId;
-use crate::error::RtError;
+use crate::error::MalformedClosureError;
 use crate::runtime::{RuntimeView, ThreadId};
 use crate::value::{Types, Value, WeakValue};
 
@@ -33,7 +34,7 @@ where
 {
     fn_ptr: FunctionPtr,
     origin: ThreadId,
-    upvalues: TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>,
+    upvalues: RefCell<TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>>,
 }
 
 impl<Ty> Trace for Closure<Ty>
@@ -41,7 +42,7 @@ where
     Ty: Types,
 {
     fn trace(&self, collector: &mut Collector) {
-        for upvalue in &self.upvalues {
+        for upvalue in self.upvalues.borrow().iter() {
             match upvalue {
                 UpvaluePlace::Place(value) => value.trace(collector),
                 UpvaluePlace::Stack(_) => (),
@@ -58,7 +59,7 @@ where
         rt: &mut RuntimeView<Ty>,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<RootCell<Self>, RtError<Ty>> {
+    ) -> Result<Root<Self>, MalformedClosureError> {
         use crate::error::{MissingChunk, MissingFunction};
 
         let upvalue_count = rt
@@ -78,6 +79,7 @@ where
                 .map(|value| heap.alloc_as(value).downgrade())
                 .map(UpvaluePlace::Place)
                 .collect();
+            let upvalues = RefCell::new(upvalues);
 
             // Use dummy id.
             // Thread with this id is guaranteed to exist which is the only property that matters:
@@ -89,7 +91,7 @@ where
                 origin,
                 upvalues,
             };
-            heap.alloc_cell(closure)
+            heap.alloc(closure)
         });
 
         Ok(closure)
@@ -108,7 +110,7 @@ where
         Closure {
             fn_ptr,
             origin,
-            upvalues,
+            upvalues: RefCell::new(upvalues),
         }
     }
 
@@ -120,13 +122,13 @@ where
         self.origin
     }
 
-    pub(crate) fn upvalues(&self) -> &TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
-        &self.upvalues
+    pub(crate) fn upvalues(&self) -> Ref<TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>> {
+        self.upvalues.borrow()
     }
 
     pub(crate) fn upvalues_mut(
-        &mut self,
-    ) -> &mut TiSlice<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>> {
-        &mut self.upvalues
+        &self,
+    ) -> RefMut<TiVec<UpvalueSlot, UpvaluePlace<GcCell<WeakValue<Ty>>>>> {
+        self.upvalues.borrow_mut()
     }
 }

@@ -329,8 +329,8 @@ where
         &mut self,
         fn_ptr: FunctionPtr,
         upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<RootCell<Closure<Ty>>, RtError<Ty>> {
-        Closure::new(self, fn_ptr, upvalues)
+    ) -> Result<Root<Closure<Ty>>, RtError<Ty>> {
+        Closure::new(self, fn_ptr, upvalues).map_err(Into::into)
     }
 
     pub fn chunk_cache(&self) -> &dyn ChunkCache {

@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::ops::{Add, Bound, Deref, DerefMut, Range, RangeBounds, Sub};
 
 use bitvec::vec::BitVec;
-use gc::{GcCell, RootCell};
+use gc::{Gc, Root, RootCell};
 use repr::index::StackSlot;
 use repr::tivec::TiVec;
 
@@ -193,7 +193,7 @@ where
     /// so it doesn't matter whether closure is dropped or not.
     ///
     /// Upvalues referencing stack slots need to be updated when those are detached.
-    closures: Vec<GcCell<Closure<Ty>>>,
+    closures: Vec<Gc<Closure<Ty>>>,
 
     /// Upvalues that got detached from the stack,
     /// but that change was not yet propagated to affected closures.
@@ -253,12 +253,12 @@ where
 
             self.closures.retain(|&closure_ref| {
                 // Discard closure if it was already dropped.
-                let Some(closure) = heap.get_mut(closure_ref) else {
+                let Some(closure) = heap.get(closure_ref) else {
                     return false;
                 };
 
                 let mut have_upvalue_on_stack = false;
-                for place in closure.upvalues_mut() {
+                for place in closure.upvalues_mut().iter_mut() {
                     let value = match *place {
                         UpvaluePlace::Stack(slot) => {
                             if let Some(&value) = reallocated.get(&slot) {
@@ -307,10 +307,11 @@ where
         }
     }
 
-    fn register_closure(&mut self, closure_ref: &RootCell<Closure<Ty>>, heap: &Heap<Ty>) {
+    fn register_closure(&mut self, closure_ref: &Root<Closure<Ty>>, heap: &Heap<Ty>) {
         let closure = &heap[closure_ref];
+        let upvalues = closure.upvalues();
 
-        let iter = closure.upvalues().iter().filter_map(|place| match place {
+        let iter = upvalues.iter().filter_map(|place| match place {
             UpvaluePlace::Stack(slot) => Some(*slot),
             UpvaluePlace::Place(_) => None,
         });
@@ -786,11 +787,7 @@ where
         self.0.stack.sync(heap);
     }
 
-    pub(super) fn register_closure(
-        &mut self,
-        closure_ref: &RootCell<Closure<Ty>>,
-        heap: &Heap<Ty>,
-    ) {
+    pub(super) fn register_closure(&mut self, closure_ref: &Root<Closure<Ty>>, heap: &Heap<Ty>) {
         self.0.stack.register_closure(closure_ref, heap)
     }
 }
