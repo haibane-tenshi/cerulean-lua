@@ -11,11 +11,11 @@ use rt::ffi::{self, delegate, LuaFfi};
 use rt::gc::{DisplayWith, Heap, LuaPtr};
 use rt::runtime::{Closure, RuntimeView};
 use rt::value::table::KeyValue;
-use rt::value::{Callable, CoreTypes, StrongValue, Types, Value, WeakValue};
+use rt::value::{Callable, Refs, StrongValue, Types, Value, WeakValue};
 
 pub fn assert<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     ffi::from_fn(
         || {
@@ -51,7 +51,7 @@ where
 
 pub fn print<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     ffi::from_fn(
@@ -73,7 +73,7 @@ where
 
 pub fn pcall<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::String: AsRef<[u8]> + Display,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
@@ -93,7 +93,7 @@ where
 
     impl<Ty> delegate::Delegate<Ty> for Delegate
     where
-        Ty: CoreTypes,
+        Ty: Types,
     {
         fn resume(
             mut self: Pin<&mut Self>,
@@ -204,7 +204,7 @@ impl Error for InvalidModeError {}
 
 impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for Mode
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Error = WeakConvertError<InvalidModeError>;
 
@@ -227,13 +227,13 @@ where
 
 pub fn load<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::String: TryInto<String> + AsRef<[u8]> + Display,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     use rt::value::{Type, Weak};
 
-    enum ChunkSource<Rf: Types, Ty: CoreTypes> {
+    enum ChunkSource<Rf: Refs, Ty: Types> {
         String(Rf::String<Ty::String>),
         Function(Callable<Rf, Ty>),
     }
@@ -260,8 +260,8 @@ where
 
     impl<Rf, Ty, Gc> ParseAtom<Value<Rf, Ty>, Gc> for ChunkSource<Rf, Ty>
     where
-        Rf: Types,
-        Ty: CoreTypes,
+        Rf: Refs,
+        Ty: Types,
     {
         type Error = ChunkSourceError;
 
@@ -363,7 +363,7 @@ where
 
 pub fn loadfile<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::String: TryInto<String> + TryInto<PathBuf> + AsRef<[u8]> + Display,
     // WeakValue<Ty>: DisplayWith<Heap<Ty>> + TryConvertInto<LuaString<PathBuf>, Heap<Ty>>,
     // <WeakValue<Ty> as TryConvertInto<LuaString<PathBuf>, Heap<Ty>>>::Error: Error,
@@ -426,7 +426,7 @@ where
 
 pub fn getmetatable<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     // Value<Gc>: Debug + Display,
 {
     ffi::from_fn(
@@ -478,7 +478,7 @@ where
 
 pub fn setmetatable<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     // Value<Gc>: Debug + Display,
 {
     ffi::from_fn(

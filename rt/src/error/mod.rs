@@ -16,7 +16,7 @@ use gc::Root;
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::gc::{DisplayWith, Heap};
 use crate::runtime::Interned;
-use crate::value::{CoreTypes, Strong, StrongValue, Types, Value};
+use crate::value::{Refs, Strong, StrongValue, Types, Value};
 
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
@@ -47,8 +47,8 @@ pub enum RuntimeError<Value> {
 
 impl<Rf, Ty> RuntimeError<Value<Rf, Ty>>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: From<Root<Interned<Ty::String>>>,
 {
     pub fn from_msg(msg: Root<Interned<Ty::String>>) -> Self {
@@ -72,7 +72,7 @@ impl<Value> RuntimeError<Value> {
 
 impl<Ty> RuntimeError<StrongValue<Ty>>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn into_diagnostic(self, heap: &Heap<Ty>, chunk_cache: &dyn ChunkCache) -> Diagnostic
     where

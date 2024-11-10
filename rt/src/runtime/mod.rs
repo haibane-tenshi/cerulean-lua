@@ -18,7 +18,7 @@ use crate::error::{AlreadyDroppedError, RtError, RuntimeError, ThreadError};
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{
-    Callable, CoreTypes, KeyValue, Meta, Strong, StrongValue, TypeWithoutMetatable, Value, Weak,
+    Callable, KeyValue, Meta, Strong, StrongValue, TypeWithoutMetatable, Types, Value, Weak,
     WeakValue,
 };
 use orchestrator::Orchestrator;
@@ -33,7 +33,7 @@ pub use thread::ThreadGuard;
 
 pub struct Core<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub global_env: StrongValue<Ty>,
     pub primitive_metatables: EnumMap<TypeWithoutMetatable, Option<RootCell<Ty::Table>>>,
@@ -44,7 +44,7 @@ where
 
 impl<Ty> Core<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn alloc_string(&mut self, s: Ty::String) -> Root<Interned<Ty::String>> {
         self.string_interner.insert(s, &mut self.gc)
@@ -76,7 +76,7 @@ where
 
 impl<Ty> Core<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn lookup_event(&self, event: Event) -> KeyValue<Weak, Ty> {
         use crate::gc::LuaPtr;
@@ -88,7 +88,7 @@ where
 
 impl<Ty> Core<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn metatable_of(
         &self,
@@ -131,7 +131,7 @@ where
 
 impl<Ty> Debug for Core<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     StrongValue<Ty>: Debug,
     Ty::Table: Debug,
 {
@@ -148,7 +148,7 @@ where
 
 pub struct Runtime<Ty, C>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub core: Core<Ty>,
     pub chunk_cache: C,
@@ -157,7 +157,7 @@ where
 
 impl<Ty, C> Runtime<Ty, C>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     C: Debug,
 {
     pub fn new(chunk_cache: C, mut core: Core<Ty>) -> Self {
@@ -174,7 +174,7 @@ where
 
 impl<Ty, C> Runtime<Ty, C>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
         self.orchestrator.new_thread(&mut self.core.gc, callable)
@@ -183,7 +183,7 @@ where
 
 impl<Ty, C> Runtime<Ty, C>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     C: ChunkCache,
 {
     fn context(&mut self) -> (orchestrator::Context<Ty>, &mut Orchestrator<Ty>) {
@@ -252,7 +252,7 @@ where
 
 impl<Ty, C> Runtime<Ty, C>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
     C: ChunkCache,
 {
@@ -264,7 +264,7 @@ where
 
 pub struct RuntimeView<'rt, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub core: &'rt mut Core<Ty>,
     pub chunk_cache: &'rt mut dyn ChunkCache,
@@ -273,7 +273,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn reborrow(&mut self) -> RuntimeView<'_, Ty> {
         let RuntimeView {
@@ -323,7 +323,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn construct_closure(
         &mut self,
@@ -340,7 +340,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn load(
         &mut self,
@@ -396,7 +396,7 @@ where
 
 impl<'rt, Ty> RuntimeView<'rt, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     // pub fn backtrace(&self) -> Backtrace {
     //     use rust_backtrace_stack::RustFrame;

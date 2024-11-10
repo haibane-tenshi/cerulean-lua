@@ -21,7 +21,7 @@ pub use float::Float;
 pub use int::Int;
 pub use nil::Nil;
 pub use table::{KeyValue, Table};
-pub use traits::{Concat, CoreTypes, Len, Meta, Metatable, Strong, TableIndex, Types, Weak};
+pub use traits::{Concat, Len, Meta, Metatable, Refs, Strong, TableIndex, Types, Weak};
 pub use userdata::DefaultParams;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -181,7 +181,7 @@ pub type WeakValue<Ty> = Value<Weak, Ty>;
 /// Default rendering will only include the contents.
 /// Alternate rendering will include type information as well,
 /// but looks a little bit nicer compared to `Debug` output.
-pub enum Value<Rf: Types, Ty: CoreTypes> {
+pub enum Value<Rf: Refs, Ty: Types> {
     Nil,
     Bool(bool),
     Int(i64),
@@ -194,8 +194,8 @@ pub enum Value<Rf: Types, Ty: CoreTypes> {
 
 impl<Rf, Ty> Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     pub fn to_bool(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
@@ -221,7 +221,7 @@ where
 
 impl<Ty> StrongValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn downgrade(&self) -> WeakValue<Ty> {
         match self {
@@ -240,7 +240,7 @@ where
 
 impl<Ty> WeakValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn upgrade(self, heap: &Heap<Ty>) -> Option<StrongValue<Ty>> {
         let r = match self {
@@ -261,7 +261,7 @@ where
 
 impl<Ty> WeakValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn is_transient(&self) -> bool {
         use Value::*;
@@ -279,7 +279,7 @@ where
 
 impl<Ty> From<StrongValue<Ty>> for WeakValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn from(value: StrongValue<Ty>) -> Self {
         value.downgrade()
@@ -301,8 +301,8 @@ where
 
 impl<Rf, Ty> Trace for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Trace,
     Callable<Rf, Ty>: Trace,
     Rf::Table<Ty::Table>: Trace,
@@ -323,8 +323,8 @@ where
 
 impl<Rf, Ty> Debug for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Debug,
     Callable<Rf, Ty>: Debug,
     Rf::Table<Ty::Table>: Debug,
@@ -346,8 +346,8 @@ where
 
 impl<Rf, Ty> Clone for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Clone,
     Callable<Rf, Ty>: Clone,
     Rf::Table<Ty::Table>: Clone,
@@ -370,8 +370,8 @@ where
 
 impl<Rf, Ty> Copy for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Copy,
     Callable<Rf, Ty>: Copy,
     Rf::Table<Ty::Table>: Copy,
@@ -381,8 +381,8 @@ where
 
 impl<Rf, Ty> PartialEq for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: PartialEq,
     Callable<Rf, Ty>: PartialEq,
     Rf::Table<Ty::Table>: PartialEq,
@@ -404,8 +404,8 @@ where
 
 impl<Rf, Ty> Eq for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Eq,
     Callable<Rf, Ty>: Eq,
     Rf::Table<Ty::Table>: Eq,
@@ -417,8 +417,8 @@ where
 #[allow(clippy::derivable_impls)]
 impl<Rf, Ty> Default for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn default() -> Self {
         Value::Nil
@@ -429,7 +429,7 @@ pub struct ValueWith<'a, Value, Heap>(&'a Value, &'a Heap);
 
 impl<'a, Ty> Display for ValueWith<'a, WeakValue<Ty>, Heap<Ty>>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
@@ -458,7 +458,7 @@ where
 
 impl<'a, Ty> Display for ValueWith<'a, StrongValue<Ty>, Heap<Ty>>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
@@ -484,7 +484,7 @@ where
 
 impl<Ty> DisplayWith<Heap<Ty>> for WeakValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Output<'a> = ValueWith<'a, Self, Heap<Ty>>
     where
@@ -497,7 +497,7 @@ where
 
 impl<Ty> DisplayWith<Heap<Ty>> for StrongValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Output<'a> = ValueWith<'a, Self, Heap<Ty>>
     where

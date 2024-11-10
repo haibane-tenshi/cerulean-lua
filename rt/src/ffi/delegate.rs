@@ -163,14 +163,14 @@ use repr::index::StackSlot;
 use crate::error::RtError;
 use crate::runtime::RuntimeView;
 use crate::runtime::ThreadId;
-use crate::value::{Callable, CoreTypes, Strong};
+use crate::value::{Callable, Strong, Types};
 
 use super::coroutine::State;
 
 /// Request runtime to perform specific action.
 pub enum Request<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     Invoke {
         callable: Callable<Strong, Ty>,
@@ -189,7 +189,7 @@ where
 #[derive(Debug)]
 pub enum Response<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     Resume,
     Evaluated(Result<(), RtError<Ty>>),
@@ -203,7 +203,7 @@ where
 /// See [module-level](super::delegate) documentation for details.
 pub trait Delegate<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn resume(
         self: Pin<&mut Self>,
@@ -228,7 +228,7 @@ where
 
 impl<Ty, T> Delegate<Ty> for &mut T
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: Delegate<Ty> + Unpin + ?Sized,
 {
     fn resume(
@@ -243,7 +243,7 @@ where
 
 impl<Ty, T> Delegate<Ty> for Pin<&mut T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: Delegate<Ty> + ?Sized,
 {
     fn resume(
@@ -258,7 +258,7 @@ where
 
 impl<Ty, T> Delegate<Ty> for Box<T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: Delegate<Ty> + Unpin + ?Sized,
 {
     fn resume(
@@ -273,7 +273,7 @@ where
 
 impl<Ty, T> Delegate<Ty> for Pin<Box<T>>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: Delegate<Ty> + ?Sized,
 {
     fn resume(
@@ -294,7 +294,7 @@ pub enum Never {}
 
 impl<Ty> Delegate<Ty> for Never
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn resume(
         self: Pin<&mut Self>,
@@ -306,7 +306,7 @@ where
 }
 
 /// No-op function for compile-time testing `Delegate` impls.
-fn assert_impl<Ty: CoreTypes, T: Delegate<Ty>>(_: &T) {}
+fn assert_impl<Ty: Types, T: Delegate<Ty>>(_: &T) {}
 
 /// Construct non-reenterable delegate out of `FnMut`/`Fn` closure.
 ///
@@ -314,7 +314,7 @@ fn assert_impl<Ty: CoreTypes, T: Delegate<Ty>>(_: &T) {}
 /// Repeated calls to [`Coroutine::resume`] will invoke the callback.
 pub fn from_mut<F, Ty>(f: F) -> FromMut<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'a> FnMut(RuntimeView<'a, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
     let r = FromMut(f);
@@ -326,7 +326,7 @@ pub struct FromMut<F>(F);
 
 impl<F, Ty> Delegate<Ty> for FromMut<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
     fn resume(
@@ -348,7 +348,7 @@ where
 /// Repeated calls to [`Coroutine::resume`] will result in error.
 pub fn from_once<F, Ty>(f: F) -> FromOnce<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'a> FnOnce(RuntimeView<'a, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
     let r = FromOnce(Some(f));
@@ -360,7 +360,7 @@ pub struct FromOnce<F>(Option<F>);
 
 impl<F, Ty> Delegate<Ty> for FromOnce<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
     fn resume(
@@ -387,7 +387,7 @@ where
 /// Lua panics will be automatically propagated.
 pub fn repeat<F, Ty>(f: F) -> Repeat<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'a> FnMut(RuntimeView<'a, Ty>) -> State<Request<Ty>, Result<(), RtError<Ty>>> + Unpin,
 {
     let r = Repeat(f);
@@ -399,7 +399,7 @@ pub struct Repeat<F>(F);
 
 impl<Ty, F> Delegate<Ty> for Repeat<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> State<Request<Ty>, Result<(), RtError<Ty>>> + Unpin,
 {
     fn resume(
@@ -426,7 +426,7 @@ where
 /// Lua panics will be automatically propagated.
 pub fn try_repeat<F, Ty>(f: F) -> TryRepeat<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<State<Request<Ty>, ()>, RtError<Ty>> + Unpin,
 {
     let r = TryRepeat(f);
@@ -438,7 +438,7 @@ pub struct TryRepeat<F>(F);
 
 impl<Ty, F> Delegate<Ty> for TryRepeat<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: for<'rt> FnMut(RuntimeView<'rt, Ty>) -> Result<State<Request<Ty>, ()>, RtError<Ty>> + Unpin,
 {
     fn resume(
@@ -470,7 +470,7 @@ where
 /// Any received errors will be propagated, completing the coroutine.
 pub fn yield_1<F0, F1, Ty>(f0: F0, f1: F1) -> Yield1<F0, F1>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F0: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<Request<Ty>, RtError<Ty>> + Unpin,
     F1: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {
@@ -487,7 +487,7 @@ pub struct Yield1<F0, F1>(Yield1State<F0, F1>);
 
 impl<Ty, F0, F1> Delegate<Ty> for Yield1<F0, F1>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F0: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<Request<Ty>, RtError<Ty>> + Unpin,
     F1: for<'rt> FnOnce(RuntimeView<'rt, Ty>) -> Result<(), RtError<Ty>> + Unpin,
 {

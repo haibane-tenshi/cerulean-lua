@@ -6,7 +6,7 @@ use gc::userdata::Params;
 use crate::error::{BorrowError, RtError};
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
 use crate::runtime::RuntimeView;
-use crate::value::CoreTypes;
+use crate::value::Types;
 
 pub use gc::userdata::{FullUserdata, Userdata};
 
@@ -20,7 +20,7 @@ pub struct DefaultParams<Ty>(PhantomData<Ty>);
 
 impl<Ty> Params for DefaultParams<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Id<'id> = MethodId<'id>;
     type Rt<'rt> = RuntimeView<'rt, Ty>;
@@ -35,7 +35,7 @@ pub enum Method<Ref, Mut, Val> {
 
 pub trait DispatchMethod<Marker, Ty>: Sized
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     const SCOPE_NAME: &'static str;
 
@@ -52,7 +52,7 @@ where
 
 impl<Marker, Ty, T> DispatchMethod<Marker, Ty> for RefCell<T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: DispatchMethod<Marker, Ty>,
 {
     const SCOPE_NAME: &'static str = <T as DispatchMethod<Marker, Ty>>::SCOPE_NAME;
@@ -97,7 +97,7 @@ where
 
 impl<Marker, Ty, T> DispatchMethod<Marker, Ty> for Option<T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     Ty::String: From<&'static str>,
     T: DispatchMethod<Marker, Ty>,
 {
@@ -161,7 +161,7 @@ where
 pub trait DispatchTrait<Traits, Ty>: Sized
 where
     Traits: Tuple,
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn dispatch_trait(
         &self,
@@ -172,7 +172,7 @@ where
 
 impl<Ty, T> DispatchTrait<(), Ty> for T
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn dispatch_trait(
         &self,
@@ -185,7 +185,7 @@ where
 
 impl<T, Tup, Ty> DispatchTrait<Tup, Ty> for T
 where
-    Ty: CoreTypes,
+    Ty: Types,
     Tup: NonEmptyTuple,
     T: DispatchMethod<TupleHead<Tup>, Ty>,
     T: DispatchTrait<TupleTail<Tup>, Ty>,

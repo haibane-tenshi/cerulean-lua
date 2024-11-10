@@ -6,7 +6,7 @@ use std::ops::Range;
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
 use crate::runtime::{FunctionPtr, RuntimeView};
-use crate::value::{CoreTypes, StrongValue};
+use crate::value::{StrongValue, Types};
 
 #[derive(Debug, Clone)]
 pub struct ChunkRange {
@@ -54,14 +54,14 @@ pub struct Part<Fun, Con, Rec, F> {
     pub builder: F,
 }
 
-pub fn builder<Ty: CoreTypes, T>() -> ValueBuilder<
+pub fn builder<Ty: Types, T>() -> ValueBuilder<
     impl for<'rt, 'a> FnOnce(
         RuntimeView<'rt, Ty>,
         ChunkId,
         T,
     ) -> Result<T, RuntimeError<StrongValue<Ty>>>,
 > {
-    fn builder<Ty: CoreTypes, T>(
+    fn builder<Ty: Types, T>(
         _: RuntimeView<Ty>,
         _: ChunkId,
         value: T,
@@ -101,7 +101,7 @@ impl<P> ValueBuilder<P> {
         impl FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<V, RuntimeError<StrongValue<Ty>>>,
     >
     where
-        Ty: CoreTypes,
+        Ty: Types,
         // Value<Ty>: Display,
         P: FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
         Fun: IntoIterator<Item = Function>,
@@ -155,7 +155,7 @@ impl<P> ValueBuilder<P> {
         impl FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
     )
     where
-        Ty: CoreTypes,
+        Ty: Types,
         P: FnOnce(RuntimeView<Ty>, ChunkId, T) -> Result<U, RuntimeError<StrongValue<Ty>>>,
     {
         let ValueBuilder { chunk, builder } = self;

@@ -5,7 +5,7 @@ use std::ops::{
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
-use super::{CoreTypes, Float, Type, Types, Value};
+use super::{Float, Refs, Type, Types, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
@@ -297,8 +297,8 @@ impl ShrAssign for Int {
 
 impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Int
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -319,8 +319,8 @@ where
 
 impl<Rf, Ty> From<Int> for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn from(value: Int) -> Self {
         let Int(value) = value;

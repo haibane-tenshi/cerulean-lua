@@ -2,7 +2,7 @@ use gc::Root;
 use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
 
 use super::{Core, Interned};
-use crate::value::{CoreTypes, Value, WeakValue};
+use crate::value::{Types, Value, WeakValue};
 
 /// Define fine aspects of runtime behavior.
 ///
@@ -312,7 +312,7 @@ impl DialectBuilder {
     }
 }
 
-pub trait CoerceArgs<Ty: CoreTypes>: sealed::Sealed {
+pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
     fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
     fn coerce_bin_op_bit(&self, op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
     fn coerce_bin_op_str<F>(
@@ -332,7 +332,7 @@ pub trait CoerceArgs<Ty: CoreTypes>: sealed::Sealed {
 
 impl<Ty> CoerceArgs<Ty> for DialectBuilder
 where
-    Ty: CoreTypes,
+    Ty: Types,
     Ty::String: From<String>,
 {
     fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
@@ -404,7 +404,7 @@ where
                 fn conv<T, Ty, F>(x: T, alloc: &mut F) -> StrongValue<Ty>
                 where
                     T: ToString,
-                    Ty: CoreTypes,
+                    Ty: Types,
                     F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
                 {
                     use crate::gc::LuaPtr;

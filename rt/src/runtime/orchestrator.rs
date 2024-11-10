@@ -4,7 +4,7 @@ use std::fmt::Display;
 use crate::chunk_cache::ChunkCache;
 use crate::error::ThreadError;
 use crate::ffi::DLuaFfi;
-use crate::value::{Callable, CoreTypes, Strong};
+use crate::value::{Callable, Strong, Types};
 
 use super::thread::frame::UpvalueRegister;
 use super::thread::stack::{Stack, StackGuard};
@@ -28,7 +28,7 @@ impl Display for ThreadId {
 
 enum ThreadState<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     /// Thread is not yet started and is located in nursery.
     Startup,
@@ -50,7 +50,7 @@ where
 
 impl<Ty> ThreadState<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     // fn as_thread_mut(&mut self) -> Option<&mut Thread<Ty>> {
     //     match self {
@@ -92,7 +92,7 @@ where
 
 pub(crate) struct ThreadStore<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     threads: Vec<ThreadState<Ty>>,
 
@@ -109,7 +109,7 @@ where
 
 impl<Ty> ThreadStore<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn new_thread(&mut self, heap: &mut Heap<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
         let id = ThreadId(self.threads.len());
@@ -178,7 +178,7 @@ where
 
 impl<Ty> ThreadStore<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     fn init(&mut self, thread_id: ThreadId, heap: &mut Heap<Ty>) {
@@ -202,7 +202,7 @@ where
 
 impl<Ty> Default for ThreadStore<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn default() -> Self {
         Self {
@@ -214,7 +214,7 @@ where
 
 pub struct Orchestrator<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     /// Call stack between threads.
     ///
@@ -236,7 +236,7 @@ where
 
 impl<Ty> Orchestrator<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn new(heap: &mut Heap<Ty>) -> Self {
         Orchestrator {
@@ -288,7 +288,7 @@ where
 
 impl<Ty> Orchestrator<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(crate) fn enter(
@@ -353,7 +353,7 @@ where
 
 pub(crate) struct Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
@@ -361,7 +361,7 @@ where
 
 impl<'a, Ty> Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
         let Context { core, chunk_cache } = self;

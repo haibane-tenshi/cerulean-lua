@@ -5,13 +5,13 @@ use crate::error::RtError;
 use crate::ffi::delegate::{Delegate as RustDelegate, Response};
 use crate::ffi::{DLuaFfi, DebugInfo, LuaFfi};
 use crate::runtime::RuntimeView;
-use crate::value::CoreTypes;
+use crate::value::Types;
 
 use super::{Control, DelegateThreadControl, FrameControl};
 
 pub(super) struct RustBundle<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     delegate: Pin<Box<dyn RustDelegate<Ty>>>,
     debug_info: DebugInfo,
@@ -19,7 +19,7 @@ where
 
 impl<Ty> RustBundle<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(super) fn new(closure: &dyn DLuaFfi<Ty>) -> Self {
         let delegate = closure.call();
@@ -34,7 +34,7 @@ where
 
 impl<Ty> RustBundle<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(super) fn enter(
         &mut self,

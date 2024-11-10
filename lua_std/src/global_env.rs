@@ -6,13 +6,13 @@ use gc::{RootCell, Trace};
 use rt::ffi::{boxed, DLuaFfi};
 use rt::gc::{DisplayWith, Heap, LuaPtr};
 use rt::runtime::{Closure, Core};
-use rt::value::{Callable, CoreTypes, KeyValue, StrongValue, TableIndex, Value, Weak, WeakValue};
+use rt::value::{Callable, KeyValue, StrongValue, TableIndex, Types, Value, Weak, WeakValue};
 
-type RootTable<Ty> = RootCell<<Ty as CoreTypes>::Table>;
+type RootTable<Ty> = RootCell<<Ty as Types>::Table>;
 
 pub struct Builder<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     value: RootTable<Ty>,
     core: &'a mut Core<Ty>,
@@ -20,7 +20,7 @@ where
 
 impl<'a, Ty> Builder<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn empty(core: &'a mut Core<Ty>) -> Self {
         let value = core.gc.alloc_cell(Default::default());
@@ -40,7 +40,7 @@ where
 
 pub fn assert<Ty>() -> impl FnOnce(&RootTable<Ty>, &mut Core<Ty>)
 where
-    Ty: CoreTypes<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     |value, core| {
         let fn_assert = crate::impl_::assert();
@@ -56,7 +56,7 @@ where
 
 pub fn pcall<Ty>() -> impl FnOnce(&RootTable<Ty>, &mut Core<Ty>)
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
@@ -74,7 +74,7 @@ where
 
 pub fn print<Ty>() -> impl FnOnce(&RootTable<Ty>, &mut Core<Ty>)
 where
-    Ty: CoreTypes<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
     Ty::String: TryInto<String> + From<&'static str>,
     Ty::Table: Trace + TableIndex<Weak, Ty>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
@@ -93,7 +93,7 @@ where
 
 pub fn load<Ty>() -> impl FnOnce(&RootTable<Ty>, &mut Core<Ty>)
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     Ty::String: TryInto<String> + AsRef<[u8]> + From<&'static str> + Display,
     Ty::Table: Trace + TableIndex<Weak, Ty>,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
@@ -112,7 +112,7 @@ where
 
 pub fn loadfile<Ty>() -> impl FnOnce(&RootTable<Ty>, &mut Core<Ty>)
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     Ty::String: TryInto<String> + TryInto<PathBuf> + Display,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
@@ -130,7 +130,7 @@ where
 
 pub fn setmetatable<Ty>() -> impl FnOnce(&RootTable<Ty>, &mut Core<Ty>)
 where
-    Ty: CoreTypes<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     |value, core| {
         let f = crate::impl_::setmetatable();
@@ -146,7 +146,7 @@ where
 
 pub fn getmetatable<Ty>() -> impl FnOnce(&RootTable<Ty>, &mut Core<Ty>)
 where
-    Ty: CoreTypes<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     |value, core| {
         let f = crate::impl_::getmetatable();

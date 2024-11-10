@@ -197,7 +197,7 @@ use super::tuple::Tuple;
 // use crate::gc::{ConvertInto, Heap, TryConvertInto, TryConvertFrom};
 use crate::error::AlreadyDroppedError;
 use crate::gc::Heap;
-use crate::value::{CoreTypes, Strong, Type, Types, Value, Weak};
+use crate::value::{Refs, Strong, Type, Types, Value, Weak};
 use sealed::{BubbleUp, Sealed};
 
 pub use crate::value::{Boolean, Callable, Float, Int, Nil};
@@ -460,8 +460,8 @@ where
 
 impl<'a, Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &'a [Value<Rf, Ty>]
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Value<Rf, Ty>: Clone,
     T: ParseAtom<Value<Rf, Ty>, Heap<Ty>>,
 {
@@ -495,8 +495,8 @@ impl<T, Ex> ParseAtom<T, Ex> for T {
 
 impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Nil
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -507,8 +507,8 @@ where
 
 impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Boolean
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -519,8 +519,8 @@ where
 
 impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Int
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -531,8 +531,8 @@ where
 
 impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Float
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -543,8 +543,8 @@ where
 
 impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for LuaString<Rf::String<Ty::String>>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -555,8 +555,8 @@ where
 
 impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for LuaTable<Rf::Table<Ty::Table>>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -567,8 +567,8 @@ where
 
 impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -732,7 +732,7 @@ where
 
 impl<Ty, T, R> FormatReturns<Ty, R> for T
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: Extend<Value<Weak, Ty>>,
     R: Into<Value<Weak, Ty>>,
 {
@@ -1299,8 +1299,8 @@ impl<T> From<Nil> for NilOr<T> {
 impl<T, Rf, Ty> From<NilOr<T>> for Value<Rf, Ty>
 where
     T: Into<Value<Rf, Ty>>,
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn from(value: NilOr<T>) -> Self {
         match value {
@@ -1312,8 +1312,8 @@ where
 
 impl<T, Rf, Ty> TryFrom<Value<Rf, Ty>> for NilOr<T>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Value<Rf, Ty>: TryInto<T>,
 {
     type Error = <Value<Rf, Ty> as TryInto<T>>::Error;
@@ -1328,8 +1328,8 @@ where
 
 impl<Rf, Ty, Ex, T> ParseAtom<Value<Rf, Ty>, Ex> for NilOr<T>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     T: ParseAtom<Value<Rf, Ty>, Ex>,
 {
     type Error = <T as ParseAtom<Value<Rf, Ty>, Ex>>::Error;
@@ -1346,7 +1346,7 @@ pub struct FromLuaString<T>(pub T);
 
 impl<Ty, T> ParseAtom<Value<Strong, Ty>, Heap<Ty>> for FromLuaString<T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     Ty::String: TryInto<T>,
 {
     type Error = StrongConvertError<<Ty::String as TryInto<T>>::Error>;
@@ -1375,7 +1375,7 @@ where
 
 impl<Ty, T> ParseAtom<Value<Weak, Ty>, Heap<Ty>> for FromLuaString<T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     Ty::String: TryInto<T>,
 {
     type Error = WeakConvertError<<Ty::String as TryInto<T>>::Error>;
@@ -1407,8 +1407,8 @@ pub struct LuaString<T>(pub T);
 
 impl<T, Rf, Ty> From<LuaString<T>> for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     T: Into<Rf::String<Ty::String>>,
 {
     fn from(value: LuaString<T>) -> Self {
@@ -1420,8 +1420,8 @@ where
 
 impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaString<Rf::String<Ty::String>>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -1444,8 +1444,8 @@ pub struct LuaTable<T>(pub T);
 
 impl<Rf, Ty, T> From<LuaTable<T>> for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::Table<Ty::Table>: From<T>,
 {
     fn from(value: LuaTable<T>) -> Self {
@@ -1456,8 +1456,8 @@ where
 
 impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaTable<Rf::Table<Ty::Table>>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 

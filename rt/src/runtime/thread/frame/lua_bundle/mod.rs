@@ -25,7 +25,7 @@ use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
 use crate::runtime::{Closure, Core, Interned, ThreadId};
 use crate::value::callable::Callable;
-use crate::value::{Concat, CoreTypes, Len, Strong, StrongValue, TableIndex, Value, WeakValue};
+use crate::value::{Concat, Len, Strong, StrongValue, TableIndex, Types, Value, WeakValue};
 
 use super::Event;
 pub(crate) use upvalue_register::UpvalueRegister;
@@ -33,7 +33,7 @@ use variadic_register::VariadicRegister;
 
 pub(crate) struct Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a dyn ChunkCache,
@@ -45,7 +45,7 @@ where
 
 impl<'a, Ty> Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
         let Context {
@@ -70,7 +70,7 @@ where
 
 pub(crate) enum ChangeFrame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     Return(StackSlot),
     Invoke(Option<Event>, Callable<Strong, Ty>, StackSlot),
@@ -98,7 +98,7 @@ where
 
 pub(crate) struct Frame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     closure: RootCell<Closure<Ty>>,
     ip: InstrId,
@@ -107,7 +107,7 @@ where
 
 impl<Ty> Frame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn new(
         closure: RootCell<Closure<Ty>>,
@@ -168,7 +168,7 @@ where
 
 impl<Ty> Frame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn closure(&self) -> &RootCell<Closure<Ty>> {
         &self.closure
@@ -181,7 +181,7 @@ where
 
 impl<Ty> Frame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn activate<'a>(
         &'a mut self,
@@ -327,7 +327,7 @@ where
 
 impl<Ty> Debug for Frame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     StrongValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -341,7 +341,7 @@ where
 
 pub struct ActiveFrame<'rt, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     current_thread_id: ThreadId,
     closure: &'rt RootCell<Closure<Ty>>,
@@ -359,7 +359,7 @@ where
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn get_constant(&self, index: ConstId) -> Result<&Literal, MissingConstId> {
         self.constants.get(index).ok_or(MissingConstId(index))
@@ -433,7 +433,7 @@ where
 
 impl<'rt, Ty> ActiveFrame<'rt, Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub(crate) fn enter(&mut self) -> Result<ChangeFrame<Ty>, RefAccessOrError<opcode_err::Error>> {
@@ -1314,7 +1314,7 @@ where
 
 impl<'rt, Ty> Debug for ActiveFrame<'rt, Ty>
 where
-    Ty: Debug + CoreTypes,
+    Ty: Debug + Types,
     WeakValue<Ty>: Debug,
     StrongValue<Ty>: Debug,
     Ty::Table: Debug,

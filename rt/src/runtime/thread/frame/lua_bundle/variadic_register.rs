@@ -2,11 +2,11 @@ use gc::Root;
 use std::fmt::Debug;
 
 use crate::gc::Heap;
-use crate::value::{CoreTypes, WeakValue};
+use crate::value::{Types, WeakValue};
 
 pub(crate) struct VariadicRegister<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     values: Vec<WeakValue<Ty>>,
     mirror: Root<Vec<WeakValue<Ty>>>,
@@ -14,7 +14,7 @@ where
 
 impl<Ty> VariadicRegister<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn new(
         values: impl IntoIterator<Item = WeakValue<Ty>>,
@@ -33,7 +33,7 @@ where
 
 impl<Ty> Debug for VariadicRegister<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VariadicRegister")

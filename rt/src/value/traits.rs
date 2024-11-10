@@ -13,7 +13,7 @@ use crate::runtime::{Closure, Interned};
 
 pub use gc::userdata::Metatable;
 
-pub trait Types: Sized + 'static {
+pub trait Refs: Sized + 'static {
     type String<T>;
     type LuaCallable<T>;
     type RustCallable<T>;
@@ -23,7 +23,7 @@ pub trait Types: Sized + 'static {
 
 pub struct Strong;
 
-impl Types for Strong {
+impl Refs for Strong {
     type String<T> = LuaPtr<Root<Interned<T>>>;
     type LuaCallable<T> = LuaPtr<RootCell<T>>;
     type RustCallable<T> = LuaPtr<RootCell<T>>;
@@ -33,7 +33,7 @@ impl Types for Strong {
 
 pub struct Weak;
 
-impl Types for Weak {
+impl Refs for Weak {
     type String<T> = LuaPtr<Gc<Interned<T>>>;
     type LuaCallable<T> = LuaPtr<GcCell<T>>;
     type RustCallable<T> = LuaPtr<GcCell<T>>;
@@ -41,7 +41,7 @@ impl Types for Weak {
     type FullUserdata<T: ?Sized> = LuaPtr<GcCell<T>>;
 }
 
-pub trait CoreTypes: Sized + 'static {
+pub trait Types: Sized + 'static {
     type String: Trace
         + Concat
         + Len
@@ -60,11 +60,11 @@ pub trait CoreTypes: Sized + 'static {
         + ?Sized;
 }
 
-pub type Meta<Ty> = GcCell<<Ty as CoreTypes>::Table>;
+pub type Meta<Ty> = GcCell<<Ty as Types>::Table>;
 
 pub struct DefaultTypes;
 
-impl CoreTypes for DefaultTypes {
+impl Types for DefaultTypes {
     type String = PossiblyUtf8Vec;
     type LuaClosure = Closure<Self>;
     type RustClosure = Box<dyn DLuaFfi<Self>>;
@@ -74,8 +74,8 @@ impl CoreTypes for DefaultTypes {
 
 pub trait TableIndex<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty>;
     fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>);

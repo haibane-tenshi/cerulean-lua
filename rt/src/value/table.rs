@@ -6,12 +6,12 @@ use gc::Trace;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::{CoreTypes, Meta, Metatable, TableIndex, Types, Value};
+use super::{Meta, Metatable, Refs, TableIndex, Types, Value};
 
 pub struct Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     data: HashMap<KeyValue<Rf, Ty>, Value<Rf, Ty>>,
     metatable: Option<Meta<Ty>>,
@@ -19,8 +19,8 @@ where
 
 impl<Rf, Ty> TableIndex<Rf, Ty> for Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     KeyValue<Rf, Ty>: Hash + Eq,
     Value<Rf, Ty>: Clone,
 {
@@ -50,8 +50,8 @@ where
 
 impl<Rf, Ty> Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     KeyValue<Rf, Ty>: Hash + Eq,
 {
     pub fn get_ref<'s>(&'s self, key: &KeyValue<Rf, Ty>) -> Option<&'s Value<Rf, Ty>> {
@@ -68,8 +68,8 @@ where
 
 impl<Rf, Ty> Metatable<Meta<Ty>> for Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn metatable(&self) -> Option<&Meta<Ty>> {
         self.metatable.as_ref()
@@ -82,8 +82,8 @@ where
 
 impl<Rf, Ty> Trace for Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Trace,
     Callable<Rf, Ty>: Trace,
     Rf::Table<Ty::Table>: Trace,
@@ -102,8 +102,8 @@ where
 
 impl<Rf, Ty> Debug for Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     KeyValue<Rf, Ty>: Debug,
     Value<Rf, Ty>: Debug,
     Meta<Ty>: Debug,
@@ -118,8 +118,8 @@ where
 
 impl<Rf, Ty> Clone for Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     KeyValue<Rf, Ty>: Clone,
     Value<Rf, Ty>: Clone,
     Meta<Ty>: Clone,
@@ -134,8 +134,8 @@ where
 
 impl<Rf, Ty> Default for Table<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn default() -> Self {
         Self {
@@ -145,7 +145,7 @@ where
     }
 }
 
-pub enum KeyValue<Rf: Types, Ty: CoreTypes> {
+pub enum KeyValue<Rf: Refs, Ty: Types> {
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
@@ -157,8 +157,8 @@ pub enum KeyValue<Rf: Types, Ty: CoreTypes> {
 
 impl<Rf, Ty> Trace for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Trace,
     Callable<Rf, Ty>: Trace,
     Rf::Table<Ty::Table>: Trace,
@@ -179,8 +179,8 @@ where
 
 impl<Rf, Ty> Debug for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Debug,
     Callable<Rf, Ty>: Debug,
     Rf::Table<Ty::Table>: Debug,
@@ -201,8 +201,8 @@ where
 
 impl<Rf, Ty> Clone for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Clone,
     Callable<Rf, Ty>: Clone,
     Rf::Table<Ty::Table>: Clone,
@@ -224,8 +224,8 @@ where
 
 impl<Rf, Ty> Copy for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Copy,
     Callable<Rf, Ty>: Copy,
     Rf::Table<Ty::Table>: Copy,
@@ -235,8 +235,8 @@ where
 
 impl<Rf, Ty> PartialEq for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: PartialEq,
     Callable<Rf, Ty>: PartialEq,
     Rf::Table<Ty::Table>: PartialEq,
@@ -258,8 +258,8 @@ where
 
 impl<Rf, Ty> Eq for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Eq,
     Callable<Rf, Ty>: Eq,
     Rf::Table<Ty::Table>: Eq,
@@ -269,8 +269,8 @@ where
 
 impl<Rf, Ty> Hash for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::String<Ty::String>: Hash,
     Callable<Rf, Ty>: Hash,
     Rf::Table<Ty::Table>: Hash,
@@ -310,8 +310,8 @@ impl InvalidTableKeyError {
 
 impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for KeyValue<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = InvalidTableKeyError;
 
@@ -336,8 +336,8 @@ where
 
 impl<Rf, Ty> From<KeyValue<Rf, Ty>> for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn from(value: KeyValue<Rf, Ty>) -> Self {
         match value {

@@ -95,14 +95,14 @@ use gc::Trace;
 
 use crate::chunk_cache::ChunkId;
 use crate::runtime::{Closure, RuntimeView};
-use crate::value::CoreTypes;
+use crate::value::Types;
 
 use delegate::{Delegate, Never};
 
 /// Trait defining Rust functions invokable by Lua runtime.
 pub trait LuaFfi<Ty>: Trace
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Delegate: Delegate<Ty>;
     type UnpinDelegate: Delegate<Ty> + Unpin;
@@ -116,7 +116,7 @@ where
 
 impl<Ty, T> LuaFfi<Ty> for Box<T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: LuaFfi<Ty> + ?Sized,
 {
     type Delegate = <T as LuaFfi<Ty>>::Delegate;
@@ -168,7 +168,7 @@ where
 
 impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFn<F, S, T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: Fn() -> R + 'static,
     R: Delegate<Ty> + Unpin,
     S: AsRef<str> + 'static,
@@ -229,7 +229,7 @@ where
 
 impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFnMut<F, S, T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: FnMut() -> R + 'static,
     R: Delegate<Ty> + Unpin,
     S: AsRef<str> + 'static,
@@ -289,7 +289,7 @@ where
 
 impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFnPin<F, S, T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: Fn() -> R + 'static,
     R: Delegate<Ty>,
     S: AsRef<str> + 'static,
@@ -349,7 +349,7 @@ where
 
 impl<Ty, F, R, S, T> LuaFfi<Ty> for FromFnMutPin<F, S, T>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: FnMut() -> R + 'static,
     R: Delegate<Ty>,
     S: AsRef<str> + 'static,
@@ -383,13 +383,13 @@ pub type UnpinDynDelegate<Ty> = Box<dyn Delegate<Ty> + Unpin>;
 pub trait DLuaFfi<Ty>:
     LuaFfi<Ty, Delegate = DynDelegate<Ty>, UnpinDelegate = UnpinDynDelegate<Ty>>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
 }
 
 impl<T, Ty> DLuaFfi<Ty> for T
 where
-    Ty: CoreTypes,
+    Ty: Types,
     T: LuaFfi<
         Ty,
         Delegate = Pin<Box<dyn Delegate<Ty>>>,
@@ -401,7 +401,7 @@ where
 /// Convert arbitrary `LuaFfi` function to `Box<dyn DLuaFfi>`.
 pub fn boxed<F, Ty>(f: F) -> Box<dyn DLuaFfi<Ty>>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: LuaFfi<Ty> + 'static,
     <F as LuaFfi<Ty>>::Delegate: 'static,
     <F as LuaFfi<Ty>>::UnpinDelegate: 'static,
@@ -428,7 +428,7 @@ where
 
 impl<F, Ty> LuaFfi<Ty> for BoxedLuaFfiFn<F>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: LuaFfi<Ty>,
     <F as LuaFfi<Ty>>::Delegate: 'static,
     <F as LuaFfi<Ty>>::UnpinDelegate: 'static,
@@ -451,7 +451,7 @@ where
 
 pub fn dyn_ffi<F, Ty>(f: F) -> impl DLuaFfi<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     F: LuaFfi<Ty> + 'static,
     <F as LuaFfi<Ty>>::Delegate: 'static,
     <F as LuaFfi<Ty>>::UnpinDelegate: 'static,
@@ -467,7 +467,7 @@ pub struct DebugInfo {
 
 pub fn call_chunk<Ty>(chunk_id: ChunkId) -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
 {
     let f = move || {
         use crate::gc::LuaPtr;
@@ -499,7 +499,7 @@ where
 
 pub fn call_file<Ty>(script: impl AsRef<Path>) -> impl LuaFfi<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     let mut script = Some(script.as_ref().to_path_buf());
     let f = move || {

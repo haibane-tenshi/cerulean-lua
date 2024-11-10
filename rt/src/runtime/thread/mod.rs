@@ -7,7 +7,7 @@ use crate::error::{RtError, ThreadError, ThreadPanicked};
 use crate::ffi::delegate::Response;
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
-use crate::value::{Callable, CoreTypes, Strong};
+use crate::value::{Callable, Strong, Types};
 
 use super::orchestrator::{ThreadId, ThreadStatus, ThreadStore};
 use super::{Closure, Core};
@@ -22,7 +22,7 @@ pub(crate) enum Status {
 
 pub(crate) struct Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
@@ -33,7 +33,7 @@ where
 
 impl<'a, Ty> Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
         let Context {
@@ -78,7 +78,7 @@ where
 
 impl<'a, Ty> Context<'a, Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(crate) fn eval(
@@ -97,7 +97,7 @@ where
 
 struct Errors<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     /// Error object that triggered unwinding.
     ///
@@ -119,7 +119,7 @@ where
 
 pub(crate) struct Thread<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     frames: Vec<Frame<Ty>>,
     stack: Stack<Ty>,
@@ -141,7 +141,7 @@ where
 
 impl<Ty> Thread<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn stack(&mut self) -> StackGuard<'_, Ty> {
         self.stack.guard(self.protected).unwrap()
@@ -187,7 +187,7 @@ enum Prompt {
 
 impl<Ty> From<Prompt> for Response<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn from(value: Prompt) -> Self {
         match value {
@@ -199,7 +199,7 @@ where
 
 impl<Ty> TryFrom<Response<Ty>> for Prompt
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Error = RtError<Ty>;
 
@@ -214,7 +214,7 @@ where
 
 struct ActiveThread<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     ctx: Context<'a, Ty>,
     thread: &'a mut Thread<Ty>,
@@ -222,7 +222,7 @@ where
 
 impl<'a, Ty> ActiveThread<'a, Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     fn enter(&mut self, response: Response<Ty>) -> Result<ThreadControl, ThreadError> {
@@ -379,7 +379,7 @@ where
 
 impl<'a, Ty> ActiveThread<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     /// Propagate runtime error up the call stack.
     ///
@@ -444,7 +444,7 @@ where
 
 pub(super) struct ThreadImpetus<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     first_callable: Callable<Strong, Ty>,
     stack: Stack<Ty>,
@@ -452,7 +452,7 @@ where
 
 impl<Ty> ThreadImpetus<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(super) fn new(callable: Callable<Strong, Ty>, heap: &mut Heap<Ty>) -> Self {
         ThreadImpetus {
@@ -468,7 +468,7 @@ where
 
 impl<Ty> ThreadImpetus<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(super) fn init(self, heap: &mut Heap<Ty>) -> Thread<Ty> {
@@ -560,7 +560,7 @@ pub(crate) enum ThreadControl {
 
 pub struct ThreadGuard<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(super) thread_id: ThreadId,
 
@@ -576,7 +576,7 @@ where
 
 impl<'a, Ty> ThreadGuard<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     /// Thread backtrace.
     pub fn backtrace(&self) -> Backtrace {

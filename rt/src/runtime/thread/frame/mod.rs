@@ -11,7 +11,7 @@ use crate::error::{MalformedClosureError, RtError};
 use crate::ffi::DLuaFfi;
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::{Closure, Core, Heap, RuntimeView};
-use crate::value::{Callable, CoreTypes, Strong};
+use crate::value::{Callable, Strong, Types};
 
 use super::super::orchestrator::{ThreadId, ThreadStore};
 use super::stack::{RawStackSlot, Stack, StackGuard};
@@ -24,7 +24,7 @@ pub(crate) use lua_bundle::UpvalueRegister;
 
 impl<Ty> LuaBundle<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
 {
     fn enter(&mut self, mut ctx: FrameContext<Ty>) -> Result<FrameControl<Ty>, RtError<Ty>> {
         use lua_bundle::ChangeFrame;
@@ -105,7 +105,7 @@ where
 
 enum Bundle<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     Lua(LuaBundle<Ty>),
     Rust(RustBundle<Ty>),
@@ -113,7 +113,7 @@ where
 
 pub(super) struct Frame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     bundle: Bundle<Ty>,
     stack_start: RawStackSlot,
@@ -127,7 +127,7 @@ where
 
 impl<Ty> Frame<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(super) fn stack_start(&self) -> RawStackSlot {
         self.stack_start
@@ -162,7 +162,7 @@ where
 
 impl<Ty> Frame<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(super) fn new(
@@ -213,7 +213,7 @@ where
 
 impl<Ty> Frame<Ty>
 where
-    Ty: CoreTypes<LuaClosure = Closure<Ty>>,
+    Ty: Types<LuaClosure = Closure<Ty>>,
 {
     pub(super) fn enter(
         &mut self,
@@ -259,7 +259,7 @@ where
 
 pub(crate) struct Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
@@ -271,7 +271,7 @@ where
 
 impl<'a, Ty> Context<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn lua_context(&mut self, stack_start: RawStackSlot) -> Option<FrameContext<'_, Ty>> {
         let Context {
@@ -339,7 +339,7 @@ impl DelegateThreadControl {
 
 pub(super) enum FrameControl<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     InitAndEnter {
         callable: Callable<Strong, Ty>,

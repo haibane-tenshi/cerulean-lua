@@ -2,14 +2,14 @@ use codespan_reporting::diagnostic::Diagnostic;
 use std::fmt::Debug;
 
 use crate::gc::{DisplayWith, Heap};
-use crate::value::{CoreTypes, StrongValue};
+use crate::value::{StrongValue, Types};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ValueError<Value>(pub Value);
 
 impl<Ty> ValueError<StrongValue<Ty>>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     Ty::String: AsRef<[u8]>,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {

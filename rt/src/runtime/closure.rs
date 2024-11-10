@@ -8,7 +8,7 @@ use super::thread::stack::RawStackSlot;
 use crate::chunk_cache::ChunkId;
 use crate::error::RtError;
 use crate::runtime::{RuntimeView, ThreadId};
-use crate::value::{CoreTypes, Value, WeakValue};
+use crate::value::{Types, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FunctionPtr {
@@ -29,7 +29,7 @@ pub(crate) enum UpvaluePlace<Value> {
 #[derive(Debug, Clone)]
 pub struct Closure<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn_ptr: FunctionPtr,
     origin: ThreadId,
@@ -38,7 +38,7 @@ where
 
 impl<Ty> Trace for Closure<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn trace(&self, collector: &mut Collector) {
         for upvalue in &self.upvalues {
@@ -52,7 +52,7 @@ where
 
 impl<Ty> Closure<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn new(
         rt: &mut RuntimeView<Ty>,
@@ -98,7 +98,7 @@ where
 
 impl<Ty> Closure<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn from_raw_parts(
         fn_ptr: FunctionPtr,

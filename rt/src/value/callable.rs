@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use gc::Trace;
 
-use super::{CoreTypes, Strong, Types, Value, Weak};
+use super::{Refs, Strong, Types, Value, Weak};
 use crate::ffi::arg_parser::TypeMismatchError;
 use crate::gc::Heap;
 
@@ -14,8 +14,8 @@ pub type WeakCallable<Ty> = Callable<Weak, Ty>;
 
 pub enum Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     Lua(Rf::LuaCallable<Ty::LuaClosure>),
     Rust(Rf::RustCallable<Ty::RustClosure>),
@@ -23,7 +23,7 @@ where
 
 impl<Ty> WeakCallable<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn upgrade(self, heap: &Heap<Ty>) -> Option<StrongCallable<Ty>> {
         let r = match self {
@@ -40,7 +40,7 @@ where
 
 impl<Ty> StrongCallable<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn downgrade(&self) -> WeakCallable<Ty> {
         match self {
@@ -52,8 +52,8 @@ where
 
 impl<Rf, Ty> Trace for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: Trace,
     Rf::RustCallable<Ty::RustClosure>: Trace,
 {
@@ -67,8 +67,8 @@ where
 
 impl<Rf, Ty> Debug for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: Debug,
     Rf::RustCallable<Ty::RustClosure>: Debug,
 {
@@ -82,8 +82,8 @@ where
 
 impl<Rf, Ty> Display for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: Display,
     Rf::RustCallable<Ty::RustClosure>: Display,
 {
@@ -97,8 +97,8 @@ where
 
 impl<Rf, Ty> Clone for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: Clone,
     Rf::RustCallable<Ty::RustClosure>: Clone,
 {
@@ -112,8 +112,8 @@ where
 
 impl<Rf, Ty> Copy for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: Copy,
     Rf::RustCallable<Ty::RustClosure>: Copy,
 {
@@ -121,8 +121,8 @@ where
 
 impl<Rf, Ty> PartialEq for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: PartialEq,
     Rf::RustCallable<Ty::RustClosure>: PartialEq,
 {
@@ -137,8 +137,8 @@ where
 
 impl<Rf, Ty> Eq for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: Eq,
     Rf::RustCallable<Ty::RustClosure>: Eq,
 {
@@ -146,8 +146,8 @@ where
 
 impl<Rf, Ty> Hash for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
     Rf::LuaCallable<Ty::LuaClosure>: Hash,
     Rf::RustCallable<Ty::RustClosure>: Hash,
 {
@@ -163,8 +163,8 @@ where
 
 impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Callable<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     type Error = TypeMismatchError;
 
@@ -187,8 +187,8 @@ where
 
 impl<Rf, Ty> From<Callable<Rf, Ty>> for Value<Rf, Ty>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
+    Ty: Types,
 {
     fn from(value: Callable<Rf, Ty>) -> Self {
         Value::Function(value)

@@ -7,11 +7,11 @@ use repr::tivec::TiVec;
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::thread::stack::StackGuard;
 use crate::runtime::Heap;
-use crate::value::{CoreTypes, WeakValue};
+use crate::value::{Types, WeakValue};
 
 pub(crate) struct UpvalueRegister<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     values: TiVec<UpvalueSlot, WeakValue<Ty>>,
     write_tag: BitVec,
@@ -21,7 +21,7 @@ where
 
 impl<Ty> UpvalueRegister<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn new(heap: &mut Heap<Ty>) -> Self {
         UpvalueRegister {
@@ -108,7 +108,7 @@ pub(super) fn preload_upvalues<'a, 'b, 'c, Ty>(
     heap: &'c Heap<Ty>,
 ) -> impl Iterator<Item = WeakValue<Ty>> + use<'a, 'b, 'c, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     upvalues.iter().map(move |place| match *place {
         UpvaluePlace::Stack(slot) => *stack

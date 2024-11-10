@@ -11,7 +11,7 @@ use super::frame::Event;
 use crate::error::opcode::MissingArgsError;
 use crate::gc::{DisplayWith, Heap};
 use crate::runtime::closure::{Closure, UpvaluePlace};
-use crate::value::{CoreTypes, Value, WeakValue};
+use crate::value::{Types, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub(crate) struct RawStackSlot(usize);
@@ -139,7 +139,7 @@ impl Diff {
 /// Backing storage for stack of temporaries.
 pub struct Stack<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     /// Values contained on the stack.
     ///
@@ -210,7 +210,7 @@ where
 
 impl<Ty> Stack<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn new(heap: &mut Heap<Ty>) -> Self {
         Stack {
@@ -334,7 +334,7 @@ where
 
 impl<Ty> Stack<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn guard(&mut self, boundary: RawStackSlot) -> Option<StackGuard<Ty>> {
         if self.len() < boundary {
@@ -497,7 +497,7 @@ where
 
 impl<Ty> Debug for Stack<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     WeakValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -514,7 +514,7 @@ where
 
 pub struct StackGuard<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     stack: &'a mut Stack<Ty>,
     boundary: RawStackSlot,
@@ -522,7 +522,7 @@ where
 
 impl<'a, Ty> StackGuard<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     // pub(super) fn guard(&mut self, protected_size: RawStackSlot) -> Option<StackGuard<'_, Ty>> {
     //     if self.stack.len() < protected_size.0 {
@@ -689,7 +689,7 @@ where
 
 impl<'a, Ty> StackGuard<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub fn emit_pretty(
@@ -726,7 +726,7 @@ where
 
 impl<'a, Ty> Deref for StackGuard<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Target = [WeakValue<Ty>];
 
@@ -737,7 +737,7 @@ where
 
 impl<'a, Ty> Debug for StackGuard<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     WeakValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -750,11 +750,11 @@ where
 
 pub(super) struct LuaStackFrame<'a, Ty>(StackGuard<'a, Ty>)
 where
-    Ty: CoreTypes;
+    Ty: Types;
 
 impl<'a, Ty> LuaStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     /// Move detached upvalues to heap.
     ///
@@ -797,7 +797,7 @@ where
 
 impl<'a, Ty> LuaStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(super) fn as_slice(&self) -> &[WeakValue<Ty>] {
         self.0.as_slice()
@@ -961,7 +961,7 @@ where
 
 impl<'a, Ty> Deref for LuaStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Target = [WeakValue<Ty>];
 
@@ -972,7 +972,7 @@ where
 
 pub struct TransientStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     stack: &'a mut Stack<Ty>,
     boundary: RawStackSlot,
@@ -980,7 +980,7 @@ where
 
 impl<'a, Ty> TransientStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn as_slice(&self) -> &[WeakValue<Ty>] {
         &self.stack.main[self.boundary..].raw
@@ -1051,7 +1051,7 @@ where
 
 impl<'a, Ty> TransientStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn sync(&mut self, heap: &mut Heap<Ty>) {
         // There are no on-stack upvalues by construction.
@@ -1061,7 +1061,7 @@ where
 
 impl<'a, Ty> Deref for TransientStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Target = [WeakValue<Ty>];
 
@@ -1072,7 +1072,7 @@ where
 
 impl<'a, Ty> DerefMut for TransientStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_mut_slice()
@@ -1081,7 +1081,7 @@ where
 
 impl<'a, Ty> Extend<WeakValue<Ty>> for TransientStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn extend<T: IntoIterator<Item = WeakValue<Ty>>>(&mut self, iter: T) {
         self.stack.main.extend(iter)
@@ -1090,7 +1090,7 @@ where
 
 impl<'a, Ty> Debug for TransientStackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
     WeakValue<Ty>: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1102,7 +1102,7 @@ where
 
 pub struct StackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     guard: StackGuard<'a, Ty>,
     heap: &'a mut Heap<Ty>,
@@ -1110,7 +1110,7 @@ where
 
 impl<'a, Ty> StackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub fn get_mut(&mut self, slot: StackSlot) -> Option<SlotProxy<'_, Ty>> {
         let value = *self.get(slot)?;
@@ -1136,7 +1136,7 @@ where
 
 impl<'a, Ty> Deref for StackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Target = StackGuard<'a, Ty>;
 
@@ -1147,7 +1147,7 @@ where
 
 impl<'a, Ty> DerefMut for StackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.guard
@@ -1156,7 +1156,7 @@ where
 
 impl<'a, Ty> Drop for StackFrame<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn drop(&mut self) {
         // Since frame holds mutable borrow to heap there are no possible gc passes that can happen.
@@ -1167,7 +1167,7 @@ where
 
 pub struct SlotProxy<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     slot: RawStackSlot,
     value: WeakValue<Ty>,
@@ -1176,7 +1176,7 @@ where
 
 impl<'a, Ty> Deref for SlotProxy<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     type Target = WeakValue<Ty>;
 
@@ -1187,7 +1187,7 @@ where
 
 impl<'a, Ty> DerefMut for SlotProxy<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.value
@@ -1196,7 +1196,7 @@ where
 
 impl<'a, Ty> Drop for SlotProxy<'a, Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn drop(&mut self) {
         self.stack.set(self.slot, self.value.take());
@@ -1234,7 +1234,7 @@ pub(crate) fn copy<Ty>(
     mut to: StackGuard<'_, Ty>,
     heap: &mut Heap<Ty>,
 ) where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     let mut to = to.transient_frame();
 
