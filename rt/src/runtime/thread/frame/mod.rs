@@ -10,7 +10,7 @@ use crate::chunk_cache::ChunkCache;
 use crate::error::{MalformedClosureError, RtError};
 use crate::ffi::DLuaFfi;
 use crate::runtime::closure::UpvaluePlace;
-use crate::runtime::{Closure, Core, Heap, RuntimeView};
+use crate::runtime::{Cache, Closure, Core, Heap, RuntimeView};
 use crate::value::{Callable, Strong, Types};
 
 use super::super::orchestrator::{ThreadId, ThreadStore};
@@ -262,6 +262,7 @@ where
     Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
+    pub(crate) internal_cache: &'a Cache<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
     pub(crate) current_thread_id: ThreadId,
     pub(crate) thread_store: &'a mut ThreadStore<Ty>,
@@ -276,6 +277,7 @@ where
     fn lua_context(&mut self, stack_start: RawStackSlot) -> Option<FrameContext<'_, Ty>> {
         let Context {
             core,
+            internal_cache,
             chunk_cache,
             current_thread_id,
             thread_store,
@@ -287,6 +289,7 @@ where
 
         let r = FrameContext {
             core,
+            internal_cache,
             chunk_cache: *chunk_cache,
             current_thread_id: *current_thread_id,
             thread_store,

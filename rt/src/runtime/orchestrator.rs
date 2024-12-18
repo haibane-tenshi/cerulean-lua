@@ -9,7 +9,7 @@ use crate::value::{Callable, Strong, Types};
 use super::thread::frame::UpvalueRegister;
 use super::thread::stack::{Stack, StackGuard};
 use super::thread::{Context as ThreadContext, Thread, ThreadControl, ThreadImpetus};
-use super::{Closure, Core, Heap};
+use super::{Cache, Closure, Core, Heap};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ThreadId(usize);
@@ -356,6 +356,7 @@ where
     Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
+    pub(crate) internal_cache: &'a Cache<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
 }
 
@@ -364,10 +365,15 @@ where
     Ty: Types,
 {
     pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
-        let Context { core, chunk_cache } = self;
+        let Context {
+            core,
+            internal_cache,
+            chunk_cache,
+        } = self;
 
         Context {
             core,
+            internal_cache,
             chunk_cache: *chunk_cache,
         }
     }
@@ -378,10 +384,15 @@ where
         thread_store: &'s mut ThreadStore<Ty>,
         upvalue_cache: &'s mut UpvalueRegister<Ty>,
     ) -> ThreadContext<'s, Ty> {
-        let Context { core, chunk_cache } = self;
+        let Context {
+            core,
+            internal_cache,
+            chunk_cache,
+        } = self;
 
         ThreadContext {
             core,
+            internal_cache,
             chunk_cache: *chunk_cache,
             current_thread_id,
             thread_store,

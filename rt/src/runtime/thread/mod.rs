@@ -77,7 +77,7 @@ use crate::gc::Heap;
 use crate::value::{Callable, Strong, Types};
 
 use super::orchestrator::{ThreadId, ThreadStatus, ThreadStore};
-use super::{Closure, Core};
+use super::{Cache, Closure, Core};
 use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl, UpvalueRegister};
 use stack::{RawStackSlot, Stack, StackGuard};
 
@@ -92,6 +92,7 @@ where
     Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
+    pub(crate) internal_cache: &'a Cache<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
     pub(crate) current_thread_id: ThreadId,
     pub(crate) thread_store: &'a mut ThreadStore<Ty>,
@@ -105,6 +106,7 @@ where
     pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
         let Context {
             core,
+            internal_cache,
             chunk_cache,
             current_thread_id,
             thread_store,
@@ -113,6 +115,7 @@ where
 
         Context {
             core: *core,
+            internal_cache,
             chunk_cache: *chunk_cache,
             current_thread_id: *current_thread_id,
             thread_store,
@@ -126,6 +129,7 @@ where
     ) -> FrameContext<'b, Ty> {
         let Context {
             core,
+            internal_cache,
             chunk_cache,
             current_thread_id,
             thread_store,
@@ -134,6 +138,7 @@ where
 
         FrameContext {
             core,
+            internal_cache,
             chunk_cache: *chunk_cache,
             current_thread_id: *current_thread_id,
             thread_store,

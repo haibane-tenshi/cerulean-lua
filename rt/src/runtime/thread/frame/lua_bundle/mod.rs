@@ -23,7 +23,7 @@ use crate::error::{
 use crate::gc::{DisplayWith, Heap, LuaPtr};
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
-use crate::runtime::{Closure, Core, Interned, ThreadId};
+use crate::runtime::{Cache, Closure, Core, Interned, ThreadId};
 use crate::value::callable::Callable;
 use crate::value::{Concat, Len, Strong, StrongValue, TableIndex, Types, Value, WeakValue};
 
@@ -36,6 +36,7 @@ where
     Ty: Types,
 {
     pub(crate) core: &'a mut Core<Ty>,
+    pub(crate) internal_cache: &'a Cache<Ty>,
     pub(crate) chunk_cache: &'a dyn ChunkCache,
     pub(crate) current_thread_id: ThreadId,
     pub(crate) thread_store: &'a mut ThreadStore<Ty>,
@@ -50,6 +51,7 @@ where
     pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
         let Context {
             core,
+            internal_cache,
             chunk_cache,
             current_thread_id,
             thread_store,
@@ -59,6 +61,7 @@ where
 
         Context {
             core,
+            internal_cache,
             chunk_cache: *chunk_cache,
             current_thread_id: *current_thread_id,
             thread_store,
@@ -195,6 +198,7 @@ where
 
         let Context {
             core,
+            internal_cache,
             chunk_cache,
             current_thread_id,
             thread_store,
@@ -257,6 +261,7 @@ where
         let r = ActiveFrame {
             current_thread_id,
             core,
+            internal_cache,
             closure,
             chunk,
             constants,
@@ -346,6 +351,7 @@ where
     current_thread_id: ThreadId,
     closure: &'rt Root<Closure<Ty>>,
     core: &'rt mut Core<Ty>,
+    internal_cache: &'rt Cache<Ty>,
     chunk: &'rt Chunk,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
@@ -695,7 +701,7 @@ where
                 let [arg] = &args;
 
                 let metatable = self.core.metatable_of(arg)?;
-                let key = self.core.lookup_event(event);
+                let key = self.internal_cache.lookup_event(event);
                 let heap = &self.core.gc;
                 let metavalue = metatable
                     .map(|mt| {
@@ -777,7 +783,7 @@ where
                     _ => args,
                 };
 
-                let key = self.core.lookup_event(event);
+                let key = self.internal_cache.lookup_event(event);
                 let lookup_event = |value: &WeakValue<Ty>| -> Result<_, AlreadyDroppedError> {
                     let r = self
                         .core
@@ -1045,7 +1051,7 @@ where
             };
 
             // Second: try detecting compatible metavalue
-            let key = self.core.lookup_event(Event::Index);
+            let key = self.internal_cache.lookup_event(Event::Index);
 
             loop {
                 let metavalue = self
@@ -1136,7 +1142,7 @@ where
             };
 
             // Second: try detecting compatible metavalue
-            let key = self.core.lookup_event(Event::NewIndex);
+            let key = self.internal_cache.lookup_event(Event::NewIndex);
             loop {
                 let metavalue = self
                     .core
@@ -1218,7 +1224,7 @@ where
                 .core
                 .metatable_of(&callable)?
                 .map(|mt| {
-                    let key = self.core.lookup_event(Event::Call);
+                    let key = self.internal_cache.lookup_event(Event::Call);
                     self.core
                         .gc
                         .get(mt)

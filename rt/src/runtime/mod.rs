@@ -230,20 +230,6 @@ impl<Ty> Core<Ty>
 where
     Ty: Types,
 {
-    fn lookup_event(&mut self, event: Event) -> KeyValue<Weak, Ty> {
-        // use crate::gc::LuaPtr;
-
-        // let s = self.gc.intern(event.to_metamethod().to_str().to_string().into()).downgrade();
-        // KeyValue::String(LuaPtr(s))
-
-        todo!("fix event lookups")
-    }
-}
-
-impl<Ty> Core<Ty>
-where
-    Ty: Types,
-{
     pub fn metatable_of(
         &self,
         value: &WeakValue<Ty>,
@@ -274,13 +260,40 @@ where
     }
 }
 
+struct Cache<Ty>
+where
+    Ty: Types,
+{
+    events: EnumMap<Event, Root<Interned<Ty::String>>>,
+}
+
+impl<Ty> Cache<Ty>
+where
+    Ty: Types,
+{
+    fn new(heap: &mut Heap<Ty>) -> Self {
+        let events =
+            EnumMap::new_with(|event: Event| heap.intern(event.to_metamethod().to_str().into()));
+
+        Cache { events }
+    }
+
+    fn lookup_event(&self, event: Event) -> KeyValue<Weak, Ty> {
+        use crate::gc::LuaPtr;
+
+        let ptr = self.events.get(event).downgrade();
+        KeyValue::String(LuaPtr(ptr))
+    }
+}
+
 pub struct Runtime<Ty, C>
 where
     Ty: Types,
 {
     pub core: Core<Ty>,
     pub chunk_cache: C,
-    pub orchestrator: Orchestrator<Ty>,
+    orchestrator: Orchestrator<Ty>,
+    internal_cache: Cache<Ty>,
 }
 
 impl<Ty, C> Runtime<Ty, C>
@@ -292,10 +305,12 @@ where
         tracing::trace!(?chunk_cache, "constructed runtime");
 
         let orchestrator = Orchestrator::new(&mut core.gc);
+        let internal_cache = Cache::new(&mut core.gc);
         Runtime {
             core,
             chunk_cache,
             orchestrator,
+            internal_cache,
         }
     }
 }
@@ -321,9 +336,14 @@ where
             core,
             chunk_cache,
             orchestrator,
+            internal_cache,
         } = self;
 
-        let ctx = Context { core, chunk_cache };
+        let ctx = Context {
+            core,
+            internal_cache,
+            chunk_cache,
+        };
 
         (ctx, orchestrator)
     }
