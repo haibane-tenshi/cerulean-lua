@@ -11,11 +11,10 @@ use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use gc::Root;
+use gc::{Interned, Root};
 
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::gc::{DisplayWith, Heap};
-use crate::runtime::Interned;
 use crate::value::{Refs, Strong, StrongValue, Types, Value};
 
 pub use crate::chunk_cache::ImmutableCacheError;

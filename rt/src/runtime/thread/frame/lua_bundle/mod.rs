@@ -411,11 +411,11 @@ where
     }
 
     fn alloc_string(&mut self, s: Ty::String) -> Root<Interned<Ty::String>> {
-        match self.core.string_interner.try_insert(s, &mut self.core.gc) {
+        match self.core.gc.try_intern(s) {
             Ok(ptr) => ptr,
             Err(value) => {
                 self.sync();
-                self.core.string_interner.insert(value, &mut self.core.gc)
+                self.core.gc.intern(value)
             }
         }
     }
@@ -855,10 +855,10 @@ where
                         .gc
                         .get(lhs)
                         .ok_or(AlreadyDroppedError)?
-                        .as_ref()
+                        .as_inner()
                         .clone();
-                    let rhs = self.core.gc.get(rhs).ok_or(AlreadyDroppedError)?;
-                    r.concat(rhs.as_ref());
+                    let rhs = self.core.gc.get(rhs).ok_or(AlreadyDroppedError)?.as_inner();
+                    r.concat(rhs);
 
                     let s = self.alloc_string(r).downgrade();
 

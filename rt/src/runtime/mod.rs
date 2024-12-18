@@ -118,7 +118,6 @@
 
 mod closure;
 mod dialect;
-mod interner;
 mod orchestrator;
 pub mod thread;
 
@@ -126,7 +125,7 @@ use std::fmt::Debug;
 use std::path::Path;
 
 use enumoid::EnumMap;
-use gc::{GcCell, Root, RootCell};
+use gc::{GcCell, Interned, Root, RootCell};
 use repr::literal::Literal;
 
 use crate::backtrace::Location;
@@ -143,7 +142,6 @@ use thread::frame::Event;
 
 pub use closure::{Closure, FunctionPtr};
 pub use dialect::{CoerceArgs, DialectBuilder};
-pub use interner::{Interned, Interner};
 pub use orchestrator::ThreadId;
 pub use thread::stack::{StackFrame, StackGuard, TransientStackFrame};
 pub use thread::ThreadGuard;
@@ -194,7 +192,6 @@ where
     pub metatable_registry: MetatableRegistry<Ty::Table>,
     pub dialect: DialectBuilder,
     pub gc: Heap<Ty>,
-    pub string_interner: Interner<Ty::String>,
 }
 
 impl<Ty> Core<Ty>
@@ -202,7 +199,7 @@ where
     Ty: Types,
 {
     pub fn alloc_string(&mut self, s: Ty::String) -> Root<Interned<Ty::String>> {
-        self.string_interner.insert(s, &mut self.gc)
+        self.gc.intern(s)
     }
 
     pub fn alloc_literal(&mut self, literal: Literal) -> StrongValue<Ty> {
@@ -233,11 +230,13 @@ impl<Ty> Core<Ty>
 where
     Ty: Types,
 {
-    fn lookup_event(&self, event: Event) -> KeyValue<Weak, Ty> {
-        use crate::gc::LuaPtr;
+    fn lookup_event(&mut self, event: Event) -> KeyValue<Weak, Ty> {
+        // use crate::gc::LuaPtr;
 
-        let s = self.string_interner.event(event.to_metamethod());
-        KeyValue::String(LuaPtr(s))
+        // let s = self.gc.intern(event.to_metamethod().to_str().to_string().into()).downgrade();
+        // KeyValue::String(LuaPtr(s))
+
+        todo!("fix event lookups")
     }
 }
 
@@ -271,7 +270,6 @@ where
             .field("metatable_registry", &self.metatable_registry)
             .field("dialect", &self.dialect)
             .field("gc", &self.gc)
-            .field("string_interner", &self.string_interner)
             .finish()
     }
 }

@@ -2,14 +2,14 @@ use std::fmt::Display;
 use std::hash::Hash;
 
 use gc::index::Allocated;
-use gc::{Gc, GcCell, Root, RootCell, Trace};
+use gc::{Gc, GcCell, Interned, Root, RootCell, Trace};
 
 use super::string::PossiblyUtf8Vec;
 use super::userdata::{DefaultParams, FullUserdata};
 use super::{KeyValue, Value};
 use crate::ffi::DLuaFfi;
 use crate::gc::LuaPtr;
-use crate::runtime::{Closure, Interned};
+use crate::runtime::Closure;
 
 pub use gc::userdata::Metatable;
 
