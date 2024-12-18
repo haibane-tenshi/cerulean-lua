@@ -386,6 +386,34 @@ mod test {
     }
 
     #[test]
+    fn try_alloc_t() {
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let _: Result<Root<u32>, _> = heap.try_alloc(3);
+        let _: Result<RootCell<u32>, _> = heap.try_alloc_cell(3);
+
+        let a = heap.alloc(3).downgrade();
+
+        for i in 1..30 {
+            if heap.try_alloc(i).is_err() {
+                break;
+            }
+        }
+
+        assert!(heap.get(a).is_some());
+    }
+
+    #[test]
+    fn intern() {
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let a = heap.intern("test");
+        let b = heap.intern("test");
+
+        assert_eq!(a.location(), b.location());
+    }
+
+    #[test]
     fn index_root_t() {
         let mut heap = Heap::<(), UnitParams>::new();
 
