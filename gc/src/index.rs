@@ -95,6 +95,8 @@ use crate::heap::TypeIndex;
 use crate::trace::Trace;
 use crate::userdata::{FullUserdata, Params, Userdata};
 
+pub use crate::heap::interned::Interned;
+
 mod sealed_access {
     use super::{Mut, Ref};
 

@@ -1,10 +1,12 @@
 pub(crate) mod arena;
+pub(crate) mod interned;
 pub(crate) mod store;
 pub(crate) mod userdata_store;
 
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 
 use bitvec::vec::BitVec;
@@ -18,6 +20,7 @@ use crate::index::{
 use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
 use arena::Arena;
+use interned::Interned;
 use store::{Addr, Counter};
 use userdata_store::Views;
 
@@ -89,6 +92,21 @@ where
         let index = *self.type_map.entry(id).or_insert_with(|| {
             self.arenas
                 .push_and_get_key(Box::new(UserdataStore::<T, P>::new()))
+        });
+        let store = self.arenas.get_mut(index).unwrap().as_mut();
+        (index, store)
+    }
+
+    fn interned_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
+    where
+        T: Trace,
+    {
+        use interned::InternedStore;
+
+        let id = TypeId::of::<Interned<T>>();
+        let index = *self.type_map.entry(id).or_insert_with(|| {
+            self.arenas
+                .push_and_get_key(Box::new(InternedStore::<T>::new()))
         });
         let store = self.arenas.get_mut(index).unwrap().as_mut();
         (index, store)
@@ -310,6 +328,45 @@ where
         let (Addr(addr), TypeIndex(ty), Counter(counter)) = value.try_alloc_into(self)?;
 
         Ok(RootPtr::new(addr, ty, counter))
+    }
+
+    /// Intern a value.
+    ///
+    /// Interning deduplicates values, that is allocating two values that compare equal (in sense given by `Eq` trait)
+    /// will result only in single actual allocation with both references pointing to it.
+    /// Because of this it is not possible to acquire mutable reference to interned values:
+    /// it is possible to modify an existing value in such way that it would be equal to another (already allocated) value, breaking the contract.
+    ///
+    /// Interning have some useful properties, for example, since all instances of the same value share the same location in memory,
+    /// comparing the locations is equivalent to comparing values for equality.
+    ///
+    /// It is a logical error to modify allocated value in such way that affects implementation of `Hash` or `Eq` (e.g. via internal mutability).
+    pub fn intern<T>(&mut self, value: T) -> Root<Interned<T>>
+    where
+        T: Trace + Hash + Eq,
+    {
+        use interned::InternedStore;
+
+        let (ty, arena) = self.interned_arena_or_insert::<T>();
+        let arena: &mut InternedStore<T> = arena.as_any_mut().downcast_mut().unwrap();
+
+        let (addr, counter) = arena.insert(value);
+
+        Root::new(addr, ty, counter)
+    }
+
+    pub fn try_intern<T>(&mut self, value: T) -> Result<Root<Interned<T>>, T>
+    where
+        T: Trace + Hash + Eq,
+    {
+        use interned::InternedStore;
+
+        let (ty, arena) = self.interned_arena_or_insert::<T>();
+        let arena: &mut InternedStore<T> = arena.as_any_mut().downcast_mut().unwrap();
+
+        let (addr, counter) = arena.try_insert(value)?;
+
+        Ok(Root::new(addr, ty, counter))
     }
 
     /// Get `&T` out of weak reference such as [`GcCell`] or [`Gc`].
