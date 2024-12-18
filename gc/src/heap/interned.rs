@@ -9,13 +9,26 @@ use super::store::{Addr, Counter, Store};
 use crate::userdata::Params;
 use crate::Trace;
 
+/// Thin wrapper around interned value.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Interned<T>(T);
+
+impl<T> Interned<T> {
+    pub fn as_inner(&self) -> &T {
+        &self.0
+    }
+}
 
 impl<T> Deref for Interned<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> AsRef<T> for Interned<T> {
+    fn as_ref(&self) -> &T {
         &self.0
     }
 }

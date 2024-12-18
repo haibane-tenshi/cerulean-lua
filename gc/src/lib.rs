@@ -268,7 +268,7 @@ pub mod userdata;
 mod vec_list;
 
 pub use heap::{Collector, Heap};
-pub use index::{Gc, GcCell, Root, RootCell};
+pub use index::{Gc, GcCell, Interned, Root, RootCell};
 pub use trace::{Trace, Untrace};
 
 #[cfg(test)]
