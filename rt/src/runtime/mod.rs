@@ -1,8 +1,126 @@
+//! Runtime object.
+//!
+//! # Coherence
+//!
+//! One challenging aspect of emulating Lua language is that it is more permissive than Rust.
+//! In Lua it is OK to have multiple aliasing mutable references - which is something that we need to carefully model.
+//!
+//! In order to work around this problem, in relevant places (where references must persist for prolonged time)
+//! we separate them into two parts: *index* and *store*.
+//! The *store* contains objects that are being borrowed and *index* is simple identifier into it.
+//! Importantly, out of two *store* carries the lifetime, which allows us to persist only index and avoid borrowing issues.
+//! However this approach also introduces a new problem.
+//!
+//! Index can represent the value only as long as the lookup actually returns that value.
+//! There are two conditions for that to happen:
+//!
+//! * lookup should happen in the same store index is associated with
+//! * the value inside store should not get replaced
+//!
+//! (note: too strict? last may not be *always* required)
+//!
+//! We call this property **coherence**.
+//! Runtime relies on it in order to provide correct semantics to Lua program
+//! even for something as simple as calling another function or maintaining internal caches.
+//!
+//! Generally speaking, breaking coherence is a logical error.
+//! It will not lead to unsafety, however in its presence runtime can no longer guarantee semantics of Lua program,
+//! resulting in Lua Undefined Behavior.
+//!
+//! ## Index-store pairs
+//!
+//! The following objects and indices into them are under purview of coherence:
+//!
+//! * `Heap` and references into it (`Gc`/`GcCell`/`Root`/`RootCell`).
+//! * Chunk cache and `ChunkId`.
+//! * Orchestrator and `ThreadId`.
+//!
+//! ## Preserving coherence
+//!
+//! Unfortunately, permitting external code to break coherence is incredibly easy:
+//!
+//! ```
+//! fn process(callback: impl FnOnce(&mut Vec<u8>)) {
+//!     let mut cache = vec![1, 2, 3];
+//!     assert_eq!(cache[2], 3);
+//!
+//!     callback(&mut cache);
+//!
+//!     // Oops, cache might have changed without us noticing.
+//!     assert_eq!(cache[2], 3);
+//! }
+//!
+//! process(|cache| {
+//!     // Malicious callback replaces the cache or some of its objects.
+//!     std::mem::replace(cache, vec![0, 0]);
+//! })
+//! ```
+//!
+//! `process` may have good reasons to expose the mutable reference to callback,
+//! but it also allows various `std::mem` methods to completely disrupt existing assumptions outside of its control.
+//!
+//! The runtime makes a reasonable effort to prevent common cases of coherence breakage:
+//!
+//! * Certain Lua objects are allocated behind immutable references (`Gc`/`Root`).
+//!     
+//!     This currently includes strings (which are interned and any changes to string content may break interning guarantees)
+//!     and Lua closures (which must keep track of upvalues/captures and changing those may affect existing frames).
+//!
+//! * It is not possible to directly access backing store of thread stack neither from host program nor delegates.
+//!     
+//!     This is because for a suspended frame stack is part of its preserved state and should be protected from external code.
+//!     During execution delegates get access to their allotted stack space via `StackGuard` object.
+//!
+//! * Chunk cache does not permit removal or modification of managed chunks.
+//!
+//! * Existing thread objects cannot be directly accessed.
+//!
+//!     It is possible to observe certain properties of a thread through `ThreadGuard` object.
+//!
+//! * Orchestrator (thread supervisor) cannot be directly accessed.
+//!
+//! ## User-driven coherence breakage
+//!
+//! You should note that the list in previous section is not waterproof.
+//! There exist ways for user to break coherence through public APIs.
+//! Patching those was considered either impossible or too disruptive.
+//! Here's a (not comprehensive) list of known loopholes:
+//!
+//! * You can replace heap object.
+//!
+//!     There are two argument to it.
+//!     
+//!     First, protecting heap is very disruptive.
+//!     Any gc-reference lookup requires heap access, modifying objects inside heap requires mutable heap access.
+//!     As such, heap references are incredibly pervasive throughout entire runtime.
+//!
+//!     Second, replacing heap is unlikely to end well regardless.
+//!     It is nigh impossible to accidentally (or intentionally) replicate internal heap state with the purpose of forging/replacing certain values.
+//!     As a result most weak reference will stop pointing to existing values and error-out on lookup.
+//!     Strong references can detect whether the lookup is performed in the heap it were created from and will panic on error.
+//!
+//!     In other words, replacing heap is almost surefire way to cause runtime to panic and/or error-out.
+//!
+//! * You can replace chunk cache.
+//!
+//!     Currently runtime does not guard access to chunk cache from host program.
+//!     This may change in the future.
+//!
+//!     However it is not possible to replace chunk cache from inside delegates:
+//!     those observe it as trait object (`&dyn ChunkCache`) and `std::mem` APIs cannot be applied to unsized objects.
+//!
+//! * You can pass weak reference created in another heap into runtime.
+//!
+//!     The situation is very similar to heap replacement.
+//!     Those external reference will most likely error out on lookup,
+//!     or in a rare case will be silently interpreted as pointing to a different object.
+//!
+
 mod closure;
 mod dialect;
 mod interner;
 mod orchestrator;
-mod thread;
+pub mod thread;
 
 use std::fmt::Debug;
 use std::path::Path;

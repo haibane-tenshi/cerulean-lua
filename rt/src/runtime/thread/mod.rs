@@ -1,3 +1,70 @@
+//! Definition of Lua threads.
+//!
+//! # Definition
+//!
+//! Lua thread represents an independent thread of execution.
+//! Implementation-wise it is a **stackful coroutine** also sometimes known as green thread or userspace thread.
+//! Some of those terms can be used in slightly different meaning in various sources so more specifically,
+//! Lua threads are:
+//!
+//! * **Coroutines**, that is they can suspend and later resume execution from the same point.
+//!
+//! * **Stackful** as in they permit to suspend execution from within arbitrarily nested sequence of function calls.
+//!     To facilitate that, coroutine must preserve the stack for all intermediate calls, hence *stackful*.
+//!
+//!     This is opposed to *stackless* coroutines, which only permit suspension from within the same function.
+//!     Thanks to that, stack state at every possible suspension point is known at compile time,
+//!     which allows a compiler to condense coroutine into single object (a state machine).
+//!     An example of such coroutines would be Rust's [`Future`s](std::future::Future).
+//!
+//! * **Asymmetric** as in there is a distinction between *resuming into* another coroutine and *returning* control to caller coroutine.
+//!     Thanks to this every coroutine (except *main* one which is invoked by host program) have a parent,
+//!     and all active coroutines at every point during execution form a *thread stack*.
+//!
+//!     This is opposed to *symmetric* coroutines, which can only resume into other coroutines and have no notion of parent.
+//!
+//! # Concurrency vs parallelism
+//!
+//! Despite confusingly similar naming (which is not at all unique to Lua) Lua threads have no relation to OS threads.
+//! Specifically, Lua threads are a unit of [concurrency][wiki#concurrency] but not [parallelism][wiki#parallelism].
+//!
+//! Our runtime is inherently single-threaded and cannot distribute load between multiple OS threads.
+//! As such, Lua threads will never be run in parallel.
+//! This trait is common among garbage-collected dynamically-typed languages.
+//!
+//! Somewhat counterintuitively, runtime will also never attempt to run threads concurrently either, despite them being a concurrency primitive.
+//! There is a good reason for that.
+//!
+//! As discussed in precious section, all active Lua threads form a *thread stack*.
+//! Inside *thread stack* only the top thread is allowed to make progress,
+//! with all others awaiting until control is returned back to them.
+//!
+//! Additionally, Lua dictates that the first thread resumed by runtime is to be considered the *main* thread.
+//! A given Lua program is represented by its *main* thread.
+//! Runtime is obliged to drive it to completion (or suspension) before taking on other tasks.
+//! *Main* thread becomes the base of *thread stack* and until stack is empty there is always a coroutine that can make progress.
+//!
+//! As a result, runtime will never attempt to resume any other coroutine unless it got (potentially transitively) called from *main*.
+//!
+//! ## Schedulers
+//!
+//! Note that it is entirely possible to run Lua threads concurrently, even though runtime doesn't do this out of the box.
+//! You only require a scheduler which will keep track of existing coroutines and implement a switch/resumption strategy.
+//! To give some pointers, such scheduler can be implemented on either Lua or Rust side.
+//!
+//! On Lua side, it is possible to take advantage of `std`'s [`coroutine`][lua_std#coroutine] APIs to manage coroutines.
+//! There already exist plenty of libraries of varying feature richness taking advantage of those.
+//!
+//! On Rust side, [`Runtime::resume`](crate::runtime::Runtime::resume) API (which is the most basic way to run Lua code)
+//! will return control to host when the target Lua thread completes or suspends.
+//! So a scheduler can switch between threads by simply resuming on a different one.
+//!
+//! Regardless, implementing a full-fledged task scheduler is out of scope for this project.
+//!
+//! [wiki#concurrency]: https://en.wikipedia.org/wiki/Concurrency_(computer_science)
+//! [wiki#parallelism]: https://en.wikipedia.org/wiki/Parallel_computing
+//! [lua_std#coroutine]: https://www.lua.org/manual/5.4/manual.html#6.2
+
 pub(crate) mod frame;
 pub(crate) mod stack;
 
