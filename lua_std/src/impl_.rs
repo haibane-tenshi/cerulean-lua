@@ -7,9 +7,10 @@ use rt::error::{AlreadyDroppedError, RefAccessError, RtError, RuntimeError};
 use rt::ffi::arg_parser::{
     FormatReturns, FromLuaString, LuaTable, Maybe, NilOr, Opts, ParseAtom, WeakConvertError,
 };
+use rt::ffi::delegate::RuntimeView;
 use rt::ffi::{self, delegate, LuaFfi};
 use rt::gc::{DisplayWith, Heap, LuaPtr};
-use rt::runtime::{Closure, RuntimeView};
+use rt::runtime::Closure;
 use rt::value::table::KeyValue;
 use rt::value::{Callable, Refs, StrongValue, Types, Value, WeakValue};
 

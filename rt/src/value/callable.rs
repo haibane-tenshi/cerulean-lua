@@ -7,7 +7,7 @@ use super::{Refs, Strong, Types, Value, Weak};
 use crate::ffi::arg_parser::TypeMismatchError;
 use crate::gc::Heap;
 
-pub use crate::runtime::{Closure as LuaClosure, RuntimeView};
+pub use crate::runtime::Closure as LuaClosure;
 
 pub type StrongCallable<Ty> = Callable<Strong, Ty>;
 pub type WeakCallable<Ty> = Callable<Weak, Ty>;

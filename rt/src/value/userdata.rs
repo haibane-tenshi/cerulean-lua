@@ -4,8 +4,8 @@ use std::marker::PhantomData;
 use gc::userdata::Params;
 
 use crate::error::{BorrowError, RtError};
+use crate::ffi::delegate::RuntimeView;
 use crate::ffi::tuple::{NonEmptyTuple, Tuple, TupleHead, TupleTail};
-use crate::runtime::RuntimeView;
 use crate::value::Types;
 
 pub use gc::userdata::{FullUserdata, Userdata};

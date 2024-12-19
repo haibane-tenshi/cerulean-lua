@@ -546,8 +546,8 @@ where
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(super) fn init(self, heap: &mut Heap<Ty>) -> Thread<Ty> {
+        use crate::ffi::delegate::RuntimeView;
         use crate::gc::LuaPtr;
-        use crate::runtime::RuntimeView;
         use crate::value::Value;
 
         let ThreadImpetus {

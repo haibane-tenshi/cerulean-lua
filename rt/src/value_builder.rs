@@ -5,7 +5,8 @@ use std::ops::Range;
 
 use crate::chunk_cache::ChunkId;
 use crate::error::RuntimeError;
-use crate::runtime::{FunctionPtr, RuntimeView};
+use crate::ffi::delegate::RuntimeView;
+use crate::runtime::FunctionPtr;
 use crate::value::{StrongValue, Types};
 
 #[derive(Debug, Clone)]

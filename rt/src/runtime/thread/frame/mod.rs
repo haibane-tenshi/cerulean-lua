@@ -8,9 +8,10 @@ use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp};
 use crate::backtrace::BacktraceFrame;
 use crate::chunk_cache::ChunkCache;
 use crate::error::{MalformedClosureError, RtError};
+use crate::ffi::delegate::RuntimeView;
 use crate::ffi::DLuaFfi;
 use crate::runtime::closure::UpvaluePlace;
-use crate::runtime::{Cache, Closure, Core, Heap, RuntimeView};
+use crate::runtime::{Cache, Closure, Core, Heap};
 use crate::value::{Callable, Strong, Types};
 
 use super::super::orchestrator::{ThreadId, ThreadStore};

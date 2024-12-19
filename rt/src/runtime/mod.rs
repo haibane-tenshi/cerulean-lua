@@ -122,16 +122,13 @@ mod orchestrator;
 pub mod thread;
 
 use std::fmt::Debug;
-use std::path::Path;
 
 use enumoid::EnumMap;
 use gc::{GcCell, Interned, Root, RootCell};
 use repr::literal::Literal;
 
-use crate::backtrace::Location;
-use crate::chunk_cache::{ChunkCache, ChunkId};
-use crate::error::diagnostic::Diagnostic;
-use crate::error::{AlreadyDroppedError, RtError, RuntimeError, ThreadError};
+use crate::chunk_cache::ChunkCache;
+use crate::error::{AlreadyDroppedError, RtError, ThreadError};
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{
@@ -139,7 +136,6 @@ use crate::value::{
 };
 use orchestrator::Orchestrator;
 use thread::frame::Event;
-use thread::stack::StackGuard;
 use thread::ThreadGuard;
 
 pub use closure::{Closure, FunctionPtr};
@@ -407,203 +403,5 @@ where
     pub fn resume(&mut self, thread_id: ThreadId) -> Result<(), ThreadError> {
         let (ctx, orchestrator) = self.context();
         orchestrator.enter(ctx, thread_id)
-    }
-}
-
-pub struct RuntimeView<'rt, Ty>
-where
-    Ty: Types,
-{
-    pub core: &'rt mut Core<Ty>,
-    pub chunk_cache: &'rt mut dyn ChunkCache,
-    pub stack: StackGuard<'rt, Ty>,
-}
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: Types,
-{
-    pub fn reborrow(&mut self) -> RuntimeView<'_, Ty> {
-        let RuntimeView {
-            core,
-            chunk_cache,
-            stack,
-        } = self;
-
-        RuntimeView {
-            core: *core,
-            chunk_cache: *chunk_cache,
-            stack: stack.reborrow(),
-        }
-    }
-}
-
-// impl<'rt, Ty> RuntimeView<'rt, Ty>
-// where
-//     Ty: CoreTypes,
-// {
-/// Return runtime into consistent state.
-///
-/// This function is useful in case you caught Lua panic
-/// (one of the methods returned `RuntimeError`)
-/// and you want to continue executing code inside this runtime.
-/// Lua panic may interrupt execution at arbitrary point
-/// potentially leaving internal structures in inconsistent state.
-/// Resuming execution on such runtime results *Lua undefined behavior*.
-///
-/// Invoking `reset` will purge stack and bring internals into consistent state
-/// making it safe to execute Lua code once again.
-/// As such you should collect any useful information about error (e.g. backtrace)
-/// before resetting in case you need it.
-///
-/// Note that the "consistency" part applies only to runtime itself but not to Lua constructs!
-/// It is entirely possible for Lua to panic while modifying some state
-/// and since most things (tables, closures, etc.) are shared through references,
-/// this corrupted state may be observed by outside code.
-/// If that code doesn't expect to find malformed data it may lead to weird and/or buggy behavior.
-/// There is nothing runtime can do to help you.
-/// In case this presents an issue,
-/// the best course of action is to discard the runtime and construct a fresh one.
-// pub fn reset(&mut self) {
-//     self.stack.lua_frame().clear();
-//     self.soft_reset();
-// }
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: Types,
-{
-    pub fn construct_closure(
-        &mut self,
-        fn_ptr: FunctionPtr,
-        upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
-    ) -> Result<Root<Closure<Ty>>, RtError<Ty>> {
-        Closure::new(self, fn_ptr, upvalues).map_err(Into::into)
-    }
-
-    pub fn chunk_cache(&self) -> &dyn ChunkCache {
-        self.chunk_cache
-    }
-}
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: Types,
-{
-    pub fn load(
-        &mut self,
-        source: String,
-        location: Option<Location>,
-    ) -> Result<ChunkId, LoadError> {
-        use codespan_reporting::files::SimpleFile;
-        use logos::Logos;
-        use parser::lex::Token;
-
-        let lexer = Token::lexer(&source);
-        let chunk = match parser::parser::chunk(lexer) {
-            Ok(chunk) => chunk,
-            Err(err) => {
-                let name = location
-                    .map(|loc| loc.file.clone())
-                    .unwrap_or_else(|| "<unnamed>".to_string());
-                let diag = Diagnostic {
-                    files: SimpleFile::new(name, source),
-                    message: err.into_diagnostic(),
-                };
-
-                return Err(diag.into());
-            }
-        };
-
-        let chunk_id = self.chunk_cache.insert(chunk, Some(source), location)?;
-
-        Ok(chunk_id)
-    }
-
-    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RtError<Ty>>
-    where
-        Ty::String: From<String>,
-    {
-        let path = path.as_ref();
-
-        let source = std::fs::read_to_string(path).map_err(|err| {
-            self.core.alloc_error_msg(format!(
-                "failed to load file {}: {err}",
-                path.to_string_lossy()
-            ))
-        })?;
-        let location = Location {
-            file: path.to_string_lossy().to_string(),
-            line: 0,
-            column: 0,
-        };
-
-        self.load(source, Some(location)).map_err(Into::into)
-    }
-}
-
-impl<'rt, Ty> RuntimeView<'rt, Ty>
-where
-    Ty: Types,
-{
-    // pub fn backtrace(&self) -> Backtrace {
-    //     use rust_backtrace_stack::RustFrame;
-
-    //     let mut start = self.frames.boundary();
-    //     let mut frames = Vec::new();
-
-    //     for rust_frame in self.rust_backtrace_stack.iter() {
-    //         let RustFrame {
-    //             position,
-    //             backtrace,
-    //         } = rust_frame;
-
-    //         frames.extend(
-    //             self.frames
-    //                 .range(start..*position)
-    //                 .unwrap_or_default()
-    //                 .iter()
-    //                 .map(|frame| frame.backtrace(&self.core.gc, self.chunk_cache)),
-    //         );
-    //         frames.push(backtrace.clone());
-    //         start = *position
-    //     }
-
-    //     frames.extend(
-    //         self.frames
-    //             .range(start..)
-    //             .unwrap_or_default()
-    //             .iter()
-    //             .map(|frame| frame.backtrace(&self.core.gc, self.chunk_cache)),
-    //     );
-
-    //     Backtrace { frames }
-    // }
-}
-
-#[derive(Debug)]
-pub enum LoadError {
-    Immutable(crate::chunk_cache::ImmutableCacheError),
-    CompilationFailure(Box<Diagnostic>),
-}
-
-impl From<crate::chunk_cache::ImmutableCacheError> for LoadError {
-    fn from(value: crate::chunk_cache::ImmutableCacheError) -> Self {
-        LoadError::Immutable(value)
-    }
-}
-
-impl From<Diagnostic> for LoadError {
-    fn from(value: Diagnostic) -> Self {
-        LoadError::CompilationFailure(Box::new(value))
-    }
-}
-
-impl<Value> From<LoadError> for RuntimeError<Value> {
-    fn from(value: LoadError) -> Self {
-        match value {
-            LoadError::Immutable(err) => RuntimeError::Immutable(err),
-            LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(diag),
-        }
     }
 }

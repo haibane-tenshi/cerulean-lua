@@ -94,10 +94,10 @@ use std::pin::Pin;
 use gc::Trace;
 
 use crate::chunk_cache::ChunkId;
-use crate::runtime::{Closure, RuntimeView};
+use crate::runtime::Closure;
 use crate::value::Types;
 
-use delegate::{Delegate, Never};
+use delegate::{Delegate, Never, RuntimeView};
 
 /// Trait defining Rust functions invokable by Lua runtime.
 pub trait LuaFfi<Ty>: Trace

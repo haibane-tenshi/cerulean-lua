@@ -156,16 +156,148 @@
 //! In case that presents an issue and some of your delegates may still panic during normal execution,
 //! consider wrapping relevant bits of `resume` implementation in [`catch_unwind`](std::panic::catch_unwind).
 
+use std::path::Path;
 use std::pin::Pin;
 
+use gc::Root;
 use repr::index::StackSlot;
 
-use crate::error::RtError;
-use crate::runtime::RuntimeView;
-use crate::runtime::ThreadId;
-use crate::value::{Callable, Strong, Types};
+use crate::backtrace::Location;
+use crate::chunk_cache::{ChunkCache, ChunkId};
+use crate::error::{Diagnostic, RtError, RuntimeError};
+use crate::runtime::thread::StackGuard;
+use crate::runtime::{Closure, Core, FunctionPtr, ThreadId};
+use crate::value::{Callable, Strong, Types, WeakValue};
 
 use super::coroutine::State;
+
+pub struct RuntimeView<'rt, Ty>
+where
+    Ty: Types,
+{
+    pub core: &'rt mut Core<Ty>,
+    pub chunk_cache: &'rt mut dyn ChunkCache,
+    pub stack: StackGuard<'rt, Ty>,
+}
+
+impl<'rt, Ty> RuntimeView<'rt, Ty>
+where
+    Ty: Types,
+{
+    pub fn reborrow(&mut self) -> RuntimeView<'_, Ty> {
+        let RuntimeView {
+            core,
+            chunk_cache,
+            stack,
+        } = self;
+
+        RuntimeView {
+            core: *core,
+            chunk_cache: *chunk_cache,
+            stack: stack.reborrow(),
+        }
+    }
+}
+
+impl<'rt, Ty> RuntimeView<'rt, Ty>
+where
+    Ty: Types,
+{
+    pub fn construct_closure(
+        &mut self,
+        fn_ptr: FunctionPtr,
+        upvalues: impl IntoIterator<Item = WeakValue<Ty>>,
+    ) -> Result<Root<Closure<Ty>>, RtError<Ty>> {
+        Closure::new(self, fn_ptr, upvalues).map_err(Into::into)
+    }
+
+    pub fn chunk_cache(&self) -> &dyn ChunkCache {
+        self.chunk_cache
+    }
+}
+
+impl<'rt, Ty> RuntimeView<'rt, Ty>
+where
+    Ty: Types,
+{
+    pub fn load(
+        &mut self,
+        source: String,
+        location: Option<Location>,
+    ) -> Result<ChunkId, LoadError> {
+        use codespan_reporting::files::SimpleFile;
+        use logos::Logos;
+        use parser::lex::Token;
+
+        let lexer = Token::lexer(&source);
+        let chunk = match parser::parser::chunk(lexer) {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let name = location
+                    .map(|loc| loc.file.clone())
+                    .unwrap_or_else(|| "<unnamed>".to_string());
+                let diag = Diagnostic {
+                    files: SimpleFile::new(name, source),
+                    message: err.into_diagnostic(),
+                };
+
+                return Err(diag.into());
+            }
+        };
+
+        let chunk_id = self.chunk_cache.insert(chunk, Some(source), location)?;
+
+        Ok(chunk_id)
+    }
+
+    pub fn load_from_file(&mut self, path: impl AsRef<Path>) -> Result<ChunkId, RtError<Ty>>
+    where
+        Ty::String: From<String>,
+    {
+        let path = path.as_ref();
+
+        let source = std::fs::read_to_string(path).map_err(|err| {
+            self.core.alloc_error_msg(format!(
+                "failed to load file {}: {err}",
+                path.to_string_lossy()
+            ))
+        })?;
+        let location = Location {
+            file: path.to_string_lossy().to_string(),
+            line: 0,
+            column: 0,
+        };
+
+        self.load(source, Some(location)).map_err(Into::into)
+    }
+}
+
+#[derive(Debug)]
+pub enum LoadError {
+    Immutable(crate::chunk_cache::ImmutableCacheError),
+    CompilationFailure(Box<Diagnostic>),
+}
+
+impl From<crate::chunk_cache::ImmutableCacheError> for LoadError {
+    fn from(value: crate::chunk_cache::ImmutableCacheError) -> Self {
+        LoadError::Immutable(value)
+    }
+}
+
+impl From<Diagnostic> for LoadError {
+    fn from(value: Diagnostic) -> Self {
+        LoadError::CompilationFailure(Box::new(value))
+    }
+}
+
+impl<Value> From<LoadError> for RuntimeError<Value> {
+    fn from(value: LoadError) -> Self {
+        match value {
+            LoadError::Immutable(err) => RuntimeError::Immutable(err),
+            LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(diag),
+        }
+    }
+}
 
 /// Request runtime to perform specific action.
 pub enum Request<Ty>

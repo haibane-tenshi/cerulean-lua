@@ -8,7 +8,8 @@ use repr::tivec::TiVec;
 use super::thread::stack::RawStackSlot;
 use crate::chunk_cache::ChunkId;
 use crate::error::MalformedClosureError;
-use crate::runtime::{RuntimeView, ThreadId};
+use crate::ffi::delegate::RuntimeView;
+use crate::runtime::ThreadId;
 use crate::value::{Types, Value, WeakValue};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
