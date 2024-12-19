@@ -9,6 +9,7 @@ where
     Ty: Types,
 {
     values: Vec<WeakValue<Ty>>,
+    #[expect(unused, reason = "mirror only exists to root values inside register")]
     mirror: Root<Vec<WeakValue<Ty>>>,
 }
 

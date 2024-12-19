@@ -79,7 +79,9 @@ use crate::value::{Callable, Strong, Types};
 use super::orchestrator::{ThreadId, ThreadStatus, ThreadStore};
 use super::{Cache, Closure, Core};
 use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl, UpvalueRegister};
-use stack::{RawStackSlot, Stack, StackGuard};
+use stack::{RawStackSlot, Stack};
+
+pub use stack::{StackGuard, SyncStackGuard, TransientStackGuard};
 
 pub(crate) enum Status {
     Normal,
@@ -569,7 +571,7 @@ where
 
                 let mut stack = stack.full_guard();
                 {
-                    let mut stack = stack.transient_frame();
+                    let mut stack = stack.transient();
                     stack.push(callable.downgrade().into());
                     stack.sync(heap);
                 }

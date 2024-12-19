@@ -571,7 +571,7 @@ where
         LuaStackFrame(self.reborrow())
     }
 
-    pub fn transient_frame(&mut self) -> TransientStackFrame<'_, Ty> {
+    pub fn transient(&mut self) -> TransientStackGuard<'_, Ty> {
         // Enforce invariant of `.upvalue_mark`
         assert!(
             self.stack
@@ -588,14 +588,26 @@ where
 
         let StackGuard { stack, boundary } = self;
 
-        TransientStackFrame {
+        TransientStackGuard {
             stack,
             boundary: *boundary,
         }
     }
 
-    pub fn frame<'s>(&'s mut self, heap: &'s mut Heap<Ty>) -> StackFrame<'s, Ty> {
-        StackFrame {
+    pub fn transient_in<R>(
+        &mut self,
+        heap: &mut Heap<Ty>,
+        f: impl FnOnce(TransientStackGuard<'_, Ty>, &mut Heap<Ty>) -> R,
+    ) -> R {
+        heap.pause(|heap| {
+            let r = f(self.transient(), heap);
+            self.transient().sync(heap);
+            r
+        })
+    }
+
+    pub fn synchronized<'s>(&'s mut self, heap: &'s mut Heap<Ty>) -> SyncStackGuard<'s, Ty> {
+        SyncStackGuard {
             guard: self.reborrow(),
             heap,
         }
@@ -843,9 +855,9 @@ where
     //     self.0.truncate(new_len)
     // }
 
-    pub(super) fn clear(&mut self) {
-        self.0.clear()
-    }
+    // pub(super) fn clear(&mut self) {
+    //     self.0.clear()
+    // }
 
     pub(super) fn boundary(&self) -> RawStackSlot {
         self.0.boundary()
@@ -967,7 +979,7 @@ where
     }
 }
 
-pub struct TransientStackFrame<'a, Ty>
+pub struct TransientStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -975,7 +987,7 @@ where
     boundary: RawStackSlot,
 }
 
-impl<'a, Ty> TransientStackFrame<'a, Ty>
+impl<'a, Ty> TransientStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1046,7 +1058,7 @@ where
     }
 }
 
-impl<'a, Ty> TransientStackFrame<'a, Ty>
+impl<'a, Ty> TransientStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1056,7 +1068,7 @@ where
     }
 }
 
-impl<'a, Ty> Deref for TransientStackFrame<'a, Ty>
+impl<'a, Ty> Deref for TransientStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1067,7 +1079,7 @@ where
     }
 }
 
-impl<'a, Ty> DerefMut for TransientStackFrame<'a, Ty>
+impl<'a, Ty> DerefMut for TransientStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1076,7 +1088,7 @@ where
     }
 }
 
-impl<'a, Ty> Extend<WeakValue<Ty>> for TransientStackFrame<'a, Ty>
+impl<'a, Ty> Extend<WeakValue<Ty>> for TransientStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1085,7 +1097,7 @@ where
     }
 }
 
-impl<'a, Ty> Debug for TransientStackFrame<'a, Ty>
+impl<'a, Ty> Debug for TransientStackGuard<'a, Ty>
 where
     Ty: Types,
     WeakValue<Ty>: Debug,
@@ -1097,7 +1109,7 @@ where
     }
 }
 
-pub struct StackFrame<'a, Ty>
+pub struct SyncStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1105,7 +1117,7 @@ where
     heap: &'a mut Heap<Ty>,
 }
 
-impl<'a, Ty> StackFrame<'a, Ty>
+impl<'a, Ty> SyncStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1131,7 +1143,7 @@ where
     }
 }
 
-impl<'a, Ty> Deref for StackFrame<'a, Ty>
+impl<'a, Ty> Deref for SyncStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1142,7 +1154,7 @@ where
     }
 }
 
-impl<'a, Ty> DerefMut for StackFrame<'a, Ty>
+impl<'a, Ty> DerefMut for SyncStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1151,7 +1163,7 @@ where
     }
 }
 
-impl<'a, Ty> Drop for StackFrame<'a, Ty>
+impl<'a, Ty> Drop for SyncStackGuard<'a, Ty>
 where
     Ty: Types,
 {
@@ -1233,7 +1245,7 @@ pub(crate) fn copy<Ty>(
 ) where
     Ty: Types,
 {
-    let mut to = to.transient_frame();
+    let mut to = to.transient();
 
     to.extend(from.iter().copied());
 

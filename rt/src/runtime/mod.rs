@@ -139,12 +139,12 @@ use crate::value::{
 };
 use orchestrator::Orchestrator;
 use thread::frame::Event;
+use thread::stack::StackGuard;
+use thread::ThreadGuard;
 
 pub use closure::{Closure, FunctionPtr};
 pub use dialect::{CoerceArgs, DialectBuilder};
 pub use orchestrator::ThreadId;
-pub use thread::stack::{StackFrame, StackGuard, TransientStackFrame};
-pub use thread::ThreadGuard;
 
 pub struct MetatableRegistry<T> {
     values: EnumMap<SolitaryType, Option<RootCell<T>>>,
@@ -260,7 +260,7 @@ where
     }
 }
 
-struct Cache<Ty>
+pub(crate) struct Cache<Ty>
 where
     Ty: Types,
 {

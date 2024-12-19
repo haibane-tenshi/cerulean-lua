@@ -3,7 +3,7 @@ use std::pin::Pin;
 use crate::backtrace::BacktraceFrame;
 use crate::error::RtError;
 use crate::ffi::delegate::{Delegate as RustDelegate, Response};
-use crate::ffi::{DLuaFfi, DebugInfo, LuaFfi};
+use crate::ffi::{DLuaFfi, DebugInfo};
 use crate::runtime::RuntimeView;
 use crate::value::Types;
 

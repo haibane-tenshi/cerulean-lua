@@ -105,7 +105,7 @@ where
             match self.0 {
                 State::Started => {
                     let callable = {
-                        let mut stack = rt.stack.frame(&mut rt.core.gc);
+                        let mut stack = rt.stack.synchronized(&mut rt.core.gc);
                         let Some(mut value) = stack.get_mut(StackSlot(0)) else {
                             // Drop forces stack to stay alive until end of block (where its drop impl is called).
                             // Have to drop it manually on divergent branches.
@@ -144,7 +144,7 @@ where
                 State::Called => {
                     match response {
                         Response::Evaluated(Ok(())) => {
-                            let mut stack = rt.stack.frame(&mut rt.core.gc);
+                            let mut stack = rt.stack.synchronized(&mut rt.core.gc);
                             let mut place = stack
                                 .get_mut(StackSlot(0))
                                 .expect("stack space below invocation point should be untouched");
@@ -165,7 +165,7 @@ where
                             let string = String::from_utf8_lossy(&s).to_string();
                             let msg = rt.core.alloc_string(string.into());
 
-                            let mut stack = rt.stack.transient_frame();
+                            let mut stack = rt.stack.transient();
                             stack.push(Value::Bool(false));
                             stack.push(Value::String(LuaPtr(msg.downgrade())));
                             stack.sync(&mut rt.core.gc);
@@ -351,7 +351,7 @@ where
                     }
                 };
 
-                rt.stack.transient_frame().format(results);
+                rt.stack.transient().format(results);
 
                 Ok(())
             })
@@ -414,7 +414,7 @@ where
                     }
                 };
 
-                rt.stack.transient_frame().format(results);
+                rt.stack.transient().format(results);
 
                 Ok(())
             })
@@ -466,7 +466,7 @@ where
                     .transpose()?
                     .unwrap_or_default();
 
-                rt.stack.transient_frame().format(results);
+                rt.stack.transient().format(results);
 
                 Ok(())
             })
@@ -535,7 +535,7 @@ where
 
                 let results = WeakValue::Table(LuaPtr(table));
 
-                rt.stack.transient_frame().format(results);
+                rt.stack.transient().format(results);
 
                 Ok(())
             })
