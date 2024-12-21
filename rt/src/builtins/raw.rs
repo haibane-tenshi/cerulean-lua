@@ -1,6 +1,11 @@
 use std::cmp::Ordering;
+use std::ops::ControlFlow;
+use ControlFlow::{Break, Continue};
 
-use crate::error::DroppedOr;
+use gc::{Interned, Root};
+use repr::opcode::{BinOp as BinaryOp, UnaOp as UnaryOp};
+
+use crate::error::AlreadyDroppedError;
 use crate::gc::Heap;
 use crate::value::{Refs, Types, Value, WeakValue};
 
@@ -15,17 +20,16 @@ pub struct MetamethodRequired;
 /// * `Float` + `Float`
 ///
 /// Consider performing a coercion step prior in case you want to perform mixed-type operation.
-pub fn add<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn add<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) + Int(rhs)).into()),
-        [Value::Float(lhs), Value::Float(rhs)] => Ok((Float(lhs) + Float(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) + Int(rhs)).into()),
+        [Value::Float(lhs), Value::Float(rhs)] => Continue((Float(lhs) + Float(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
@@ -37,17 +41,16 @@ where
 /// * `Float` + `Float`
 ///
 /// Consider performing a coercion step prior in case you want to perform mixed-type operation.
-pub fn sub<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn sub<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) - Int(rhs)).into()),
-        [Value::Float(lhs), Value::Float(rhs)] => Ok((Float(lhs) - Float(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) - Int(rhs)).into()),
+        [Value::Float(lhs), Value::Float(rhs)] => Continue((Float(lhs) - Float(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
@@ -59,17 +62,16 @@ where
 /// * `Float` + `Float`
 ///
 /// Consider performing a coercion step prior in case you want to perform mixed-type operation.
-pub fn mul<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn mul<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) * Int(rhs)).into()),
-        [Value::Float(lhs), Value::Float(rhs)] => Ok((Float(lhs) * Float(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) * Int(rhs)).into()),
+        [Value::Float(lhs), Value::Float(rhs)] => Continue((Float(lhs) * Float(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
@@ -95,18 +97,17 @@ where
 /// The operation between integers is *checked*, that is if `rhs` is 0 `None` will be returned.
 ///
 /// The operation between floats is unchecked and will result in NaN.
-pub fn div<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Option<Value<Rf, Ty>>, MetamethodRequired>
+pub fn div<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Option<WeakValue<Ty>>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(_), Value::Int(0)] => Ok(None),
-        [Value::Int(lhs), Value::Int(rhs)] => Ok(Some((Int(lhs) / Int(rhs)).into())),
-        [Value::Float(lhs), Value::Float(rhs)] => Ok(Some((Float(lhs) / Float(rhs)).into())),
-        _ => Err(MetamethodRequired),
+        [Value::Int(_), Value::Int(0)] => Continue(None),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue(Some((Int(lhs) / Int(rhs)).into())),
+        [Value::Float(lhs), Value::Float(rhs)] => Continue(Some((Float(lhs) / Float(rhs)).into())),
+        _ => Break(MetamethodRequired),
     }
 }
 
@@ -124,22 +125,21 @@ where
 /// The operation between integers is *checked*, that is if `rhs` is 0 `None` will be returned.
 ///
 /// The operation between floats is unchecked and will result in NaN.
-pub fn floor_div<Rf, Ty>(
-    args: [Value<Rf, Ty>; 2],
-) -> Result<Option<Value<Rf, Ty>>, MetamethodRequired>
+pub fn floor_div<Ty>(
+    args: [WeakValue<Ty>; 2],
+) -> ControlFlow<MetamethodRequired, Option<WeakValue<Ty>>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(_), Value::Int(0)] => Ok(None),
-        [Value::Int(lhs), Value::Int(rhs)] => Ok(Some((Int(lhs).floor_div(Int(rhs))).into())),
+        [Value::Int(_), Value::Int(0)] => Continue(None),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue(Some((Int(lhs).floor_div(Int(rhs))).into())),
         [Value::Float(lhs), Value::Float(rhs)] => {
-            Ok(Some((Float(lhs).floor_div(Float(rhs))).into()))
+            Continue(Some((Float(lhs).floor_div(Float(rhs))).into()))
         }
-        _ => Err(MetamethodRequired),
+        _ => Break(MetamethodRequired),
     }
 }
 
@@ -167,18 +167,17 @@ where
 /// The operation between integers is *checked*, that is if `rhs` is 0 `None` will be returned.
 ///
 /// The operation between floats is unchecked and will result in NaN.
-pub fn rem<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Option<Value<Rf, Ty>>, MetamethodRequired>
+pub fn rem<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Option<WeakValue<Ty>>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(_), Value::Int(0)] => Ok(None),
-        [Value::Int(lhs), Value::Int(rhs)] => Ok(Some((Int(lhs) % Int(rhs)).into())),
-        [Value::Float(lhs), Value::Float(rhs)] => Ok(Some((Float(lhs) % Float(rhs)).into())),
-        _ => Err(MetamethodRequired),
+        [Value::Int(_), Value::Int(0)] => Continue(None),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue(Some((Int(lhs) % Int(rhs)).into())),
+        [Value::Float(lhs), Value::Float(rhs)] => Continue(Some((Float(lhs) % Float(rhs)).into())),
+        _ => Break(MetamethodRequired),
     }
 }
 
@@ -207,123 +206,119 @@ where
 ///
 /// Currently this function will return a `None` if the power argument is too large (bigger that `u32::MAX`).
 /// This restriction will likely be lifted in the future.
-pub fn pow<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Option<Value<Rf, Ty>>, MetamethodRequired>
+pub fn pow<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Option<WeakValue<Ty>>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs).exp(Int(rhs))).map(Into::into)),
-        [Value::Float(lhs), Value::Float(rhs)] => Ok(Some((Float(lhs).exp(Float(rhs))).into())),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs).exp(Int(rhs))).map(Into::into)),
+        [Value::Float(lhs), Value::Float(rhs)] => {
+            Continue(Some((Float(lhs).exp(Float(rhs))).into()))
+        }
+        _ => Break(MetamethodRequired),
     }
 }
 
-pub fn bit_and<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn bit_and<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::Int;
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) & Int(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) & Int(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
-pub fn bit_or<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn bit_or<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::Int;
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) | Int(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) | Int(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
-pub fn bit_xor<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn bit_xor<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::Int;
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) ^ Int(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) ^ Int(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
-pub fn shl<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn bit_shl<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::Int;
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) << Int(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) << Int(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
-pub fn shr<Rf, Ty>(args: [Value<Rf, Ty>; 2]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn bit_shr<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::Int;
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Ok((Int(lhs) >> Int(rhs)).into()),
-        _ => Err(MetamethodRequired),
+        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs) >> Int(rhs)).into()),
+        _ => Break(MetamethodRequired),
     }
 }
 
-pub fn eq<Ty>(args: [WeakValue<Ty>; 2], cmp_int_flt: bool) -> Result<bool, MetamethodRequired>
+pub fn eq<Ty>(args: [WeakValue<Ty>; 2], cmp_int_flt: bool) -> ControlFlow<MetamethodRequired, bool>
 where
     Ty: Types,
 {
     use crate::value::{Float, Int};
 
     if args[0] == args[1] {
-        return Ok(true);
+        return Continue(true);
     }
 
     match args {
         [Value::Int(lhs), Value::Float(rhs)] if cmp_int_flt => {
             let r = PartialEq::eq(&Int(lhs), &Float(rhs));
-            Ok(r)
+            Continue(r)
         }
         [Value::Float(lhs), Value::Int(rhs)] if cmp_int_flt => {
             let r = PartialEq::eq(&Float(lhs), &Int(rhs));
-            Ok(r)
+            Continue(r)
         }
         [Value::Table(_), Value::Table(_)] | [Value::Userdata(_), Value::Userdata(_)] => {
-            Err(MetamethodRequired)
+            Break(MetamethodRequired)
         }
-        _ => Ok(false),
+        _ => Continue(false),
     }
 }
 
-pub fn ne<Ty>(args: [WeakValue<Ty>; 2], cmp_int_flt: bool) -> Result<bool, MetamethodRequired>
+pub fn ne<Ty>(args: [WeakValue<Ty>; 2], cmp_int_flt: bool) -> ControlFlow<MetamethodRequired, bool>
 where
     Ty: Types,
 {
-    eq(args, cmp_int_flt).map(|value| !value)
+    eq(args, cmp_int_flt).map_continue(|value| !value)
 }
 
 pub fn partial_cmp<Ty>(
     args: [WeakValue<Ty>; 2],
     heap: &Heap<Ty>,
     cmp_int_flt: bool,
-) -> Result<Option<Ordering>, DroppedOr<MetamethodRequired>>
+) -> Result<ControlFlow<MetamethodRequired, Option<Ordering>>, AlreadyDroppedError>
 where
     Ty: Types,
 {
@@ -333,27 +328,27 @@ where
     match args {
         [Value::Int(lhs), Value::Int(rhs)] => {
             let r = PartialOrd::partial_cmp(&Int(lhs), &Int(rhs));
-            Ok(r)
+            Ok(Continue(r))
         }
         [Value::Float(lhs), Value::Float(rhs)] => {
             let r = PartialOrd::partial_cmp(&Float(lhs), &Float(rhs));
-            Ok(r)
+            Ok(Continue(r))
         }
         [Value::Int(lhs), Value::Float(rhs)] if cmp_int_flt => {
             let r = PartialOrd::partial_cmp(&Int(lhs), &Float(rhs));
-            Ok(r)
+            Ok(Continue(r))
         }
         [Value::Float(lhs), Value::Int(rhs)] if cmp_int_flt => {
             let r = PartialOrd::partial_cmp(&Float(lhs), &Int(rhs));
-            Ok(r)
+            Ok(Continue(r))
         }
         [Value::String(lhs), Value::String(rhs)] => {
             let lhs = heap.get(lhs.0).ok_or(AlreadyDroppedError)?;
             let rhs = heap.get(rhs.0).ok_or(AlreadyDroppedError)?;
             let r = PartialOrd::partial_cmp(lhs, rhs);
-            Ok(r)
+            Ok(Continue(r))
         }
-        _ => Err(DroppedOr::Other(MetamethodRequired)),
+        _ => Ok(Break(MetamethodRequired)),
     }
 }
 
@@ -361,52 +356,55 @@ pub fn lt<Ty>(
     args: [WeakValue<Ty>; 2],
     heap: &Heap<Ty>,
     cmp_int_flt: bool,
-) -> Result<bool, DroppedOr<MetamethodRequired>>
+) -> Result<ControlFlow<MetamethodRequired, bool>, AlreadyDroppedError>
 where
     Ty: Types,
 {
-    partial_cmp(args, heap, cmp_int_flt).map(|ord| matches!(ord, Some(Ordering::Less)))
+    partial_cmp(args, heap, cmp_int_flt)
+        .map(|ctrl| ctrl.map_continue(|ord| matches!(ord, Some(Ordering::Less))))
 }
 
 pub fn gt<Ty>(
     args: [WeakValue<Ty>; 2],
     heap: &Heap<Ty>,
     cmp_int_flt: bool,
-) -> Result<bool, DroppedOr<MetamethodRequired>>
+) -> Result<ControlFlow<MetamethodRequired, bool>, AlreadyDroppedError>
 where
     Ty: Types,
 {
-    partial_cmp(args, heap, cmp_int_flt).map(|ord| matches!(ord, Some(Ordering::Greater)))
+    partial_cmp(args, heap, cmp_int_flt)
+        .map(|ctrl| ctrl.map_continue(|ord| matches!(ord, Some(Ordering::Greater))))
 }
 
 pub fn lt_eq<Ty>(
     args: [WeakValue<Ty>; 2],
     heap: &Heap<Ty>,
     cmp_int_flt: bool,
-) -> Result<bool, DroppedOr<MetamethodRequired>>
+) -> Result<ControlFlow<MetamethodRequired, bool>, AlreadyDroppedError>
 where
     Ty: Types,
 {
     partial_cmp(args, heap, cmp_int_flt)
-        .map(|ord| matches!(ord, Some(Ordering::Less | Ordering::Equal)))
+        .map(|ctrl| ctrl.map_continue(|ord| matches!(ord, Some(Ordering::Less | Ordering::Equal))))
 }
 
 pub fn gt_eq<Ty>(
     args: [WeakValue<Ty>; 2],
     heap: &Heap<Ty>,
     cmp_int_flt: bool,
-) -> Result<bool, DroppedOr<MetamethodRequired>>
+) -> Result<ControlFlow<MetamethodRequired, bool>, AlreadyDroppedError>
 where
     Ty: Types,
 {
     partial_cmp(args, heap, cmp_int_flt)
-        .map(|ord| matches!(ord, Some(Ordering::Less | Ordering::Equal)))
+        .map(|ctrl| ctrl.map_continue(|ord| matches!(ord, Some(Ordering::Less | Ordering::Equal))))
 }
 
-pub fn concat<Ty>(
+pub(crate) fn inner_concat<Ty>(
     args: [WeakValue<Ty>; 2],
     heap: &mut Heap<Ty>,
-) -> Result<WeakValue<Ty>, DroppedOr<MetamethodRequired>>
+    mut alloc: impl FnMut(&mut Heap<Ty>, Ty::String) -> Root<Interned<Ty::String>>,
+) -> Result<ControlFlow<MetamethodRequired, WeakValue<Ty>>, AlreadyDroppedError>
 where
     Ty: Types,
 {
@@ -420,21 +418,95 @@ where
             let rhs_value = heap.get(rhs.0).ok_or(AlreadyDroppedError)?.as_inner();
 
             if rhs_value.is_empty() {
-                Ok(Value::String(lhs))
+                Ok(Continue(Value::String(lhs)))
             } else if lhs_value.is_empty() {
-                Ok(Value::String(rhs))
+                Ok(Continue(Value::String(rhs)))
             } else {
                 let mut value = lhs_value.clone();
                 value.concat(rhs_value);
-                let ptr = heap.intern(value);
-                Ok(Value::String(LuaPtr(ptr.downgrade())))
+                let ptr = alloc(heap, value);
+                Ok(Continue(Value::String(LuaPtr(ptr.downgrade()))))
             }
         }
-        _ => Err(DroppedOr::Other(MetamethodRequired)),
+        _ => Ok(Break(MetamethodRequired)),
     }
 }
 
-pub fn neg<Rf, Ty>(args: [Value<Rf, Ty>; 1]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn concat<Ty>(
+    args: [WeakValue<Ty>; 2],
+    heap: &mut Heap<Ty>,
+) -> Result<ControlFlow<MetamethodRequired, WeakValue<Ty>>, AlreadyDroppedError>
+where
+    Ty: Types,
+{
+    inner_concat(args, heap, |heap, value| heap.intern(value))
+}
+
+pub(crate) fn inner_binary_op<Ty>(
+    op: BinaryOp,
+    args: [WeakValue<Ty>; 2],
+    cmp_int_flt: bool,
+    heap: &mut Heap<Ty>,
+    alloc: impl FnMut(&mut Heap<Ty>, Ty::String) -> Root<Interned<Ty::String>>,
+) -> Result<ControlFlow<MetamethodRequired, Option<WeakValue<Ty>>>, AlreadyDroppedError>
+where
+    Ty: Types,
+{
+    use repr::opcode::{AriBinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp};
+    use AriBinOp::*;
+    use BitBinOp::*;
+    use EqBinOp::*;
+    use RelBinOp::*;
+    use StrBinOp::*;
+
+    match op {
+        BinaryOp::Ari(Add) => Ok(add(args).map_continue(Some)),
+        BinaryOp::Ari(Sub) => Ok(sub(args).map_continue(Some)),
+        BinaryOp::Ari(Mul) => Ok(mul(args).map_continue(Some)),
+        BinaryOp::Ari(Div) => Ok(div(args)),
+        BinaryOp::Ari(FloorDiv) => Ok(floor_div(args)),
+        BinaryOp::Ari(Rem) => Ok(rem(args)),
+        BinaryOp::Ari(Pow) => Ok(pow(args)),
+        BinaryOp::Bit(And) => Ok(bit_and(args).map_continue(Some)),
+        BinaryOp::Bit(Or) => Ok(bit_or(args).map_continue(Some)),
+        BinaryOp::Bit(Xor) => Ok(bit_xor(args).map_continue(Some)),
+        BinaryOp::Bit(ShL) => Ok(bit_shl(args).map_continue(Some)),
+        BinaryOp::Bit(ShR) => Ok(bit_shr(args).map_continue(Some)),
+        BinaryOp::Str(Concat) => {
+            inner_concat(args, heap, alloc).map(|ctrl| ctrl.map_continue(Some))
+        }
+        BinaryOp::Eq(Eq) => Ok(eq(args, cmp_int_flt).map_continue(|t| Some(Value::Bool(t)))),
+        BinaryOp::Eq(Neq) => Ok(ne(args, cmp_int_flt).map_continue(|t| Some(Value::Bool(t)))),
+        BinaryOp::Rel(Lt) => {
+            lt(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
+        }
+        BinaryOp::Rel(Gt) => {
+            gt(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
+        }
+        BinaryOp::Rel(LtEq) => {
+            lt_eq(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
+        }
+        BinaryOp::Rel(GtEq) => {
+            gt_eq(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
+        }
+    }
+}
+
+pub fn binary_op<Ty>(
+    op: BinaryOp,
+    args: [WeakValue<Ty>; 2],
+    cmp_int_flt: bool,
+    heap: &mut Heap<Ty>,
+) -> Result<ControlFlow<MetamethodRequired, Option<WeakValue<Ty>>>, AlreadyDroppedError>
+where
+    Ty: Types,
+{
+    inner_binary_op(op, args, cmp_int_flt, heap, |heap, value| {
+        heap.intern(value)
+    })
+}
+
+pub fn neg<Rf, Ty>(args: [Value<Rf, Ty>; 1]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
     Rf: Refs,
     Ty: Types,
@@ -444,17 +516,17 @@ where
     match args {
         [Value::Int(val)] => {
             let Int(r) = -Int(val);
-            Ok(Value::Int(r))
+            Continue(Value::Int(r))
         }
         [Value::Float(val)] => {
             let Float(r) = -Float(val);
-            Ok(Value::Float(r))
+            Continue(Value::Float(r))
         }
-        _ => Err(MetamethodRequired),
+        _ => Break(MetamethodRequired),
     }
 }
 
-pub fn bit_not<Rf, Ty>(args: [Value<Rf, Ty>; 1]) -> Result<Value<Rf, Ty>, MetamethodRequired>
+pub fn bit_not<Rf, Ty>(args: [Value<Rf, Ty>; 1]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
     Rf: Refs,
     Ty: Types,
@@ -464,16 +536,16 @@ where
     match args {
         [Value::Int(val)] => {
             let Int(r) = !Int(val);
-            Ok(Value::Int(r))
+            Continue(Value::Int(r))
         }
-        _ => Err(MetamethodRequired),
+        _ => Break(MetamethodRequired),
     }
 }
 
 pub fn len<Ty>(
     args: [WeakValue<Ty>; 1],
     heap: &Heap<Ty>,
-) -> Result<usize, DroppedOr<MetamethodRequired>>
+) -> Result<ControlFlow<MetamethodRequired, usize>, AlreadyDroppedError>
 where
     Ty: Types,
 {
@@ -483,8 +555,39 @@ where
     match args {
         [Value::String(val)] => {
             let val = heap.get(val.0).ok_or(AlreadyDroppedError)?;
-            Ok(val.len())
+            Ok(Continue(val.len()))
         }
-        _ => Err(DroppedOr::Other(MetamethodRequired)),
+        _ => Ok(Break(MetamethodRequired)),
+    }
+}
+
+pub fn log_not<Ty>(args: [WeakValue<Ty>; 1]) -> bool
+where
+    Ty: Types,
+{
+    let [val] = args;
+    !val.to_bool()
+}
+
+pub fn unary_op<Ty>(
+    op: UnaryOp,
+    args: [WeakValue<Ty>; 1],
+    heap: &Heap<Ty>,
+) -> Result<ControlFlow<MetamethodRequired, WeakValue<Ty>>, AlreadyDroppedError>
+where
+    Ty: Types,
+{
+    use UnaryOp::*;
+
+    match op {
+        AriNeg => Ok(neg(args)),
+        BitNot => Ok(bit_not(args)),
+        StrLen => len(args, heap).map(|ctrl| {
+            ctrl.map_continue(|value| {
+                let r = value.try_into().unwrap();
+                Value::Int(r)
+            })
+        }),
+        LogNot => Ok(Continue(Value::Bool(log_not(args)))),
     }
 }
