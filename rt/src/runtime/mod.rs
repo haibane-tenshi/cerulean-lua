@@ -126,7 +126,7 @@ use enumoid::EnumMap;
 use gc::{GcCell, Interned, Root, RootCell};
 use repr::literal::Literal;
 
-use crate::builtins::coerce::DialectBuilder;
+use crate::builtins::coerce::CustomPolicy;
 use crate::chunk_cache::ChunkCache;
 use crate::error::{AlreadyDroppedError, RtError, ThreadError};
 use crate::ffi::DLuaFfi;
@@ -185,7 +185,7 @@ where
 {
     pub global_env: StrongValue<Ty>,
     pub metatable_registry: MetatableRegistry<Ty::Table>,
-    pub dialect: DialectBuilder,
+    pub dialect: CustomPolicy,
     pub gc: Heap<Ty>,
 }
 

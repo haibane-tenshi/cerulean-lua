@@ -1,5 +1,5 @@
 use gc::{Interned, Root};
-use repr::opcode::{AriBinOp, BitBinOp, StrBinOp};
+use repr::opcode::{AriBinOp, BinOp, BitBinOp, StrBinOp, UnaOp};
 
 use crate::value::{Types, Value, WeakValue};
 
@@ -8,7 +8,7 @@ use crate::value::{Types, Value, WeakValue};
 /// Currently this type is used to control which type coercions runtime should perform.
 /// See individual methods for details on altered behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DialectBuilder {
+pub struct CustomPolicy {
     una_op_bit_not_float_to_int: bool,
     bin_op_bit_float_to_int: bool,
     bin_op_ari_int_to_float: bool,
@@ -21,7 +21,7 @@ pub struct DialectBuilder {
     tab_get_float_to_int: bool,
 }
 
-impl DialectBuilder {
+impl CustomPolicy {
     /// Construct builder with no enabled type coercions.
     pub fn no_coercions() -> Self {
         Default::default()
@@ -309,56 +309,11 @@ impl DialectBuilder {
         self.with_tab_set_float_to_int(value);
         self.with_tab_get_float_to_int(value)
     }
-}
 
-pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
-    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
-    fn coerce_bin_op_str<F>(
-        &self,
-        op: StrBinOp,
-        args: [WeakValue<Ty>; 2],
-        f: F,
-    ) -> [WeakValue<Ty>; 2]
+    fn bit_op<Ty>(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2]
     where
-        F: FnMut(Ty::String) -> Root<Interned<Ty::String>>;
-
-    fn coerce_una_op_bit(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1];
-    fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
-    fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
-    fn cmp_float_and_int(&self) -> bool;
-}
-
-impl<Ty> CoerceArgs<Ty> for DialectBuilder
-where
-    Ty: Types,
-    Ty::String: From<String>,
-{
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
-        use crate::value::{Float, Int};
-
-        match (op, args) {
-            (_, [Value::Int(lhs), rhs @ Value::Float(_)]) if self.bin_op_ari_int_to_float => {
-                [Float::from(Int(lhs)).into(), rhs]
-            }
-            (_, [lhs @ Value::Float(_), Value::Int(rhs)]) if self.bin_op_ari_int_to_float => {
-                [lhs, Float::from(Int(rhs)).into()]
-            }
-            (AriBinOp::Pow, [Value::Int(lhs), Value::Int(rhs)])
-                if self.bin_op_ari_exp_2int_to_float =>
-            {
-                [Float::from(Int(lhs)).into(), Float::from(Int(rhs)).into()]
-            }
-            (AriBinOp::Div, [Value::Int(lhs), Value::Int(rhs)])
-                if self.bin_op_ari_div_2int_to_float =>
-            {
-                [Float::from(Int(lhs)).into(), Float::from(Int(rhs)).into()]
-            }
-            (_, args) => args,
-        }
-    }
-
-    fn coerce_bin_op_bit(&self, _op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        Ty: Types,
+    {
         use crate::value::{Float, Int};
 
         let try_into = |value: f64| -> WeakValue<Ty> {
@@ -385,79 +340,301 @@ where
             args => args,
         }
     }
+}
+
+pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
+    fn add(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn sub(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn mul(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn div(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn floor_div(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn rem(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn pow(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+
+    fn bit_and(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn bit_or(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn bit_xor(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn bit_shl(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+    fn bit_shr(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2];
+
+    fn concat<F>(&self, args: [WeakValue<Ty>; 2], alloc: F) -> [WeakValue<Ty>; 2]
+    where
+        F: FnMut(Ty::String) -> Root<Interned<Ty::String>>;
+
+    fn bit_not(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1];
+
+    fn tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
+    fn tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
+
+    fn cmp_float_and_int(&self) -> bool;
+
+    fn binary_op<F>(&self, op: BinOp, args: [WeakValue<Ty>; 2], alloc: F) -> [WeakValue<Ty>; 2]
+    where
+        F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
+    {
+        match op {
+            BinOp::Ari(op) => self.coerce_bin_op_ari(op, args),
+            BinOp::Bit(op) => self.coerce_bin_op_bit(op, args),
+            BinOp::Str(op) => self.coerce_bin_op_str(op, args, alloc),
+            BinOp::Rel(_) => args,
+            BinOp::Eq(_) => args,
+        }
+    }
+
+    fn unary_op(&self, op: UnaOp, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1] {
+        match op {
+            UnaOp::BitNot => self.bit_not(args),
+            _ => args,
+        }
+    }
+
+    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        match op {
+            AriBinOp::Add => self.add(args),
+            AriBinOp::Sub => self.sub(args),
+            AriBinOp::Mul => self.mul(args),
+            AriBinOp::Div => self.div(args),
+            AriBinOp::FloorDiv => self.floor_div(args),
+            AriBinOp::Rem => self.rem(args),
+            AriBinOp::Pow => self.pow(args),
+        }
+    }
+
+    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        match op {
+            BitBinOp::And => self.bit_and(args),
+            BitBinOp::Or => self.bit_or(args),
+            BitBinOp::Xor => self.bit_xor(args),
+            BitBinOp::ShL => self.bit_shl(args),
+            BitBinOp::ShR => self.bit_shr(args),
+        }
+    }
 
     fn coerce_bin_op_str<F>(
         &self,
         op: StrBinOp,
         args: [WeakValue<Ty>; 2],
-        mut alloc: F,
+        f: F,
     ) -> [WeakValue<Ty>; 2]
     where
         F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
     {
         match op {
-            StrBinOp::Concat => {
-                use crate::value::StrongValue;
-                use Value::*;
-
-                fn conv<T, Ty, F>(x: T, alloc: &mut F) -> StrongValue<Ty>
-                where
-                    T: ToString,
-                    Ty: Types,
-                    F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
-                {
-                    use crate::gc::LuaPtr;
-                    String(LuaPtr(alloc(x.to_string().into())))
-                }
-
-                let alloc = &mut alloc;
-
-                // Important: downgrade only after both arguments are converted.
-                // Otherwise allocation of second arg may gc the first arg.
-                match args {
-                    [Int(lhs), Int(rhs)] => {
-                        let lhs = conv(lhs, alloc);
-                        let rhs = conv(rhs, alloc);
-                        [lhs.downgrade(), rhs.downgrade()]
-                    }
-                    [Int(lhs), Float(rhs)] => {
-                        let lhs = conv(lhs, alloc);
-                        let rhs = conv(rhs, alloc);
-                        [lhs.downgrade(), rhs.downgrade()]
-                    }
-                    [Int(lhs), String(rhs)] => {
-                        let lhs = conv(lhs, alloc);
-                        [lhs.downgrade(), String(rhs)]
-                    }
-                    [Float(lhs), Int(rhs)] => {
-                        let lhs = conv(lhs, alloc);
-                        let rhs = conv(rhs, alloc);
-                        [lhs.downgrade(), rhs.downgrade()]
-                    }
-                    [Float(lhs), Float(rhs)] => {
-                        let lhs = conv(lhs, alloc);
-                        let rhs = conv(rhs, alloc);
-                        [lhs.downgrade(), rhs.downgrade()]
-                    }
-                    [Float(lhs), String(rhs)] => {
-                        let lhs = conv(lhs, alloc);
-                        [lhs.downgrade(), String(rhs)]
-                    }
-                    [String(lhs), Int(rhs)] => {
-                        let rhs = conv(rhs, alloc);
-                        [String(lhs), rhs.downgrade()]
-                    }
-                    [String(lhs), Float(rhs)] => {
-                        let rhs = conv(rhs, alloc);
-                        [String(lhs), rhs.downgrade()]
-                    }
-                    args => args,
-                }
-            }
+            StrBinOp::Concat => self.concat(args, f),
         }
     }
 
     fn coerce_una_op_bit(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1] {
+        self.bit_not(args)
+    }
+
+    fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
+        self.tab_set(key)
+    }
+
+    fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
+        self.tab_get(key)
+    }
+}
+
+impl<Ty> CoerceArgs<Ty> for CustomPolicy
+where
+    Ty: Types,
+    Ty::String: From<String>,
+{
+    fn add(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        use crate::value::{Float, Int};
+
+        match args {
+            [Value::Int(lhs), rhs @ Value::Float(_)] if self.bin_op_ari_int_to_float => {
+                [Float::from(Int(lhs)).into(), rhs]
+            }
+            [lhs @ Value::Float(_), Value::Int(rhs)] if self.bin_op_ari_int_to_float => {
+                [lhs, Float::from(Int(rhs)).into()]
+            }
+            args => args,
+        }
+    }
+
+    fn sub(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        use crate::value::{Float, Int};
+
+        match args {
+            [Value::Int(lhs), rhs @ Value::Float(_)] if self.bin_op_ari_int_to_float => {
+                [Float::from(Int(lhs)).into(), rhs]
+            }
+            [lhs @ Value::Float(_), Value::Int(rhs)] if self.bin_op_ari_int_to_float => {
+                [lhs, Float::from(Int(rhs)).into()]
+            }
+            args => args,
+        }
+    }
+
+    fn mul(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        use crate::value::{Float, Int};
+
+        match args {
+            [Value::Int(lhs), rhs @ Value::Float(_)] if self.bin_op_ari_int_to_float => {
+                [Float::from(Int(lhs)).into(), rhs]
+            }
+            [lhs @ Value::Float(_), Value::Int(rhs)] if self.bin_op_ari_int_to_float => {
+                [lhs, Float::from(Int(rhs)).into()]
+            }
+            args => args,
+        }
+    }
+
+    fn div(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        use crate::value::{Float, Int};
+
+        match args {
+            [Value::Int(lhs), rhs @ Value::Float(_)] if self.bin_op_ari_int_to_float => {
+                [Float::from(Int(lhs)).into(), rhs]
+            }
+            [lhs @ Value::Float(_), Value::Int(rhs)] if self.bin_op_ari_int_to_float => {
+                [lhs, Float::from(Int(rhs)).into()]
+            }
+            [Value::Int(lhs), Value::Int(rhs)] if self.bin_op_ari_div_2int_to_float => {
+                [Float::from(Int(lhs)).into(), Float::from(Int(rhs)).into()]
+            }
+            args => args,
+        }
+    }
+
+    fn floor_div(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        use crate::value::{Float, Int};
+
+        match args {
+            [Value::Int(lhs), rhs @ Value::Float(_)] if self.bin_op_ari_int_to_float => {
+                [Float::from(Int(lhs)).into(), rhs]
+            }
+            [lhs @ Value::Float(_), Value::Int(rhs)] if self.bin_op_ari_int_to_float => {
+                [lhs, Float::from(Int(rhs)).into()]
+            }
+            [Value::Int(lhs), Value::Int(rhs)] if self.bin_op_ari_div_2int_to_float => {
+                [Float::from(Int(lhs)).into(), Float::from(Int(rhs)).into()]
+            }
+            args => args,
+        }
+    }
+
+    fn rem(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        use crate::value::{Float, Int};
+
+        match args {
+            [Value::Int(lhs), rhs @ Value::Float(_)] if self.bin_op_ari_int_to_float => {
+                [Float::from(Int(lhs)).into(), rhs]
+            }
+            [lhs @ Value::Float(_), Value::Int(rhs)] if self.bin_op_ari_int_to_float => {
+                [lhs, Float::from(Int(rhs)).into()]
+            }
+            [Value::Int(lhs), Value::Int(rhs)] if self.bin_op_ari_div_2int_to_float => {
+                [Float::from(Int(lhs)).into(), Float::from(Int(rhs)).into()]
+            }
+            args => args,
+        }
+    }
+
+    fn pow(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        use crate::value::{Float, Int};
+
+        match args {
+            [Value::Int(lhs), rhs @ Value::Float(_)] if self.bin_op_ari_int_to_float => {
+                [Float::from(Int(lhs)).into(), rhs]
+            }
+            [lhs @ Value::Float(_), Value::Int(rhs)] if self.bin_op_ari_int_to_float => {
+                [lhs, Float::from(Int(rhs)).into()]
+            }
+            [Value::Int(lhs), Value::Int(rhs)] if self.bin_op_ari_exp_2int_to_float => {
+                [Float::from(Int(lhs)).into(), Float::from(Int(rhs)).into()]
+            }
+            args => args,
+        }
+    }
+
+    fn bit_and(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        self.bit_op(args)
+    }
+
+    fn bit_or(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        self.bit_op(args)
+    }
+
+    fn bit_xor(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        self.bit_op(args)
+    }
+
+    fn bit_shl(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        self.bit_op(args)
+    }
+
+    fn bit_shr(&self, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
+        self.bit_op(args)
+    }
+
+    fn concat<F>(&self, args: [WeakValue<Ty>; 2], mut alloc: F) -> [WeakValue<Ty>; 2]
+    where
+        F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
+    {
+        use crate::value::StrongValue;
+        use Value::*;
+
+        fn conv<T, Ty, F>(x: T, alloc: &mut F) -> StrongValue<Ty>
+        where
+            T: ToString,
+            Ty: Types,
+            F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
+        {
+            use crate::gc::LuaPtr;
+            String(LuaPtr(alloc(x.to_string().into())))
+        }
+
+        let alloc = &mut alloc;
+
+        // Important: downgrade only after both arguments are converted.
+        // Otherwise allocation of second arg may gc the first arg.
+        match args {
+            [Int(lhs), Int(rhs)] => {
+                let lhs = conv(lhs, alloc);
+                let rhs = conv(rhs, alloc);
+                [lhs.downgrade(), rhs.downgrade()]
+            }
+            [Int(lhs), Float(rhs)] => {
+                let lhs = conv(lhs, alloc);
+                let rhs = conv(rhs, alloc);
+                [lhs.downgrade(), rhs.downgrade()]
+            }
+            [Int(lhs), String(rhs)] => {
+                let lhs = conv(lhs, alloc);
+                [lhs.downgrade(), String(rhs)]
+            }
+            [Float(lhs), Int(rhs)] => {
+                let lhs = conv(lhs, alloc);
+                let rhs = conv(rhs, alloc);
+                [lhs.downgrade(), rhs.downgrade()]
+            }
+            [Float(lhs), Float(rhs)] => {
+                let lhs = conv(lhs, alloc);
+                let rhs = conv(rhs, alloc);
+                [lhs.downgrade(), rhs.downgrade()]
+            }
+            [Float(lhs), String(rhs)] => {
+                let lhs = conv(lhs, alloc);
+                [lhs.downgrade(), String(rhs)]
+            }
+            [String(lhs), Int(rhs)] => {
+                let rhs = conv(rhs, alloc);
+                [String(lhs), rhs.downgrade()]
+            }
+            [String(lhs), Float(rhs)] => {
+                let rhs = conv(rhs, alloc);
+                [String(lhs), rhs.downgrade()]
+            }
+            args => args,
+        }
+    }
+
+    fn bit_not(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1] {
         use crate::value::{Float, Int};
 
         match args {
@@ -472,7 +649,7 @@ where
         }
     }
 
-    fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
+    fn tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_set_float_to_int {
@@ -491,7 +668,7 @@ where
         }
     }
 
-    fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
+    fn tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_get_float_to_int {
@@ -518,5 +695,5 @@ where
 mod sealed {
     pub trait Sealed {}
 
-    impl Sealed for super::DialectBuilder {}
+    impl Sealed for super::CustomPolicy {}
 }
