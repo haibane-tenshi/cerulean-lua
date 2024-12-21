@@ -661,7 +661,7 @@ where
                 args => Break((Event::Neg, args)),
             },
             UnaOp::BitNot => {
-                use crate::runtime::CoerceArgs;
+                use crate::builtins::coerce::CoerceArgs;
 
                 let args = self.core.dialect.coerce_una_op_bit(args);
 
@@ -848,7 +848,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: StrBinOp,
     ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
-        use crate::runtime::dialect::CoerceArgs;
+        use crate::builtins::coerce::CoerceArgs;
 
         let dialect = self.core.dialect;
         let args = dialect.coerce_bin_op_str(op, args, |value| self.alloc_string(value));
@@ -880,7 +880,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: EqBinOp,
     ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use crate::runtime::dialect::CoerceArgs;
+        use crate::builtins::coerce::CoerceArgs;
         use crate::value::{Float, Int};
         use EqBinOp::*;
 
@@ -912,7 +912,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: RelBinOp,
     ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
-        use crate::runtime::dialect::CoerceArgs;
+        use crate::builtins::coerce::CoerceArgs;
         use crate::value;
         use RelBinOp::*;
         use Value::*;
@@ -956,7 +956,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: BitBinOp,
     ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use crate::runtime::dialect::CoerceArgs;
+        use crate::builtins::coerce::CoerceArgs;
         use crate::value::Int;
 
         let args = self.core.dialect.coerce_bin_op_bit(op, args);
@@ -980,7 +980,7 @@ where
         args: [WeakValue<Ty>; 2],
         op: AriBinOp,
     ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use crate::runtime::dialect::CoerceArgs;
+        use crate::builtins::coerce::CoerceArgs;
         use crate::value::{Float, Int};
         use AriBinOp::*;
 
@@ -1021,7 +1021,7 @@ where
         ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
-        use crate::runtime::dialect::CoerceArgs;
+        use crate::builtins::coerce::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 
@@ -1115,7 +1115,7 @@ where
         ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
         RefAccessOrError<opcode_err::TabCause>,
     > {
-        use crate::runtime::dialect::CoerceArgs;
+        use crate::builtins::coerce::CoerceArgs;
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 

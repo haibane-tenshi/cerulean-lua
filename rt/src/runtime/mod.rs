@@ -117,7 +117,6 @@
 //!
 
 mod closure;
-mod dialect;
 mod orchestrator;
 pub mod thread;
 
@@ -127,6 +126,7 @@ use enumoid::EnumMap;
 use gc::{GcCell, Interned, Root, RootCell};
 use repr::literal::Literal;
 
+use crate::builtins::coerce::DialectBuilder;
 use crate::chunk_cache::ChunkCache;
 use crate::error::{AlreadyDroppedError, RtError, ThreadError};
 use crate::ffi::DLuaFfi;
@@ -139,7 +139,6 @@ use thread::frame::Event;
 use thread::ThreadGuard;
 
 pub use closure::{Closure, FunctionPtr};
-pub use dialect::{CoerceArgs, DialectBuilder};
 pub use orchestrator::ThreadId;
 
 pub struct MetatableRegistry<T> {

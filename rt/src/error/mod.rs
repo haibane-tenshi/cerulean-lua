@@ -219,6 +219,32 @@ impl<Value> From<RefAccessError> for RuntimeError<Value> {
     }
 }
 
+#[derive(Debug)]
+pub enum DroppedOr<E> {
+    AlreadyDropped(AlreadyDroppedError),
+    Other(E),
+}
+
+impl<E> Display for DroppedOr<E>
+where
+    E: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DroppedOr::AlreadyDropped(err) => write!(f, "{}", err),
+            DroppedOr::Other(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl<E> Error for DroppedOr<E> where E: Debug + Display {}
+
+impl<E> From<AlreadyDroppedError> for DroppedOr<E> {
+    fn from(value: AlreadyDroppedError) -> Self {
+        DroppedOr::AlreadyDropped(value)
+    }
+}
+
 pub(crate) trait ExtraDiagnostic<FileId> {
     fn with_label(&mut self, iter: impl IntoIterator<Item = Label<FileId>>);
     fn with_note(&mut self, iter: impl IntoIterator<Item = impl AsRef<str>>);
