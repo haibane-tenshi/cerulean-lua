@@ -13,11 +13,26 @@
 //! 2. raw builtins
 //! 3. metamethod call
 //!
+//! Coercion step always succeeds.
+//! Metamethod is attempted when raw builtin fails.
+//! When metamethod fails Lua raises an error.
+//!
 //! Methods inside this module cover the first two steps:
 //! * [`raw`](self::raw) module provides raw operations disregarding possible coercions.
 //! * [`coerce`](self::coerce) module provides methods for controlling and performing type coercions in various situations.
 //!
 //! The last step requires access to runtime (for obvious reasons), but there are a few helper methods to assist you in the task.
+//!
+//! ## Exceptions
+//!
+//! String length operator `#` when applied to table is an exception to above rule.
+//! It performs metamethod call *before* raw builtin, so the actual order is
+//!
+//! 1. coercion
+//! 2. metamethod call
+//! 3. length raw builtin
+//!
+//! In this case when metamethod is not found raw builtin is executed which always succeeds.
 //!
 //! # Coercion warnings
 //!
@@ -33,52 +48,120 @@ pub mod coerce;
 pub mod full;
 pub mod raw;
 
-// use crate::runtime::TransientStackFrame;
-// use crate::gc::Heap;
-// use crate::value::{Value, Callable, Weak, Types};
+use std::fmt::Display;
 
-// pub struct NotCallableError;
+use crate::error::{AlreadyDroppedError, AlreadyDroppedOr};
+use crate::gc::Heap;
+use crate::runtime::thread::TransientStackGuard;
+use crate::runtime::MetatableRegistry;
+use crate::value::{Callable, KeyValue, Strong, Types, Value, Weak, WeakValue};
 
-// pub fn prepare_invoke<Ty>(mut callable: Value<Weak, Ty>, mut stack: TransientStackFrame<'_, Ty>, heap: &Heap<Ty>) -> Result<Callable<Weak, Ty>, NotCallableError>
-// where
-//     Ty: Types
-// {
-//     use repr::index::StackSlot;
+/// Resolve metavalue out of a list of values.
+///
+/// This method will seek metavalue with specified key inside metatables for provided values.
+/// Values will be checked in order, concluding with the first non-`nil` metavalue produced.
+/// `nil` will be returned if no suitable metavalue is resolved.
+///
+/// This method will error-out if any value or metatable is already garbage-collected.
+pub fn find_metavalue<Ty>(
+    values: impl IntoIterator<Item = WeakValue<Ty>>,
+    key: KeyValue<Weak, Ty>,
+    heap: &Heap<Ty>,
+    registry: &MetatableRegistry<Ty::Table>,
+) -> Result<WeakValue<Ty>, AlreadyDroppedError>
+where
+    Ty: Types,
+{
+    values
+        .into_iter()
+        .find_map(|value| {
+            use crate::value::{TableIndex, Value};
 
-//     let starting_len = stack.len();
+            let metatable = match value.metatable(heap, registry) {
+                Err(err) => return Some(Err(err)),
+                Ok(None) => return None,
+                Ok(Some(mt)) => mt,
+            };
+            let metatable = heap.get(metatable)?;
 
-//     let err = loop {
-//         callable = match callable {
-//             Value::Function(callable) => return Ok(callable),
-//             t => t,
-//         };
+            match metatable.get(&key) {
+                Value::Nil => None,
+                value => Some(Ok(value)),
+            }
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
 
-//         let new_callable = self
-//             .core
-//             .metatable_of(&callable)?
-//             .map(|mt| {
-//                 let key = self.core.lookup_event(Event::Call);
-//                 self.core
-//                     .gc
-//                     .get(mt)
-//                     .ok_or(AlreadyDroppedError)
-//                     .map(|table| table.get(&key))
-//             })
-//             .transpose()?
-//             .unwrap_or_default();
+pub fn prepare_invoke<Ty>(
+    callable: Value<Weak, Ty>,
+    stack: TransientStackGuard<'_, Ty>,
+    heap: &mut Heap<Ty>,
+    registry: &MetatableRegistry<Ty::Table>,
+) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError>>
+where
+    Ty: Types,
+{
+    use crate::gc::LuaPtr;
+    use crate::runtime::thread::frame::BuiltinMetamethod;
 
-//         // Keys associated with nil are not considered part of the table.
-//         if new_callable == Value::Nil {
-//             break NotCallableError;
-//         }
+    let s = heap
+        .intern(BuiltinMetamethod::Call.to_str().into())
+        .downgrade();
+    let key = KeyValue::String(LuaPtr(s));
 
-//         stack.insert(StackSlot(0), callable);
-//         callable = new_callable;
-//     };
+    inner_prepare_invoke(callable, stack, heap, registry, key)
+}
 
-//     // We failed to find callable, remove everything that was put on the stack.
-//     let end = StackSlot(stack.len() - starting_len);
-//     stack.drain(..end);
+pub(crate) fn inner_prepare_invoke<Ty>(
+    mut callable: Value<Weak, Ty>,
+    mut stack: TransientStackGuard<'_, Ty>,
+    heap: &Heap<Ty>,
+    registry: &MetatableRegistry<Ty::Table>,
+    key: KeyValue<Weak, Ty>,
+) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError>>
+where
+    Ty: Types,
+{
+    use crate::value::TableIndex;
+    use repr::index::StackSlot;
 
-//     Err(err)
-// }
+    let starting_len = stack.len();
+
+    let err = loop {
+        callable = match callable {
+            Value::Function(callable) => {
+                return callable.upgrade(heap).ok_or(AlreadyDroppedError.into())
+            }
+            t => t,
+        };
+
+        let Some(metatable) = callable.metatable(heap, registry)? else {
+            continue;
+        };
+        let metavalue = heap.get(metatable).ok_or(AlreadyDroppedError)?.get(&key);
+
+        // Keys associated with nil are not considered part of the table.
+        if metavalue == Value::Nil {
+            break NotCallableError;
+        }
+
+        stack.insert(StackSlot(0), callable);
+        callable = metavalue;
+    };
+
+    // We failed to find callable, remove everything that was put on the stack.
+    let end = StackSlot(stack.len() - starting_len);
+    stack.drain(..end);
+
+    Err(AlreadyDroppedOr::Other(err))
+}
+
+#[derive(Debug)]
+pub struct NotCallableError;
+
+impl Display for NotCallableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "value already dropped")
+    }
+}
