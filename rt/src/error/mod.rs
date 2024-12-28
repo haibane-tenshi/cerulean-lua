@@ -220,28 +220,37 @@ impl<Value> From<RefAccessError> for RuntimeError<Value> {
 }
 
 #[derive(Debug)]
-pub enum DroppedOr<E> {
-    AlreadyDropped(AlreadyDroppedError),
+pub enum AlreadyDroppedOr<E> {
+    Dropped(AlreadyDroppedError),
     Other(E),
 }
 
-impl<E> Display for DroppedOr<E>
+impl<E> AlreadyDroppedOr<E> {
+    pub fn map_other<T>(self, f: impl FnOnce(E) -> T) -> AlreadyDroppedOr<T> {
+        match self {
+            AlreadyDroppedOr::Dropped(t) => AlreadyDroppedOr::Dropped(t),
+            AlreadyDroppedOr::Other(t) => AlreadyDroppedOr::Other(f(t)),
+        }
+    }
+}
+
+impl<E> Display for AlreadyDroppedOr<E>
 where
     E: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DroppedOr::AlreadyDropped(err) => write!(f, "{}", err),
-            DroppedOr::Other(err) => write!(f, "{}", err),
+            AlreadyDroppedOr::Dropped(err) => write!(f, "{}", err),
+            AlreadyDroppedOr::Other(err) => write!(f, "{}", err),
         }
     }
 }
 
-impl<E> Error for DroppedOr<E> where E: Debug + Display {}
+impl<E> Error for AlreadyDroppedOr<E> where E: Debug + Display {}
 
-impl<E> From<AlreadyDroppedError> for DroppedOr<E> {
+impl<E> From<AlreadyDroppedError> for AlreadyDroppedOr<E> {
     fn from(value: AlreadyDroppedError) -> Self {
-        DroppedOr::AlreadyDropped(value)
+        AlreadyDroppedOr::Dropped(value)
     }
 }
 

@@ -13,12 +13,14 @@ use repr::tivec::TiSlice;
 
 use super::super::stack::StackGuard;
 use crate::backtrace::BacktraceFrame;
+use crate::builtins::NotCallableError;
 use crate::chunk_cache::ChunkCache;
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
 use crate::error::{
-    AlreadyDroppedError, BorrowError, MalformedClosureError, RefAccessError, RuntimeError,
+    AlreadyDroppedError, AlreadyDroppedOr, BorrowError, MalformedClosureError, RefAccessError,
+    RuntimeError,
 };
 use crate::gc::{DisplayWith, Heap, LuaPtr};
 use crate::runtime::closure::UpvaluePlace;
@@ -495,9 +497,12 @@ where
                     .ok_or(MissingStackSlot(slot))?;
                 let type_ = value.type_();
 
-                let callable = self
-                    .prepare_invoke(value, slot)
-                    .map_err(|err| err.map_other(|_| opcode_err::Invoke(type_).into()))?;
+                let callable = self.prepare_invoke(value, slot).map_err(|err| match err {
+                    AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
+                    AlreadyDroppedOr::Other(_) => {
+                        RefAccessOrError::Other(opcode_err::Invoke(type_).into())
+                    }
+                })?;
 
                 let start = slot;
 
@@ -570,7 +575,11 @@ where
             UnaOp(op) => {
                 let args = self.stack.lua_frame().take1()?;
                 self.exec_una_op(args, op)
-                    .map_err(|err| err.map_other(Into::into))?
+                    // TODO: Temporary patch, investigate necessity of RefAccessOr
+                    .map_err(|err| match err {
+                        AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
+                        AlreadyDroppedOr::Other(err) => RefAccessOrError::Other(err.into()),
+                    })?
                     .map_br(|(event, callable, start)| {
                         ChangeFrame::Invoke(Some(event), callable, start)
                     })
@@ -638,100 +647,65 @@ where
         Ok(r)
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn exec_una_op(
         &mut self,
         args: [WeakValue<Ty>; 1],
         op: UnaOp,
     ) -> Result<
         ControlFlow<(Event, Callable<Strong, Ty>, StackSlot)>,
-        RefAccessOrError<opcode_err::UnaOpCause>,
+        AlreadyDroppedOr<opcode_err::UnaOpCause>,
     > {
-        use crate::value::{Float, Int};
+        use crate::builtins::coerce::CoerceArgs;
+        use crate::builtins::find_metavalue;
+        use crate::builtins::raw::{unary_op, MetamethodRequired};
         use ControlFlow::*;
 
         let [val] = &args;
-
         let err = opcode_err::UnaOpCause { arg: val.type_() };
 
-        let eval = match op {
-            UnaOp::AriNeg => match args {
-                [Value::Int(val)] => Continue((-Int(val)).into()),
-                [Value::Float(val)] => Continue((-Float(val)).into()),
-                args => Break((Event::Neg, args)),
-            },
-            UnaOp::BitNot => {
-                use crate::builtins::coerce::CoerceArgs;
-
-                let args = self.core.dialect.coerce_una_op_bit(args);
-
-                match args {
-                    [Value::Int(val)] => Continue((!Int(val)).into()),
-                    args => Break((Event::BitNot, args)),
-                }
-            }
-            UnaOp::StrLen => {
-                match args {
-                    [Value::String(LuaPtr(val))] => {
-                        let val = self.core.gc.get(val).ok_or(AlreadyDroppedError)?;
-                        let len = val.len().try_into().unwrap();
-
-                        Continue(Value::Int(len))
-                    }
-                    // Table builtin triggers after metamethod attempt.
-                    args => Break((Event::Len, args)),
-                }
-            }
-            UnaOp::LogNot => {
-                let [arg] = args;
-                let r = Value::Bool(!arg.to_bool());
-                self.stack.lua_frame().push(r);
-
-                return Ok(Continue(()));
-            }
+        let args = self.core.dialect.unary_op(op, args);
+        let eval = match (op, args) {
+            // Lua spec dictates that len op (`#`) on table must try metamethod before raw builtin.
+            (UnaOp::StrLen, [Value::Table(_)]) => ControlFlow::Break(MetamethodRequired),
+            (op, args) => unary_op(op, args, &self.core.gc)?,
         };
 
         match eval {
             Continue(value) => {
-                // Value contains no reference in this case.
                 self.stack.lua_frame().push(value);
                 Ok(Continue(()))
             }
-            Break((event, args)) => {
-                let [arg] = &args;
+            Break(MetamethodRequired) => {
+                let event = match op {
+                    UnaOp::AriNeg => Event::Neg,
+                    UnaOp::BitNot => Event::BitNot,
+                    UnaOp::StrLen => Event::Len,
+                    UnaOp::LogNot => unreachable!("logical NOT should always resolve a value"),
+                };
 
-                let metatable = self.core.metatable_of(arg)?;
                 let key = self.internal_cache.lookup_event(event);
-                let heap = &self.core.gc;
-                let metavalue = metatable
-                    .map(|mt| {
-                        heap.get(mt)
-                            .ok_or(AlreadyDroppedError)
-                            .map(|table| table.get(&key))
-                    })
-                    .transpose()?
-                    .unwrap_or_default();
+                let metavalue =
+                    find_metavalue(args, key, &self.core.gc, &self.core.metatable_registry)?;
 
                 match metavalue {
                     Value::Nil => match (op, args) {
                         // Trigger table len builtin on failed metamethod lookup.
                         (UnaOp::StrLen, [Value::Table(LuaPtr(tab))]) => {
-                            let border = heap.get(tab).ok_or(AlreadyDroppedError)?.border();
+                            let border = self.core.gc.get(tab).ok_or(AlreadyDroppedError)?.border();
                             self.stack.lua_frame().push(Value::Int(border));
 
                             Ok(Continue(()))
                         }
-                        _ => Err(err.into()),
+                        _ => Err(AlreadyDroppedOr::Other(err)),
                     },
                     metavalue => {
                         let start = self.stack.next_slot();
-
                         let [arg] = args;
-                        let mut stack = self.stack.lua_frame();
-                        stack.push(arg);
-                        let callable = metavalue;
+                        self.stack.lua_frame().push(arg);
+
                         let callable = self
-                            .prepare_invoke(callable, start)
+                            .prepare_invoke(metavalue, start)
                             .map_err(|e| e.map_other(|_| err))?;
 
                         Ok(Break((event, callable, start)))
@@ -831,9 +805,11 @@ where
                         stack.push(rhs);
 
                         let callable = metavalue;
-                        let callable = self
-                            .prepare_invoke(callable, start)
-                            .map_err(|e| e.map_other(|_| err))?;
+                        let callable =
+                            self.prepare_invoke(callable, start).map_err(|e| match e {
+                                AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
+                                AlreadyDroppedOr::Other(_) => RefAccessOrError::Other(err),
+                            })?;
 
                         Ok(ControlFlow::Break((event, callable, start)))
                     }
@@ -1208,40 +1184,22 @@ where
 
     fn prepare_invoke(
         &mut self,
-        mut callable: WeakValue<Ty>,
+        callable: WeakValue<Ty>,
         start: StackSlot,
-    ) -> Result<Callable<Strong, Ty>, RefAccessOrError<NotCallableError>> {
-        loop {
-            callable = match callable {
-                Value::Function(callable) => {
-                    let r = callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
-                    return Ok(r);
-                }
-                t => t,
-            };
+    ) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError>> {
+        use crate::builtins::inner_prepare_invoke;
 
-            let new_callable = self
-                .core
-                .metatable_of(&callable)?
-                .map(|mt| {
-                    let key = self.internal_cache.lookup_event(Event::Call);
-                    self.core
-                        .gc
-                        .get(mt)
-                        .ok_or(AlreadyDroppedError)
-                        .map(|table| table.get(&key))
-                })
-                .transpose()?
-                .unwrap_or_default();
+        let key = self.internal_cache.lookup_event(Event::Call);
+        let mut stack = self.stack.guard_at(start).unwrap();
+        let stack = stack.transient();
 
-            // Keys associated with nil are not considered part of the table.
-            if new_callable == Value::Nil {
-                return Err(RefAccessOrError::Other(NotCallableError));
-            }
-
-            self.stack.lua_frame().insert(start, callable);
-            callable = new_callable;
-        }
+        inner_prepare_invoke(
+            callable,
+            stack,
+            &self.core.gc,
+            &self.core.metatable_registry,
+            key,
+        )
     }
 
     pub fn next_opcode(&mut self) -> Option<OpCode> {
@@ -1338,8 +1296,6 @@ where
             .finish()
     }
 }
-
-struct NotCallableError;
 
 #[derive(Debug)]
 pub(super) enum RefAccessOrError<E> {
