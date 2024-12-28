@@ -27,7 +27,7 @@ use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
 use crate::runtime::{Cache, Closure, Core, Interned, ThreadId};
 use crate::value::callable::Callable;
-use crate::value::{Concat, Len, Strong, StrongValue, TableIndex, Types, Value, WeakValue};
+use crate::value::{Concat, Strong, StrongValue, TableIndex, Types, Value, WeakValue};
 
 use super::Event;
 pub(crate) use upvalue_register::UpvalueRegister;
@@ -73,12 +73,26 @@ where
     }
 }
 
+struct Invoke<Ty>(Event, Callable<Strong, Ty>, StackSlot)
+where
+    Ty: Types;
+
 pub(crate) enum ChangeFrame<Ty>
 where
     Ty: Types,
 {
     Return(StackSlot),
     Invoke(Option<Event>, Callable<Strong, Ty>, StackSlot),
+}
+
+impl<Ty> From<Invoke<Ty>> for ChangeFrame<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: Invoke<Ty>) -> Self {
+        let Invoke(event, callable, start) = value;
+        ChangeFrame::Invoke(Some(event), callable, start)
+    }
 }
 
 trait MapControlFlow<F> {
@@ -580,17 +594,13 @@ where
                         AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
                         AlreadyDroppedOr::Other(err) => RefAccessOrError::Other(err.into()),
                     })?
-                    .map_br(|(event, callable, start)| {
-                        ChangeFrame::Invoke(Some(event), callable, start)
-                    })
+                    .map_br(Into::into)
             }
             BinOp(op) => {
                 let args = self.stack.lua_frame().take2()?;
                 self.exec_bin_op(args, op)
                     .map_err(|err| err.map_other(Into::into))?
-                    .map_br(|(event, callable, start)| {
-                        ChangeFrame::Invoke(Some(event), callable, start)
-                    })
+                    .map_br(Into::into)
             }
             Jump { offset } => {
                 *self.ip -= InstrOffset(1);
@@ -652,10 +662,7 @@ where
         &mut self,
         args: [WeakValue<Ty>; 1],
         op: UnaOp,
-    ) -> Result<
-        ControlFlow<(Event, Callable<Strong, Ty>, StackSlot)>,
-        AlreadyDroppedOr<opcode_err::UnaOpCause>,
-    > {
+    ) -> Result<ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::UnaOpCause>> {
         use crate::builtins::coerce::CoerceArgs;
         use crate::builtins::find_metavalue;
         use crate::builtins::raw::{unary_op, MetamethodRequired};
@@ -708,22 +715,19 @@ where
                             .prepare_invoke(metavalue, start)
                             .map_err(|e| e.map_other(|_| err))?;
 
-                        Ok(Break((event, callable, start)))
+                        Ok(Break(Invoke(event, callable, start)))
                     }
                 }
             }
         }
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn exec_bin_op(
         &mut self,
         args: [WeakValue<Ty>; 2],
         op: BinOp,
-    ) -> Result<
-        std::ops::ControlFlow<(Event, Callable<Strong, Ty>, StackSlot)>,
-        RefAccessOrError<opcode_err::BinOpCause>,
-    > {
+    ) -> Result<std::ops::ControlFlow<Invoke<Ty>>, RefAccessOrError<opcode_err::BinOpCause>> {
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
             rhs: args[1].type_(),
@@ -811,7 +815,7 @@ where
                                 AlreadyDroppedOr::Other(_) => RefAccessOrError::Other(err),
                             })?;
 
-                        Ok(ControlFlow::Break((event, callable, start)))
+                        Ok(ControlFlow::Break(Invoke(event, callable, start)))
                     }
                 }
             }
