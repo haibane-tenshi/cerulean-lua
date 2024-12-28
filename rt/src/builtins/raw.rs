@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
+use std::hash::Hash;
 use std::ops::ControlFlow;
 use ControlFlow::{Break, Continue};
 
-use gc::{Interned, Root};
+use gc::{Interned, Root, Trace};
 use repr::opcode::{BinOp as BinaryOp, UnaOp as UnaryOp};
 
 use crate::error::AlreadyDroppedError;
@@ -400,13 +401,13 @@ where
         .map(|ctrl| ctrl.map_continue(|ord| matches!(ord, Some(Ordering::Less | Ordering::Equal))))
 }
 
-pub(crate) fn inner_concat<Ty>(
+pub(crate) fn inner_concat<Ty, Heap>(
     args: [WeakValue<Ty>; 2],
-    heap: &mut Heap<Ty>,
-    mut alloc: impl FnMut(&mut Heap<Ty>, Ty::String) -> Root<Interned<Ty::String>>,
+    heap: &mut Heap,
 ) -> Result<ControlFlow<MetamethodRequired, WeakValue<Ty>>, AlreadyDroppedError>
 where
     Ty: Types,
+    Heap: AsHeap<Ty> + Intern<Ty::String>,
 {
     use crate::error::AlreadyDroppedError;
     use crate::gc::LuaPtr;
@@ -414,8 +415,16 @@ where
 
     match args {
         [Value::String(lhs), Value::String(rhs)] => {
-            let lhs_value = heap.get(lhs.0).ok_or(AlreadyDroppedError)?.as_inner();
-            let rhs_value = heap.get(rhs.0).ok_or(AlreadyDroppedError)?.as_inner();
+            let lhs_value = heap
+                .as_heap()
+                .get(lhs.0)
+                .ok_or(AlreadyDroppedError)?
+                .as_inner();
+            let rhs_value = heap
+                .as_heap()
+                .get(rhs.0)
+                .ok_or(AlreadyDroppedError)?
+                .as_inner();
 
             if rhs_value.is_empty() {
                 Ok(Continue(Value::String(lhs)))
@@ -424,7 +433,7 @@ where
             } else {
                 let mut value = lhs_value.clone();
                 value.concat(rhs_value);
-                let ptr = alloc(heap, value);
+                let ptr = heap.intern(value);
                 Ok(Continue(Value::String(LuaPtr(ptr.downgrade()))))
             }
         }
@@ -439,18 +448,18 @@ pub fn concat<Ty>(
 where
     Ty: Types,
 {
-    inner_concat(args, heap, |heap, value| heap.intern(value))
+    inner_concat(args, heap)
 }
 
-pub(crate) fn inner_binary_op<Ty>(
+pub(crate) fn inner_binary_op<Ty, Heap>(
     op: BinaryOp,
     args: [WeakValue<Ty>; 2],
     cmp_int_flt: bool,
-    heap: &mut Heap<Ty>,
-    alloc: impl FnMut(&mut Heap<Ty>, Ty::String) -> Root<Interned<Ty::String>>,
+    heap: &mut Heap,
 ) -> Result<ControlFlow<MetamethodRequired, Option<WeakValue<Ty>>>, AlreadyDroppedError>
 where
     Ty: Types,
+    Heap: AsHeap<Ty> + Intern<Ty::String>,
 {
     use repr::opcode::{AriBinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp};
     use AriBinOp::*;
@@ -472,23 +481,17 @@ where
         BinaryOp::Bit(Xor) => Ok(bit_xor(args).map_continue(Some)),
         BinaryOp::Bit(ShL) => Ok(bit_shl(args).map_continue(Some)),
         BinaryOp::Bit(ShR) => Ok(bit_shr(args).map_continue(Some)),
-        BinaryOp::Str(Concat) => {
-            inner_concat(args, heap, alloc).map(|ctrl| ctrl.map_continue(Some))
-        }
+        BinaryOp::Str(Concat) => inner_concat(args, heap).map(|ctrl| ctrl.map_continue(Some)),
         BinaryOp::Eq(Eq) => Ok(eq(args, cmp_int_flt).map_continue(|t| Some(Value::Bool(t)))),
         BinaryOp::Eq(Neq) => Ok(ne(args, cmp_int_flt).map_continue(|t| Some(Value::Bool(t)))),
-        BinaryOp::Rel(Lt) => {
-            lt(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
-        }
-        BinaryOp::Rel(Gt) => {
-            gt(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
-        }
-        BinaryOp::Rel(LtEq) => {
-            lt_eq(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
-        }
-        BinaryOp::Rel(GtEq) => {
-            gt_eq(args, heap, cmp_int_flt).map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t))))
-        }
+        BinaryOp::Rel(Lt) => lt(args, heap.as_heap(), cmp_int_flt)
+            .map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t)))),
+        BinaryOp::Rel(Gt) => gt(args, heap.as_heap(), cmp_int_flt)
+            .map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t)))),
+        BinaryOp::Rel(LtEq) => lt_eq(args, heap.as_heap(), cmp_int_flt)
+            .map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t)))),
+        BinaryOp::Rel(GtEq) => gt_eq(args, heap.as_heap(), cmp_int_flt)
+            .map(|ctrl| ctrl.map_continue(|t| Some(Value::Bool(t)))),
     }
 }
 
@@ -501,9 +504,7 @@ pub fn binary_op<Ty>(
 where
     Ty: Types,
 {
-    inner_binary_op(op, args, cmp_int_flt, heap, |heap, value| {
-        heap.intern(value)
-    })
+    inner_binary_op(op, args, cmp_int_flt, heap)
 }
 
 pub fn neg<Rf, Ty>(args: [Value<Rf, Ty>; 1]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
@@ -589,5 +590,35 @@ where
             })
         }),
         LogNot => Ok(Continue(Value::Bool(log_not(args)))),
+    }
+}
+
+pub(crate) trait AsHeap<Ty>
+where
+    Ty: Types,
+{
+    fn as_heap(&self) -> &Heap<Ty>;
+}
+
+pub(crate) trait Intern<T> {
+    fn intern(&mut self, value: T) -> Root<Interned<T>>;
+}
+
+impl<Ty> AsHeap<Ty> for Heap<Ty>
+where
+    Ty: Types,
+{
+    fn as_heap(&self) -> &Heap<Ty> {
+        self
+    }
+}
+
+impl<T, Ty> Intern<T> for Heap<Ty>
+where
+    Ty: Types,
+    T: Trace + Hash + Eq,
+{
+    fn intern(&mut self, value: T) -> Root<Interned<T>> {
+        Heap::intern(self, value)
     }
 }
