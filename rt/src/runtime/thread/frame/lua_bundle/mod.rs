@@ -599,7 +599,10 @@ where
             BinOp(op) => {
                 let args = self.stack.lua_frame().take2()?;
                 self.exec_bin_op(args, op)
-                    .map_err(|err| err.map_other(Into::into))?
+                    .map_err(|err| match err {
+                        AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
+                        AlreadyDroppedOr::Other(err) => RefAccessOrError::Other(err.into()),
+                    })?
                     .map_br(Into::into)
             }
             Jump { offset } => {
@@ -727,19 +730,42 @@ where
         &mut self,
         args: [WeakValue<Ty>; 2],
         op: BinOp,
-    ) -> Result<std::ops::ControlFlow<Invoke<Ty>>, RefAccessOrError<opcode_err::BinOpCause>> {
+    ) -> Result<std::ops::ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::BinOpCause>> {
+        use crate::builtins::coerce::CoerceArgs;
+        use crate::builtins::find_metavalue;
+        use crate::builtins::raw::{inner_binary_op, AsHeap, Intern, MetamethodRequired};
+
+        struct Inner<'a, 'rt, Ty>(&'a mut ActiveFrame<'rt, Ty>)
+        where
+            Ty: Types;
+
+        impl<Ty> AsHeap<Ty> for Inner<'_, '_, Ty>
+        where
+            Ty: Types,
+        {
+            fn as_heap(&self) -> &Heap<Ty> {
+                &self.0.core.gc
+            }
+        }
+
+        impl<Ty> Intern<Ty::String> for Inner<'_, '_, Ty>
+        where
+            Ty: Types,
+        {
+            fn intern(&mut self, value: Ty::String) -> Root<Interned<Ty::String>> {
+                self.0.alloc_string(value)
+            }
+        }
+
         let err = opcode_err::BinOpCause {
             lhs: args[0].type_(),
             rhs: args[1].type_(),
         };
 
-        let eval = match op {
-            BinOp::Ari(op) => self.exec_bin_op_ari(args, op),
-            BinOp::Bit(op) => self.exec_bin_op_bit(args, op),
-            BinOp::Eq(op) => self.exec_bin_op_eq(args, op),
-            BinOp::Rel(op) => self.exec_bin_op_rel(args, op)?,
-            BinOp::Str(op) => self.exec_bin_op_str(args, op)?,
-        };
+        let coerce_policy = self.core.dialect;
+        let args = coerce_policy.binary_op(op, args, |value| self.alloc_string(value));
+        let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&coerce_policy);
+        let eval = inner_binary_op(op, args, cmp_int_flt, &mut Inner(self))?;
 
         match eval {
             ControlFlow::Continue(Some(value)) => {
@@ -747,13 +773,13 @@ where
                 self.stack.lua_frame().push(value);
                 Ok(ControlFlow::Continue(()))
             }
-            ControlFlow::Continue(None) => Err(err.into()),
-            ControlFlow::Break(args) => {
+            ControlFlow::Continue(None) => Err(AlreadyDroppedOr::Other(err)),
+            ControlFlow::Break(MetamethodRequired) => {
                 let event: Event = op.into();
 
                 // Swap arguments for greater/greater-or-eq comparisons.
                 // Those desugar into Lt/LtEq metamethods with swapped arguments.
-                let [lhs, rhs] = match op {
+                let args = match op {
                     BinOp::Rel(RelBinOp::Gt | RelBinOp::GtEq) => {
                         let [rhs, lhs] = args;
                         [lhs, rhs]
@@ -762,36 +788,20 @@ where
                 };
 
                 let key = self.internal_cache.lookup_event(event);
-                let lookup_event = |value: &WeakValue<Ty>| -> Result<_, AlreadyDroppedError> {
-                    let r = self
-                        .core
-                        .metatable_of(value)?
-                        .map(|mt| {
-                            self.core
-                                .gc
-                                .get(mt)
-                                .ok_or(AlreadyDroppedError)
-                                .map(|table| table.get(&key))
-                        })
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    Ok(r)
-                };
-
-                let metavalue = match lookup_event(&lhs)? {
-                    Value::Nil => lookup_event(&rhs)?,
-                    value => value,
-                };
+                let metavalue =
+                    find_metavalue(args, key, &self.core.gc, &self.core.metatable_registry)?;
 
                 match metavalue {
                     Value::Nil => {
                         // Fallback on raw comparison for (in)equality in case metamethod is not found.
                         let fallback_result = match op {
-                            BinOp::Eq(eq_op) => match eq_op {
-                                EqBinOp::Eq => Some(Value::Bool(lhs == rhs)),
-                                EqBinOp::Neq => Some(Value::Bool(lhs != rhs)),
-                            },
+                            BinOp::Eq(eq_op) => {
+                                let [lhs, rhs] = args;
+                                match eq_op {
+                                    EqBinOp::Eq => Some(Value::Bool(lhs == rhs)),
+                                    EqBinOp::Neq => Some(Value::Bool(lhs != rhs)),
+                                }
+                            }
                             _ => None,
                         };
 
@@ -799,21 +809,17 @@ where
                             self.stack.lua_frame().push(r);
                             Ok(ControlFlow::Continue(()))
                         } else {
-                            Err(err.into())
+                            Err(AlreadyDroppedOr::Other(err))
                         }
                     }
                     metavalue => {
                         let start = self.stack.next_slot();
-                        let mut stack = self.stack.lua_frame();
-                        stack.push(lhs);
-                        stack.push(rhs);
+                        self.stack.lua_frame().extend(args, false);
 
                         let callable = metavalue;
-                        let callable =
-                            self.prepare_invoke(callable, start).map_err(|e| match e {
-                                AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
-                                AlreadyDroppedOr::Other(_) => RefAccessOrError::Other(err),
-                            })?;
+                        let callable = self
+                            .prepare_invoke(callable, start)
+                            .map_err(|e| e.map_other(|_| err))?;
 
                         Ok(ControlFlow::Break(Invoke(event, callable, start)))
                     }
