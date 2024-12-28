@@ -25,7 +25,9 @@
 //!
 //! ## Exceptions
 //!
-//! String length operator `#` when applied to table is an exception to above rule.
+//! ### Length (`#`) operator
+//!
+//! String length operator `#` when applied to tables have different behavior.
 //! It performs metamethod call *before* raw builtin, so the actual order is
 //!
 //! 1. coercion
@@ -33,6 +35,21 @@
 //! 3. length raw builtin
 //!
 //! In this case when metamethod is not found raw builtin is executed which always succeeds.
+//!
+//! Note that length operator behaves normally when applied to arguments of other types (including strings).
+//!
+//! ### Equality (`==`) and inequality (`~=`) operators
+//!
+//! Equality operator have a fallback stage in case metamethod lookup fails:
+//!
+//! 1. coercion
+//! 2. eq raw builtin
+//! 3. metamethod call
+//! 4. raw identity comparison
+//!
+//! The last step always succeeds (it carries result from 2nd step so it always returns `false` for equality op).
+//!
+//! Inequality is defined exactly as negation of equality, so its behavior is identical.
 //!
 //! # Coercion warnings
 //!
