@@ -63,7 +63,7 @@ impl<'a> PendingAdjustStackView<'a> {
     }
 }
 
-impl<'a> Drop for PendingAdjustStackView<'a> {
+impl Drop for PendingAdjustStackView<'_> {
     fn drop(&mut self) {
         self.store.apply(self.prev_state)
     }

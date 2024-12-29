@@ -149,7 +149,7 @@ impl<'fun> FunctionView<'fun> {
     }
 }
 
-impl<'fun> Drop for FunctionView<'fun> {
+impl Drop for FunctionView<'_> {
     fn drop(&mut self) {
         self.func.apply(self.prev_state);
     }

@@ -234,7 +234,7 @@ pub struct LuaPtrDisplay<'a, Ptr, M, P> {
     heap: &'a TrueHeap<M, P>,
 }
 
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, Gc<T>, M, P>
+impl<T, M, P> Display for LuaPtrDisplay<'_, Gc<T>, M, P>
 where
     T: Allocated<M, P> + Display + ?Sized,
     P: Params,
@@ -250,7 +250,7 @@ where
     }
 }
 
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, GcCell<T>, M, P>
+impl<T, M, P> Display for LuaPtrDisplay<'_, GcCell<T>, M, P>
 where
     T: Allocated<M, P> + Display + ?Sized,
     P: Params,
@@ -266,7 +266,7 @@ where
     }
 }
 
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, Root<T>, M, P>
+impl<T, M, P> Display for LuaPtrDisplay<'_, Root<T>, M, P>
 where
     T: Allocated<M, P> + Display + ?Sized,
     P: Params,
@@ -279,7 +279,7 @@ where
     }
 }
 
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, RootCell<T>, M, P>
+impl<T, M, P> Display for LuaPtrDisplay<'_, RootCell<T>, M, P>
 where
     T: Allocated<M, P> + Display + ?Sized,
     P: Params,

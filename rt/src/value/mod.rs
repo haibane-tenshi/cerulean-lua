@@ -504,7 +504,7 @@ where
 
 pub struct ValueWith<'a, Value, Heap>(&'a Value, &'a Heap);
 
-impl<'a, Ty> Display for ValueWith<'a, WeakValue<Ty>, Heap<Ty>>
+impl<Ty> Display for ValueWith<'_, WeakValue<Ty>, Heap<Ty>>
 where
     Ty: Types,
 {
@@ -533,7 +533,7 @@ where
     }
 }
 
-impl<'a, Ty> Display for ValueWith<'a, StrongValue<Ty>, Heap<Ty>>
+impl<Ty> Display for ValueWith<'_, StrongValue<Ty>, Heap<Ty>>
 where
     Ty: Types,
 {
@@ -563,7 +563,8 @@ impl<Ty> DisplayWith<Heap<Ty>> for WeakValue<Ty>
 where
     Ty: Types,
 {
-    type Output<'a> = ValueWith<'a, Self, Heap<Ty>>
+    type Output<'a>
+        = ValueWith<'a, Self, Heap<Ty>>
     where
         Self: 'a;
 
@@ -576,7 +577,8 @@ impl<Ty> DisplayWith<Heap<Ty>> for StrongValue<Ty>
 where
     Ty: Types,
 {
-    type Output<'a> = ValueWith<'a, Self, Heap<Ty>>
+    type Output<'a>
+        = ValueWith<'a, Self, Heap<Ty>>
     where
         Self: 'a;
 

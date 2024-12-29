@@ -26,6 +26,7 @@ impl Display for ThreadId {
     }
 }
 
+#[expect(clippy::large_enum_variant)]
 enum ThreadState<Ty>
 where
     Ty: Types,
@@ -360,7 +361,7 @@ where
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
 }
 
-impl<'a, Ty> Context<'a, Ty>
+impl<Ty> Context<'_, Ty>
 where
     Ty: Types,
 {

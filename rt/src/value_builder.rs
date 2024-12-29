@@ -55,6 +55,7 @@ pub struct Part<Fun, Con, Rec, F> {
     pub builder: F,
 }
 
+#[expect(clippy::type_complexity)]
 pub fn builder<Ty: Types, T>() -> ValueBuilder<
     impl for<'rt, 'a> FnOnce(
         RuntimeView<'rt, Ty>,
@@ -95,6 +96,7 @@ impl<P> ValueBuilder<P> {
     //     ChunkBuilder { chunk, builder }
     // }
 
+    #[expect(clippy::type_complexity)]
     pub fn include<Fun, Con, Rec, Ty, F, T, U, V>(
         self,
         chunk_part: Part<Fun, Con, Rec, F>,
@@ -149,6 +151,7 @@ impl<P> ValueBuilder<P> {
         ValueBuilder { chunk, builder }
     }
 
+    #[expect(clippy::type_complexity)]
     pub fn finish<Ty, T, U>(
         self,
     ) -> (

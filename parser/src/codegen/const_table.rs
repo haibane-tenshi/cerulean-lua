@@ -117,7 +117,7 @@ impl<'a> ConstTableView<'a> {
     }
 }
 
-impl<'a> Drop for ConstTableView<'a> {
+impl Drop for ConstTableView<'_> {
     fn drop(&mut self) {
         self.constants.apply(self.inner_state)
     }

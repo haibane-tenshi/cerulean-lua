@@ -521,7 +521,7 @@ where
     boundary: RawStackSlot,
 }
 
-impl<'a, Ty> StackGuard<'a, Ty>
+impl<Ty> StackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -700,7 +700,7 @@ where
     }
 }
 
-impl<'a, Ty> StackGuard<'a, Ty>
+impl<Ty> StackGuard<'_, Ty>
 where
     Ty: Types,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
@@ -737,7 +737,7 @@ where
     }
 }
 
-impl<'a, Ty> Deref for StackGuard<'a, Ty>
+impl<Ty> Deref for StackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -748,7 +748,7 @@ where
     }
 }
 
-impl<'a, Ty> Debug for StackGuard<'a, Ty>
+impl<Ty> Debug for StackGuard<'_, Ty>
 where
     Ty: Types,
     WeakValue<Ty>: Debug,
@@ -765,7 +765,7 @@ pub(super) struct LuaStackFrame<'a, Ty>(StackGuard<'a, Ty>)
 where
     Ty: Types;
 
-impl<'a, Ty> LuaStackFrame<'a, Ty>
+impl<Ty> LuaStackFrame<'_, Ty>
 where
     Ty: Types,
 {
@@ -804,7 +804,7 @@ where
     }
 }
 
-impl<'a, Ty> LuaStackFrame<'a, Ty>
+impl<Ty> LuaStackFrame<'_, Ty>
 where
     Ty: Types,
 {
@@ -968,7 +968,7 @@ where
     }
 }
 
-impl<'a, Ty> Deref for LuaStackFrame<'a, Ty>
+impl<Ty> Deref for LuaStackFrame<'_, Ty>
 where
     Ty: Types,
 {
@@ -987,7 +987,7 @@ where
     boundary: RawStackSlot,
 }
 
-impl<'a, Ty> TransientStackGuard<'a, Ty>
+impl<Ty> TransientStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1058,7 +1058,7 @@ where
     }
 }
 
-impl<'a, Ty> TransientStackGuard<'a, Ty>
+impl<Ty> TransientStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1068,7 +1068,7 @@ where
     }
 }
 
-impl<'a, Ty> Deref for TransientStackGuard<'a, Ty>
+impl<Ty> Deref for TransientStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1079,7 +1079,7 @@ where
     }
 }
 
-impl<'a, Ty> DerefMut for TransientStackGuard<'a, Ty>
+impl<Ty> DerefMut for TransientStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1088,7 +1088,7 @@ where
     }
 }
 
-impl<'a, Ty> Extend<WeakValue<Ty>> for TransientStackGuard<'a, Ty>
+impl<Ty> Extend<WeakValue<Ty>> for TransientStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1097,7 +1097,7 @@ where
     }
 }
 
-impl<'a, Ty> Debug for TransientStackGuard<'a, Ty>
+impl<Ty> Debug for TransientStackGuard<'_, Ty>
 where
     Ty: Types,
     WeakValue<Ty>: Debug,
@@ -1117,7 +1117,7 @@ where
     heap: &'a mut Heap<Ty>,
 }
 
-impl<'a, Ty> SyncStackGuard<'a, Ty>
+impl<Ty> SyncStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1154,7 +1154,7 @@ where
     }
 }
 
-impl<'a, Ty> DerefMut for SyncStackGuard<'a, Ty>
+impl<Ty> DerefMut for SyncStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1163,7 +1163,7 @@ where
     }
 }
 
-impl<'a, Ty> Drop for SyncStackGuard<'a, Ty>
+impl<Ty> Drop for SyncStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -1183,7 +1183,7 @@ where
     stack: &'a mut Stack<Ty>,
 }
 
-impl<'a, Ty> Deref for SlotProxy<'a, Ty>
+impl<Ty> Deref for SlotProxy<'_, Ty>
 where
     Ty: Types,
 {
@@ -1194,7 +1194,7 @@ where
     }
 }
 
-impl<'a, Ty> DerefMut for SlotProxy<'a, Ty>
+impl<Ty> DerefMut for SlotProxy<'_, Ty>
 where
     Ty: Types,
 {
@@ -1203,7 +1203,7 @@ where
     }
 }
 
-impl<'a, Ty> Drop for SlotProxy<'a, Ty>
+impl<Ty> Drop for SlotProxy<'_, Ty>
 where
     Ty: Types,
 {

@@ -252,7 +252,7 @@ pub trait ParseArgs<Values, Gc>: Sealed {
     fn parse(self, gc: &mut Gc) -> Result<Values, ParseError<Self::Error>>;
 }
 
-impl<'a, Value, Values, Gc> ParseArgs<Values, Gc> for &'a [Value]
+impl<Value, Values, Gc> ParseArgs<Values, Gc> for &[Value]
 where
     Self: ExtractArgs<Values, Gc>,
     // <<Self as ExtractArgs<Values, Gc>>::Error as BubbleUp>::Output: Error,
@@ -340,7 +340,7 @@ pub trait ExtractArgs<Values, Gc>: Sealed + Sized {
     fn extract(self, gc: &mut Gc) -> Result<(Self, Values), Self::Error>;
 }
 
-impl<'a, Value, Gc> ExtractArgs<(), Gc> for &'a [Value] {
+impl<Value, Gc> ExtractArgs<(), Gc> for &[Value] {
     type Error = std::convert::Infallible;
 
     fn extract(self, _gc: &mut Gc) -> Result<(Self, ()), Self::Error> {
@@ -348,7 +348,7 @@ impl<'a, Value, Gc> ExtractArgs<(), Gc> for &'a [Value] {
     }
 }
 
-impl<'a, Value, Gc, A> ExtractArgs<(A,), Gc> for &'a [Value]
+impl<Value, Gc, A> ExtractArgs<(A,), Gc> for &[Value]
 where
     Self: ExtractArgs<A, Gc>,
 {
@@ -392,7 +392,7 @@ extract_tuple!(Error10, A, B, C, D, E, F, G, H, I, J);
 extract_tuple!(Error11, A, B, C, D, E, F, G, H, I, J, K);
 extract_tuple!(Error12, A, B, C, D, E, F, G, H, I, J, K, L);
 
-impl<'a, Value, Gc, T> ExtractArgs<Maybe<T>, Gc> for &'a [Value]
+impl<Value, Gc, T> ExtractArgs<Maybe<T>, Gc> for &[Value]
 where
     Self: ExtractArgs<T, Gc>,
 {
@@ -406,7 +406,7 @@ where
     }
 }
 
-impl<'a, Value, Gc, T, const N: usize> ExtractArgs<[T; N], Gc> for &'a [Value]
+impl<Value, Gc, T, const N: usize> ExtractArgs<[T; N], Gc> for &[Value]
 where
     Self: ExtractArgs<T, Gc>,
 {
@@ -439,7 +439,7 @@ where
     }
 }
 
-impl<'a, Value, Gc, T> ExtractArgs<Vec<T>, Gc> for &'a [Value]
+impl<Value, Gc, T> ExtractArgs<Vec<T>, Gc> for &[Value]
 where
     Self: ExtractArgs<T, Gc>,
 {
@@ -458,7 +458,7 @@ where
     }
 }
 
-impl<'a, Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &'a [Value<Rf, Ty>]
+impl<Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &[Value<Rf, Ty>]
 where
     Rf: Refs,
     Ty: Types,
@@ -769,7 +769,7 @@ mod sealed {
 
     pub trait Sealed {}
 
-    impl<'a, T> Sealed for &'a [T] {}
+    impl<T> Sealed for &[T] {}
 }
 
 /// Split [`Opts<T>`] into tuple of options.

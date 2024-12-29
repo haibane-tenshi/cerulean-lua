@@ -93,7 +93,7 @@ impl<'a> FuncTableView<'a> {
     }
 }
 
-impl<'a> Drop for FuncTableView<'a> {
+impl Drop for FuncTableView<'_> {
     fn drop(&mut self) {
         let FuncTableView {
             func_table,

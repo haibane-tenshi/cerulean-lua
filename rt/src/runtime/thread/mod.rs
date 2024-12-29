@@ -101,7 +101,7 @@ where
     pub(crate) upvalue_cache: &'a mut UpvalueRegister<Ty>,
 }
 
-impl<'a, Ty> Context<'a, Ty>
+impl<Ty> Context<'_, Ty>
 where
     Ty: Types,
 {
@@ -150,7 +150,7 @@ where
     }
 }
 
-impl<'a, Ty> Context<'a, Ty>
+impl<Ty> Context<'_, Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
@@ -294,7 +294,7 @@ where
     thread: &'a mut Thread<Ty>,
 }
 
-impl<'a, Ty> ActiveThread<'a, Ty>
+impl<Ty> ActiveThread<'_, Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
@@ -451,7 +451,7 @@ where
     }
 }
 
-impl<'a, Ty> ActiveThread<'a, Ty>
+impl<Ty> ActiveThread<'_, Ty>
 where
     Ty: Types,
 {
@@ -648,7 +648,7 @@ where
     pub(super) status: ThreadStatus,
 }
 
-impl<'a, Ty> ThreadGuard<'a, Ty>
+impl<Ty> ThreadGuard<'_, Ty>
 where
     Ty: Types,
 {

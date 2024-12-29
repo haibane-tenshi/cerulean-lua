@@ -271,7 +271,7 @@ where
     pub(crate) stack: &'a mut Stack<Ty>,
 }
 
-impl<'a, Ty> Context<'a, Ty>
+impl<Ty> Context<'_, Ty>
 where
     Ty: Types,
 {

@@ -180,7 +180,7 @@ where
     pub stack: StackGuard<'rt, Ty>,
 }
 
-impl<'rt, Ty> RuntimeView<'rt, Ty>
+impl<Ty> RuntimeView<'_, Ty>
 where
     Ty: Types,
 {
@@ -199,7 +199,7 @@ where
     }
 }
 
-impl<'rt, Ty> RuntimeView<'rt, Ty>
+impl<Ty> RuntimeView<'_, Ty>
 where
     Ty: Types,
 {
@@ -216,7 +216,7 @@ where
     }
 }
 
-impl<'rt, Ty> RuntimeView<'rt, Ty>
+impl<Ty> RuntimeView<'_, Ty>
 where
     Ty: Types,
 {

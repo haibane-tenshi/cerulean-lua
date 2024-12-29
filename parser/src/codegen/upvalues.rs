@@ -89,7 +89,7 @@ impl<'s, 'origin> UpvaluesView<'s, 'origin> {
     }
 }
 
-impl<'s, 'origin> Drop for UpvaluesView<'s, 'origin> {
+impl Drop for UpvaluesView<'_, '_> {
     fn drop(&mut self) {
         let state = self.prev_state;
         self.upvalues.apply(state);

@@ -46,7 +46,7 @@ where
     pub(crate) upvalues: &'a mut UpvalueRegister<Ty>,
 }
 
-impl<'a, Ty> Context<'a, Ty>
+impl<Ty> Context<'_, Ty>
 where
     Ty: Types,
 {
@@ -379,7 +379,7 @@ where
     register_variadic: &'rt [WeakValue<Ty>],
 }
 
-impl<'rt, Ty> ActiveFrame<'rt, Ty>
+impl<Ty> ActiveFrame<'_, Ty>
 where
     Ty: Types,
 {
@@ -453,7 +453,7 @@ where
     }
 }
 
-impl<'rt, Ty> ActiveFrame<'rt, Ty>
+impl<Ty> ActiveFrame<'_, Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
@@ -660,7 +660,6 @@ where
         Ok(r)
     }
 
-    #[expect(clippy::type_complexity)]
     fn exec_una_op(
         &mut self,
         args: [WeakValue<Ty>; 1],
@@ -725,7 +724,6 @@ where
         }
     }
 
-    #[expect(clippy::type_complexity)]
     fn exec_bin_op(
         &mut self,
         args: [WeakValue<Ty>; 2],
@@ -1286,7 +1284,7 @@ where
     }
 }
 
-impl<'rt, Ty> Debug for ActiveFrame<'rt, Ty>
+impl<Ty> Debug for ActiveFrame<'_, Ty>
 where
     Ty: Debug + Types,
     WeakValue<Ty>: Debug,
