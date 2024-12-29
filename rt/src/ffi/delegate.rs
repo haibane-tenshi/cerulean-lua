@@ -160,7 +160,6 @@ use std::path::Path;
 use std::pin::Pin;
 
 use gc::Root;
-use repr::index::StackSlot;
 
 use crate::backtrace::Location;
 use crate::chunk_cache::{ChunkCache, ChunkId};
@@ -169,7 +168,8 @@ use crate::runtime::thread::StackGuard;
 use crate::runtime::{Closure, Core, FunctionPtr, ThreadId};
 use crate::value::{Callable, Strong, Types, WeakValue};
 
-use super::coroutine::State;
+pub use super::coroutine::State;
+pub use repr::index::StackSlot;
 
 pub struct RuntimeView<'rt, Ty>
 where
