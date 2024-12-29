@@ -4,6 +4,7 @@ mod closure;
 pub mod diagnostic;
 pub mod opcode;
 pub mod out_of_bounds_stack;
+pub mod signature;
 pub mod thread;
 pub mod value;
 
@@ -24,6 +25,7 @@ pub use closure::{MalformedClosureError, MissingChunk, MissingFunction, UpvalueC
 pub use diagnostic::Diagnostic;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
+pub use signature::SignatureError;
 pub use thread::{ResumeDeadThread, ThreadError, ThreadPanicked};
 pub use value::ValueError;
 
@@ -40,6 +42,7 @@ pub enum RuntimeError<Value> {
     MissingFunction(MissingFunction),
     OutOfBoundsStack(OutOfBoundsStack),
     UpvalueCountMismatch(UpvalueCountMismatch),
+    Signature(SignatureError),
     Thread(ThreadError),
     OpCode(OpCodeError),
 }
@@ -92,6 +95,7 @@ where
             RuntimeError::MissingFunction(err) => err.into_diagnostic(),
             RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
             RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
+            RuntimeError::Signature(err) => err.into_diagnostic(),
             RuntimeError::Thread(err) => err.into_diagnostic(),
             RuntimeError::OpCode(err) => err.into_diagnostic((), chunk_cache),
         };
@@ -160,6 +164,12 @@ impl<Value> From<OpCodeError> for RuntimeError<Value> {
 impl<Value> From<ThreadError> for RuntimeError<Value> {
     fn from(value: ThreadError) -> Self {
         RuntimeError::Thread(value)
+    }
+}
+
+impl<Value> From<SignatureError> for RuntimeError<Value> {
+    fn from(value: SignatureError) -> Self {
+        RuntimeError::Signature(value)
     }
 }
 
