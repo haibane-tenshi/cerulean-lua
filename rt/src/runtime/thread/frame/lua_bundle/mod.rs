@@ -843,7 +843,7 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(LuaPtr(table)) = &table {
-                let index = self.core.dialect.coerce_tab_get(index);
+                let index = self.core.dialect.tab_get(index);
 
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = *table;
@@ -937,7 +937,7 @@ where
         'outer: loop {
             // First: try raw table access.
             if let Value::Table(LuaPtr(table)) = &table {
-                let index = self.core.dialect.coerce_tab_set(index);
+                let index = self.core.dialect.tab_set(index);
                 let key = index.try_into().map_err(InvalidKey)?;
                 let table = self.core.gc.get_mut(*table).ok_or(AlreadyDroppedError)?;
 
@@ -977,7 +977,7 @@ where
                             // Third: Fallback to raw assignment.
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
-                            let index = self.core.dialect.coerce_tab_set(index);
+                            let index = self.core.dialect.tab_set(index);
                             let key = index.try_into().map_err(InvalidKey)?;
 
                             self.core

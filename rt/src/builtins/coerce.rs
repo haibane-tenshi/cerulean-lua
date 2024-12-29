@@ -373,9 +373,19 @@ pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
         F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
     {
         match op {
-            BinOp::Ari(op) => self.coerce_bin_op_ari(op, args),
-            BinOp::Bit(op) => self.coerce_bin_op_bit(op, args),
-            BinOp::Str(op) => self.coerce_bin_op_str(op, args, alloc),
+            BinOp::Ari(AriBinOp::Add) => self.add(args),
+            BinOp::Ari(AriBinOp::Sub) => self.sub(args),
+            BinOp::Ari(AriBinOp::Mul) => self.mul(args),
+            BinOp::Ari(AriBinOp::Div) => self.div(args),
+            BinOp::Ari(AriBinOp::FloorDiv) => self.floor_div(args),
+            BinOp::Ari(AriBinOp::Rem) => self.rem(args),
+            BinOp::Ari(AriBinOp::Pow) => self.pow(args),
+            BinOp::Bit(BitBinOp::And) => self.bit_and(args),
+            BinOp::Bit(BitBinOp::Or) => self.bit_or(args),
+            BinOp::Bit(BitBinOp::Xor) => self.bit_xor(args),
+            BinOp::Bit(BitBinOp::ShL) => self.bit_shl(args),
+            BinOp::Bit(BitBinOp::ShR) => self.bit_shr(args),
+            BinOp::Str(StrBinOp::Concat) => self.concat(args, alloc),
             BinOp::Rel(_) => args,
             BinOp::Eq(_) => args,
         }
@@ -386,54 +396,6 @@ pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
             UnaOp::BitNot => self.bit_not(args),
             _ => args,
         }
-    }
-
-    fn coerce_bin_op_ari(&self, op: AriBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
-        match op {
-            AriBinOp::Add => self.add(args),
-            AriBinOp::Sub => self.sub(args),
-            AriBinOp::Mul => self.mul(args),
-            AriBinOp::Div => self.div(args),
-            AriBinOp::FloorDiv => self.floor_div(args),
-            AriBinOp::Rem => self.rem(args),
-            AriBinOp::Pow => self.pow(args),
-        }
-    }
-
-    fn coerce_bin_op_bit(&self, op: BitBinOp, args: [WeakValue<Ty>; 2]) -> [WeakValue<Ty>; 2] {
-        match op {
-            BitBinOp::And => self.bit_and(args),
-            BitBinOp::Or => self.bit_or(args),
-            BitBinOp::Xor => self.bit_xor(args),
-            BitBinOp::ShL => self.bit_shl(args),
-            BitBinOp::ShR => self.bit_shr(args),
-        }
-    }
-
-    fn coerce_bin_op_str<F>(
-        &self,
-        op: StrBinOp,
-        args: [WeakValue<Ty>; 2],
-        f: F,
-    ) -> [WeakValue<Ty>; 2]
-    where
-        F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
-    {
-        match op {
-            StrBinOp::Concat => self.concat(args, f),
-        }
-    }
-
-    fn coerce_una_op_bit(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1] {
-        self.bit_not(args)
-    }
-
-    fn coerce_tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
-        self.tab_set(key)
-    }
-
-    fn coerce_tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
-        self.tab_get(key)
     }
 }
 
