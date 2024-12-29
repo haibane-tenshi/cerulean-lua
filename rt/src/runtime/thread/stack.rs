@@ -840,9 +840,9 @@ where
         self.0.next_slot()
     }
 
-    pub(super) fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
-        self.0.insert(slot, value)
-    }
+    // pub(super) fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
+    //     self.0.insert(slot, value)
+    // }
 
     pub(super) fn drain(
         &mut self,

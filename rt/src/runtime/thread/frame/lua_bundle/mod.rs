@@ -8,7 +8,7 @@ use gc::{Root, RootCell};
 use repr::chunk::{Chunk, ClosureRecipe};
 use repr::index::{ConstId, InstrId, InstrOffset, RecipeId, StackSlot};
 use repr::literal::Literal;
-use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, OpCode, RelBinOp, StrBinOp, UnaOp};
+use repr::opcode::{BinOp, EqBinOp, OpCode, RelBinOp, UnaOp};
 use repr::tivec::TiSlice;
 
 use super::super::stack::StackGuard;
@@ -27,7 +27,7 @@ use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadStore;
 use crate::runtime::{Cache, Closure, Core, Interned, ThreadId};
 use crate::value::callable::Callable;
-use crate::value::{Concat, Strong, StrongValue, TableIndex, Types, Value, WeakValue};
+use crate::value::{Strong, StrongValue, TableIndex, Types, Value, WeakValue};
 
 use super::Event;
 pub(crate) use upvalue_register::UpvalueRegister;
@@ -824,177 +824,6 @@ where
                 }
             }
         }
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn exec_bin_op_str(
-        &mut self,
-        args: [WeakValue<Ty>; 2],
-        op: StrBinOp,
-    ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
-        use crate::builtins::coerce::CoerceArgs;
-
-        let dialect = self.core.dialect;
-        let args = dialect.coerce_bin_op_str(op, args, |value| self.alloc_string(value));
-
-        match args {
-            [Value::String(LuaPtr(lhs)), Value::String(LuaPtr(rhs))] => match op {
-                StrBinOp::Concat => {
-                    let mut r = self
-                        .core
-                        .gc
-                        .get(lhs)
-                        .ok_or(AlreadyDroppedError)?
-                        .as_inner()
-                        .clone();
-                    let rhs = self.core.gc.get(rhs).ok_or(AlreadyDroppedError)?.as_inner();
-                    r.concat(rhs);
-
-                    let s = self.alloc_string(r).downgrade();
-
-                    Ok(ControlFlow::Continue(Some(Value::String(LuaPtr(s)))))
-                }
-            },
-            args => Ok(ControlFlow::Break(args)),
-        }
-    }
-
-    fn exec_bin_op_eq(
-        &mut self,
-        args: [WeakValue<Ty>; 2],
-        op: EqBinOp,
-    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use crate::builtins::coerce::CoerceArgs;
-        use crate::value::{Float, Int};
-        use EqBinOp::*;
-
-        let cmp = <_ as CoerceArgs<Ty>>::cmp_float_and_int(&self.core.dialect);
-
-        let equal = match args {
-            [Value::Int(lhs), Value::Float(rhs)] if cmp => Int(lhs) == Float(rhs),
-            [Value::Float(lhs), Value::Int(rhs)] if cmp => Float(lhs) == Int(rhs),
-
-            [Value::Table(lhs), Value::Table(rhs)] if lhs != rhs => {
-                let args = [Value::Table(lhs), Value::Table(rhs)];
-                return ControlFlow::Break(args);
-            }
-
-            [lhs, rhs] => lhs == rhs,
-        };
-
-        let r = match op {
-            Eq => equal,
-            Neq => !equal,
-        };
-
-        ControlFlow::Continue(Some(Value::Bool(r)))
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn exec_bin_op_rel(
-        &mut self,
-        args: [WeakValue<Ty>; 2],
-        op: RelBinOp,
-    ) -> Result<ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>>, RefAccessError> {
-        use crate::builtins::coerce::CoerceArgs;
-        use crate::value;
-        use RelBinOp::*;
-        use Value::*;
-
-        let cmp = <_ as CoerceArgs<Ty>>::cmp_float_and_int(&self.core.dialect);
-
-        let ord = match &args {
-            [Int(lhs), Int(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
-            [Float(lhs), Float(rhs)] => PartialOrd::partial_cmp(lhs, rhs),
-            [String(LuaPtr(lhs)), String(LuaPtr(rhs))] => {
-                let lhs = self.core.gc.get(*lhs).ok_or(AlreadyDroppedError)?;
-                let rhs = self.core.gc.get(*rhs).ok_or(AlreadyDroppedError)?;
-
-                PartialOrd::partial_cmp(lhs, rhs)
-            }
-            [Int(lhs), Float(rhs)] if cmp => {
-                PartialOrd::partial_cmp(&value::Int(*lhs), &value::Float(*rhs))
-            }
-            [Float(lhs), Int(rhs)] if cmp => {
-                PartialOrd::partial_cmp(&value::Float(*lhs), &value::Int(*rhs))
-            }
-            _ => None,
-        };
-
-        let Some(ord) = ord else {
-            return Ok(ControlFlow::Break(args));
-        };
-
-        let r = match op {
-            Lt => ord.is_lt(),
-            LtEq => ord.is_le(),
-            Gt => ord.is_gt(),
-            GtEq => ord.is_ge(),
-        };
-
-        Ok(ControlFlow::Continue(Some(Value::Bool(r))))
-    }
-
-    fn exec_bin_op_bit(
-        &mut self,
-        args: [WeakValue<Ty>; 2],
-        op: BitBinOp,
-    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use crate::builtins::coerce::CoerceArgs;
-        use crate::value::Int;
-
-        let args = self.core.dialect.coerce_bin_op_bit(op, args);
-
-        let r = match args {
-            [Value::Int(lhs), Value::Int(rhs)] => match op {
-                BitBinOp::And => (Int(lhs) & Int(rhs)).into(),
-                BitBinOp::Or => (Int(lhs) | Int(rhs)).into(),
-                BitBinOp::Xor => (Int(lhs) ^ Int(rhs)).into(),
-                BitBinOp::ShL => (Int(lhs) << Int(rhs)).into(),
-                BitBinOp::ShR => (Int(lhs) >> Int(rhs)).into(),
-            },
-            args => return ControlFlow::Break(args),
-        };
-
-        ControlFlow::Continue(Some(r))
-    }
-
-    fn exec_bin_op_ari(
-        &mut self,
-        args: [WeakValue<Ty>; 2],
-        op: AriBinOp,
-    ) -> ControlFlow<[WeakValue<Ty>; 2], Option<WeakValue<Ty>>> {
-        use crate::builtins::coerce::CoerceArgs;
-        use crate::value::{Float, Int};
-        use AriBinOp::*;
-
-        // Coercions.
-        let args = self.core.dialect.coerce_bin_op_ari(op, args);
-
-        let r = match args {
-            [Value::Int(lhs), Value::Int(rhs)] => match op {
-                Add => Some((Int(lhs) + Int(rhs)).into()),
-                Sub => Some((Int(lhs) - Int(rhs)).into()),
-                Mul => Some((Int(lhs) * Int(rhs)).into()),
-                Div | FloorDiv | Rem if rhs == 0 => None,
-                Rem => Some((Int(lhs) % Int(rhs)).into()),
-                Div => Some((Int(lhs) / Int(rhs)).into()),
-                FloorDiv => Some(Int(lhs).floor_div(Int(rhs)).into()),
-                Pow => Int(lhs).exp(Int(rhs)).map(Into::into),
-            },
-            [Value::Float(lhs), Value::Float(rhs)] => match op {
-                Add => Some((Float(lhs) + Float(rhs)).into()),
-                Sub => Some((Float(lhs) - Float(rhs)).into()),
-                Mul => Some((Float(lhs) * Float(rhs)).into()),
-                Div => Some((Float(lhs) / Float(rhs)).into()),
-                FloorDiv => Some(Float(lhs).floor_div(Float(rhs)).into()),
-                Rem => Some((Float(lhs) % Float(rhs)).into()),
-                Pow => Some(Float(lhs).exp(Float(rhs)).into()),
-            },
-            args => return ControlFlow::Break(args),
-        };
-
-        ControlFlow::Continue(r)
     }
 
     #[allow(clippy::type_complexity)]

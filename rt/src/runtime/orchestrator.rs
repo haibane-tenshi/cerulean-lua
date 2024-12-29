@@ -365,19 +365,19 @@ impl<Ty> Context<'_, Ty>
 where
     Ty: Types,
 {
-    pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
-        let Context {
-            core,
-            internal_cache,
-            chunk_cache,
-        } = self;
+    // pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
+    //     let Context {
+    //         core,
+    //         internal_cache,
+    //         chunk_cache,
+    //     } = self;
 
-        Context {
-            core,
-            internal_cache,
-            chunk_cache: *chunk_cache,
-        }
-    }
+    //     Context {
+    //         core,
+    //         internal_cache,
+    //         chunk_cache: *chunk_cache,
+    //     }
+    // }
 
     fn thread_context<'s>(
         &'s mut self,

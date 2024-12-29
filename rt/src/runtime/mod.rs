@@ -136,7 +136,7 @@ use crate::value::{
 };
 use orchestrator::Orchestrator;
 use thread::frame::Event;
-use thread::ThreadGuard;
+use thread::{StackGuard, ThreadGuard};
 
 pub use closure::{Closure, FunctionPtr};
 pub use orchestrator::ThreadId;
@@ -316,6 +316,14 @@ where
 {
     pub fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
         self.orchestrator.new_thread(&mut self.core.gc, callable)
+    }
+
+    pub fn contains(&self, thread_id: ThreadId) -> bool {
+        self.orchestrator.contains(thread_id)
+    }
+
+    pub fn stack(&mut self) -> StackGuard<'_, Ty> {
+        self.orchestrator.stack()
     }
 }
 
