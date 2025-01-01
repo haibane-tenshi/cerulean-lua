@@ -42,7 +42,7 @@ fn impl_trace(ast: DeriveInput) -> TokenStream {
             .map(|variant| {
                 let ident = &variant.ident;
                 let branch = branch(&variant.fields);
-                quote! { #ident #branch }
+                quote! { #name::#ident #branch }
             })
             .collect(),
         Data::Union(_) => todo!(),
@@ -50,7 +50,7 @@ fn impl_trace(ast: DeriveInput) -> TokenStream {
 
     let tokens = quote! {
         impl #impl_generics gc::Trace for #name #type_generics #where_clause {
-            fn trace(&self, collector: &mut gc::Collector) {
+            fn trace(&self, _collector: &mut gc::Collector) {
                 match self {
                     #(#branches)*
                 }
@@ -66,13 +66,16 @@ fn branch(fields: &Fields) -> proc_macro2::TokenStream {
 
     match fields {
         Fields::Named(fields) => {
-            let idents: Vec<_> = fields
+            let original_idents = fields
                 .named
                 .iter()
-                .map(|field| field.ident.as_ref().unwrap())
+                .map(|field| field.ident.as_ref().unwrap());
+            let idents: Vec<_> = (0..fields.named.len())
+                .map(|i| format_ident!("t{}", i))
                 .collect();
+
             quote! {
-                { #(#idents,)* } => {
+                { #(#original_idents: #idents,)* } => {
                     #(#idents.trace(_collector);)*
                 }
             }
@@ -94,4 +97,10 @@ fn branch(fields: &Fields) -> proc_macro2::TokenStream {
             quote! { => {} }
         }
     }
+}
+
+#[test]
+fn intended_targets() {
+    let tests = trybuild::TestCases::new();
+    tests.pass("tests/ui/*.rs");
 }

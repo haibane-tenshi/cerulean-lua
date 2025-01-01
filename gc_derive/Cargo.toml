@@ -10,3 +10,7 @@ edition = "2021"
 proc-macro2 = "1.0.92"
 quote = "1.0.38"
 syn = "2.0.93"
+
+[dev-dependencies]
+gc = { path = "../gc" }
+trybuild = "1.0.101"
