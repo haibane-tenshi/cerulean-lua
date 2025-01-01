@@ -24,9 +24,9 @@ fn impl_trace(ast: DeriveInput) -> TokenStream {
             let where_token = &where_clause.where_token;
             let predicates = &where_clause.predicates;
 
-            quote! { #where_token #(#generic_type_names: gc::Trace,)* #predicates }
+            quote! { #where_token #(#generic_type_names: ::gc::Trace,)* #predicates }
         }
-        None => quote! {where #(#generic_type_names: gc::Trace,)*},
+        None => quote! {where #(#generic_type_names: ::gc::Trace,)*},
     };
 
     let branches = match &ast.data {
@@ -59,8 +59,8 @@ fn impl_trace(ast: DeriveInput) -> TokenStream {
     };
 
     let tokens = quote! {
-        impl #impl_generics gc::Trace for #name #type_generics #where_clause {
-            fn trace(&self, _collector: &mut gc::Collector) {
+        impl #impl_generics ::gc::Trace for #name #type_generics #where_clause {
+            fn trace(&self, _collector: &mut ::gc::Collector) {
                 match self {
                     #(#branches)*
                 }
@@ -86,7 +86,7 @@ fn branch(fields: &Fields) -> proc_macro2::TokenStream {
 
             quote! {
                 { #(#original_idents: #idents,)* } => {
-                    #(gc::Trace::trace(#idents, _collector);)*
+                    #(::gc::Trace::trace(#idents, _collector);)*
                 }
             }
         }
@@ -99,7 +99,7 @@ fn branch(fields: &Fields) -> proc_macro2::TokenStream {
                 .collect();
             quote! {
                 ( #(#idents,)* ) => {
-                    #(gc::Trace::trace(#idents, _collector);)*
+                    #(::gc::Trace::trace(#idents, _collector);)*
                 }
             }
         }
