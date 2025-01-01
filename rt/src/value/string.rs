@@ -7,12 +7,8 @@ use gc::Trace;
 
 use super::{Concat, Len};
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Trace)]
 pub struct PossiblyUtf8Vec(pub Vec<u8>);
-
-impl Trace for PossiblyUtf8Vec {
-    fn trace(&self, _collector: &mut gc::Collector) {}
-}
 
 impl Len for PossiblyUtf8Vec {
     fn len(&self) -> usize {

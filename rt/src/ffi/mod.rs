@@ -411,19 +411,9 @@ where
     Box::new(inner)
 }
 
+#[derive(Trace)]
 struct BoxedLuaFfiFn<F> {
     value: F,
-}
-
-impl<F> Trace for BoxedLuaFfiFn<F>
-where
-    F: Trace,
-{
-    fn trace(&self, collector: &mut gc::Collector) {
-        let BoxedLuaFfiFn { value } = self;
-
-        value.trace(collector);
-    }
 }
 
 impl<F, Ty> LuaFfi<Ty> for BoxedLuaFfiFn<F>

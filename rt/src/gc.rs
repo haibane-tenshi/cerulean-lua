@@ -21,7 +21,7 @@ pub trait DisplayWith<Gc> {
     fn display<'a>(&'a self, extra: &'a Gc) -> Self::Output<'a>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Trace)]
 pub struct LuaPtr<P>(pub P);
 
 impl<P> LuaPtr<P> {
@@ -52,16 +52,6 @@ where
 {
     pub fn downgrade(&self) -> LuaPtr<GcPtr<T, A>> {
         LuaPtr(self.0.downgrade())
-    }
-}
-
-impl<P> Trace for LuaPtr<P>
-where
-    P: Trace,
-{
-    fn trace(&self, collector: &mut gc::Collector) {
-        let LuaPtr(ptr) = self;
-        ptr.trace(collector);
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::backtrace::Location;
+use gc::Trace;
 use repr::chunk::Chunk;
 use std::fmt::Display;
 
@@ -31,7 +32,7 @@ pub trait ChunkCache {
     ) -> Result<ChunkId, ImmutableCacheError>;
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Trace)]
 pub struct ChunkId(pub usize);
 
 impl From<usize> for ChunkId {
