@@ -23,9 +23,9 @@ fn impl_trace(ast: DeriveInput) -> TokenStream {
             let where_token = &where_clause.where_token;
             let predicates = &where_clause.predicates;
 
-            quote! { #where_token #(#generic_type_names: Trace,)* #predicates }
+            quote! { #where_token #(#generic_type_names: gc::Trace,)* #predicates }
         }
-        None => quote! {where #(#generic_type_names: Trace,)*},
+        None => quote! {where #(#generic_type_names: gc::Trace,)*},
     };
 
     let branches = match &ast.data {
@@ -36,15 +36,24 @@ fn impl_trace(ast: DeriveInput) -> TokenStream {
                 #ident #branch
             }]
         }
-        Data::Enum(data) => data
-            .variants
-            .iter()
-            .map(|variant| {
-                let ident = &variant.ident;
-                let branch = branch(&variant.fields);
-                quote! { #name::#ident #branch }
-            })
-            .collect(),
+        Data::Enum(data) => {
+            if data.variants.is_empty() {
+                // References to empty enums are considered inhabited,
+                // adding a fictional branch is the easiest way to handle that.
+                vec![quote! {
+                    _ => {},
+                }]
+            } else {
+                data.variants
+                    .iter()
+                    .map(|variant| {
+                        let ident = &variant.ident;
+                        let branch = branch(&variant.fields);
+                        quote! { #name::#ident #branch }
+                    })
+                    .collect()
+            }
+        }
         Data::Union(_) => todo!(),
     };
 
@@ -76,7 +85,7 @@ fn branch(fields: &Fields) -> proc_macro2::TokenStream {
 
             quote! {
                 { #(#original_idents: #idents,)* } => {
-                    #(#idents.trace(_collector);)*
+                    #(gc::Trace::trace(#idents, _collector);)*
                 }
             }
         }
@@ -89,7 +98,7 @@ fn branch(fields: &Fields) -> proc_macro2::TokenStream {
                 .collect();
             quote! {
                 ( #(#idents,)* ) => {
-                    #(#idents.trace(_collector);)*
+                    #(gc::Trace::trace(#idents, _collector);)*
                 }
             }
         }
