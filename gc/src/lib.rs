@@ -267,6 +267,7 @@ mod trace;
 pub mod userdata;
 mod vec_list;
 
+pub use gc_derive::Trace;
 pub use heap::{Collector, Heap};
 pub use index::{Gc, GcCell, Interned, Root, RootCell};
 pub use trace::{Trace, Untrace};

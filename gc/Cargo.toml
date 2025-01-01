@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 bitvec = "1.0.1"
+gc_derive = { version = "0.1.0", path = "../gc_derive" }
 hashbrown = "0.15.1"
 nonmax = "0.5.5"
 typed-index-collections = "3.1.0"

@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use syn::{DeriveInput, Fields};
 
+/// Derive `Trace` trait.
 #[proc_macro_derive(Trace)]
 pub fn trace_derive(tokens: TokenStream) -> TokenStream {
     let ast = match syn::parse(tokens) {
