@@ -287,7 +287,7 @@ mod test {
 
     fn assert_root_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Root<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         let p0 = heap.get_root(ptr) as *const _;
@@ -300,7 +300,7 @@ mod test {
 
     fn assert_root_cell_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &RootCell<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         let p0 = heap.get_root(ptr) as *const _;
@@ -319,7 +319,7 @@ mod test {
 
     fn assert_gc_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Gc<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         let _p1 = heap.get(*ptr).unwrap() as *const _;
@@ -327,7 +327,7 @@ mod test {
 
     fn assert_gc_cell_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &GcCell<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         let p0 = heap.get(*ptr).unwrap() as *const _;
@@ -338,7 +338,7 @@ mod test {
 
     fn assert_root_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Root<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         assert_eq!(heap.get_root(ptr), value);
@@ -348,7 +348,7 @@ mod test {
 
     fn assert_root_cell_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &RootCell<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         use std::ops::{Index, IndexMut};
@@ -363,7 +363,7 @@ mod test {
 
     fn assert_gc_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Gc<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         assert_eq!(heap.get(*ptr), Some(value));
@@ -371,7 +371,7 @@ mod test {
 
     fn assert_gc_cell_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &GcCell<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         assert_eq!(heap.get(*ptr), Some(value));

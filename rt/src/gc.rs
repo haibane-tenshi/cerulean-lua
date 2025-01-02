@@ -157,7 +157,7 @@ where
 
 impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Gc<T>>
 where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
     M: 'static,
     P: Params,
 {
@@ -173,7 +173,7 @@ where
 
 impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<GcCell<T>>
 where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
     M: 'static,
     P: Params,
 {
@@ -189,7 +189,7 @@ where
 
 impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Root<T>>
 where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
     M: 'static,
     P: Params,
 {
@@ -205,7 +205,7 @@ where
 
 impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<RootCell<T>>
 where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
     M: 'static,
     P: Params,
 {
@@ -226,7 +226,7 @@ pub struct LuaPtrDisplay<'a, Ptr, M, P> {
 
 impl<T, M, P> Display for LuaPtrDisplay<'_, Gc<T>, M, P>
 where
-    T: Allocated<M, P> + Display + ?Sized,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
     P: Params,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -242,7 +242,7 @@ where
 
 impl<T, M, P> Display for LuaPtrDisplay<'_, GcCell<T>, M, P>
 where
-    T: Allocated<M, P> + Display + ?Sized,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
     P: Params,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -258,7 +258,7 @@ where
 
 impl<T, M, P> Display for LuaPtrDisplay<'_, Root<T>, M, P>
 where
-    T: Allocated<M, P> + Display + ?Sized,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
     P: Params,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -271,7 +271,7 @@ where
 
 impl<T, M, P> Display for LuaPtrDisplay<'_, RootCell<T>, M, P>
 where
-    T: Allocated<M, P> + Display + ?Sized,
+    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
     P: Params,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -80,6 +80,14 @@ where
         Default::default()
     }
 
+    pub(crate) fn arena(&self, ty: TypeIndex) -> Option<&(dyn Arena<M, P> + 'static)> {
+        self.arenas.get(ty).map(AsRef::as_ref)
+    }
+
+    pub(crate) fn arena_mut(&mut self, ty: TypeIndex) -> Option<&mut (dyn Arena<M, P> + 'static)> {
+        self.arenas.get_mut(ty).map(AsMut::as_mut)
+    }
+
     fn arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
     where
         T: Trace + Views<M, P>,
@@ -207,7 +215,7 @@ where
     /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
     pub fn alloc_as<U, T, A>(&mut self, value: T) -> RootPtr<U, A>
     where
-        T: Trace + AllocateAs<U, M, P>,
+        T: Trace + AllocateAs<U, Self>,
         U: ?Sized,
         A: Access,
     {
@@ -317,7 +325,7 @@ where
     /// so you will not be able to change metatable of `Root<dyn FullUserdata<_, _>>` once allocated.
     pub fn try_alloc_as<U, T, A>(&mut self, value: T) -> Result<RootPtr<U, A>, T>
     where
-        T: Trace + AllocateAs<U, M, P>,
+        T: Trace + AllocateAs<U, Self>,
         U: ?Sized,
         A: Access,
     {
@@ -383,14 +391,12 @@ where
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get<T, A>(&self, ptr: GcPtr<T, A>) -> Option<&T>
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Self> + ?Sized,
         A: RefAccess,
     {
-        use crate::index::sealed_allocated::{Addr, ArenaRef, Sealed};
+        use crate::index::sealed_allocated::{Addr, Sealed, Ty};
 
-        let arena = self.arenas.get(ptr.ty())?.as_ref();
-
-        <T as Sealed<M, P>>::get_ref(ArenaRef(arena), Addr(ptr.addr()))
+        <T as Sealed<Self>>::get_ref(self, Ty(ptr.ty()), Addr(ptr.addr()))
     }
 
     /// Get `&mut T` out of weak reference such as [`GcCell`].
@@ -409,14 +415,12 @@ where
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
     pub fn get_mut<T, A>(&mut self, ptr: GcPtr<T, A>) -> Option<&mut T>
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Self> + ?Sized,
         A: MutAccess,
     {
-        use crate::index::sealed_allocated::{Addr, ArenaMut, Sealed};
+        use crate::index::sealed_allocated::{Addr, Sealed, Ty};
 
-        let arena = self.arenas.get_mut(ptr.ty())?.as_mut();
-
-        <T as Sealed<M, P>>::get_mut(ArenaMut(arena), Addr(ptr.addr()))
+        <T as Sealed<Self>>::get_mut(self, Ty(ptr.ty()), Addr(ptr.addr()))
     }
 
     /// Get `&T` out of strong reference such as [`RootCell`] or [`Root`].
@@ -430,7 +434,7 @@ where
     /// but otherwise it never will.
     pub fn get_root<T, A>(&self, ptr: &RootPtr<T, A>) -> &T
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Self> + ?Sized,
         A: RefAccess,
     {
         assert!(
@@ -453,7 +457,7 @@ where
     /// but otherwise it never will.
     pub fn get_root_mut<T, A>(&mut self, ptr: &RootPtr<T, A>) -> &mut T
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Self> + ?Sized,
         A: MutAccess,
     {
         assert!(
@@ -715,7 +719,7 @@ impl<M, P> Debug for Heap<M, P> {
 
 impl<T, M, P> Index<&RootCell<T>> for Heap<M, P>
 where
-    T: Allocated<M, P> + ?Sized,
+    T: Allocated<Self> + ?Sized,
     P: Params,
 {
     type Output = T;
@@ -727,7 +731,7 @@ where
 
 impl<T, M, P> Index<&Root<T>> for Heap<M, P>
 where
-    T: Allocated<M, P> + ?Sized,
+    T: Allocated<Self> + ?Sized,
     P: Params,
 {
     type Output = T;
@@ -739,7 +743,7 @@ where
 
 impl<T, M, P> IndexMut<&RootCell<T>> for Heap<M, P>
 where
-    T: Allocated<M, P> + ?Sized,
+    T: Allocated<Self> + ?Sized,
     P: Params,
 {
     fn index_mut(&mut self, index: &RootCell<T>) -> &mut Self::Output {

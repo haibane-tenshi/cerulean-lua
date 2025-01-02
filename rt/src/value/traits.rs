@@ -8,7 +8,7 @@ use super::string::PossiblyUtf8Vec;
 use super::userdata::{DefaultParams, FullUserdata};
 use super::{KeyValue, Value};
 use crate::ffi::DLuaFfi;
-use crate::gc::LuaPtr;
+use crate::gc::{Heap, LuaPtr};
 use crate::runtime::Closure;
 
 pub use gc::userdata::Metatable;
@@ -56,7 +56,7 @@ pub trait Types: Sized + 'static {
     type RustClosure: Trace;
     type Table: Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
     type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
-        + Allocated<Meta<Self>, DefaultParams<Self>>
+        + Allocated<Heap<Self>>
         + ?Sized;
 }
 

@@ -89,7 +89,6 @@ use std::fmt::{Debug, Pointer};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use crate::heap::arena::Arena;
 use crate::heap::store::{Addr, Counter, Gen, Index};
 use crate::heap::{Heap, TypeIndex};
 use crate::trace::Trace;
@@ -919,62 +918,59 @@ where
 }
 
 pub(crate) mod sealed_allocated {
-    use super::{FullUserdata, Params, Userdata};
+    use super::{FullUserdata, Heap, Params, Userdata};
 
     #[doc(hidden)]
-    pub struct ArenaRef<'a, M, P>(pub(crate) &'a dyn super::Arena<M, P>);
-
-    #[doc(hidden)]
-    pub struct ArenaMut<'a, M, P>(pub(crate) &'a mut dyn super::Arena<M, P>);
+    pub struct Ty(pub(crate) super::TypeIndex);
 
     #[doc(hidden)]
     pub struct Addr(pub(crate) super::Addr);
 
-    pub trait Sealed<M, P> {
+    pub trait Sealed<Heap> {
         #[doc(hidden)]
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self>;
+        fn get_ref(heap: &Heap, ty: Ty, addr: Addr) -> Option<&Self>;
 
         #[doc(hidden)]
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self>;
+        fn get_mut(heap: &mut Heap, ty: Ty, addr: Addr) -> Option<&mut Self>;
     }
 
-    impl<T, M, P> Sealed<M, P> for T
+    impl<T, M, P> Sealed<Heap<M, P>> for T
     where
         T: 'static,
         P: Params,
     {
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get(addr.0)
+        fn get_ref(heap: &Heap<M, P>, ty: Ty, addr: Addr) -> Option<&Self> {
+            heap.arena(ty.0)?.get(addr.0)
         }
 
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_mut(addr.0)
-        }
-    }
-
-    impl<M, P> Sealed<M, P> for dyn Userdata<P>
-    where
-        P: Params,
-    {
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get_userdata(addr.0)
-        }
-
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_userdata_mut(addr.0)
+        fn get_mut(heap: &mut Heap<M, P>, ty: Ty, addr: Addr) -> Option<&mut Self> {
+            heap.arena_mut(ty.0)?.get_mut(addr.0)
         }
     }
 
-    impl<M, P> Sealed<M, P> for dyn FullUserdata<M, P>
+    impl<M, P> Sealed<Heap<M, P>> for dyn Userdata<P>
     where
         P: Params,
     {
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get_full_userdata(addr.0)
+        fn get_ref(heap: &Heap<M, P>, ty: Ty, addr: Addr) -> Option<&Self> {
+            heap.arena(ty.0)?.get_userdata(addr.0)
         }
 
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_full_userdata_mut(addr.0)
+        fn get_mut(heap: &mut Heap<M, P>, ty: Ty, addr: Addr) -> Option<&mut Self> {
+            heap.arena_mut(ty.0)?.get_userdata_mut(addr.0)
+        }
+    }
+
+    impl<M, P> Sealed<Heap<M, P>> for dyn FullUserdata<M, P>
+    where
+        P: Params,
+    {
+        fn get_ref(heap: &Heap<M, P>, ty: Ty, addr: Addr) -> Option<&Self> {
+            heap.arena(ty.0)?.get_full_userdata(addr.0)
+        }
+
+        fn get_mut(heap: &mut Heap<M, P>, ty: Ty, addr: Addr) -> Option<&mut Self> {
+            heap.arena_mut(ty.0)?.get_full_userdata_mut(addr.0)
         }
     }
 }
@@ -992,15 +988,15 @@ pub(crate) mod sealed_allocate_as {
     #[doc(hidden)]
     pub struct Counter(pub(crate) super::Counter);
 
-    pub trait Sealed<T: ?Sized, M, P>: Sized {
+    pub trait Sealed<T: ?Sized, Heap>: Sized {
         #[doc(hidden)]
-        fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter);
+        fn alloc_into(self, heap: &mut Heap) -> (Addr, TypeIndex, Counter);
 
         #[doc(hidden)]
-        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self>;
+        fn try_alloc_into(self, heap: &mut Heap) -> Result<(Addr, TypeIndex, Counter), Self>;
     }
 
-    impl<T, M, P> Sealed<T, M, P> for T
+    impl<T, M, P> Sealed<T, Heap<M, P>> for T
     where
         T: Trace,
         P: Params,
@@ -1024,7 +1020,7 @@ pub(crate) mod sealed_allocate_as {
         }
     }
 
-    impl<T, M, P> Sealed<dyn Userdata<P>, M, P> for T
+    impl<T, M, P> Sealed<dyn Userdata<P>, Heap<M, P>> for T
     where
         T: Trace,
         P: Params,
@@ -1048,7 +1044,7 @@ pub(crate) mod sealed_allocate_as {
         }
     }
 
-    impl<T, M, P> Sealed<dyn FullUserdata<M, P>, M, P> for T
+    impl<T, M, P> Sealed<dyn FullUserdata<M, P>, Heap<M, P>> for T
     where
         T: Trace,
         M: Trace + Clone,
@@ -1080,40 +1076,48 @@ pub(crate) mod sealed_allocate_as {
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
+///
+/// The trait is implemented for all types references to which can be extracted out of heap,
+/// that is for which you can go from `Gc<T>` to `&T` for example.
+/// This is never a problem for *sized* types, however this is not true about *unsized* types.
+/// To extract a reference to unsized type you either need to reconstruct it from raw parts
+/// (which is impossible until Rust provides mechanism to interact with that)
+/// or have dedicated internal API methods for each individual unsized type you want to extract.
+/// The reason this trait exists is to mark those few blessed unsized types that we support.
+pub trait Allocated<Heap>: sealed_allocated::Sealed<Heap> {}
 
 /// Marker trait for types that can be allocated in `Heap`.
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s allocation methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait AllocateAs<T: ?Sized, M, P>: sealed_allocate_as::Sealed<T, M, P> {}
+pub trait AllocateAs<T: ?Sized, Heap>: sealed_allocate_as::Sealed<T, Heap> {}
 
-impl<T, M, P> Allocated<M, P> for T
+impl<T, M, P> Allocated<Heap<M, P>> for T
 where
     T: 'static,
     P: Params,
 {
 }
 
-impl<M, P> Allocated<M, P> for dyn Userdata<P> where P: Params {}
+impl<M, P> Allocated<Heap<M, P>> for dyn Userdata<P> where P: Params {}
 
-impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P> where P: Params {}
+impl<M, P> Allocated<Heap<M, P>> for dyn FullUserdata<M, P> where P: Params {}
 
-impl<T, M, P> AllocateAs<T, M, P> for T
+impl<T, M, P> AllocateAs<T, Heap<M, P>> for T
 where
     T: Trace,
     P: Params,
 {
 }
 
-impl<T, M, P> AllocateAs<dyn Userdata<P>, M, P> for T
+impl<T, M, P> AllocateAs<dyn Userdata<P>, Heap<M, P>> for T
 where
     T: Trace,
     P: Params,
 {
 }
 
-impl<T, M, P> AllocateAs<dyn FullUserdata<M, P>, M, P> for T
+impl<T, M, P> AllocateAs<dyn FullUserdata<M, P>, Heap<M, P>> for T
 where
     T: Trace,
     M: Trace + Clone,
