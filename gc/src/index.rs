@@ -111,13 +111,13 @@ pub trait Access: sealed_access::Sealed {}
 
 /// Marker trait permitting by-reference (`&T`) access.
 ///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
+/// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
 pub trait RefAccess: Access {}
 
 /// Marker trait permitting by-mut-reference (`&mut T`) access.
 ///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
+/// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
 pub trait MutAccess: RefAccess {}
 
@@ -548,7 +548,7 @@ where
 ///
 /// # Construct
 ///
-/// [`Heap`](crate::Heap) naturally returns [`RootCell`] after allocating a value:
+/// [`Heap`] naturally returns [`RootCell`] after allocating a value:
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
@@ -591,7 +591,7 @@ where
 /// assert_eq!(heap.get_root(&strong), &4);
 /// ```
 ///
-/// Alternatively [`Heap`](crate::Heap) can be indexed using `&RootCell<T>`:
+/// Alternatively [`Heap`] can be indexed using `&RootCell<T>`:
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
@@ -722,7 +722,7 @@ where
 ///
 /// # Construct
 ///
-/// [`Heap`](crate::Heap) naturally returns [`Root`] after allocating a value:
+/// [`Heap`] naturally returns [`Root`] after allocating a value:
 ///
 /// ```
 /// # use gc::{Heap, Root};
@@ -762,7 +762,7 @@ where
 /// assert_eq!(heap.get_root(&strong), &3);
 /// ```
 ///
-/// Alternatively [`Heap`](crate::Heap) can be indexed using `&Root<T>`:
+/// Alternatively [`Heap`] can be indexed using `&Root<T>`:
 ///
 /// ```
 /// # use gc::{Heap, Root};
@@ -1072,7 +1072,7 @@ pub(crate) mod sealed_allocate_as {
     }
 }
 
-/// Marker trait for types that can be retrieved from [`Heap`](crate::Heap).
+/// Marker trait for types that can be retrieved from [`Heap`].
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s getter methods.
 /// You probably shouldn't use it for anything else or at all.

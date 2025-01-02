@@ -23,25 +23,167 @@ use interned::{Interned, InternedStore};
 use store::{Addr, Counter};
 use userdata_store::Views;
 
+#[expect(unused_imports, reason = "frequently referenced in doc comments")]
+use crate::index::{Gc, GcCell};
+
 /// Backing store for garbage-collected objects.
-///
-/// This type hosts all objects that are allocated within garbage collector.
-/// Creating or dereferencing any objects requires access to heap:
-///
-/// ```
-/// # use gc::{Heap};
-/// # use gc::userdata::UnitParams;
-/// let mut heap = Heap::<_, _>::new();
-/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
-/// let a = heap.alloc(3_usize);
-///
-/// assert_eq!(heap[&a], 3);
-/// ```
 ///
 /// Allocated objects require to implement [`Trace`] trait
 /// which allows garbage collector to discover transitive references through an object.
 /// Note that `Trace` requires `'static`: this is due to internal use of [`Any`](std::any::Any)
 /// so unfortunately you cannot allocate objects containing non-static lifetimes.
+///
+/// # Generics
+///
+/// Heap takes two generic parameters.
+/// Both are an unfortunate consequence of tight integration with Lua userdata.
+///
+/// `M` is the type of *metatable* used by [`FullUserdata`] trait.
+/// There are little restrictions on it besides `'static` bounds.
+/// Note that [`alloc_as`](Heap::alloc_as) requires `M: Clone` when allocating as `dyn FullUserdata` to clone default metatable.
+///
+/// `P` contains parameters configuring [`Userdata`](crate::userdata::Userdata) trait.
+/// For this reason you will need to satisfy [`P: Params`](Params) bound.
+/// It primarily exists to prevent spilling runtime-related details over garbage collector (and let it reside in a different crate).
+///
+/// # Allocating
+///
+/// There is a host of methods provided by heap to allocate values.
+/// The simplest two are
+///
+/// * [`alloc`](Heap::alloc) - allocates `T` as [`Root<T>`]
+/// * [`alloc_cell`](Heap::alloc_cell) - allocates `T` as [`RootCell<T>`]
+///
+/// Result differs in mutability of allocated value.
+/// `Root`s are immutable:
+///
+/// ```rust
+/// # use gc::{Heap, Root, RootCell};
+/// # use gc::userdata::UnitParams;
+/// # let mut heap = Heap::<_, _>::new();
+/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
+/// let a: RootCell<usize> = heap.alloc_cell(3_usize);
+/// assert_eq!(heap[&a], 3);
+///
+/// heap[&a] = 4;
+/// assert_eq!(heap[&a], 4);
+///
+/// let b: Root<usize> = heap.alloc(3_usize);
+/// assert_eq!(heap[&b], 3);
+///
+/// // Cannot mutate values behind Root/Gc
+/// // heap[&b] = 4;
+/// ```
+///
+/// See documentation of smart pointers for more details.
+///
+/// The most versatile allocation method is [`alloc_as`](Heap::alloc_as).
+/// It can produce smart pointers of different types depending on type hints.
+/// While normally you may want to allocate values as-is:
+///
+/// ```rust
+/// # use gc::{Heap, Root};
+/// # use gc::userdata::UnitParams;
+/// # let mut heap = Heap::<_, _>::new();
+/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
+/// let a: Root<usize> = heap.alloc_as(3_usize);
+/// ```
+///
+/// It is also possible to allocate values as trait objects for a few blessed traits:
+///
+/// ```rust
+/// # use gc::{Heap, Root};
+/// # use gc::userdata::{UnitParams, FullUserdata};
+/// # let mut heap = Heap::<_, _>::new();
+/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
+/// let a: Root<dyn FullUserdata<_, _>> = heap.alloc_as(3_usize);
+/// ```
+///
+/// `alloc_as` is versatile, but it also make it less convenient to use in many circumstances.
+///
+/// ## Handling userdata
+///
+/// Heap permits to allocate object as trait objects implementing Lua userdata traits.
+/// There are a few peculiarities here:
+///
+/// *   *Any* type can be allocated as userdata.
+///     This is because [`Userdata`](crate::userdata::Userdata)/[`FullUserdata`] are a surrogate traits as explained in [design doc](crate::userdata#userdata-design).
+/// *   To complete userdata every type requires a *method dispatcher* that must be separately configured.
+/// *   Additionally, `FullUserdata` requires a *metatable* to be allocated alongside it.
+///     It can be either provided explicitly using [`alloc_full_userdata`](Heap::alloc_full_userdata) method,
+///     or when using other allocation methods ([`alloc_as`](Heap::alloc_as)) cloned from default metatable that must be configured separately.
+///
+/// Default metatable can be set or acquired using the following methods:
+///
+/// * [`set_metatable_of`](Heap::set_metatable_of)
+/// * [`metatable_of`](Heap::metatable_of)
+///
+/// Default metatable is as the name implies only used to initiate metatables of newly allocated objects
+/// and have no impact on already existing objects.
+///
+/// You can set *method dispatcher* for a type using
+///
+/// * [`set_dispatcher_of`](Heap::set_dispatcher_of)
+///
+/// As noted in userdata design doc, **all values of the same type share single dispatcher**.
+/// Replacing existing dispatcher will immediately affect all already allocated values of that type.
+///
+/// Currently, for technical reasons, dispatchers are required to be function pointers.
+///
+/// ## Interning objects
+///
+/// Heap has dedicated APIs to [`intern`](Heap::intern) objects.
+/// Interned values are deduplicated:
+///
+/// ```
+/// # use gc::{Heap, Root, Interned};
+/// # use gc::userdata::{UnitParams, FullUserdata};
+/// # let mut heap = Heap::<_, _>::new();
+/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
+/// let a: Root<Interned<usize>> = heap.intern(3_usize);
+/// let b: Root<Interned<usize>> = heap.intern(3_usize);
+///
+/// assert_eq!(a.location() == b.location());
+/// ```
+///
+/// Because of this guarantee, interned object can only exist behind `Root`.
+/// It is a logical error to modify interned objects in any way that affects `Eq` or `Hash` (e.g. through internal mutability).
+///
+/// There is also a secondary interning API, [`intern_from`](Heap::intern_from):
+///
+/// ```
+/// # use gc::{Heap, Root, Interned};
+/// # use gc::userdata::{UnitParams, FullUserdata};
+/// # let mut heap = Heap::<_, _>::new();
+/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
+/// let a: Root<Interned<String>> = heap.intern(String::from("foobar"));
+/// let b: Root<Interned<String>> = heap.intern_from("foobar");
+///
+/// assert_eq!(a.location() == b.location());
+/// ```
+///
+/// Commonly, object you are trying to intern might already exist,
+/// however you still need to provide one to `intern` method - even if it will be immediately discarded,
+/// which can be extremely wasteful.
+///
+/// `intern_from` instead takes *a reference* to another object and uses that to search for an already existing allocation.
+/// The simplest way to use it is to pass `&T` and `T` will be cloned only when necessary.
+/// Alternatively, by providing proper [`Borrow`] and [`ToOwned`] impls you can pass reference to some other type.
+/// Those already exist for `str`/`String` and `[T]`/`Vec<T>` pairings.
+///
+/// # Retrieving objects
+///
+/// Dereferencing requires access to heap:
+///
+/// ```
+/// # use gc::{Heap};
+/// # use gc::userdata::UnitParams;
+/// # let mut heap = Heap::<_, _>::new();
+/// # let mut heap = std::convert::identity::<Heap<(), UnitParams>>(heap);
+/// let a = heap.alloc(3_usize);
+///
+/// assert_eq!(heap[&a], 3);
+/// ```
 ///
 /// # Garbage collection
 ///
@@ -56,7 +198,7 @@ use userdata_store::Views;
 ///
 /// Implementation uses standard mark-and-sweep strategy.
 ///
-/// # Avoiding garbage collection
+/// ## Avoiding garbage collection
 ///
 /// There are situations where you may not want to trigger a gc pass while allocating objects.
 /// There are currently two APIs available to this purpose:
@@ -214,7 +356,7 @@ where
     ///
     /// * All values of one type share dispacher function by design.
     ///    Currently configured function will be used, otherwise a default "do nothing" dispacher will be set.
-    ///    Dispacher method needs to be configured separately using [`set_dispatcher`](Heap::set_dispatcher) method.
+    ///    Dispacher method needs to be configured separately using [`set_dispatcher_of`](Heap::set_dispatcher_of) method.
     /// * `FullUserdata` will use metatable for the type if configured, otherwise no metatable will be set.
     ///
     /// Alternatively full userdata can be allocated using [`alloc_full_userdata`](Heap::alloc_full_userdata) which allows you to set its metatable immediately.
@@ -324,7 +466,7 @@ where
     ///
     /// * All values of one type share dispacher function by design.
     ///    Currently configured function will be used, otherwise a default "do nothing" dispacher will be set.
-    ///    Dispacher method needs to be configured separately using [`set_dispatcher`](Heap::set_dispatcher) method.
+    ///    Dispacher method needs to be configured separately using [`set_dispatcher_of`](Heap::set_dispatcher_of) method.
     /// * `FullUserdata` will use metatable for the type if configured, otherwise no metatable will be set.
     ///
     /// Alternatively full userdata can be allocated using [`alloc_full_userdata`](Heap::alloc_full_userdata) which allows you to set its metatable immediately.
@@ -573,6 +715,8 @@ where
     ///
     /// By design all values of the same type share dispacher function.
     /// This change will affect all future and existing userdata of this type.
+    ///
+    /// Currently, for technical reasons, dispatchers are required to be function pointers.
     pub fn set_dispatcher_of<T>(&mut self, dispatcher: Dispatcher<T, P>)
     where
         T: Trace,
@@ -589,7 +733,7 @@ where
 
     /// Query default metatable for the type.
     ///
-    /// Default metatable can be set using [`Heap::set_metatable`] for the type.
+    /// Default metatable can be set using [`Heap::set_metatable_of`] for the type.
     /// This metatable will be used when value of type `T` is allocated as `dyn FullUserdata` in [`Heap::alloc_as`] method.
     /// If you want to control what metatable is set on creation consider using [`Heap::alloc_full_userdata`] instead.
     pub fn metatable_of<T>(&self) -> Option<&M>
