@@ -160,6 +160,27 @@ where
         Addr { index, gen }
     }
 
+    pub(crate) fn transmute<U>(self) -> GcPtr<U, A>
+    where
+        U: ?Sized,
+    {
+        let GcPtr {
+            index,
+            gen,
+            ty,
+            _type,
+            _access,
+        } = self;
+
+        GcPtr {
+            index,
+            gen,
+            ty,
+            _type: PhantomData,
+            _access,
+        }
+    }
+
     /// Return location of referenced object.
     ///
     /// See [`Location`] struct for more information.

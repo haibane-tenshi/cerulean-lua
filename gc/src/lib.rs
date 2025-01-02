@@ -630,6 +630,17 @@ mod test {
         assert_root_ptr_eq(&mut heap, &c);
     }
 
+    #[test]
+    fn downcast() {
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let a: Root<dyn Userdata<_>> = heap.alloc_as(5_usize);
+        let _: Gc<usize> = heap.downcast(a.downgrade()).unwrap();
+
+        let a: Root<dyn FullUserdata<_, _>> = heap.alloc_as(5_usize);
+        let _: Gc<usize> = heap.downcast(a.downgrade()).unwrap();
+    }
+
     struct ReturnU32;
 
     impl Params for ReturnU32 {

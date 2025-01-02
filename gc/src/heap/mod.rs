@@ -508,6 +508,58 @@ where
         Some(ptr)
     }
 
+    /// Downcast wrapped type of weak reference to a concrete type.
+    ///
+    /// # Panics
+    ///
+    /// This function will never panic.
+    pub fn downcast<T, U, A>(&self, ptr: GcPtr<U, A>) -> Option<GcPtr<T, A>>
+    where
+        M: 'static,
+        T: 'static,
+        U: ?Sized,
+        A: Access,
+    {
+        use userdata_store::{Concrete, FullUd, LightUd};
+
+        if let Some(&ty) = self.type_map.get(&TypeId::of::<FullUd<T, M, P>>()) {
+            if ty == ptr.ty() {
+                return Some(ptr.transmute());
+            }
+        }
+
+        if let Some(&ty) = self.type_map.get(&TypeId::of::<LightUd<T, P>>()) {
+            if ty == ptr.ty() {
+                return Some(ptr.transmute());
+            }
+        }
+
+        if let Some(&ty) = self.type_map.get(&TypeId::of::<Concrete<T>>()) {
+            if ty == ptr.ty() {
+                return Some(ptr.transmute());
+            }
+        }
+
+        None
+    }
+
+    /// Downcast wrapped type of strong reference to a concrete type.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if provided pointer was allocated from another heap.
+    pub fn downcast_root<T, U, A>(&self, ptr: &RootPtr<U, A>) -> Option<RootPtr<T, A>>
+    where
+        M: 'static,
+        T: 'static,
+        U: ?Sized,
+        A: Access,
+    {
+        let new_ptr = self.downcast(ptr.downgrade())?;
+        todo!("panic when reference doesn't point to this heap");
+        Some(self.upgrade(new_ptr).unwrap())
+    }
+
     /// Set dispatcher method for the type.
     ///
     /// By design all values of the same type share dispacher function.
