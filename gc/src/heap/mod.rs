@@ -573,7 +573,7 @@ where
     ///
     /// By design all values of the same type share dispacher function.
     /// This change will affect all future and existing userdata of this type.
-    pub fn set_dispatcher<T>(&mut self, dispatcher: Dispatcher<T, P>)
+    pub fn set_dispatcher_of<T>(&mut self, dispatcher: Dispatcher<T, P>)
     where
         T: Trace,
         M: Trace,
@@ -608,7 +608,7 @@ where
     /// # Return
     ///
     /// A previously set metatable will be returned if one was set.
-    pub fn set_metatable<T>(&mut self, mt: Option<M>) -> Option<M>
+    pub fn set_metatable_of<T>(&mut self, mt: Option<M>) -> Option<M>
     where
         T: 'static,
     {

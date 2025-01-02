@@ -673,19 +673,19 @@ mod test {
         assert_eq!(heap.get_root(&b).method((), ()), None);
         assert_eq!(heap.get_root(&c).method((), ()), None);
 
-        heap.set_dispatcher::<u32>(|value, _, _| Some(*value));
+        heap.set_dispatcher_of::<u32>(|value, _, _| Some(*value));
 
         assert_eq!(heap.get_root(&a).method((), ()), Some(3));
         assert_eq!(heap.get_root(&b).method((), ()), Some(5));
         assert_eq!(heap.get_root(&c).method((), ()), None);
 
-        heap.set_dispatcher::<u64>(|_, _, _| Some(0));
+        heap.set_dispatcher_of::<u64>(|_, _, _| Some(0));
 
         assert_eq!(heap.get_root(&a).method((), ()), Some(3));
         assert_eq!(heap.get_root(&b).method((), ()), Some(5));
         assert_eq!(heap.get_root(&c).method((), ()), Some(0));
 
-        heap.set_dispatcher::<u32>(|value, _, _| Some(*value + 1));
+        heap.set_dispatcher_of::<u32>(|value, _, _| Some(*value + 1));
 
         assert_eq!(heap.get_root(&a).method((), ()), Some(4));
         assert_eq!(heap.get_root(&b).method((), ()), Some(6));
@@ -706,7 +706,7 @@ mod test {
         assert_eq!(heap.get_root(&a).metatable(), None);
         assert_eq!(heap.get_root(&b).metatable(), None);
 
-        heap.set_metatable::<u32>(Some(2));
+        heap.set_metatable_of::<u32>(Some(2));
         assert_eq!(heap.metatable_of::<u32>(), Some(&2));
 
         let c: Root<dyn FullUserdata<_, _>> = heap.alloc_as(5_u32);
@@ -725,7 +725,7 @@ mod test {
         assert_eq!(heap.get_root(&d).metatable(), None);
         assert_eq!(heap.get_root(&e).metatable(), Some(&10));
 
-        heap.set_metatable::<u64>(Some(15));
+        heap.set_metatable_of::<u64>(Some(15));
         assert_eq!(heap.metatable_of::<u64>(), Some(&15));
 
         heap.get_root_mut(&e).set_metatable(Some(12));
@@ -739,7 +739,7 @@ mod test {
         assert_eq!(heap.get_root(&e).metatable(), Some(&12));
         assert_eq!(heap.get_root(&f).metatable(), Some(&15));
 
-        let prev = heap.set_metatable::<u32>(None);
+        let prev = heap.set_metatable_of::<u32>(None);
 
         assert_eq!(prev, Some(2));
         assert_eq!(heap.metatable_of::<u32>(), None);
