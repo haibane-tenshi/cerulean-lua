@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -6,6 +7,7 @@ use hashbrown::HashTable;
 
 use super::arena::{AsAny, Getters, HandleStrongRef, Traceable};
 use super::store::{Addr, Counter, Store};
+use crate::index::ToOwned;
 use crate::userdata::Params;
 use crate::Trace;
 
@@ -49,11 +51,12 @@ struct Interner<T> {
     _marker: PhantomData<T>,
 }
 
-impl<T> Interner<T>
-where
-    T: Hash + Eq,
-{
-    fn get(&self, value: &T, store: &Store<Interned<T>>) -> Option<Addr> {
+impl<T> Interner<T> {
+    fn get<U>(&self, value: &U, store: &Store<Interned<T>>) -> Option<Addr>
+    where
+        U: Hash + Eq + ?Sized,
+        T: Borrow<U>,
+    {
         use std::hash::BuildHasher;
 
         let hash = self.hasher.hash_one(value);
@@ -62,13 +65,16 @@ where
             .find(hash, |&ptr| {
                 store
                     .get(ptr)
-                    .map(|other| value == other.deref())
+                    .map(|other| value == other.deref().borrow())
                     .unwrap_or(false)
             })
             .copied()
     }
 
-    fn insert(&mut self, addr: Addr, store: &Store<Interned<T>>) {
+    fn insert(&mut self, addr: Addr, store: &Store<Interned<T>>)
+    where
+        T: Hash,
+    {
         use std::hash::BuildHasher;
 
         let value = store.get(addr).unwrap().deref();
@@ -112,14 +118,28 @@ impl<T> InternedStore<T> {
     // }
 }
 
+impl<T> InternedStore<T> {
+    fn find<U>(&self, value: &U) -> Option<(Addr, Counter)>
+    where
+        U: Hash + Eq + ?Sized,
+        T: Borrow<U>,
+    {
+        if let Some(addr) = self.interner.get(value, &self.store) {
+            let counter = self.store.upgrade(addr).unwrap();
+            Some((addr, counter))
+        } else {
+            None
+        }
+    }
+}
+
 impl<T> InternedStore<T>
 where
     T: Hash + Eq,
 {
     pub(crate) fn insert(&mut self, value: T) -> (Addr, Counter) {
-        if let Some(addr) = self.interner.get(&value, &self.store) {
-            let counter = self.store.upgrade(addr).unwrap();
-            return (addr, counter);
+        if let Some(r) = self.find(&value) {
+            return r;
         }
 
         let (addr, counter) = self.store.insert(Interned(value));
@@ -129,15 +149,38 @@ where
     }
 
     pub(crate) fn try_insert(&mut self, value: T) -> Result<(Addr, Counter), T> {
-        if let Some(addr) = self.interner.get(&value, &self.store) {
-            let counter = self.store.upgrade(addr).unwrap();
-            return Ok((addr, counter));
+        if let Some(r) = self.find(&value) {
+            return Ok(r);
         }
 
         let (addr, counter) = self.store.try_insert(Interned(value)).map_err(|t| t.0)?;
         self.interner.insert(addr, &self.store);
 
         Ok((addr, counter))
+    }
+
+    pub(crate) fn insert_from<U>(&mut self, value: &U) -> (Addr, Counter)
+    where
+        U: Hash + Eq + ToOwned<T> + ?Sized,
+        T: Borrow<U>,
+    {
+        if let Some(r) = self.find(value) {
+            return r;
+        }
+
+        self.insert(value.to_owned())
+    }
+
+    pub(crate) fn try_insert_from<U>(&mut self, value: &U) -> Result<(Addr, Counter), T>
+    where
+        U: Hash + Eq + ToOwned<T> + ?Sized,
+        T: Borrow<U>,
+    {
+        if let Some(r) = self.find(value) {
+            return Ok(r);
+        }
+
+        self.try_insert(value.to_owned())
     }
 }
 

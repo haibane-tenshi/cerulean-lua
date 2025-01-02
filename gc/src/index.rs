@@ -1124,3 +1124,31 @@ where
     P: Params,
 {
 }
+
+pub trait ToOwned<Owned> {
+    fn to_owned(&self) -> Owned;
+}
+
+impl<T> ToOwned<T> for T
+where
+    T: Clone,
+{
+    fn to_owned(&self) -> T {
+        self.clone()
+    }
+}
+
+impl ToOwned<String> for str {
+    fn to_owned(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl<T> ToOwned<Vec<T>> for [T]
+where
+    T: Clone,
+{
+    fn to_owned(&self) -> Vec<T> {
+        self.into()
+    }
+}

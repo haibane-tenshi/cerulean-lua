@@ -415,6 +415,18 @@ mod test {
     }
 
     #[test]
+    fn intern_from() {
+        use crate::index::Interned;
+
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let a: Root<Interned<String>> = heap.intern_from("test");
+        let b = heap.intern("test".to_string());
+
+        assert_eq!(a.location(), b.location());
+    }
+
+    #[test]
     fn index_root_t() {
         let mut heap = Heap::<(), UnitParams>::new();
 

@@ -4,6 +4,7 @@ pub(crate) mod store;
 pub(crate) mod userdata_store;
 
 use std::any::TypeId;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -13,12 +14,12 @@ use bitvec::vec::BitVec;
 use typed_index_collections::TiVec;
 
 use crate::index::{
-    Access, AllocateAs, Allocated, GcPtr, MutAccess, RefAccess, Root, RootCell, RootPtr,
+    Access, AllocateAs, Allocated, GcPtr, MutAccess, RefAccess, Root, RootCell, RootPtr, ToOwned,
 };
 use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
 use arena::Arena;
-use interned::Interned;
+use interned::{Interned, InternedStore};
 use store::{Addr, Counter};
 use userdata_store::Views;
 
@@ -103,18 +104,24 @@ where
         (index, store)
     }
 
-    fn interned_arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
+    fn interned_store<T>(&mut self) -> (TypeIndex, &mut InternedStore<T>)
     where
         T: Trace,
     {
-        use interned::InternedStore;
-
         let id = TypeId::of::<Interned<T>>();
         let index = *self.type_map.entry(id).or_insert_with(|| {
             self.arenas
                 .push_and_get_key(Box::new(InternedStore::<T>::new()))
         });
-        let store = self.arenas.get_mut(index).unwrap().as_mut();
+        let store = self
+            .arenas
+            .get_mut(index)
+            .unwrap()
+            .as_mut()
+            .as_any_mut()
+            .downcast_mut()
+            .unwrap();
+
         (index, store)
     }
 
@@ -351,12 +358,19 @@ where
     where
         T: Trace + Hash + Eq,
     {
-        use interned::InternedStore;
-
-        let (ty, arena) = self.interned_arena_or_insert::<T>();
-        let arena: &mut InternedStore<T> = arena.as_any_mut().downcast_mut().unwrap();
-
+        let (ty, arena) = self.interned_store::<T>();
         let (addr, counter) = arena.insert(value);
+
+        Root::new(addr, ty, counter)
+    }
+
+    pub fn intern_from<U, T>(&mut self, value: &U) -> Root<Interned<T>>
+    where
+        U: Hash + Eq + ToOwned<T> + ?Sized,
+        T: Trace + Hash + Eq + Borrow<U>,
+    {
+        let (ty, arena) = self.interned_store::<T>();
+        let (addr, counter) = arena.insert_from(value);
 
         Root::new(addr, ty, counter)
     }
@@ -365,12 +379,19 @@ where
     where
         T: Trace + Hash + Eq,
     {
-        use interned::InternedStore;
-
-        let (ty, arena) = self.interned_arena_or_insert::<T>();
-        let arena: &mut InternedStore<T> = arena.as_any_mut().downcast_mut().unwrap();
-
+        let (ty, arena) = self.interned_store::<T>();
         let (addr, counter) = arena.try_insert(value)?;
+
+        Ok(Root::new(addr, ty, counter))
+    }
+
+    pub fn try_intern_from<U, T>(&mut self, value: &U) -> Result<Root<Interned<T>>, T>
+    where
+        U: Hash + Eq + ToOwned<T> + ?Sized,
+        T: Trace + Hash + Eq + Borrow<U>,
+    {
+        let (ty, arena) = self.interned_store::<T>();
+        let (addr, counter) = arena.try_insert_from(value)?;
 
         Ok(Root::new(addr, ty, counter))
     }
