@@ -291,7 +291,7 @@ mod test {
         P: Params,
     {
         let p0 = heap.get_root(ptr) as *const _;
-        let p1 = heap.get(ptr).unwrap() as *const _;
+        let p1 = heap.get(ptr.downgrade()).unwrap() as *const _;
         let p2 = &heap[ptr] as *const _;
 
         assert_eq!(p0, p1);
@@ -305,8 +305,8 @@ mod test {
     {
         let p0 = heap.get_root(ptr) as *const _;
         let p1 = heap.get_root_mut(ptr) as *const _;
-        let p2 = heap.get(ptr).unwrap() as *const _;
-        let p3 = heap.get_mut(ptr).unwrap() as *const _;
+        let p2 = heap.get(ptr.downgrade()).unwrap() as *const _;
+        let p3 = heap.get_mut(ptr.downgrade()).unwrap() as *const _;
         let p4 = &heap[ptr] as *const _;
         let p5 = &mut heap[ptr] as *const _;
 
@@ -322,7 +322,7 @@ mod test {
         T: Allocated<M, P> + ?Sized,
         P: Params,
     {
-        let _p1 = heap.get(ptr).unwrap() as *const _;
+        let _p1 = heap.get(*ptr).unwrap() as *const _;
     }
 
     fn assert_gc_cell_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &GcCell<T>)
@@ -330,8 +330,8 @@ mod test {
         T: Allocated<M, P> + ?Sized,
         P: Params,
     {
-        let p0 = heap.get(ptr).unwrap() as *const _;
-        let p1 = heap.get_mut(ptr).unwrap() as *const _;
+        let p0 = heap.get(*ptr).unwrap() as *const _;
+        let p1 = heap.get_mut(*ptr).unwrap() as *const _;
 
         assert_eq!(p0, p1);
     }
@@ -342,7 +342,7 @@ mod test {
         P: Params,
     {
         assert_eq!(heap.get_root(ptr), value);
-        assert_eq!(heap.get(ptr), Some(value));
+        assert_eq!(heap.get(ptr.downgrade()), Some(value));
         assert_eq!(&heap[ptr], value);
     }
 
@@ -355,8 +355,8 @@ mod test {
 
         assert_eq!(heap.get_root(ptr), value);
         assert_eq!(heap.get_root_mut(ptr), value);
-        assert_eq!(heap.get(ptr), Some(value));
-        assert_eq!(heap.get_mut(ptr).map(|t| &*t), Some(value));
+        assert_eq!(heap.get(ptr.downgrade()), Some(value));
+        assert_eq!(heap.get_mut(ptr.downgrade()).map(|t| &*t), Some(value));
         assert_eq!(heap.index(ptr), value);
         assert_eq!(*heap.index_mut(ptr), *value);
     }
@@ -366,7 +366,7 @@ mod test {
         T: Debug + Eq + Allocated<M, P> + ?Sized,
         P: Params,
     {
-        assert_eq!(heap.get(ptr), Some(value));
+        assert_eq!(heap.get(*ptr), Some(value));
     }
 
     fn assert_gc_cell_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &GcCell<T>, value: &T)
@@ -374,8 +374,8 @@ mod test {
         T: Debug + Eq + Allocated<M, P> + ?Sized,
         P: Params,
     {
-        assert_eq!(heap.get(ptr), Some(value));
-        assert_eq!(heap.get_mut(ptr).map(|t| &*t), Some(value));
+        assert_eq!(heap.get(*ptr), Some(value));
+        assert_eq!(heap.get_mut(*ptr).map(|t| &*t), Some(value));
     }
 
     #[test]

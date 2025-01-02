@@ -91,7 +91,7 @@ use std::marker::PhantomData;
 
 use crate::heap::arena::Arena;
 use crate::heap::store::{Addr, Counter, Gen, Index};
-use crate::heap::TypeIndex;
+use crate::heap::{Heap, TypeIndex};
 use crate::trace::Trace;
 use crate::userdata::{FullUserdata, Params, Userdata};
 
@@ -110,15 +110,30 @@ mod sealed_access {
 /// Trait for marking possible access permissions of a smart pointer.
 pub trait Access: sealed_access::Sealed {}
 
+/// Marker trait permitting by-reference (`&T`) access.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait RefAccess: Access {}
+
+/// Marker trait permitting by-mut-reference (`&mut T`) access.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait MutAccess: RefAccess {}
+
 /// Marker type denoting immutable-only access permissions of smart pointer.
 pub struct Ref;
 
 impl Access for Ref {}
+impl RefAccess for Ref {}
 
 /// Marker type denoting mutable and immutable access permissions of smart pointer.
 pub struct Mut;
 
 impl Access for Mut {}
+impl RefAccess for Mut {}
+impl MutAccess for Mut {}
 
 /// Common type for all weak references.
 ///
@@ -179,6 +194,23 @@ where
             _type: PhantomData,
             _access,
         }
+    }
+
+    pub(crate) fn upgrade_with(self, counter: Counter) -> RootPtr<T, A> {
+        let addr = self.addr();
+        let ty = self.ty();
+
+        RootPtr::new(addr, ty, counter)
+    }
+
+    /// Upgrade weak reference into strong one.
+    ///
+    /// This function is a convenience wrapper around [`Heap::upgrade`].
+    pub fn upgrade<M, P>(self, heap: &Heap<M, P>) -> Option<RootPtr<T, A>>
+    where
+        P: Params,
+    {
+        heap.upgrade(self)
     }
 
     /// Return location of referenced object.
@@ -293,6 +325,10 @@ where
         GcPtr::new(self.addr(), self.ty)
     }
 
+    pub(crate) fn ty(&self) -> TypeIndex {
+        self.ty
+    }
+
     pub(crate) fn addr(&self) -> Addr {
         let RootPtr { index, gen, .. } = self;
 
@@ -300,6 +336,10 @@ where
             index: *index,
             gen: *gen,
         }
+    }
+
+    pub(crate) fn counter(&self) -> &Counter {
+        &self.counter
     }
 
     /// Return location of referenced object.
@@ -878,101 +918,6 @@ where
     }
 }
 
-pub(crate) mod sealed {
-    use super::{Access, GcPtr, RootPtr};
-
-    #[doc(hidden)]
-    pub struct Addr(pub(crate) super::Addr);
-
-    #[doc(hidden)]
-    pub struct TypeIndex(pub(crate) super::TypeIndex);
-
-    pub trait Sealed {
-        #[doc(hidden)]
-        fn addr(&self) -> Addr;
-
-        #[doc(hidden)]
-        fn type_index(&self) -> TypeIndex;
-    }
-
-    impl<T, A> Sealed for GcPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        fn addr(&self) -> Addr {
-            Addr(GcPtr::addr(*self))
-        }
-
-        fn type_index(&self) -> TypeIndex {
-            TypeIndex(self.ty)
-        }
-    }
-
-    impl<T, A> Sealed for RootPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        fn addr(&self) -> Addr {
-            Addr(RootPtr::addr(self))
-        }
-
-        fn type_index(&self) -> TypeIndex {
-            TypeIndex(self.ty)
-        }
-    }
-}
-
-pub(crate) mod sealed_root {
-    use super::{Access, RootPtr};
-
-    #[doc(hidden)]
-    pub struct CounterRef<'a>(pub(crate) &'a super::Counter);
-
-    pub trait Sealed {
-        #[doc(hidden)]
-        fn counter(&self) -> CounterRef;
-    }
-
-    impl<T, A> Sealed for RootPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        fn counter(&self) -> CounterRef {
-            CounterRef(&self.counter)
-        }
-    }
-}
-
-pub(crate) mod sealed_upgrade {
-    use super::{Access, GcPtr, RootPtr};
-
-    #[doc(hidden)]
-    pub struct Counter(pub(crate) super::Counter);
-
-    pub trait Sealed {
-        type Target;
-
-        #[doc(hidden)]
-        fn upgrade(self, counter: Counter) -> Self::Target;
-    }
-
-    impl<T, A> Sealed for GcPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        type Target = RootPtr<T, A>;
-
-        fn upgrade(self, counter: Counter) -> Self::Target {
-            let Counter(counter) = counter;
-            RootPtr::new(self.addr(), self.ty, counter)
-        }
-    }
-}
-
 pub(crate) mod sealed_allocated {
     use super::{FullUserdata, Params, Userdata};
 
@@ -1131,24 +1076,6 @@ pub(crate) mod sealed_allocate_as {
     }
 }
 
-/// Marker trait permitting by-reference (`&T`) access.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-pub trait RefAccess<T: ?Sized>: sealed::Sealed {}
-
-/// Marker trait permitting by-mut-reference (`&mut T`) access.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-pub trait MutAccess<T: ?Sized>: RefAccess<T> {}
-
-/// Marker trait for strong references.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-pub trait Rooted: sealed_root::Sealed {}
-
 /// Marker trait for types that can be retrieved from [`Heap`](crate::Heap).
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s getter methods.
@@ -1160,18 +1087,6 @@ pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
 /// Purpose of this trait is to serve as bound in `Heap`'s allocation methods.
 /// You probably shouldn't use it for anything else or at all.
 pub trait AllocateAs<T: ?Sized, M, P>: sealed_allocate_as::Sealed<T, M, P> {}
-
-impl<T: ?Sized> RefAccess<T> for GcCell<T> {}
-impl<T: ?Sized> MutAccess<T> for GcCell<T> {}
-
-impl<T: ?Sized> RefAccess<T> for RootCell<T> {}
-impl<T: ?Sized> MutAccess<T> for RootCell<T> {}
-impl<T: ?Sized> Rooted for RootCell<T> {}
-
-impl<T: ?Sized> RefAccess<T> for Gc<T> {}
-
-impl<T: ?Sized> RefAccess<T> for Root<T> {}
-impl<T: ?Sized> Rooted for Root<T> {}
 
 impl<T, M, P> Allocated<M, P> for T
 where

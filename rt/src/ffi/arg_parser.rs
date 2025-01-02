@@ -1364,7 +1364,7 @@ where
         };
 
         extra
-            .get_root(ptr)
+            .get_root(&ptr)
             .as_ref()
             .clone()
             .try_into()

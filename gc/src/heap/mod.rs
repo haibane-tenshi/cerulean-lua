@@ -12,10 +12,8 @@ use std::ops::{Index, IndexMut};
 use bitvec::vec::BitVec;
 use typed_index_collections::TiVec;
 
-use crate::index::sealed_upgrade::Sealed;
 use crate::index::{
-    Access, AllocateAs, Allocated, Gc, GcCell, GcPtr, MutAccess, RefAccess, Root, RootCell,
-    RootPtr, Rooted,
+    Access, AllocateAs, Allocated, GcPtr, MutAccess, RefAccess, Root, RootCell, RootPtr,
 };
 use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
@@ -383,20 +381,16 @@ where
     ///
     /// Result of dereferencing a reference created from a different heap is unspecified but *safe*.
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
-    pub fn get<Ptr, T>(&self, ptr: impl AsRef<Ptr>) -> Option<&T>
+    pub fn get<T, A>(&self, ptr: GcPtr<T, A>) -> Option<&T>
     where
-        Ptr: RefAccess<T>,
         T: Allocated<M, P> + ?Sized,
+        A: RefAccess,
     {
         use crate::index::sealed_allocated::{Addr, ArenaRef, Sealed};
 
-        let ptr = ptr.as_ref();
-        let ty = ptr.type_index().0;
-        let addr = ptr.addr().0;
+        let arena = self.arenas.get(ptr.ty())?.as_ref();
 
-        let arena = self.arenas.get(ty)?.as_ref();
-
-        <T as Sealed<M, P>>::get_ref(ArenaRef(arena), Addr(addr))
+        <T as Sealed<M, P>>::get_ref(ArenaRef(arena), Addr(ptr.addr()))
     }
 
     /// Get `&mut T` out of weak reference such as [`GcCell`].
@@ -413,20 +407,16 @@ where
     ///
     /// Result of dereferencing a reference created from a different heap is unspecified but *safe*.
     /// You are likely to get `None` but it might return a reference if a suitable object is found.
-    pub fn get_mut<Ptr, T>(&mut self, ptr: impl AsRef<Ptr>) -> Option<&mut T>
+    pub fn get_mut<T, A>(&mut self, ptr: GcPtr<T, A>) -> Option<&mut T>
     where
-        Ptr: MutAccess<T>,
         T: Allocated<M, P> + ?Sized,
+        A: MutAccess,
     {
         use crate::index::sealed_allocated::{Addr, ArenaMut, Sealed};
 
-        let ptr = ptr.as_ref();
-        let ty = ptr.type_index().0;
-        let addr = ptr.addr().0;
+        let arena = self.arenas.get_mut(ptr.ty())?.as_mut();
 
-        let arena = self.arenas.get_mut(ty)?.as_mut();
-
-        <T as Sealed<M, P>>::get_mut(ArenaMut(arena), Addr(addr))
+        <T as Sealed<M, P>>::get_mut(ArenaMut(arena), Addr(ptr.addr()))
     }
 
     /// Get `&T` out of strong reference such as [`RootCell`] or [`Root`].
@@ -438,24 +428,17 @@ where
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root<Ptr, T>(&self, ptr: impl AsRef<Ptr>) -> &T
+    pub fn get_root<T, A>(&self, ptr: &RootPtr<T, A>) -> &T
     where
-        Ptr: RefAccess<T> + Rooted,
         T: Allocated<M, P> + ?Sized,
+        A: RefAccess,
     {
-        let ptr = ptr.as_ref();
-        let addr = ptr.addr().0;
-        let ty = ptr.type_index().0;
-        let counter = ptr.counter().0;
+        assert!(
+            self.contains(ptr),
+            "attempt to dereference a pointer created from a different heap"
+        );
 
-        match self.arenas.get(ty) {
-            Some(arena) if arena.validate(counter) => (),
-            _ => panic!("attempt to dereference a pointer created from a different heap"),
-        };
-
-        let ptr = Gc::<T>::new(addr, ty);
-
-        self.get(ptr)
+        self.get(ptr.downgrade())
             .expect("rooted object should never be deallocated")
     }
 
@@ -468,25 +451,26 @@ where
     ///
     /// This function panics if `ptr` is created from a different heap
     /// but otherwise it never will.
-    pub fn get_root_mut<Ptr, T>(&mut self, ptr: impl AsRef<Ptr>) -> &mut T
+    pub fn get_root_mut<T, A>(&mut self, ptr: &RootPtr<T, A>) -> &mut T
     where
-        Ptr: MutAccess<T> + Rooted,
         T: Allocated<M, P> + ?Sized,
+        A: MutAccess,
     {
-        let ptr = ptr.as_ref();
-        let addr = ptr.addr().0;
-        let ty = ptr.type_index().0;
-        let counter = ptr.counter().0;
+        assert!(
+            self.contains(ptr),
+            "attempt to dereference a pointer created from a different heap"
+        );
 
-        match self.arenas.get(ty) {
-            Some(arena) if arena.validate(counter) => (),
-            _ => panic!("attempt to dereference a pointer created from a different heap"),
-        };
-
-        let ptr = GcCell::<T>::new(addr, ty);
-
-        self.get_mut(ptr)
+        self.get_mut(ptr.downgrade())
             .expect("rooted object should never be deallocated")
+    }
+
+    pub fn contains<T, A>(&self, ptr: &RootPtr<T, A>) -> bool
+    where
+        T: ?Sized,
+        A: Access,
+    {
+        matches!(self.arenas.get(ptr.ty()), Some(arena) if arena.validate(ptr.counter()))
     }
 
     /// Upgrade weak reference ([`Gc`]/[`GcCell`]) into corresponding strong reference ([`Root`]/[`RootCell`]).
@@ -497,14 +481,10 @@ where
         T: ?Sized,
         A: Access,
     {
-        use crate::index::sealed_upgrade::Counter;
+        let arena = self.arenas.get(ptr.ty())?;
+        let counter = arena.upgrade(ptr.addr())?;
+        let ptr = ptr.upgrade_with(counter);
 
-        let ty = ptr.ty();
-        let addr = ptr.addr();
-
-        let arena = self.arenas.get(ty)?;
-        let counter = arena.upgrade(addr)?;
-        let ptr = ptr.upgrade(Counter(counter));
         Some(ptr)
     }
 
@@ -555,8 +535,12 @@ where
         U: ?Sized,
         A: Access,
     {
+        assert!(
+            self.contains(ptr),
+            "attempt to downcast a pointer created from a different heap"
+        );
+
         let new_ptr = self.downcast(ptr.downgrade())?;
-        todo!("panic when reference doesn't point to this heap");
         Some(self.upgrade(new_ptr).unwrap())
     }
 

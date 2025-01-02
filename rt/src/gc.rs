@@ -232,7 +232,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let LuaPtrDisplay { ptr, heap } = self;
 
-        if let Some(value) = heap.get(*ptr) {
+        if let Some(value) = heap.get(**ptr) {
             write!(f, "{value}")?;
         }
 

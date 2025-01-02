@@ -326,10 +326,16 @@ where
             Value::Float(_) => registry.get_gc(Float),
             Value::String(_) => registry.get_gc(String),
             Value::Function(_) => registry.get_gc(Function),
-            Value::Table(LuaPtr(t)) => heap.get(t).ok_or(AlreadyDroppedError)?.metatable().copied(),
-            Value::Userdata(LuaPtr(t)) => {
-                heap.get(t).ok_or(AlreadyDroppedError)?.metatable().copied()
-            }
+            Value::Table(LuaPtr(t)) => heap
+                .get(*t)
+                .ok_or(AlreadyDroppedError)?
+                .metatable()
+                .copied(),
+            Value::Userdata(LuaPtr(t)) => heap
+                .get(*t)
+                .ok_or(AlreadyDroppedError)?
+                .metatable()
+                .copied(),
         };
 
         Ok(r)
