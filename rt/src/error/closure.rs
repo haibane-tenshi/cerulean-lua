@@ -31,16 +31,16 @@ impl MissingFunction {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct UpvalueCountMismatch {
+pub struct CapturesMismatch {
     pub expected: usize,
     pub closure: usize,
 }
 
-impl UpvalueCountMismatch {
+impl CapturesMismatch {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
 
-        let UpvalueCountMismatch { expected, closure } = self;
+        let CapturesMismatch { expected, closure } = self;
 
         let mut diag = Diagnostic::error().with_message(format!(
             "function expected {expected} upvalues but closure provided {closure} upvalues instead"
@@ -58,7 +58,7 @@ impl UpvalueCountMismatch {
 pub enum MalformedClosureError {
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
-    CapturesMismatch(UpvalueCountMismatch),
+    CapturesMismatch(CapturesMismatch),
 }
 
 impl From<MissingChunk> for MalformedClosureError {
@@ -73,8 +73,8 @@ impl From<MissingFunction> for MalformedClosureError {
     }
 }
 
-impl From<UpvalueCountMismatch> for MalformedClosureError {
-    fn from(value: UpvalueCountMismatch) -> Self {
+impl From<CapturesMismatch> for MalformedClosureError {
+    fn from(value: CapturesMismatch) -> Self {
         MalformedClosureError::CapturesMismatch(value)
     }
 }

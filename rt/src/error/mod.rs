@@ -21,7 +21,7 @@ use crate::value::{Refs, Strong, StrongValue, Types, Value};
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::AlreadyDroppedError;
 pub use borrow::BorrowError;
-pub use closure::{MalformedClosureError, MissingChunk, MissingFunction, UpvalueCountMismatch};
+pub use closure::{CapturesMismatch, MalformedClosureError, MissingChunk, MissingFunction};
 pub use diagnostic::Diagnostic;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
@@ -41,7 +41,7 @@ pub enum RuntimeError<Value> {
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
     OutOfBoundsStack(OutOfBoundsStack),
-    UpvalueCountMismatch(UpvalueCountMismatch),
+    UpvalueCountMismatch(CapturesMismatch),
     Signature(SignatureError),
     Thread(ThreadError),
     OpCode(OpCodeError),
@@ -143,8 +143,8 @@ impl<Value> From<OutOfBoundsStack> for RuntimeError<Value> {
     }
 }
 
-impl<Value> From<UpvalueCountMismatch> for RuntimeError<Value> {
-    fn from(value: UpvalueCountMismatch) -> Self {
+impl<Value> From<CapturesMismatch> for RuntimeError<Value> {
+    fn from(value: CapturesMismatch) -> Self {
         RuntimeError::UpvalueCountMismatch(value)
     }
 }

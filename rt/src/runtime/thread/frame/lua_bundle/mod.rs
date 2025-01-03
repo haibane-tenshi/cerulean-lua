@@ -134,7 +134,7 @@ where
         chunk_cache: &dyn ChunkCache,
         mut stack: StackGuard<Ty>,
     ) -> Result<Self, MalformedClosureError> {
-        use crate::error::{MissingChunk, MissingFunction, UpvalueCountMismatch};
+        use crate::error::{CapturesMismatch, MissingChunk, MissingFunction};
         use repr::chunk::Function;
 
         let cls = &heap[&closure];
@@ -151,7 +151,7 @@ where
         // Verify that closure provides exact same number of upvalues
         // that is expected by the function.
         if signature.upvalue_count != cls.upvalues().len() {
-            let err = UpvalueCountMismatch {
+            let err = CapturesMismatch {
                 expected: signature.upvalue_count,
                 closure: cls.upvalues().len(),
             };
