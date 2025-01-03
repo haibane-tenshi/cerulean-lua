@@ -1,7 +1,6 @@
 pub mod backtrace;
 pub mod builtins;
 pub mod chunk_cache;
-pub mod convert;
 pub mod error;
 pub mod ffi;
 pub mod gc;
