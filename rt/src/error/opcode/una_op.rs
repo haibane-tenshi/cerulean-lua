@@ -20,6 +20,7 @@ impl Cause {
         FileId: Clone,
     {
         use super::{ExtraDiagnostic, TotalSpan};
+        use crate::runtime::thread::frame::Event;
         use codespan_reporting::diagnostic::Label;
 
         let Cause { arg } = self;
@@ -43,9 +44,19 @@ impl Cause {
             }
         }
 
+        let metamethod = {
+            let event: Event = match op {
+                UnaOp::AriNeg => Event::Neg,
+                UnaOp::BitNot => Event::BitNot,
+                UnaOp::StrLen => Event::Len,
+                UnaOp::LogNot => unimplemented!(),
+            };
+            event.to_metamethod().to_str()
+        };
+
         if let Type::Table = arg {
             diag.with_help([
-                format!("by default `{op}` cannot be applied to tables,\nhowever defining <?> metamethod will allow you to do it"),
+                format!("by default `{op}` cannot be applied to tables,\nhowever defining `{metamethod}` metamethod will allow you to do it"),
             ])
         }
 
