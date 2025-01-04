@@ -26,7 +26,7 @@ pub use diagnostic::Diagnostic;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use signature::SignatureError;
-pub use thread::{ResumeDeadThread, ThreadError, ThreadPanicked};
+pub use thread::{ReentryFailure, ThreadError, ThreadPanicked};
 pub use value::ValueError;
 
 pub type RtError<Ty> = RuntimeError<Value<Strong, Ty>>;

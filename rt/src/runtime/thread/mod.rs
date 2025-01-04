@@ -310,9 +310,9 @@ where
         };
 
         if let Some(status) = dead_status {
-            use crate::error::thread::ResumeDeadThread;
+            use crate::error::thread::ReentryFailure;
 
-            let err = ResumeDeadThread {
+            let err = ReentryFailure {
                 thread_id: self.ctx.current_thread_id,
                 status,
             };
@@ -521,22 +521,16 @@ where
     Ty: Types,
 {
     first_callable: Callable<Strong, Ty>,
-    stack: Stack<Ty>,
 }
 
 impl<Ty> ThreadImpetus<Ty>
 where
     Ty: Types,
 {
-    pub(super) fn new(callable: Callable<Strong, Ty>, heap: &mut Heap<Ty>) -> Self {
+    pub(super) fn new(callable: Callable<Strong, Ty>) -> Self {
         ThreadImpetus {
             first_callable: callable,
-            stack: Stack::new(heap),
         }
-    }
-
-    pub(super) fn stack(&mut self) -> StackGuard<'_, Ty> {
-        self.stack.full_guard()
     }
 }
 
@@ -545,15 +539,12 @@ where
     Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    pub(super) fn init(self, heap: &mut Heap<Ty>) -> Thread<Ty> {
+    pub(super) fn init(self, mut stack: Stack<Ty>, heap: &mut Heap<Ty>) -> Thread<Ty> {
         use crate::ffi::delegate::RuntimeView;
         use crate::gc::LuaPtr;
         use crate::value::Value;
 
-        let ThreadImpetus {
-            first_callable,
-            mut stack,
-        } = self;
+        let ThreadImpetus { first_callable } = self;
 
         let frame = match first_callable {
             Callable::Rust(LuaPtr(callable)) => {

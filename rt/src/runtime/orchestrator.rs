@@ -112,29 +112,25 @@ impl<Ty> ThreadStore<Ty>
 where
     Ty: Types,
 {
-    fn new_thread(&mut self, heap: &mut Heap<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
+    fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
         let id = ThreadId(self.threads.len());
 
         self.threads.push(ThreadState::Startup);
-        self.nursery.insert(id, ThreadImpetus::new(callable, heap));
+        self.nursery.insert(id, ThreadImpetus::new(callable));
 
         id
     }
 
     pub(super) fn stack_of(&mut self, id: ThreadId) -> Option<StackGuard<'_, Ty>> {
         match self.threads.get_mut(id.0)? {
-            ThreadState::Startup => {
-                let stack = self
-                    .nursery
-                    .get_mut(&id)
-                    .expect("startup threads should be placed in nursery")
-                    .stack();
-
-                Some(stack)
-            }
+            ThreadState::Startup => None,
             ThreadState::Running(thread) => Some(thread.stack()),
             ThreadState::Evaluating => None,
         }
+    }
+
+    fn get(&self, thread_id: ThreadId) -> Option<&ThreadState<Ty>> {
+        self.threads.get(thread_id.0)
     }
 
     fn thread(&self, thread_id: ThreadId) -> Option<&Thread<Ty>> {
@@ -182,20 +178,19 @@ where
     Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    fn init(&mut self, thread_id: ThreadId, heap: &mut Heap<Ty>) {
-        let Some(place) = self.threads.get_mut(thread_id.0) else {
-            return;
-        };
+    fn init(&mut self, startup: ThreadId, stack: Stack<Ty>, heap: &mut Heap<Ty>) {
+        let place = self
+            .threads
+            .get_mut(startup.0)
+            .expect("thread should exist");
 
-        if !place.is_starting() {
-            return;
-        }
+        assert!(place.is_starting(), "can only initialize a thread once");
 
         let impetus = self
             .nursery
-            .remove(&thread_id)
+            .remove(&startup)
             .expect("starting threads should be placed in nursery");
-        let thread = impetus.init(heap);
+        let thread = impetus.init(stack, heap);
 
         *place = ThreadState::Running(thread);
     }
@@ -248,8 +243,8 @@ where
         }
     }
 
-    pub fn new_thread(&mut self, heap: &mut Heap<Ty>, callable: Callable<Strong, Ty>) -> ThreadId {
-        self.store.new_thread(heap, callable)
+    pub fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
+        self.store.new_thread(callable)
     }
 
     pub fn stack(&mut self) -> StackGuard<'_, Ty> {
@@ -304,15 +299,26 @@ where
             todo!()
         }
 
-        let mut temp_stack = self.temp_stack.full_guard();
-
         let mut current = thread_id;
         let mut response = Response::Resume;
 
         loop {
-            self.store.init(current, &mut ctx.core.gc);
+            match self.store.get(current) {
+                None => todo!(),
+                Some(ThreadState::Evaluating) => unreachable!(),
+                Some(ThreadState::Running(_)) => (),
+                Some(ThreadState::Startup) => {
+                    let new_stack = Stack::new(&mut ctx.core.gc);
+                    let stack = std::mem::replace(&mut self.temp_stack, new_stack);
+
+                    self.store.init(current, stack, &mut ctx.core.gc);
+                }
+            }
+
             let r = self.store.with_current(current, |store, thread| {
                 use super::thread::stack::copy;
+
+                let mut temp_stack = self.temp_stack.full_guard();
 
                 // We use orchestrator's stack as an intermediate destination.
                 copy(temp_stack.reborrow(), thread.stack(), &mut ctx.core.gc);
@@ -320,13 +326,13 @@ where
                 let mut ctx = ctx.thread_context(current, store, &mut self.upvalue_cache);
                 match ctx.eval(thread, response) {
                     Ok(ThreadControl::Resume { thread: thread_id }) => {
-                        copy(thread.stack(), temp_stack.reborrow(), &mut ctx.core.gc);
+                        copy(thread.stack(), temp_stack, &mut ctx.core.gc);
 
                         self.stack.push(current);
                         ControlFlow::Continue((thread_id, Response::Resume))
                     }
                     Ok(ThreadControl::Yield | ThreadControl::Return) => {
-                        copy(thread.stack(), temp_stack.reborrow(), &mut ctx.core.gc);
+                        copy(thread.stack(), temp_stack, &mut ctx.core.gc);
 
                         match self.stack.pop() {
                             Some(thread) => {

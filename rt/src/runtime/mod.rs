@@ -315,7 +315,7 @@ where
     Ty: Types,
 {
     pub fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
-        self.orchestrator.new_thread(&mut self.core.gc, callable)
+        self.orchestrator.new_thread(callable)
     }
 
     pub fn contains(&self, thread_id: ThreadId) -> bool {
