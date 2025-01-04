@@ -243,11 +243,11 @@ where
         }
     }
 
-    pub fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
+    pub(crate) fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
         self.store.new_thread(callable)
     }
 
-    pub fn stack(&mut self) -> StackGuard<'_, Ty> {
+    pub(crate) fn stack(&mut self) -> StackGuard<'_, Ty> {
         self.temp_stack.full_guard()
     }
 
@@ -280,81 +280,9 @@ where
     pub(crate) fn thread(&self, thread_id: ThreadId) -> Option<&Thread<Ty>> {
         self.store.thread(thread_id)
     }
-}
 
-impl<Ty> Orchestrator<Ty>
-where
-    Ty: Types<LuaClosure = Closure<Ty>>,
-    Ty::RustClosure: DLuaFfi<Ty>,
-{
-    pub(crate) fn enter(
-        &mut self,
-        mut ctx: Context<Ty>,
-        thread_id: ThreadId,
-    ) -> Result<(), ThreadError> {
-        use crate::ffi::delegate::Response;
-        use std::ops::ControlFlow;
-
-        if !self.stack.is_empty() {
-            todo!()
-        }
-
-        let mut current = thread_id;
-        let mut response = Response::Resume;
-
-        loop {
-            match self.store.get(current) {
-                None => todo!(),
-                Some(ThreadState::Evaluating) => unreachable!(),
-                Some(ThreadState::Running(_)) => (),
-                Some(ThreadState::Startup) => {
-                    let new_stack = Stack::new(&mut ctx.core.gc);
-                    let stack = std::mem::replace(&mut self.temp_stack, new_stack);
-
-                    self.store.init(current, stack, &mut ctx.core.gc);
-                }
-            }
-
-            let r = self.store.with_current(current, |store, thread| {
-                use super::thread::stack::copy;
-
-                let mut temp_stack = self.temp_stack.full_guard();
-
-                // We use orchestrator's stack as an intermediate destination.
-                copy(temp_stack.reborrow(), thread.stack(), &mut ctx.core.gc);
-
-                let mut ctx = ctx.thread_context(current, store, &mut self.upvalue_cache);
-                match ctx.eval(thread, response) {
-                    Ok(ThreadControl::Resume { thread: thread_id }) => {
-                        copy(thread.stack(), temp_stack, &mut ctx.core.gc);
-
-                        self.stack.push(current);
-                        ControlFlow::Continue((thread_id, Response::Resume))
-                    }
-                    Ok(ThreadControl::Yield | ThreadControl::Return) => {
-                        copy(thread.stack(), temp_stack, &mut ctx.core.gc);
-
-                        match self.stack.pop() {
-                            Some(thread) => {
-                                ControlFlow::Continue((thread, Response::Evaluated(Ok(()))))
-                            }
-                            None => ControlFlow::Break(Ok(())),
-                        }
-                    }
-                    Err(err) => match self.stack.pop() {
-                        Some(thread) => {
-                            ControlFlow::Continue((thread, Response::Evaluated(Err(err.into()))))
-                        }
-                        None => ControlFlow::Break(Err(err)),
-                    },
-                }
-            });
-
-            (current, response) = match r {
-                ControlFlow::Break(res) => break res,
-                ControlFlow::Continue(t) => t,
-            };
-        }
+    pub(crate) fn push(&mut self, thread_id: ThreadId) {
+        self.stack.push(thread_id)
     }
 }
 
@@ -371,20 +299,6 @@ impl<Ty> Context<'_, Ty>
 where
     Ty: Types,
 {
-    // pub(crate) fn reborrow(&mut self) -> Context<'_, Ty> {
-    //     let Context {
-    //         core,
-    //         internal_cache,
-    //         chunk_cache,
-    //     } = self;
-
-    //     Context {
-    //         core,
-    //         internal_cache,
-    //         chunk_cache: *chunk_cache,
-    //     }
-    // }
-
     fn thread_context<'s>(
         &'s mut self,
         current_thread_id: ThreadId,
@@ -404,6 +318,82 @@ where
             current_thread_id,
             thread_store,
             upvalue_cache,
+        }
+    }
+}
+
+impl<Ty> Context<'_, Ty>
+where
+    Ty: Types<LuaClosure = Closure<Ty>>,
+    Ty::RustClosure: DLuaFfi<Ty>,
+{
+    pub(crate) fn eval(&mut self, orch: &mut Orchestrator<Ty>) -> Result<(), ThreadError> {
+        use crate::ffi::delegate::Response;
+        use std::ops::ControlFlow;
+
+        assert!(
+            orch.stack.len() <= 1,
+            "suspected attempt at resuming panicked orchestrator; currently unsupported"
+        );
+
+        let Some(mut current) = orch.stack.pop() else {
+            return Ok(());
+        };
+
+        let mut response = Response::Resume;
+
+        loop {
+            match orch.store.get(current) {
+                None => todo!(),
+                Some(ThreadState::Evaluating) => unreachable!(),
+                Some(ThreadState::Running(_)) => (),
+                Some(ThreadState::Startup) => {
+                    let new_stack = Stack::new(&mut self.core.gc);
+                    let stack = std::mem::replace(&mut orch.temp_stack, new_stack);
+
+                    orch.store.init(current, stack, &mut self.core.gc);
+                }
+            }
+
+            let r = orch.store.with_current(current, |store, thread| {
+                use super::thread::stack::copy;
+
+                let mut temp_stack = orch.temp_stack.full_guard();
+
+                // We use orchestrator's stack as an intermediate destination.
+                copy(temp_stack.reborrow(), thread.stack(), &mut self.core.gc);
+
+                let mut ctx = self.thread_context(current, store, &mut orch.upvalue_cache);
+                match ctx.eval(thread, response) {
+                    Ok(ThreadControl::Resume { thread: thread_id }) => {
+                        copy(thread.stack(), temp_stack, &mut self.core.gc);
+
+                        orch.stack.push(current);
+                        ControlFlow::Continue((thread_id, Response::Resume))
+                    }
+                    Ok(ThreadControl::Yield | ThreadControl::Return) => {
+                        copy(thread.stack(), temp_stack, &mut self.core.gc);
+
+                        match orch.stack.pop() {
+                            Some(thread) => {
+                                ControlFlow::Continue((thread, Response::Evaluated(Ok(()))))
+                            }
+                            None => ControlFlow::Break(Ok(())),
+                        }
+                    }
+                    Err(err) => match orch.stack.pop() {
+                        Some(thread) => {
+                            ControlFlow::Continue((thread, Response::Evaluated(Err(err.into()))))
+                        }
+                        None => ControlFlow::Break(Err(err)),
+                    },
+                }
+            });
+
+            (current, response) = match r {
+                ControlFlow::Break(res) => break res,
+                ControlFlow::Continue(t) => t,
+            };
         }
     }
 }

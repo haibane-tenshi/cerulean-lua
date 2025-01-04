@@ -408,7 +408,8 @@ where
     C: ChunkCache,
 {
     pub fn resume(&mut self, thread_id: ThreadId) -> Result<(), ThreadError> {
-        let (ctx, orchestrator) = self.context();
-        orchestrator.enter(ctx, thread_id)
+        let (mut ctx, orchestrator) = self.context();
+        orchestrator.push(thread_id);
+        ctx.eval(orchestrator)
     }
 }
