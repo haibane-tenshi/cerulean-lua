@@ -281,6 +281,17 @@ where
     }
 }
 
+impl<Ty> Debug for Cache<Ty>
+where
+    Ty: Types,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cache")
+            .field("events", &self.events)
+            .finish()
+    }
+}
+
 pub struct Runtime<Ty, C>
 where
     Ty: Types,

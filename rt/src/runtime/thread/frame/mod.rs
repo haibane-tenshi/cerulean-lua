@@ -35,7 +35,7 @@ where
         let mut active_frame = self.activate(ctx.reborrow())?;
 
         let r = active_frame
-            .enter()
+            .eval()
             .map(|request| match request {
                 ChangeFrame::Return(slot) => {
                     let mut stack = ctx.stack.lua_frame();

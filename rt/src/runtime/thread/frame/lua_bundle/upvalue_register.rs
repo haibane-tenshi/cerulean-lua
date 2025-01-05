@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use bitvec::prelude::BitVec;
 
 use gc::{GcCell, RootCell};
@@ -99,6 +101,20 @@ where
         mirror.extend_from_slice(self.values.as_ref());
 
         self.unsync_tag.fill(false);
+    }
+}
+
+impl<Ty> Debug for UpvalueRegister<Ty>
+where
+    Ty: Types,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpvalueRegister")
+            .field("values", &self.values)
+            .field("write_tag", &self.write_tag)
+            .field("unsync_tag", &self.unsync_tag)
+            .field("mirror", &self.mirror)
+            .finish()
     }
 }
 

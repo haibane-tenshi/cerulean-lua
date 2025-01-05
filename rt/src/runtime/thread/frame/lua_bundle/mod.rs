@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::ops::ControlFlow;
 
 use gc::{Root, RootCell};
-use repr::chunk::{Chunk, ClosureRecipe};
+use repr::chunk::ClosureRecipe;
 use repr::index::{ConstId, InstrId, InstrOffset, RecipeId, StackSlot};
 use repr::literal::Literal;
 use repr::opcode::{BinOp, EqBinOp, OpCode, RelBinOp, UnaOp};
@@ -243,13 +243,15 @@ where
 
         let Frame {
             closure,
-            ip,
+            ip: store_ip,
             register_variadic,
         } = self;
 
+        let ip = *store_ip;
+
+        let recipes = &chunk.closure_recipes;
         let constants = &chunk.constants;
         let opcodes = &function.opcodes;
-        // let stack = stack.guard(stack_start).unwrap();
 
         let register_upvalue = {
             let stack = if origin == current_thread_id {
@@ -279,7 +281,8 @@ where
             core,
             internal_cache,
             closure,
-            chunk,
+            store_ip,
+            recipes,
             constants,
             opcodes,
             ip,
@@ -365,15 +368,16 @@ where
     Ty: Types,
 {
     current_thread_id: ThreadId,
-    closure: &'rt Root<Closure<Ty>>,
     core: &'rt mut Core<Ty>,
     internal_cache: &'rt Cache<Ty>,
-    chunk: &'rt Chunk,
+    recipes: &'rt TiSlice<RecipeId, ClosureRecipe>,
     constants: &'rt TiSlice<ConstId, Literal>,
     opcodes: &'rt TiSlice<InstrId, OpCode>,
-    // Not sure about this one.
-    // It might be better to keep a copy internally and only sync when frame is deactivated.
-    ip: &'rt mut InstrId,
+
+    closure: &'rt Root<Closure<Ty>>,
+    store_ip: &'rt mut InstrId,
+
+    ip: InstrId,
     stack: StackGuard<'rt, Ty>,
     register_upvalue: &'rt mut UpvalueRegister<Ty>,
     register_variadic: &'rt [WeakValue<Ty>],
@@ -392,25 +396,25 @@ where
     }
 
     fn current_ip(&self) -> InstrId {
-        *self.ip - 1
+        self.ip - 1
     }
 
     fn increment_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
-        let err = IpOutOfBounds(*self.ip);
+        let err = IpOutOfBounds(self.ip);
 
         let new_ip = self.ip.checked_add(offset).ok_or(err)?;
         if new_ip > self.opcodes.next_key() {
             Err(err)
         } else {
-            *self.ip = new_ip;
+            self.ip = new_ip;
             Ok(())
         }
     }
 
     fn decrement_ip(&mut self, offset: InstrOffset) -> Result<(), IpOutOfBounds> {
-        let err = IpOutOfBounds(*self.ip);
+        let err = IpOutOfBounds(self.ip);
 
-        *self.ip = self.ip.checked_sub_offset(offset).ok_or(err)?;
+        self.ip = self.ip.checked_sub_offset(offset).ok_or(err)?;
         Ok(())
     }
 
@@ -458,14 +462,18 @@ where
     Ty: Types<LuaClosure = Closure<Ty>>,
     WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
-    pub(crate) fn enter(&mut self) -> Result<ChangeFrame<Ty>, RefAccessOrError<opcode_err::Error>> {
-        loop {
+    pub(crate) fn eval(&mut self) -> Result<ChangeFrame<Ty>, RefAccessOrError<opcode_err::Error>> {
+        let r = loop {
             match self.step() {
                 Ok(ControlFlow::Continue(())) => (),
                 Ok(ControlFlow::Break(command)) => break Ok(command),
                 Err(err) => break Err(err),
             }
-        }
+        };
+
+        *self.store_ip = self.ip;
+
+        r
     }
 
     pub(super) fn step(
@@ -606,7 +614,7 @@ where
                     .map_br(Into::into)
             }
             Jump { offset } => {
-                *self.ip -= InstrOffset(1);
+                self.ip -= InstrOffset(1);
                 self.increment_ip(offset)?;
 
                 ControlFlow::Continue(())
@@ -615,14 +623,14 @@ where
                 let [value] = self.stack.lua_frame().take1()?;
 
                 if value.to_bool() == cond {
-                    *self.ip -= InstrOffset(1);
+                    self.ip -= InstrOffset(1);
                     self.increment_ip(offset)?;
                 }
 
                 ControlFlow::Continue(())
             }
             Loop { offset } => {
-                *self.ip -= InstrOffset(1);
+                self.ip -= InstrOffset(1);
                 self.decrement_ip(offset)?;
 
                 ControlFlow::Continue(())
@@ -1040,11 +1048,11 @@ where
     }
 
     pub fn next_opcode(&mut self) -> Option<OpCode> {
-        let r = *self.opcodes.get(*self.ip)?;
+        let r = *self.opcodes.get(self.ip)?;
 
         tracing::trace!(ip = self.ip.0, opcode = %r, "next opcode");
 
-        *self.ip += 1;
+        self.ip += 1;
 
         Some(r)
     }
@@ -1056,8 +1064,8 @@ where
         use crate::runtime::FunctionPtr;
 
         let recipe = self
-            .chunk
-            .get_recipe(recipe_id)
+            .recipes
+            .get(recipe_id)
             .ok_or(opcode_err::MissingRecipe(recipe_id))?;
 
         let ClosureRecipe {
@@ -1122,13 +1130,17 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ActiveFrame")
+            .field("current_thread_id", &self.current_thread_id)
             .field("core", &self.core)
-            .field("closure", &self.closure)
-            .field("chunk", &self.chunk)
+            .field("internal_cache", &self.internal_cache)
+            .field("recipes", &self.recipes)
             .field("constants", &self.constants)
             .field("opcodes", &self.opcodes)
+            .field("closure", &self.closure)
+            .field("store_ip", &self.store_ip)
             .field("ip", &self.ip)
             .field("stack", &self.stack)
+            .field("register_upvalue", &self.register_upvalue)
             .field("register_variadic", &self.register_variadic)
             .finish()
     }
