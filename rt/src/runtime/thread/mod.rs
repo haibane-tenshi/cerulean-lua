@@ -363,8 +363,8 @@ where
                 break Ok(ThreadControl::Return);
             };
 
-            let ctx = self.ctx.frame_context(&mut self.thread.stack);
-            let ctrl = frame.enter(ctx, prompt)?;
+            let mut ctx = self.ctx.frame_context(&mut self.thread.stack);
+            let ctrl = ctx.eval(frame, prompt)?;
 
             prompt = match self.process_control(ctrl)? {
                 Control::Frame(prompt) => prompt,
@@ -512,8 +512,8 @@ where
             // Clear portion of the stack belonging to other functions.
             self.thread.stack.truncate(upper_bound);
 
-            let ctx = self.ctx.frame_context(&mut self.thread.stack);
-            match frame.process_error(ctx, error) {
+            let mut ctx = self.ctx.frame_context(&mut self.thread.stack);
+            match ctx.eval_error(frame, error) {
                 Ok(request) => {
                     self.thread.frames.truncate(i + 1);
                     return Ok(request);

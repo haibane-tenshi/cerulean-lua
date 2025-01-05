@@ -134,21 +134,6 @@ where
         self.stack_start
     }
 
-    pub(super) fn process_error(
-        &mut self,
-        mut ctx: Context<Ty>,
-        err: RtError<Ty>,
-    ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
-        use crate::ffi::delegate::Response;
-
-        let Bundle::Rust(rust_bundle) = &mut self.bundle else {
-            return Err(err);
-        };
-
-        let ctx = ctx.runtime_view(self.stack_start).unwrap();
-        rust_bundle.enter(ctx, Response::Evaluated(Err(err)))
-    }
-
     pub(super) fn backtrace(
         &self,
         heap: &Heap<Ty>,
@@ -212,52 +197,6 @@ where
     }
 }
 
-impl<Ty> Frame<Ty>
-where
-    Ty: Types<LuaClosure = Closure<Ty>>,
-{
-    pub(super) fn enter(
-        &mut self,
-        mut ctx: Context<Ty>,
-        resume: Prompt,
-    ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
-        let Frame {
-            bundle,
-            stack_start,
-            event,
-        } = self;
-
-        let stack_start = *stack_start;
-
-        let result = match bundle {
-            Bundle::Lua(frame) => {
-                let ctx = ctx
-                    .lua_context(stack_start)
-                    .expect("thread should preserve stack space of suspended frames");
-                frame.enter(ctx).map(Control::Frame)
-            }
-            Bundle::Rust(frame) => {
-                let rt = ctx
-                    .runtime_view(stack_start)
-                    .expect("thread should preserve stack space of suspended frames");
-                frame.enter(rt, resume.into())
-            }
-        }?;
-
-        if matches!(result, Control::Frame(FrameControl::Return)) {
-            if let Some(event) = *event {
-                ctx.stack
-                    .guard(stack_start)
-                    .unwrap()
-                    .lua_frame()
-                    .adjust_event_returns(event);
-            }
-        }
-
-        Ok(result)
-    }
-}
-
 pub(crate) struct Context<'a, Ty>
 where
     Ty: Types,
@@ -317,6 +256,72 @@ where
         };
 
         Some(r)
+    }
+}
+
+impl<Ty> Context<'_, Ty>
+where
+    Ty: Types<LuaClosure = Closure<Ty>>,
+{
+    pub(super) fn eval(
+        &mut self,
+        frame: &mut Frame<Ty>,
+        resume: Prompt,
+    ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
+        let Frame {
+            bundle,
+            stack_start,
+            event,
+        } = frame;
+
+        let stack_start = *stack_start;
+
+        let result = match bundle {
+            Bundle::Lua(frame) => {
+                let ctx = self
+                    .lua_context(stack_start)
+                    .expect("thread should preserve stack space of suspended frames");
+                frame.enter(ctx).map(Control::Frame)
+            }
+            Bundle::Rust(frame) => {
+                let mut ctx = self
+                    .runtime_view(stack_start)
+                    .expect("thread should preserve stack space of suspended frames");
+                ctx.eval(frame, resume.into())
+            }
+        }?;
+
+        if matches!(result, Control::Frame(FrameControl::Return)) {
+            if let Some(event) = *event {
+                self.stack
+                    .guard(stack_start)
+                    .unwrap()
+                    .lua_frame()
+                    .adjust_event_returns(event);
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+impl<Ty> Context<'_, Ty>
+where
+    Ty: Types,
+{
+    pub(super) fn eval_error(
+        &mut self,
+        frame: &mut Frame<Ty>,
+        err: RtError<Ty>,
+    ) -> Result<Control<FrameControl<Ty>, DelegateThreadControl>, RtError<Ty>> {
+        use crate::ffi::delegate::Response;
+
+        let Bundle::Rust(rust_bundle) = &mut frame.bundle else {
+            return Err(err);
+        };
+
+        let mut ctx = self.runtime_view(frame.stack_start).unwrap();
+        ctx.eval(rust_bundle, Response::Evaluated(Err(err)))
     }
 }
 
