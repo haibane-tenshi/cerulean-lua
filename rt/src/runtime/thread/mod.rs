@@ -70,6 +70,7 @@ pub(crate) mod stack;
 
 use crate::backtrace::Backtrace;
 use crate::chunk_cache::ChunkCache;
+use crate::error::thread::ReentryFailure;
 use crate::error::{RtError, ThreadError, ThreadPanicked};
 use crate::ffi::delegate::Response;
 use crate::ffi::DLuaFfi;
@@ -148,6 +149,13 @@ where
             stack,
         }
     }
+
+    fn activate<'b>(&'b mut self, thread: &'b mut Thread<Ty>) -> ActiveContext<'b, Ty> {
+        ActiveContext {
+            ctx: self.reborrow(),
+            thread,
+        }
+    }
 }
 
 impl<Ty> Context<'_, Ty>
@@ -160,12 +168,7 @@ where
         thread: &mut Thread<Ty>,
         response: Response<Ty>,
     ) -> Result<ThreadControl, ThreadError> {
-        let mut active = ActiveThread {
-            ctx: self.reborrow(),
-            thread,
-        };
-
-        active.enter(response)
+        self.activate(thread).eval(response)
     }
 }
 
@@ -251,6 +254,27 @@ where
     pub(crate) fn original_error(&self) -> Option<&RtError<Ty>> {
         self.panicked_with.as_ref().map(|errors| &errors.original)
     }
+
+    fn reentry_check(&self, thread_id: ThreadId) -> Result<(), ReentryFailure> {
+        use crate::error::thread::ThreadStatus;
+
+        // Check it thread is resumable.
+        let dead_status = match self.status() {
+            Status::Normal => None,
+            Status::Finished => Some(ThreadStatus::Finished),
+            Status::Panicked => Some(ThreadStatus::Panicked),
+        };
+
+        if let Some(status) = dead_status {
+            use crate::error::thread::ReentryFailure;
+
+            let err = ReentryFailure { thread_id, status };
+
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -286,7 +310,7 @@ where
     }
 }
 
-struct ActiveThread<'a, Ty>
+struct ActiveContext<'a, Ty>
 where
     Ty: Types,
 {
@@ -294,31 +318,23 @@ where
     thread: &'a mut Thread<Ty>,
 }
 
-impl<Ty> ActiveThread<'_, Ty>
+impl<Ty> ActiveContext<'_, Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
     Ty::RustClosure: DLuaFfi<Ty>,
 {
-    fn enter(&mut self, response: Response<Ty>) -> Result<ThreadControl, ThreadError> {
-        use crate::error::thread::ThreadStatus;
+    fn eval(&mut self, response: Response<Ty>) -> Result<ThreadControl, ThreadError> {
+        let r = self.eval_inner(response);
 
-        // Check it thread is resumable.
-        let dead_status = match self.thread.status() {
-            Status::Normal => None,
-            Status::Finished => Some(ThreadStatus::Finished),
-            Status::Panicked => Some(ThreadStatus::Panicked),
-        };
+        // Ensure that stack is properly synced before exiting.
+        // Suspended threads are expected to not cause trouble.
+        self.thread.stack.sync(&mut self.ctx.core.gc);
 
-        if let Some(status) = dead_status {
-            use crate::error::thread::ReentryFailure;
+        r
+    }
 
-            let err = ReentryFailure {
-                thread_id: self.ctx.current_thread_id,
-                status,
-            };
-
-            return Err(err.into());
-        }
+    fn eval_inner(&mut self, response: Response<Ty>) -> Result<ThreadControl, ThreadError> {
+        self.thread.reentry_check(self.ctx.current_thread_id)?;
 
         let mut prompt = match response.try_into() {
             Ok(prompt) => prompt,
@@ -328,38 +344,33 @@ where
             },
         };
 
-        let r = loop {
+        loop {
+            let err = match self.eval_regular(prompt) {
+                Ok(ctrl) => break Ok(ctrl),
+                Err(err) => err,
+            };
+
+            prompt = match self.unwind(err)? {
+                Control::Thread(ctrl) => break Ok(ctrl),
+                Control::Frame(prompt) => prompt,
+            };
+        }
+    }
+
+    fn eval_regular(&mut self, mut prompt: Prompt) -> Result<ThreadControl, RtError<Ty>> {
+        loop {
             let Some(frame) = self.thread.frames.last_mut() else {
-                self.thread.protected = Default::default();
                 break Ok(ThreadControl::Return);
             };
 
             let ctx = self.ctx.frame_context(&mut self.thread.stack);
-            let request = frame.enter(ctx, prompt);
+            let ctrl = frame.enter(ctx, prompt)?;
 
-            let result = match request {
-                Ok(ctrl) => match self.process_control(ctrl) {
-                    Ok(Control::Frame(prompt)) => Ok(prompt),
-                    Ok(Control::Thread(ctrl)) => break Ok(ctrl),
-                    Err(err) => Err(err),
-                },
-                Err(err) => Err(err),
+            prompt = match self.process_control(ctrl)? {
+                Control::Frame(prompt) => prompt,
+                Control::Thread(ctrl) => break Ok(ctrl),
             };
-
-            prompt = match result {
-                Ok(state) => state,
-                Err(err) => match self.unwind(err)? {
-                    Control::Frame(prompt) => prompt,
-                    Control::Thread(ctrl) => break Ok(ctrl),
-                },
-            }
-        };
-
-        // Ensure that stack is properly synced before exiting.
-        // Suspended threads are expected to not cause trouble.
-        self.thread.stack.sync(&mut self.ctx.core.gc);
-
-        r
+        }
     }
 
     fn process_control(
@@ -418,14 +429,10 @@ where
         &mut self,
         mut error: RtError<Ty>,
     ) -> Result<Control<Prompt, ThreadControl>, ThreadPanicked> {
-        // Unwinding loop.
-        // One problem here is that we actually invoke Rust frames in the process,
-        // which may leave us with more requests to process,
-        // which may fail and cause us to unwind again.
         loop {
             let ctrl = match self.propagate_error(error.clone()) {
                 Ok(ctrl) => ctrl,
-                Err(err) => {
+                Err(processed) => {
                     use crate::error::thread::ThreadPanicked;
 
                     debug_assert!(self.thread.panicked_with.is_none());
@@ -433,7 +440,7 @@ where
                     // Record error value inside thread and replace it with general `ThreadPanicked`.
                     let errors = Errors {
                         original: error,
-                        processed: err,
+                        processed,
                     };
                     self.thread.panicked_with = Some(errors);
 
@@ -441,6 +448,11 @@ where
                     break Err(err);
                 }
             };
+
+            // This is an unfortunate circumstance here.
+            // It is possible that in the process of handling error delegate may trigger another one by providing a bad invoking config.
+            // In this case, we go into another spin of unwinding with the new error.
+            // Note that previous panic is considered to be handled so the new error becomes the origin of panic.
             match self.process_control(ctrl) {
                 Ok(state) => break Ok(state),
                 Err(err) => {
@@ -451,7 +463,7 @@ where
     }
 }
 
-impl<Ty> ActiveThread<'_, Ty>
+impl<Ty> ActiveContext<'_, Ty>
 where
     Ty: Types,
 {
@@ -484,21 +496,19 @@ where
             return Err(error);
         }
 
-        let mut iter = self.thread.frames.iter_mut().enumerate().rev();
-        // The last frame is the one that invoked panic.
-        // Skip it.
-        let upper_bound = iter.next().unwrap().1.stack_start();
-        let mut iter = iter.scan(upper_bound, |upper_bound, (i, frame)| {
-            let r = *upper_bound;
-            *upper_bound = frame.stack_start();
-            Some((i, frame, r))
-        });
+        let iter = {
+            let mut iter = self.thread.frames.iter_mut().enumerate().rev();
+            // The last frame is the one that invoked panic.
+            // Skip it.
+            let upper_bound = iter.next().unwrap().1.stack_start();
+            iter.scan(upper_bound, |upper_bound, (i, frame)| {
+                let r = *upper_bound;
+                *upper_bound = frame.stack_start();
+                Some((i, frame, r))
+            })
+        };
 
-        loop {
-            let Some((i, frame, upper_bound)) = iter.next() else {
-                break Err(error);
-            };
-
+        for (i, frame, upper_bound) in iter {
             // Clear portion of the stack belonging to other functions.
             self.thread.stack.truncate(upper_bound);
 
@@ -506,13 +516,15 @@ where
             match frame.process_error(ctx, error) {
                 Ok(request) => {
                     self.thread.frames.truncate(i + 1);
-                    break Ok(request);
+                    return Ok(request);
                 }
                 Err(err) => {
                     error = err;
                 }
             }
         }
+
+        Err(error)
     }
 }
 
