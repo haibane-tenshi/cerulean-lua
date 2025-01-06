@@ -18,6 +18,7 @@ pub enum ThreadStatus {
     Active,
     Finished,
     Panicked,
+    NotExist,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +55,10 @@ impl ReentryFailure {
             }
             ThreadStatus::Panicked => Diagnostic::error()
                 .with_message(format!("attempt to resume panicked thread {:?}", thread_id)),
+            ThreadStatus::NotExist => Diagnostic::error().with_message(format!(
+                "attempt to resume non-existent thread {:?}",
+                thread_id
+            )),
         }
     }
 }

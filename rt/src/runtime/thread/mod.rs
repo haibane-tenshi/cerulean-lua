@@ -77,7 +77,7 @@ use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::value::{Callable, Strong, Types};
 
-use super::orchestrator::{ThreadId, ThreadStatus, ThreadStore};
+use super::orchestrator::{ThreadId, ThreadManagerGuard, ThreadStatus};
 use super::{Cache, Closure, Core};
 use frame::{Context as FrameContext, DelegateThreadControl, Frame, FrameControl, UpvalueRegister};
 use stack::{RawStackSlot, Stack};
@@ -97,8 +97,7 @@ where
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) internal_cache: &'a Cache<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
-    pub(crate) current_thread_id: ThreadId,
-    pub(crate) thread_store: &'a mut ThreadStore<Ty>,
+    pub(crate) threads: ThreadManagerGuard<'a, Ty>,
     pub(crate) upvalue_cache: &'a mut UpvalueRegister<Ty>,
 }
 
@@ -111,8 +110,7 @@ where
             core,
             internal_cache,
             chunk_cache,
-            current_thread_id,
-            thread_store,
+            threads,
             upvalue_cache,
         } = self;
 
@@ -120,8 +118,7 @@ where
             core: *core,
             internal_cache,
             chunk_cache: *chunk_cache,
-            current_thread_id: *current_thread_id,
-            thread_store,
+            threads: threads.reborrow(),
             upvalue_cache,
         }
     }
@@ -134,8 +131,7 @@ where
             core,
             internal_cache,
             chunk_cache,
-            current_thread_id,
-            thread_store,
+            threads,
             upvalue_cache,
         } = self;
 
@@ -143,8 +139,7 @@ where
             core,
             internal_cache,
             chunk_cache: *chunk_cache,
-            current_thread_id: *current_thread_id,
-            thread_store,
+            threads: threads.reborrow(),
             upvalue_cache,
             stack,
         }
@@ -334,7 +329,7 @@ where
     }
 
     fn eval_inner(&mut self, response: Response<Ty>) -> Result<ThreadControl, ThreadError> {
-        self.thread.reentry_check(self.ctx.current_thread_id)?;
+        self.thread.reentry_check(self.ctx.threads.current())?;
 
         let mut prompt = match response.try_into() {
             Ok(prompt) => prompt,
@@ -444,7 +439,7 @@ where
                     };
                     self.thread.panicked_with = Some(errors);
 
-                    let err = ThreadPanicked(self.ctx.current_thread_id);
+                    let err = ThreadPanicked(self.ctx.threads.current());
                     break Err(err);
                 }
             };

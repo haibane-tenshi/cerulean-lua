@@ -14,7 +14,7 @@ use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::{Cache, Closure, Core, Heap};
 use crate::value::{Callable, Strong, Types};
 
-use super::super::orchestrator::{ThreadId, ThreadStore};
+use super::super::orchestrator::{ThreadId, ThreadManagerGuard};
 use super::stack::{RawStackSlot, Stack, StackGuard};
 use super::{Control, Prompt, ThreadControl};
 
@@ -72,7 +72,7 @@ where
             let mut stack = if origin == ctx.current_thread_id {
                 ctx.stack
             } else {
-                ctx.thread_store
+                ctx.threads
                     .stack_of(origin)
                     .expect("threads should never get deallocated")
             };
@@ -204,8 +204,7 @@ where
     pub(crate) core: &'a mut Core<Ty>,
     pub(crate) internal_cache: &'a Cache<Ty>,
     pub(crate) chunk_cache: &'a mut dyn ChunkCache,
-    pub(crate) current_thread_id: ThreadId,
-    pub(crate) thread_store: &'a mut ThreadStore<Ty>,
+    pub(crate) threads: ThreadManagerGuard<'a, Ty>,
     pub(crate) upvalue_cache: &'a mut UpvalueRegister<Ty>,
     pub(crate) stack: &'a mut Stack<Ty>,
 }
@@ -219,8 +218,7 @@ where
             core,
             internal_cache,
             chunk_cache,
-            current_thread_id,
-            thread_store,
+            threads,
             upvalue_cache,
             stack,
         } = self;
@@ -231,8 +229,8 @@ where
             core,
             internal_cache,
             chunk_cache: *chunk_cache,
-            current_thread_id: *current_thread_id,
-            thread_store,
+            current_thread_id: threads.current(),
+            threads: threads.reborrow(),
             upvalues: upvalue_cache,
             stack,
         };

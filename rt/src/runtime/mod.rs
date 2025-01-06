@@ -420,7 +420,7 @@ where
 {
     pub fn resume(&mut self, thread_id: ThreadId) -> Result<(), ThreadError> {
         let (mut ctx, orchestrator) = self.context();
-        orchestrator.push(thread_id);
+        orchestrator.push(thread_id)?;
         ctx.eval(orchestrator)
     }
 }

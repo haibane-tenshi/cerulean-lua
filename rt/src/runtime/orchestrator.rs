@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::chunk_cache::ChunkCache;
+use crate::error::thread::ReentryFailure;
 use crate::error::ThreadError;
 use crate::ffi::DLuaFfi;
 use crate::value::{Callable, Strong, Types};
@@ -26,68 +27,68 @@ impl Display for ThreadId {
     }
 }
 
-#[expect(clippy::large_enum_variant)]
-enum ThreadState<Ty>
-where
-    Ty: Types,
-{
+enum State<T> {
     /// Thread is not yet started and is located in nursery.
     Startup,
 
     /// Thread is suspended in the middle of evaluation.
     ///
     /// It is possible for it to be finished.
-    Running(Thread<Ty>),
-
-    /// Thread is currently evaluating.
-    ///
-    /// At most one thread should be marked this way.
-    ///
-    /// Due to borrow conflicts
-    /// (Lua frames may need mutable access to *any* thread stack which is caused by upvalue behavior)
-    /// we need to move the thread out of structure for evaluation.
-    Evaluating,
+    Running(T),
 }
 
-impl<Ty> ThreadState<Ty>
-where
-    Ty: Types,
-{
-    // fn as_thread_mut(&mut self) -> Option<&mut Thread<Ty>> {
-    //     match self {
-    //         ThreadState::Running(thread) => Some(thread),
-    //         ThreadState::Startup | ThreadState::Evaluating => None,
-    //     }
-    // }
-
-    fn take(&mut self) -> Option<Thread<Ty>> {
-        use std::mem::replace;
-
-        match replace(self, ThreadState::Evaluating) {
-            ThreadState::Running(thread) => Some(thread),
-            state => {
-                let _ = replace(self, state);
-                None
-            }
+impl<T> State<T> {
+    fn as_ref(&self) -> State<&T> {
+        match self {
+            State::Startup => State::Startup,
+            State::Running(t) => State::Running(t),
         }
     }
 
-    #[allow(clippy::result_large_err)]
-    fn place(&mut self, thread: Thread<Ty>) -> Result<(), Thread<Ty>> {
-        if self.is_evaluating() {
-            let _ = std::mem::replace(self, ThreadState::Running(thread));
-            Ok(())
-        } else {
-            Err(thread)
+    fn as_mut(&mut self) -> State<&mut T> {
+        match self {
+            State::Startup => State::Startup,
+            State::Running(t) => State::Running(t),
+        }
+    }
+
+    fn as_option_mut(&mut self) -> Option<&mut T> {
+        self.as_mut().into_option()
+    }
+
+    fn into_option(self) -> Option<T> {
+        match self {
+            State::Startup => None,
+            State::Running(t) => Some(t),
         }
     }
 
     fn is_starting(&self) -> bool {
-        matches!(self, ThreadState::Startup)
+        matches!(self, State::Startup)
     }
+}
 
-    fn is_evaluating(&self) -> bool {
-        matches!(self, ThreadState::Evaluating)
+enum EvalState<T> {
+    Current,
+    Startup,
+    Running(T),
+}
+
+impl<T> EvalState<T> {
+    fn into_option(self) -> Option<T> {
+        match self {
+            EvalState::Current | EvalState::Startup => None,
+            EvalState::Running(t) => Some(t),
+        }
+    }
+}
+
+impl<T> From<State<T>> for EvalState<T> {
+    fn from(value: State<T>) -> Self {
+        match value {
+            State::Startup => EvalState::Startup,
+            State::Running(t) => EvalState::Running(t),
+        }
     }
 }
 
@@ -95,7 +96,7 @@ pub(crate) struct ThreadStore<Ty>
 where
     Ty: Types,
 {
-    threads: Vec<ThreadState<Ty>>,
+    threads: Vec<State<Thread<Ty>>>,
 
     /// Newly created threads.
     ///
@@ -106,6 +107,8 @@ where
     /// This isn't a problem for any other suspension point:
     /// Rust frames are responsible for controlling their allotted stack space.
     nursery: HashMap<ThreadId, ThreadImpetus<Ty>>,
+
+    next_id: ThreadId,
 }
 
 impl<Ty> ThreadStore<Ty>
@@ -113,63 +116,51 @@ where
     Ty: Types,
 {
     fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
-        let id = ThreadId(self.threads.len());
+        let id = self.next_id;
+        self.next_id = ThreadId(id.0 + 1);
 
-        self.threads.push(ThreadState::Startup);
         self.nursery.insert(id, ThreadImpetus::new(callable));
 
         id
     }
 
-    pub(super) fn stack_of(&mut self, id: ThreadId) -> Option<StackGuard<'_, Ty>> {
-        match self.threads.get_mut(id.0)? {
-            ThreadState::Startup => None,
-            ThreadState::Running(thread) => Some(thread.stack()),
-            ThreadState::Evaluating => None,
-        }
-    }
-
-    fn get(&self, thread_id: ThreadId) -> Option<&ThreadState<Ty>> {
-        self.threads.get(thread_id.0)
-    }
-
-    fn thread(&self, thread_id: ThreadId) -> Option<&Thread<Ty>> {
-        self.threads.get(thread_id.0).and_then(|state| {
-            if let ThreadState::Running(thread) = state {
-                Some(thread)
-            } else {
-                None
-            }
-        })
-    }
-
-    fn contains(&self, thread_id: ThreadId) -> bool {
-        (0..self.threads.len()).contains(&thread_id.0)
-    }
-
-    fn with_current<R>(
-        &mut self,
-        thread_id: ThreadId,
-        f: impl FnOnce(&mut Self, &mut Thread<Ty>) -> R,
-    ) -> R {
-        let mut thread = self
-            .threads
-            .get_mut(thread_id.0)
-            // TODO: this is technically observable, convert it to error.
-            .expect("thread should exist")
-            .take()
-            .expect("thread should be initialized to enter");
-
-        let res = f(self, &mut thread);
-
+    fn get(&self, id: ThreadId) -> Option<State<&Thread<Ty>>> {
         self.threads
-            .get_mut(thread_id.0)
-            .expect("thread should exist")
-            .place(thread)
-            .ok()
-            .expect("current thread should not get overwritten");
+            .get(id.0)
+            .map(State::as_ref)
+            .or_else(|| self.contains(id).then_some(State::Startup))
+    }
 
-        res
+    fn contains(&self, id: ThreadId) -> bool {
+        (0..self.next_id.0).contains(&id.0)
+    }
+
+    fn with_current(&mut self, id: ThreadId) -> (ThreadStoreGuard<'_, Ty>, &mut Thread<Ty>) {
+        assert!(self.contains(id), "thread must exist");
+
+        let ThreadStore {
+            threads,
+            nursery,
+            next_id,
+        } = self;
+
+        let (slice, thread) = {
+            let (front, back) = threads.split_at_mut(id.0);
+            let (thread, back) = back.split_first_mut().unwrap();
+            (PerforatedSlice(front, back), thread)
+        };
+
+        let guard = ThreadStoreGuard {
+            threads: slice,
+            nursery,
+            next_id,
+        };
+
+        let thread = thread
+            .as_option_mut()
+            .expect("thread should be already initialized");
+
+        (guard, thread)
     }
 }
 
@@ -179,10 +170,12 @@ where
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     fn init(&mut self, startup: ThreadId, stack: Stack<Ty>, heap: &mut Heap<Ty>) {
-        let place = self
-            .threads
-            .get_mut(startup.0)
-            .expect("thread should exist");
+        let place = if let Some(place) = self.threads.get_mut(startup.0) {
+            place
+        } else {
+            self.threads.resize_with(startup.0 + 1, || State::Startup);
+            self.threads.get_mut(startup.0).unwrap()
+        };
 
         assert!(place.is_starting(), "can only initialize a thread once");
 
@@ -190,9 +183,9 @@ where
             .nursery
             .remove(&startup)
             .expect("starting threads should be placed in nursery");
-        let thread = impetus.init(stack, heap);
 
-        *place = ThreadState::Running(thread);
+        let thread = impetus.init(stack, heap);
+        *place = State::Running(thread);
     }
 }
 
@@ -204,11 +197,119 @@ where
         Self {
             threads: Default::default(),
             nursery: Default::default(),
+            next_id: ThreadId(0),
         }
     }
 }
 
-pub struct Orchestrator<Ty>
+/// Mutable slice `&mut [T]` with single element missing in the middle.
+///
+/// This type allows us to have disjoint mutable reference to omitted element and all others.
+///
+/// It is currently implemented as two slices, although it can be done more efficiently using unsafe.
+struct PerforatedSlice<'a, T>(&'a mut [T], &'a mut [T]);
+
+impl<T> PerforatedSlice<'_, T> {
+    fn reborrow(&mut self) -> PerforatedSlice<'_, T> {
+        let PerforatedSlice(front, back) = self;
+        PerforatedSlice(front, back)
+    }
+
+    fn hole(&self) -> usize {
+        self.0.len()
+    }
+
+    fn get(&self, i: usize) -> Option<Option<&T>> {
+        if let Some(t) = self.0.get(i) {
+            Some(Some(t))
+        } else {
+            let i = i - self.0.len();
+            if let Some(i) = i.checked_sub(1) {
+                self.1.get(i).map(Some)
+            } else {
+                Some(None)
+            }
+        }
+    }
+
+    fn get_mut(&mut self, i: usize) -> Option<Option<&mut T>> {
+        let front_len = self.0.len();
+
+        if let Some(t) = self.0.get_mut(i) {
+            Some(Some(t))
+        } else {
+            let i = i - front_len;
+            if let Some(i) = i.checked_sub(1) {
+                self.1.get_mut(i).map(Some)
+            } else {
+                Some(None)
+            }
+        }
+    }
+}
+
+struct ThreadStoreGuard<'a, Ty>
+where
+    Ty: Types,
+{
+    threads: PerforatedSlice<'a, State<Thread<Ty>>>,
+    nursery: &'a mut HashMap<ThreadId, ThreadImpetus<Ty>>,
+    next_id: &'a mut ThreadId,
+}
+
+impl<Ty> ThreadStoreGuard<'_, Ty>
+where
+    Ty: Types,
+{
+    fn reborrow(&mut self) -> ThreadStoreGuard<'_, Ty> {
+        let ThreadStoreGuard {
+            threads,
+            nursery,
+            next_id,
+        } = self;
+
+        ThreadStoreGuard {
+            threads: threads.reborrow(),
+            nursery,
+            next_id,
+        }
+    }
+
+    fn current(&self) -> ThreadId {
+        ThreadId(self.threads.hole())
+    }
+
+    fn contains(&self, id: ThreadId) -> bool {
+        (0..self.next_id.0).contains(&id.0)
+    }
+
+    fn get(&self, id: ThreadId) -> Option<EvalState<&Thread<Ty>>> {
+        self.threads
+            .get(id.0)
+            .map(|state| {
+                state
+                    .map(State::as_ref)
+                    .map(Into::into)
+                    .unwrap_or(EvalState::Current)
+            })
+            .or_else(|| self.contains(id).then_some(EvalState::Startup))
+    }
+
+    fn get_mut(&mut self, id: ThreadId) -> Option<EvalState<&mut Thread<Ty>>> {
+        let fallback = self.contains(id).then_some(EvalState::Startup);
+        self.threads
+            .get_mut(id.0)
+            .map(|state| {
+                state
+                    .map(State::as_mut)
+                    .map(Into::into)
+                    .unwrap_or(EvalState::Current)
+            })
+            .or(fallback)
+    }
+}
+
+struct ThreadManager<Ty>
 where
     Ty: Types,
 {
@@ -218,6 +319,154 @@ where
     stack: Vec<ThreadId>,
 
     store: ThreadStore<Ty>,
+}
+
+impl<Ty> ThreadManager<Ty>
+where
+    Ty: Types,
+{
+    fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
+        self.store.new_thread(callable)
+    }
+
+    fn push(&mut self, id: ThreadId) -> Result<(), ReentryFailure> {
+        if let Some(err) = make_reentry_error(id, self.status_of(id)) {
+            Err(err)
+        } else {
+            self.stack.push(id);
+            Ok(())
+        }
+    }
+
+    fn pop(&mut self) -> Option<ThreadId> {
+        self.stack.pop()
+    }
+
+    fn len(&self) -> usize {
+        self.stack.len()
+    }
+
+    fn get(&self, id: ThreadId) -> Option<State<&Thread<Ty>>> {
+        self.store.get(id)
+    }
+
+    fn contains(&self, id: ThreadId) -> bool {
+        self.store.contains(id)
+    }
+
+    fn status_of(&self, id: ThreadId) -> Option<ThreadStatus> {
+        use super::thread::Status;
+
+        let r = match self.store.get(id)? {
+            State::Startup => ThreadStatus::Suspended,
+            State::Running(thread) => match thread.status() {
+                Status::Finished => ThreadStatus::Finished,
+                Status::Panicked => ThreadStatus::Panicked,
+                Status::Normal => {
+                    if self.stack.contains(&id) {
+                        ThreadStatus::Active
+                    } else {
+                        ThreadStatus::Suspended
+                    }
+                }
+            },
+        };
+
+        Some(r)
+    }
+
+    fn with_current(&mut self, id: ThreadId) -> (ThreadManagerGuard<'_, Ty>, &mut Thread<Ty>) {
+        let ThreadManager { stack, store } = self;
+        let (store, thread) = store.with_current(id);
+
+        let guard = ThreadManagerGuard { stack, store };
+
+        (guard, thread)
+    }
+}
+
+impl<Ty> ThreadManager<Ty>
+where
+    Ty: Types<LuaClosure = Closure<Ty>>,
+    Ty::RustClosure: DLuaFfi<Ty>,
+{
+    fn init(&mut self, startup: ThreadId, stack: Stack<Ty>, heap: &mut Heap<Ty>) {
+        self.store.init(startup, stack, heap)
+    }
+}
+
+impl<Ty> Default for ThreadManager<Ty>
+where
+    Ty: Types,
+{
+    fn default() -> Self {
+        Self {
+            stack: Default::default(),
+            store: Default::default(),
+        }
+    }
+}
+
+pub(crate) struct ThreadManagerGuard<'a, Ty>
+where
+    Ty: Types,
+{
+    stack: &'a [ThreadId],
+    store: ThreadStoreGuard<'a, Ty>,
+}
+
+impl<Ty> ThreadManagerGuard<'_, Ty>
+where
+    Ty: Types,
+{
+    pub(crate) fn reborrow(&mut self) -> ThreadManagerGuard<'_, Ty> {
+        let ThreadManagerGuard { stack, store } = self;
+
+        ThreadManagerGuard {
+            stack,
+            store: store.reborrow(),
+        }
+    }
+
+    pub(crate) fn current(&self) -> ThreadId {
+        self.store.current()
+    }
+
+    pub(crate) fn status_of(&self, id: ThreadId) -> Option<ThreadStatus> {
+        use super::thread::Status;
+
+        let r = match self.store.get(id)? {
+            EvalState::Current => ThreadStatus::Current,
+            EvalState::Startup => ThreadStatus::Suspended,
+            EvalState::Running(thread) => match thread.status() {
+                Status::Finished => ThreadStatus::Finished,
+                Status::Panicked => ThreadStatus::Panicked,
+                Status::Normal => {
+                    if self.stack.contains(&id) {
+                        ThreadStatus::Active
+                    } else {
+                        ThreadStatus::Suspended
+                    }
+                }
+            },
+        };
+
+        Some(r)
+    }
+
+    pub(crate) fn stack_of(&mut self, id: ThreadId) -> Option<StackGuard<'_, Ty>> {
+        self.store
+            .get_mut(id)
+            .and_then(EvalState::into_option)
+            .map(Thread::stack)
+    }
+}
+
+pub struct Orchestrator<Ty>
+where
+    Ty: Types,
+{
+    manager: ThreadManager<Ty>,
 
     /// Stack of temporaries used to communicate with host program.
     temp_stack: Stack<Ty>,
@@ -236,53 +485,34 @@ where
 {
     pub(crate) fn new(heap: &mut Heap<Ty>) -> Self {
         Orchestrator {
-            stack: Default::default(),
-            store: Default::default(),
+            manager: Default::default(),
             temp_stack: Stack::new(heap),
             upvalue_cache: UpvalueRegister::new(heap),
         }
     }
 
     pub(crate) fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
-        self.store.new_thread(callable)
+        self.manager.new_thread(callable)
     }
 
     pub(crate) fn stack(&mut self) -> StackGuard<'_, Ty> {
         self.temp_stack.full_guard()
     }
 
-    pub(crate) fn status_of(&self, thread_id: ThreadId) -> Option<ThreadStatus> {
-        use super::thread::Status;
-
-        let r = match self.store.threads.get(thread_id.0)? {
-            ThreadState::Evaluating => ThreadStatus::Current,
-            ThreadState::Startup => ThreadStatus::Suspended,
-            ThreadState::Running(thread) => match thread.status() {
-                Status::Finished => ThreadStatus::Finished,
-                Status::Panicked => ThreadStatus::Panicked,
-                Status::Normal => {
-                    if self.stack.contains(&thread_id) {
-                        ThreadStatus::Active
-                    } else {
-                        ThreadStatus::Suspended
-                    }
-                }
-            },
-        };
-
-        Some(r)
-    }
-
     pub(crate) fn contains(&self, thread_id: ThreadId) -> bool {
-        self.store.contains(thread_id)
+        self.manager.contains(thread_id)
     }
 
-    pub(crate) fn thread(&self, thread_id: ThreadId) -> Option<&Thread<Ty>> {
-        self.store.thread(thread_id)
+    pub(crate) fn push(&mut self, thread_id: ThreadId) -> Result<(), ReentryFailure> {
+        self.manager.push(thread_id)
     }
 
-    pub(crate) fn push(&mut self, thread_id: ThreadId) {
-        self.stack.push(thread_id)
+    pub(crate) fn status_of(&self, id: ThreadId) -> Option<ThreadStatus> {
+        self.manager.status_of(id)
+    }
+
+    pub(crate) fn thread(&self, id: ThreadId) -> Option<&Thread<Ty>> {
+        self.manager.get(id).and_then(State::into_option)
     }
 }
 
@@ -301,8 +531,7 @@ where
 {
     fn thread_context<'s>(
         &'s mut self,
-        current_thread_id: ThreadId,
-        thread_store: &'s mut ThreadStore<Ty>,
+        threads: ThreadManagerGuard<'s, Ty>,
         upvalue_cache: &'s mut UpvalueRegister<Ty>,
     ) -> ThreadContext<'s, Ty> {
         let Context {
@@ -315,8 +544,7 @@ where
             core,
             internal_cache,
             chunk_cache: *chunk_cache,
-            current_thread_id,
-            thread_store,
+            threads,
             upvalue_cache,
         }
     }
@@ -328,74 +556,86 @@ where
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(crate) fn eval(&mut self, orch: &mut Orchestrator<Ty>) -> Result<(), ThreadError> {
+        use super::thread::stack::copy;
         use crate::ffi::delegate::Response;
-        use std::ops::ControlFlow;
 
         assert!(
-            orch.stack.len() <= 1,
+            orch.manager.len() <= 1,
             "suspected attempt at resuming panicked orchestrator; currently unsupported"
         );
 
-        let Some(mut current) = orch.stack.pop() else {
+        let Some(mut current) = orch.manager.pop() else {
             return Ok(());
         };
 
         let mut response = Response::Resume;
 
         loop {
-            match orch.store.get(current) {
-                None => todo!(),
-                Some(ThreadState::Evaluating) => unreachable!(),
-                Some(ThreadState::Running(_)) => (),
-                Some(ThreadState::Startup) => {
+            match orch.manager.get(current) {
+                None => unreachable!("thread stack should not contains non-existent threads"),
+                Some(State::Running(_)) => (),
+                Some(State::Startup) => {
                     let new_stack = Stack::new(&mut self.core.gc);
                     let stack = std::mem::replace(&mut orch.temp_stack, new_stack);
 
-                    orch.store.init(current, stack, &mut self.core.gc);
+                    orch.manager.init(current, stack, &mut self.core.gc);
                 }
             }
 
-            let r = orch.store.with_current(current, |store, thread| {
-                use super::thread::stack::copy;
+            let (threads, thread) = orch.manager.with_current(current);
+            let mut temp_stack = orch.temp_stack.full_guard();
 
-                let mut temp_stack = orch.temp_stack.full_guard();
+            // We use orchestrator's stack as an intermediate destination.
+            copy(temp_stack.reborrow(), thread.stack(), &mut self.core.gc);
 
-                // We use orchestrator's stack as an intermediate destination.
-                copy(temp_stack.reborrow(), thread.stack(), &mut self.core.gc);
-
-                let mut ctx = self.thread_context(current, store, &mut orch.upvalue_cache);
-                match ctx.eval(thread, response) {
-                    Ok(ThreadControl::Resume { thread: thread_id }) => {
-                        copy(thread.stack(), temp_stack, &mut self.core.gc);
-
-                        orch.stack.push(current);
-                        ControlFlow::Continue((thread_id, Response::Resume))
+            let mut ctx = self.thread_context(threads, &mut orch.upvalue_cache);
+            (current, response) = match ctx.eval(thread, response) {
+                Ok(ThreadControl::Resume { thread: thread_id }) => {
+                    if let Some(err) =
+                        make_reentry_error(thread_id, ctx.threads.status_of(thread_id))
+                    {
+                        break Err(err.into());
                     }
-                    Ok(ThreadControl::Yield | ThreadControl::Return) => {
-                        copy(thread.stack(), temp_stack, &mut self.core.gc);
 
-                        match orch.stack.pop() {
-                            Some(thread) => {
-                                ControlFlow::Continue((thread, Response::Evaluated(Ok(()))))
-                            }
-                            None => ControlFlow::Break(Ok(())),
-                        }
-                    }
-                    Err(err) => match orch.stack.pop() {
-                        Some(thread) => {
-                            ControlFlow::Continue((thread, Response::Evaluated(Err(err.into()))))
-                        }
-                        None => ControlFlow::Break(Err(err)),
-                    },
+                    copy(thread.stack(), temp_stack, &mut self.core.gc);
+                    orch.manager.push(current)?;
+
+                    (thread_id, Response::Resume)
                 }
-            });
+                Ok(ThreadControl::Yield | ThreadControl::Return) => {
+                    copy(thread.stack(), temp_stack, &mut self.core.gc);
 
-            (current, response) = match r {
-                ControlFlow::Break(res) => break res,
-                ControlFlow::Continue(t) => t,
+                    match orch.manager.pop() {
+                        Some(thread) => (thread, Response::Evaluated(Ok(()))),
+                        None => break Ok(()),
+                    }
+                }
+                Err(err) => match orch.manager.pop() {
+                    Some(thread) => (thread, Response::Evaluated(Err(err.into()))),
+                    None => break Err(err),
+                },
             };
         }
     }
+}
+
+fn make_reentry_error(id: ThreadId, status: Option<ThreadStatus>) -> Option<ReentryFailure> {
+    use crate::error::thread::ThreadStatus as Status;
+
+    let status = match status {
+        None => Some(Status::NotExist),
+        Some(ThreadStatus::Active | ThreadStatus::Current) => Some(Status::Active),
+        Some(ThreadStatus::Finished) => Some(Status::Finished),
+        Some(ThreadStatus::Panicked) => Some(Status::Panicked),
+        Some(ThreadStatus::Suspended) => None,
+    }?;
+
+    let err = ReentryFailure {
+        thread_id: id,
+        status,
+    };
+
+    Some(err)
 }
 
 /// Status of a Lua thread.
