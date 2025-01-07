@@ -132,6 +132,7 @@ pub fn floor_div<Ty>(
 where
     Ty: Types,
 {
+    use crate::value::traits::FloorDiv;
     use crate::value::{Float, Int};
 
     match args {
@@ -211,12 +212,15 @@ pub fn pow<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Opti
 where
     Ty: Types,
 {
+    use crate::value::traits::Pow;
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(lhs), Value::Int(rhs)] => Continue((Int(lhs).exp(Int(rhs))).map(Into::into)),
+        [Value::Int(lhs), Value::Int(rhs)] => {
+            Continue((Int(lhs).checked_pow(Int(rhs))).map(Into::into))
+        }
         [Value::Float(lhs), Value::Float(rhs)] => {
-            Continue(Some((Float(lhs).exp(Float(rhs))).into()))
+            Continue(Some((Float(lhs).pow(Float(rhs))).into()))
         }
         _ => Break(MetamethodRequired),
     }

@@ -12,6 +12,11 @@ use crate::gc::{Heap, LuaPtr};
 use crate::runtime::Closure;
 
 pub use gc::userdata::Metatable;
+pub use std::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
+    Mul, MulAssign, Neg, Not as BitNot, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub,
+    SubAssign,
+};
 
 pub trait Refs: Sized + 'static {
     type String<T>;
@@ -82,6 +87,22 @@ where
     fn border(&self) -> i64;
     fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
         !matches!(self.get(key), Value::Nil)
+    }
+}
+
+pub trait FloorDiv<Rhs = Self> {
+    type Output;
+
+    fn floor_div(self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait Pow<Rhs = Self>: Sized {
+    type Output;
+
+    fn checked_pow(self, rhs: Rhs) -> Option<Self::Output>;
+
+    fn pow(self, rhs: Rhs) -> Self::Output {
+        self.checked_pow(rhs).unwrap()
     }
 }
 

@@ -1,9 +1,10 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::ops::{
-    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
-};
 
+use super::traits::{
+    Add, AddAssign, Div, DivAssign, FloorDiv, Mul, MulAssign, Neg, Pow, Rem, RemAssign, Sub,
+    SubAssign,
+};
 use super::{Int, Refs, Type, Types, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
 
@@ -17,17 +18,6 @@ impl Float {
 
     pub fn to_bool(&self) -> bool {
         true
-    }
-
-    pub fn floor_div(self, rhs: Self) -> Self {
-        let Float(lhs) = self;
-        let Float(rhs) = rhs;
-
-        Float((lhs / rhs).floor())
-    }
-
-    pub fn exp(self, rhs: Self) -> Self {
-        Float(self.0.powf(rhs.0))
     }
 }
 
@@ -151,6 +141,17 @@ impl DivAssign for Float {
     }
 }
 
+impl FloorDiv for Float {
+    type Output = Self;
+
+    fn floor_div(self, rhs: Self) -> Self::Output {
+        let Float(lhs) = self;
+        let Float(rhs) = rhs;
+
+        Float((lhs / rhs).floor())
+    }
+}
+
 impl Rem for Float {
     type Output = Self;
 
@@ -166,6 +167,18 @@ impl Rem for Float {
 impl RemAssign for Float {
     fn rem_assign(&mut self, rhs: Self) {
         *self = *self % rhs;
+    }
+}
+
+impl Pow for Float {
+    type Output = Self;
+
+    fn pow(self, rhs: Self) -> Self::Output {
+        Float(self.0.powf(rhs.0))
+    }
+
+    fn checked_pow(self, rhs: Self) -> Option<Self::Output> {
+        Some(self.pow(rhs))
     }
 }
 

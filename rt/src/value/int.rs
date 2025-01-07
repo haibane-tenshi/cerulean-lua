@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::ops::{
-    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
-    Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
-};
 
+use super::traits::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitNot, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
+    DivAssign, FloorDiv, Mul, MulAssign, Neg, Pow, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign,
+    Sub, SubAssign,
+};
 use super::{Float, Refs, Type, Types, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
 
@@ -18,14 +19,6 @@ impl Int {
 
     pub fn to_bool(&self) -> bool {
         true
-    }
-
-    pub fn floor_div(self, rhs: Self) -> Self {
-        self / rhs
-    }
-
-    pub fn exp(self, rhs: Self) -> Option<Self> {
-        rhs.0.try_into().ok().map(|rhs| self.0.pow(rhs)).map(Int)
     }
 }
 
@@ -179,6 +172,14 @@ impl DivAssign for Int {
     }
 }
 
+impl FloorDiv for Int {
+    type Output = Self;
+
+    fn floor_div(self, rhs: Self) -> Self::Output {
+        self / rhs
+    }
+}
+
 impl Rem for Int {
     type Output = Self;
 
@@ -193,7 +194,44 @@ impl RemAssign for Int {
     }
 }
 
-impl Not for Int {
+impl Pow for Int {
+    type Output = Self;
+
+    fn checked_pow(self, rhs: Self) -> Option<Self::Output> {
+        let Int(lhs) = self;
+        let Int(rhs) = rhs;
+
+        match (lhs, rhs) {
+            (0, 0) => None,
+            (0, _) if rhs < 0 => None,
+            (_, 0) => Some(Int(1)),
+            (_, 1) => Some(Int(lhs)),
+            (1, _) => Some(Int(1)),
+            (-1, _) if rhs % 2 == 0 => Some(Int(1)),
+            (-1, _) if rhs % 2 != 0 => Some(Int(-1)),
+            (_, _) if rhs < 0 => Some(Int(0)),
+            (mut lhs, mut rhs) => {
+                let mask = 0b1;
+
+                let mut r = 1;
+                while rhs != 0 {
+                    if rhs & mask != 0 {
+                        r *= lhs;
+                        if r == 0 {
+                            break;
+                        }
+                    }
+                    lhs *= lhs;
+                    rhs >>= 1;
+                }
+
+                Some(Int(r))
+            }
+        }
+    }
+}
+
+impl BitNot for Int {
     type Output = Self;
 
     fn not(self) -> Self::Output {
