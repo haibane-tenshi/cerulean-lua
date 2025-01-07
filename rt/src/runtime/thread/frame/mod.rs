@@ -38,7 +38,7 @@ where
             .eval()
             .map(|request| match request {
                 ChangeFrame::Return(slot) => {
-                    let mut stack = ctx.stack.lua_frame();
+                    let mut stack = ctx.stack.lua_guard();
                     stack.evict_upvalues();
                     let _ = stack.drain(StackSlot(0)..slot);
 
@@ -49,11 +49,11 @@ where
                     ctx.stack
                         .guard_at(start)
                         .unwrap()
-                        .lua_frame()
+                        .lua_guard()
                         .evict_upvalues();
 
                     // Make sure that detached upvalues are properly allocated before entering a new frame.
-                    ctx.stack.lua_frame().sync_upvalues(&mut ctx.core.gc);
+                    ctx.stack.lua_guard().sync_upvalues(&mut ctx.core.gc);
 
                     let start = boundary + start;
                     FrameControl::InitAndEnter {
@@ -76,7 +76,7 @@ where
                     .stack_of(origin)
                     .expect("threads should never get deallocated")
             };
-            let mut stack = stack.lua_frame();
+            let mut stack = stack.lua_guard();
 
             for (slot, value) in ctx.upvalues.drain_written() {
                 let upvalue = *ctx
@@ -294,7 +294,7 @@ where
                 self.stack
                     .guard(stack_start)
                     .unwrap()
-                    .lua_frame()
+                    .lua_guard()
                     .adjust_event_returns(event);
             }
         }

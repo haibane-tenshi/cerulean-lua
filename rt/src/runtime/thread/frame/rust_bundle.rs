@@ -67,7 +67,7 @@ where
         // It doesn't matter much if we sync it after, however:
         // if the next frame is Rust frame we will sync it on entry,
         // if the next frame is Lua frame it will sync it when necessary.
-        self.stack.lua_frame().sync(&mut self.core.gc);
+        self.stack.lua_guard().sync(&mut self.core.gc);
 
         match bundle.delegate.as_mut().resume(self.reborrow(), response) {
             State::Complete(Ok(())) => Ok(Control::Frame(FrameControl::Return)),

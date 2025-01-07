@@ -567,8 +567,8 @@ where
         self.raw_guard_at(slot)
     }
 
-    pub(super) fn lua_frame(&mut self) -> LuaStackFrame<'_, Ty> {
-        LuaStackFrame(self.reborrow())
+    pub(super) fn lua_guard(&mut self) -> LuaStackGuard<'_, Ty> {
+        LuaStackGuard(self.reborrow())
     }
 
     pub fn transient(&mut self) -> TransientStackGuard<'_, Ty> {
@@ -761,11 +761,11 @@ where
     }
 }
 
-pub(super) struct LuaStackFrame<'a, Ty>(StackGuard<'a, Ty>)
+pub(super) struct LuaStackGuard<'a, Ty>(StackGuard<'a, Ty>)
 where
     Ty: Types;
 
-impl<Ty> LuaStackFrame<'_, Ty>
+impl<Ty> LuaStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -804,7 +804,7 @@ where
     }
 }
 
-impl<Ty> LuaStackFrame<'_, Ty>
+impl<Ty> LuaStackGuard<'_, Ty>
 where
     Ty: Types,
 {
@@ -968,7 +968,7 @@ where
     }
 }
 
-impl<Ty> Deref for LuaStackFrame<'_, Ty>
+impl<Ty> Deref for LuaStackGuard<'_, Ty>
 where
     Ty: Types,
 {

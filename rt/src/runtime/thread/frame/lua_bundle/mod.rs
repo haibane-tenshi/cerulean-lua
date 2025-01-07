@@ -160,7 +160,7 @@ where
         }
 
         // Adjust stack, move varargs into register if needed.
-        let mut stack = stack.lua_frame();
+        let mut stack = stack.lua_guard();
         let call_height = StackSlot(0) + signature.arg_count;
 
         let varargs: Vec<_> = if signature.is_variadic {
@@ -420,7 +420,7 @@ where
 
     fn sync(&mut self) {
         self.register_upvalue.sync(&mut self.core.gc);
-        self.stack.lua_frame().sync(&mut self.core.gc);
+        self.stack.lua_guard().sync(&mut self.core.gc);
     }
 
     fn alloc_literal(&mut self, literal: Literal) -> StrongValue<Ty> {
@@ -481,7 +481,7 @@ where
     ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Error>> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
-                self.stack.lua_frame().next_slot(),
+                self.stack.lua_guard().next_slot(),
             )));
         };
 
@@ -514,7 +514,7 @@ where
                 // Not sure if it will work better.
                 let value = self
                     .stack
-                    .lua_frame()
+                    .lua_guard()
                     .remove(slot)
                     .ok_or(MissingStackSlot(slot))?;
                 let type_ = value.type_();
@@ -535,7 +535,7 @@ where
                 let closure = self.construct_closure(fn_id)?;
 
                 self.stack
-                    .lua_frame()
+                    .lua_guard()
                     .push(Value::Function(Callable::Lua(LuaPtr(closure.downgrade()))));
 
                 ControlFlow::Continue(())
@@ -543,32 +543,32 @@ where
             LoadConstant(index) => {
                 let constant = self.get_constant(index)?.clone();
                 let value = self.alloc_literal(constant);
-                self.stack.lua_frame().push(value.downgrade());
+                self.stack.lua_guard().push(value.downgrade());
 
                 ControlFlow::Continue(())
             }
             LoadVariadic => {
                 self.stack
-                    .lua_frame()
+                    .lua_guard()
                     .extend(self.register_variadic.iter().copied(), true);
 
                 ControlFlow::Continue(())
             }
             LoadStack(slot) => {
                 let value = *self.get_stack(slot)?;
-                self.stack.lua_frame().push(value);
+                self.stack.lua_guard().push(value);
 
                 ControlFlow::Continue(())
             }
             StoreStack(slot) => {
-                let mut stack = self.stack.lua_frame();
+                let mut stack = self.stack.lua_guard();
                 let [value] = stack.take1()?;
                 stack.set(slot, value);
 
                 ControlFlow::Continue(())
             }
             AdjustStack(height) => {
-                let _ = self.stack.lua_frame().adjust_height(height);
+                let _ = self.stack.lua_guard().adjust_height(height);
 
                 ControlFlow::Continue(())
             }
@@ -577,7 +577,7 @@ where
                     .register_upvalue
                     .load(slot)
                     .ok_or(MissingUpvalue(slot))?;
-                let mut stack = self.stack.lua_frame();
+                let mut stack = self.stack.lua_guard();
 
                 // Source tracking is to be removed.
                 stack.push_raw(value);
@@ -585,7 +585,7 @@ where
                 ControlFlow::Continue(())
             }
             StoreUpvalue(slot) => {
-                let mut stack = self.stack.lua_frame();
+                let mut stack = self.stack.lua_guard();
                 let [value] = stack.take1()?;
 
                 self.register_upvalue
@@ -595,7 +595,7 @@ where
                 ControlFlow::Continue(())
             }
             UnaOp(op) => {
-                let args = self.stack.lua_frame().take1()?;
+                let args = self.stack.lua_guard().take1()?;
                 self.exec_una_op(args, op)
                     // TODO: Temporary patch, investigate necessity of RefAccessOr
                     .map_err(|err| match err {
@@ -605,7 +605,7 @@ where
                     .map_br(Into::into)
             }
             BinOp(op) => {
-                let args = self.stack.lua_frame().take2()?;
+                let args = self.stack.lua_guard().take2()?;
                 self.exec_bin_op(args, op)
                     .map_err(|err| match err {
                         AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
@@ -620,7 +620,7 @@ where
                 ControlFlow::Continue(())
             }
             JumpIf { cond, offset } => {
-                let [value] = self.stack.lua_frame().take1()?;
+                let [value] = self.stack.lua_guard().take1()?;
 
                 if value.to_bool() == cond {
                     self.ip -= InstrOffset(1);
@@ -638,12 +638,12 @@ where
             TabCreate => {
                 let value = self.alloc_table().downgrade();
 
-                self.stack.lua_frame().push(Value::Table(LuaPtr(value)));
+                self.stack.lua_guard().push(Value::Table(LuaPtr(value)));
 
                 ControlFlow::Continue(())
             }
             TabGet => {
-                let args = self.stack.lua_frame().take2()?;
+                let args = self.stack.lua_guard().take2()?;
                 self.exec_tab_get(args)
                     .map_err(|err| err.map_other(Cause::TabGet))?
                     .map_br(|(callable, start)| {
@@ -651,7 +651,7 @@ where
                     })
             }
             TabSet => {
-                let args = self.stack.lua_frame().take3()?;
+                let args = self.stack.lua_guard().take3()?;
                 self.exec_tab_set(args)
                     .map_err(|err| err.map_other(Cause::TabSet))?
                     .map_br(|(callable, start)| {
@@ -690,7 +690,7 @@ where
 
         match eval {
             Continue(value) => {
-                self.stack.lua_frame().push(value);
+                self.stack.lua_guard().push(value);
                 Ok(Continue(()))
             }
             Break(MetamethodRequired) => {
@@ -710,7 +710,7 @@ where
                         // Trigger table len builtin on failed metamethod lookup.
                         (UnaOp::StrLen, [Value::Table(LuaPtr(tab))]) => {
                             let border = self.core.gc.get(tab).ok_or(AlreadyDroppedError)?.border();
-                            self.stack.lua_frame().push(Value::Int(border));
+                            self.stack.lua_guard().push(Value::Int(border));
 
                             Ok(Continue(()))
                         }
@@ -719,7 +719,7 @@ where
                     metavalue => {
                         let start = self.stack.next_slot();
                         let [arg] = args;
-                        self.stack.lua_frame().push(arg);
+                        self.stack.lua_guard().push(arg);
 
                         let callable = self
                             .prepare_invoke(metavalue, start)
@@ -776,7 +776,7 @@ where
         match eval {
             ControlFlow::Continue(Some(value)) => {
                 // Value contains no reference in this case.
-                self.stack.lua_frame().push(value);
+                self.stack.lua_guard().push(value);
                 Ok(ControlFlow::Continue(()))
             }
             ControlFlow::Continue(None) => Err(AlreadyDroppedOr::Other(err)),
@@ -812,7 +812,7 @@ where
                         };
 
                         if let Some(r) = fallback_result {
-                            self.stack.lua_frame().push(r);
+                            self.stack.lua_guard().push(r);
                             Ok(ControlFlow::Continue(()))
                         } else {
                             Err(AlreadyDroppedOr::Other(err))
@@ -820,7 +820,7 @@ where
                     }
                     metavalue => {
                         let start = self.stack.next_slot();
-                        self.stack.lua_frame().extend(args, false);
+                        self.stack.lua_guard().extend(args, false);
 
                         let callable = metavalue;
                         let callable = self
@@ -865,7 +865,7 @@ where
                 // It succeeds if any non-nil value is produced.
                 if value != Value::Nil {
                     // We know that the value originated from the table in this slot.
-                    let mut stack = self.stack.lua_frame();
+                    let mut stack = self.stack.lua_guard();
                     stack.push(value);
                     return Ok(Continue(()));
                 }
@@ -895,7 +895,7 @@ where
                             // Third: Fallback to producing nil.
                             // This can only be reached if raw table access returned nil and there is no metamethod.
 
-                            self.stack.lua_frame().push(Value::Nil);
+                            self.stack.lua_guard().push(Value::Nil);
                             return Ok(Continue(()));
                         } else {
                             return Err(TableTypeMismatch(table.type_()).into());
@@ -912,7 +912,7 @@ where
                         let callable =
                             callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
                         let start = self.stack.next_slot();
-                        let mut stack = self.stack.lua_frame();
+                        let mut stack = self.stack.lua_guard();
                         stack.push(table);
                         stack.push(index);
 
@@ -1010,7 +1010,7 @@ where
                         let callable =
                             callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
                         let start = self.stack.next_slot();
-                        let mut stack = self.stack.lua_frame();
+                        let mut stack = self.stack.lua_guard();
                         stack.push(table);
                         stack.push(index);
                         stack.push(value);
@@ -1080,7 +1080,7 @@ where
             function_id: *function_id,
         };
 
-        let stack = self.stack.lua_frame();
+        let stack = self.stack.lua_guard();
         let closure = &self.core.gc[self.closure];
         let upvalues = upvalues
             .iter()
@@ -1114,7 +1114,7 @@ where
         };
 
         self.stack
-            .lua_frame()
+            .lua_guard()
             .register_closure(&closure, &self.core.gc);
 
         Ok(closure)

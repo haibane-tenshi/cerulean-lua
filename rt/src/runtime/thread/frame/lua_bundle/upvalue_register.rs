@@ -128,7 +128,7 @@ where
 {
     upvalues.iter().map(move |place| match *place {
         UpvaluePlace::Stack(slot) => *stack
-            .lua_frame()
+            .lua_guard()
             .get_raw_slot(slot)
             .expect("upvalues allocated on thread stack should be protected"),
         UpvaluePlace::Place(ptr) => *heap
