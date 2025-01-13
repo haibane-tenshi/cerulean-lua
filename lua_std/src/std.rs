@@ -8,6 +8,14 @@ use rt::value::{Callable, KeyValue, StrongValue, TableIndex, Types, Value, WeakV
 
 use crate::plugin::{RootTable, StdPlugin};
 
+/// Runtime assertion.
+///
+/// # From Lua documentation
+///
+/// Signature: `(v [, message]) -> ()`
+///
+/// Raises an error if the value of its argument `v` is false (i.e., `nil` or `false`); otherwise, returns all its arguments.
+/// In case of error, `message` is the error object; when absent, it defaults to "assertion failed!"
 #[expect(non_camel_case_types)]
 pub struct assert;
 
