@@ -922,6 +922,13 @@ where
         };
     }
 
+    /// Whether automatic garbage collection is enabled.
+    ///
+    /// This function will return false if gc is paused (e.g. inside closure, passed to [`pause`](Heap::pause)).
+    pub fn is_auto_gc_enabled(&self) -> bool {
+        matches!(self.status, Status::Running)
+    }
+
     /// Execute closure with paused garbage collection.
     ///
     /// If the garbage collection is triggered during execution of the closure,
