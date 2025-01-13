@@ -131,6 +131,7 @@ use crate::chunk_cache::ChunkCache;
 use crate::error::{AlreadyDroppedError, RtError, ThreadError};
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
+use crate::plugin::Plugin;
 use crate::value::{
     Callable, KeyValue, Meta, SolitaryType, Strong, StrongValue, Types, Value, Weak, WeakValue,
 };
@@ -325,6 +326,10 @@ impl<Ty, C> Runtime<Ty, C>
 where
     Ty: Types,
 {
+    pub fn include(&mut self, plugin: impl Plugin<Ty, C>) {
+        plugin.build(self)
+    }
+
     pub fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
         self.orchestrator.new_thread(callable)
     }

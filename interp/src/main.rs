@@ -64,28 +64,26 @@ fn main() -> Result<()> {
             use rt::value::traits::DefaultTypes;
             use rt::value::{Callable, Value};
 
-            let mut core = Core {
+            let core = Core {
                 global_env: Value::Nil,
                 metatable_registry: Default::default(),
                 dialect: CustomPolicy::lua_5_4(),
                 gc: Heap::new(),
             };
 
-            let env = global_env::Builder::empty(&mut core)
-                .include(global_env::assert())
-                .include(global_env::pcall())
-                .include(global_env::print())
-                .include(global_env::load())
-                .include(global_env::loadfile())
-                .include(global_env::setmetatable())
-                .include(global_env::getmetatable())
-                .finish();
-
-            core.global_env = Value::Table(LuaPtr(env));
-
             let chunk_cache = VecCache::new();
-
             let mut runtime = Runtime::<DefaultTypes, _>::new(chunk_cache, core);
+
+            let env = global_env::Std::empty()
+                .with(global_env::assert)
+                .with(global_env::pcall)
+                .with(global_env::print)
+                .with(global_env::load)
+                .with(global_env::loadfile)
+                .with(global_env::setmetatable)
+                .with(global_env::getmetatable);
+
+            runtime.include(env);
 
             let callable = runtime
                 .core
