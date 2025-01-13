@@ -251,7 +251,7 @@ where
         T: Trace,
         A: Insert<T> + 'static,
     {
-        self.gc_with(&value);
+        self.gc_with(&value, false);
         let arena: &mut A = self.arenas.get_mut(ty).unwrap().downcast_mut().unwrap();
 
         arena.insert(value)
@@ -556,7 +556,7 @@ where
         let (addr, counter) = match arena.try_insert(value) {
             Ok(r) => r,
             Err(value) => {
-                self.gc_with(&value);
+                self.gc_with(&value, false);
                 let arena: &mut InternedStore<T> =
                     self.arena_mut(ty).unwrap().downcast_mut().unwrap();
                 arena.insert(value)
@@ -575,7 +575,7 @@ where
         let (addr, counter) = match arena.try_insert_from(value) {
             Ok(r) => r,
             Err(value) => {
-                self.gc_with(&value);
+                self.gc_with(&value, false);
                 let arena: &mut InternedStore<T> =
                     self.arena_mut(ty).unwrap().downcast_mut().unwrap();
                 arena.insert(value)
@@ -842,13 +842,20 @@ where
 
     /// Trigger garbage collection phase.
     pub fn gc(&mut self) {
-        self.gc_with(&())
+        self.gc_with(&(), true)
     }
 
-    fn gc_with(&mut self, keep_alive: &dyn Trace) {
-        if !self.status.is_enabled() {
-            self.status.trigger_gc();
-            return;
+    fn gc_with(&mut self, keep_alive: &dyn Trace, forced: bool) {
+        match &mut self.status {
+            Status::Stopped => return,
+            Status::Paused(pending) => {
+                *pending |= match forced {
+                    true => Pending::Forced,
+                    false => Pending::Auto,
+                };
+                return;
+            }
+            Status::Running => (),
         }
 
         let processed = {
@@ -899,20 +906,53 @@ where
         }
     }
 
+    /// Whether heap should trigger automatic garbage collection.
+    ///
+    /// When disabled only direct calls to [`Heap::gc`] will trigger garbage collection.
+    ///
+    /// This function have no effect while gc is paused (e.g. inside closure passed to [`pause`](Heap::pause)).
+    pub fn enable_auto_gc(&mut self, enable: bool) {
+        if matches!(self.status, Status::Paused(_)) {
+            return;
+        }
+
+        self.status = match enable {
+            true => Status::Running,
+            false => Status::Stopped,
+        };
+    }
+
     /// Execute closure with paused garbage collection.
     ///
-    /// Calls to `pause` can be safely nested, only the outermost will perform garbage collection if necessary.
+    /// If the garbage collection is triggered during execution of the closure,
+    /// gc pass will be delayed and executed only after closure exits.
+    /// This function respects auto gc setting (set by [`enable_auto_gc`](Heap::enable_auto_gc)),
+    /// so no garbage collection will happen if it is explicitly disabled.
+    ///
+    /// Calls to `pause` can be safely nested.
+    ///
+    /// Note that `enable_auto_gc` has no effect inside provided closure.
     pub fn pause<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
-        let was_running = self.status.is_running();
-
-        if was_running {
-            self.status.pause();
-        }
+        let prev = std::mem::replace(&mut self.status, Status::Paused(Pending::None));
 
         let r = f(self);
 
-        if was_running && self.status.unpause() {
-            self.gc();
+        // Should be always reachable, but technically user can mem::swap from inside closure.
+        // If that happens simply ignore, not our problem.
+        if let Status::Paused(pending) = self.status {
+            match (prev, pending) {
+                (Status::Running, Pending::Forced | Pending::Auto)
+                | (Status::Stopped, Pending::Forced) => {
+                    self.status = prev;
+                    self.gc();
+                }
+                (Status::Paused(prev), pending) => {
+                    self.status = Status::Paused(prev | pending);
+                }
+                (Status::Stopped | Status::Running, _) => {
+                    self.status = prev;
+                }
+            }
         }
 
         r
@@ -971,68 +1011,41 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-enum PauseStatus {
-    Resumed,
-    Paused,
-    PausedPendingGc,
+enum Pending {
+    None,
+    Auto,
+    Forced,
 }
 
-impl PauseStatus {
-    fn is_running(self) -> bool {
-        match self {
-            PauseStatus::Paused | PauseStatus::PausedPendingGc => false,
-            PauseStatus::Resumed => true,
-        }
-    }
+impl std::ops::BitOr for Pending {
+    type Output = Self;
 
-    fn pending_gc(self) -> bool {
-        match self {
-            PauseStatus::Paused | PauseStatus::Resumed => false,
-            PauseStatus::PausedPendingGc => true,
-        }
-    }
-}
+    fn bitor(self, rhs: Self) -> Self::Output {
+        use Pending::*;
 
-#[derive(Debug, Clone, Copy)]
-struct Status {
-    is_enabled: bool,
-    pause: PauseStatus,
-}
-
-impl Status {
-    fn is_enabled(self) -> bool {
-        self.pause.is_running() && self.is_enabled
-    }
-
-    fn is_running(self) -> bool {
-        self.pause.is_running()
-    }
-
-    fn pause(&mut self) {
-        self.pause = PauseStatus::Paused;
-    }
-
-    fn unpause(&mut self) -> bool {
-        let r = self.pause.pending_gc();
-        self.pause = PauseStatus::Resumed;
-
-        r
-    }
-
-    fn trigger_gc(&mut self) {
-        if !self.is_running() {
-            self.pause = PauseStatus::PausedPendingGc;
+        match (self, rhs) {
+            (Forced, _) | (_, Forced) => Forced,
+            (Auto, _) | (_, Auto) => Auto,
+            _ => None,
         }
     }
 }
 
-impl Default for Status {
-    fn default() -> Self {
-        Status {
-            is_enabled: true,
-            pause: PauseStatus::Resumed,
-        }
+impl std::ops::BitOrAssign for Pending {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum Status {
+    #[default]
+    Running,
+    /// Auto gc is temporarily paused.
+    ///
+    /// Any garbage collection is delayed until paused status is lifted.
+    Paused(Pending),
+    Stopped,
 }
 
 /// Intermediary keeping track of visited objects during [`Trace`]ing.
