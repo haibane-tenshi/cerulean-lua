@@ -56,7 +56,8 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
-            use lua_std::global_env;
+            use lua_std::std;
+            use lua_std::Std;
             use rt::builtins::coerce::CustomPolicy;
             use rt::chunk_cache::VecCache;
             use rt::gc::{Heap, LuaPtr};
@@ -74,14 +75,14 @@ fn main() -> Result<()> {
             let chunk_cache = VecCache::new();
             let mut runtime = Runtime::<DefaultTypes, _>::new(chunk_cache, core);
 
-            let env = global_env::Std::empty()
-                .with(global_env::assert)
-                .with(global_env::pcall)
-                .with(global_env::print)
-                .with(global_env::load)
-                .with(global_env::loadfile)
-                .with(global_env::setmetatable)
-                .with(global_env::getmetatable);
+            let env = Std::empty()
+                .with(std::assert)
+                .with(std::pcall)
+                .with(std::print)
+                .with(std::load)
+                .with(std::loadfile)
+                .with(std::setmetatable)
+                .with(std::getmetatable);
 
             runtime.include(env);
 
