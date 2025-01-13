@@ -261,7 +261,7 @@
 
 #![forbid(unsafe_code)]
 
-mod heap;
+pub mod heap;
 pub mod index;
 mod trace;
 pub mod userdata;

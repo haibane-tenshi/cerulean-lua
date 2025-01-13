@@ -4,7 +4,7 @@ use std::cell::Cell;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 
-use super::arena::{AsAny, Getters, HandleStrongRef, Insert, Traceable};
+use super::arena::{ArenaInfo, AsAny, Getters, HandleStrongRef, HealthCheck, Insert, Traceable};
 use super::store::{Addr, Counter, Store, StrongRefPolicy};
 use super::{Collector, Trace};
 use crate::index::WeakRoot;
@@ -139,6 +139,15 @@ where
         } else {
             unreachable!("bad dispatcher type")
         }
+    }
+}
+
+impl<T, P, M> HealthCheck for UserdataStore<T, P, M>
+where
+    P: Params,
+{
+    fn health_check(&self) -> ArenaInfo {
+        self.store.health_check()
     }
 }
 

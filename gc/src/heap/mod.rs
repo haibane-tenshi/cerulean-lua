@@ -957,6 +957,27 @@ where
 
         r
     }
+
+    pub fn health_check(&self) -> HeapInfo {
+        let mut occupied_bytes = 0;
+        let mut reserved_bytes = 0;
+        let mut dead_bytes = 0;
+
+        for arena in self.arenas.iter() {
+            let info = arena.health_check();
+            let size = info.object_layout.pad_to_align().size();
+
+            occupied_bytes += size * info.occupied;
+            reserved_bytes += size * info.reserved;
+            dead_bytes += size * info.dead;
+        }
+
+        HeapInfo {
+            occupied_bytes,
+            reserved_bytes,
+            dead_bytes,
+        }
+    }
 }
 
 impl<M, P> Default for Heap<M, P> {
@@ -1106,4 +1127,19 @@ impl From<TypeIndex> for usize {
     fn from(value: TypeIndex) -> Self {
         value.0.into()
     }
+}
+
+/// Statistics on memory used by heap.
+#[derive(Debug, Clone, Copy)]
+pub struct HeapInfo {
+    /// Total amount of bytes used by all alive objects.
+    pub occupied_bytes: usize,
+
+    /// Total amount of bytes reserved for future objects.
+    pub reserved_bytes: usize,
+
+    /// Total amount of bytes taken by dead memory slots.
+    ///
+    /// Dead slots exhausted their generation tags and cannot get allocated into ever again.
+    pub dead_bytes: usize,
 }

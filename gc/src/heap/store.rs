@@ -7,7 +7,7 @@ use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 use nonmax::NonMaxU32;
 
-use super::arena::{AsAny, Getters, HandleStrongRef, Insert, Traceable};
+use super::arena::{ArenaInfo, AsAny, Getters, HandleStrongRef, HealthCheck, Insert, Traceable};
 use super::{Collector, Trace};
 use crate::userdata::Params;
 use crate::vec_list::{GenTag, VecList};
@@ -220,6 +220,20 @@ where
     }
 
     fn set_dispatcher(&mut self, _dispatcher: &dyn std::any::Any) {}
+}
+
+impl<T> HealthCheck for Store<T> {
+    fn health_check(&self) -> ArenaInfo {
+        let (occupied, reserved, dead) = self.values.health_check();
+
+        ArenaInfo {
+            type_name: std::any::type_name::<T>(),
+            object_layout: self.values.item_layout(),
+            occupied,
+            reserved,
+            dead,
+        }
+    }
 }
 
 impl<T> Insert<T> for Store<T> {

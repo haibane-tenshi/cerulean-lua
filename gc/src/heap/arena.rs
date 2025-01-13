@@ -1,4 +1,5 @@
 use bitvec::prelude::{BitSlice, BitVec};
+use std::alloc::Layout;
 use std::any::Any;
 
 use super::{Addr, Collector, Counter};
@@ -36,15 +37,48 @@ pub(crate) trait Getters<M, P: Params> {
     fn set_dispatcher(&mut self, dispatcher: &dyn Any);
 }
 
+pub(crate) trait HealthCheck {
+    fn health_check(&self) -> ArenaInfo;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ArenaInfo {
+    /// Name of type contained inside arena.
+    ///
+    /// This is only intended for diagnostic needs.
+    /// Generated using [`std::any::type_name`], so the same caveats apply.
+    #[expect(dead_code)]
+    pub(crate) type_name: &'static str,
+
+    /// Layout of a single object.
+    ///
+    /// Note that some auxiliary structures may be allocated alongside the object which are included here,
+    /// so the exact layout might be bigger than layout of the underlying type.
+    pub(crate) object_layout: Layout,
+
+    /// Number of occupied memory slots.
+    ///
+    /// Each occupied slot contains one alive object.
+    pub(crate) occupied: usize,
+
+    /// Number of reserved memory slots.
+    pub(crate) reserved: usize,
+
+    /// Number of dead memory slots.
+    ///
+    /// Dead slots exhausted their generation tags and cannot be allocated into ever again.
+    pub(crate) dead: usize,
+}
+
 pub(crate) trait Arena<M, P: Params>:
-    Traceable + AsAny + HandleStrongRef + Getters<M, P>
+    Traceable + AsAny + HandleStrongRef + Getters<M, P> + HealthCheck
 {
 }
 
 impl<M, P, T> Arena<M, P> for T
 where
     P: Params,
-    T: Traceable + AsAny + HandleStrongRef + Getters<M, P>,
+    T: Traceable + AsAny + HandleStrongRef + Getters<M, P> + HealthCheck,
 {
 }
 

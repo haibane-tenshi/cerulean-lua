@@ -5,7 +5,7 @@ use std::ops::Deref;
 
 use hashbrown::HashTable;
 
-use super::arena::{AsAny, Getters, HandleStrongRef, Traceable};
+use super::arena::{ArenaInfo, AsAny, Getters, HandleStrongRef, HealthCheck, Traceable};
 use super::store::{Addr, Counter, Store, StrongRefPolicy};
 use crate::index::ToOwned;
 use crate::userdata::Params;
@@ -266,4 +266,10 @@ where
     }
 
     fn set_dispatcher(&mut self, _dispatcher: &dyn std::any::Any) {}
+}
+
+impl<T> HealthCheck for InternedStore<T> {
+    fn health_check(&self) -> ArenaInfo {
+        self.store.health_check()
+    }
 }
