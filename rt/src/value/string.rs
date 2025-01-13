@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use gc::Trace;
 
 use super::{Concat, Len};
+use crate::ffi::arg_parser::ParseFrom;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Trace)]
 pub struct PossiblyUtf8Vec(pub Vec<u8>);
@@ -126,6 +127,38 @@ impl<'a> TryFrom<&'a PossiblyUtf8Vec> for PathBuf {
     fn try_from(value: &'a PossiblyUtf8Vec) -> Result<Self, Self::Error> {
         let s: String = value.try_into()?;
         Ok(s.into())
+    }
+}
+
+impl ParseFrom<PossiblyUtf8Vec> for Vec<u8> {
+    type Error = std::convert::Infallible;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        Ok(value.into())
+    }
+}
+
+impl ParseFrom<PossiblyUtf8Vec> for String {
+    type Error = std::string::FromUtf8Error;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl ParseFrom<PossiblyUtf8Vec> for OsString {
+    type Error = std::string::FromUtf8Error;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl ParseFrom<PossiblyUtf8Vec> for PathBuf {
+    type Error = std::string::FromUtf8Error;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        value.try_into()
     }
 }
 

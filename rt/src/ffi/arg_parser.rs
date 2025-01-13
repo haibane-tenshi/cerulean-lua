@@ -1344,12 +1344,18 @@ where
 
 pub struct FromLuaString<T>(pub T);
 
+pub trait ParseFrom<T>: Sized {
+    type Error;
+
+    fn parse(value: &T) -> Result<Self, Self::Error>;
+}
+
 impl<Ty, T> ParseAtom<Value<Strong, Ty>, Heap<Ty>> for FromLuaString<T>
 where
     Ty: Types,
-    Ty::String: TryInto<T>,
+    T: ParseFrom<Ty::String>,
 {
-    type Error = StrongConvertError<<Ty::String as TryInto<T>>::Error>;
+    type Error = StrongConvertError<<T as ParseFrom<Ty::String>>::Error>;
 
     fn parse_atom(value: Value<Strong, Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
         use crate::gc::LuaPtr;
@@ -1363,11 +1369,9 @@ where
             return Err(err.into());
         };
 
-        extra
-            .get_root(&ptr)
-            .as_ref()
-            .clone()
-            .try_into()
+        let value = extra.get_root(&ptr).as_ref();
+
+        ParseFrom::parse(value)
             .map(FromLuaString)
             .map_err(StrongConvertError::Other)
     }
@@ -1376,9 +1380,9 @@ where
 impl<Ty, T> ParseAtom<Value<Weak, Ty>, Heap<Ty>> for FromLuaString<T>
 where
     Ty: Types,
-    Ty::String: TryInto<T>,
+    T: ParseFrom<Ty::String>,
 {
-    type Error = WeakConvertError<<Ty::String as TryInto<T>>::Error>;
+    type Error = WeakConvertError<<T as ParseFrom<Ty::String>>::Error>;
 
     fn parse_atom(value: Value<Weak, Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
         use crate::gc::LuaPtr;
@@ -1392,12 +1396,9 @@ where
             return Err(err.into());
         };
 
-        extra
-            .get(ptr)
-            .ok_or(AlreadyDroppedError)?
-            .as_ref()
-            .clone()
-            .try_into()
+        let value = extra.get(ptr).ok_or(AlreadyDroppedError)?.as_ref();
+
+        ParseFrom::parse(value)
             .map(FromLuaString)
             .map_err(WeakConvertError::Other)
     }
