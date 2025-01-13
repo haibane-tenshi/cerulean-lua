@@ -89,7 +89,7 @@ use std::fmt::{Debug, Pointer};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use crate::heap::store::{Addr, Counter, Gen, Index};
+use crate::heap::store::{Addr, Counter, Gen, Index, WeakCounter};
 use crate::heap::{Heap, TypeIndex};
 use crate::trace::Trace;
 use crate::userdata::{FullUserdata, Params, Userdata};
@@ -174,26 +174,26 @@ where
         Addr { index, gen }
     }
 
-    pub(crate) fn transmute<U>(self) -> GcPtr<U, A>
-    where
-        U: ?Sized,
-    {
-        let GcPtr {
-            index,
-            gen,
-            ty,
-            _type,
-            _access,
-        } = self;
+    // pub(crate) fn transmute<U>(self) -> GcPtr<U, A>
+    // where
+    //     U: ?Sized,
+    // {
+    //     let GcPtr {
+    //         index,
+    //         gen,
+    //         ty,
+    //         _type,
+    //         _access,
+    //     } = self;
 
-        GcPtr {
-            index,
-            gen,
-            ty,
-            _type: PhantomData,
-            _access,
-        }
-    }
+    //     GcPtr {
+    //         index,
+    //         gen,
+    //         ty,
+    //         _type: PhantomData,
+    //         _access,
+    //     }
+    // }
 
     pub(crate) fn upgrade_with(self, counter: Counter) -> RootPtr<T, A> {
         let addr = self.addr();
@@ -785,6 +785,66 @@ where
     }
 }
 
+pub(crate) struct WeakRoot<T> {
+    ty: TypeIndex,
+    addr: Addr,
+    counter: WeakCounter,
+    _marker: PhantomData<T>,
+}
+
+impl<T> WeakRoot<T> {
+    pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: WeakCounter) -> Self {
+        WeakRoot {
+            addr,
+            ty,
+            counter,
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn downgrade<A>(&self) -> GcPtr<T, A>
+    where
+        A: Access,
+    {
+        GcPtr::new(self.addr, self.ty)
+    }
+
+    pub(crate) fn upgrade<A>(self) -> RootPtr<T, A>
+    where
+        A: Access,
+    {
+        let counter = self.counter.upgrade();
+        RootPtr::new(self.addr, self.ty, counter)
+    }
+}
+
+impl<T> Clone for WeakRoot<T> {
+    fn clone(&self) -> Self {
+        let WeakRoot {
+            ty,
+            addr,
+            counter,
+            _marker,
+        } = self;
+
+        Self {
+            ty: *ty,
+            addr: *addr,
+            counter: counter.clone(),
+            _marker: *_marker,
+        }
+    }
+}
+
+impl<T> Trace for WeakRoot<T>
+where
+    T: 'static,
+{
+    fn trace(&self, collector: &mut crate::Collector) {
+        collector.mark(self.downgrade::<Ref>());
+    }
+}
+
 /// A memory location of garbage-collected object.
 ///
 /// This garbage collector was originally written to back up Lua runtime needs.
@@ -1002,20 +1062,12 @@ pub(crate) mod sealed_allocate_as {
         P: Params,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
-            use crate::heap::userdata_store::Concrete;
-
-            let value = Concrete::new(self);
-
-            let (addr, ty, counter) = heap.alloc_inner(value);
+            let (addr, ty, counter) = heap.alloc_verbatim(self);
             (Addr(addr), TypeIndex(ty), Counter(counter))
         }
 
         fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
-            use crate::heap::userdata_store::Concrete;
-
-            let value = Concrete::new(self);
-
-            let (addr, ty, counter) = heap.try_alloc_inner(value).map_err(|t| t.value)?;
+            let (addr, ty, counter) = heap.try_alloc_verbatim(self)?;
             Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
@@ -1024,22 +1076,15 @@ pub(crate) mod sealed_allocate_as {
     where
         T: Trace,
         P: Params,
+        M: Trace,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
-            use crate::heap::userdata_store::LightUd;
-
-            let value = LightUd::new(self);
-
-            let (addr, ty, counter) = heap.alloc_inner(value);
+            let (addr, ty, counter) = heap.alloc_userdata(self, None);
             (Addr(addr), TypeIndex(ty), Counter(counter))
         }
 
         fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
-            use crate::heap::userdata_store::LightUd;
-
-            let value = LightUd::new(self);
-
-            let (addr, ty, counter) = heap.try_alloc_inner(value).map_err(|t| t.value)?;
+            let (addr, ty, counter) = heap.try_alloc_userdata(self, None)?;
             Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
@@ -1051,22 +1096,14 @@ pub(crate) mod sealed_allocate_as {
         P: Params,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
-            use crate::heap::userdata_store::FullUd;
-
-            let metatable = heap.metatable_of::<T>();
-            let value = FullUd::new(self, metatable.cloned());
-
-            let (addr, ty, counter) = heap.alloc_inner(value);
+            let metatable = heap.metatable_of::<T>().cloned();
+            let (addr, ty, counter) = heap.alloc_userdata(self, metatable);
             (Addr(addr), TypeIndex(ty), Counter(counter))
         }
 
         fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
-            use crate::heap::userdata_store::FullUd;
-
-            let metatable = heap.metatable_of::<T>();
-            let value = FullUd::new(self, metatable.cloned());
-
-            let (addr, ty, counter) = heap.try_alloc_inner(value).map_err(|t| t.value)?;
+            let metatable = heap.metatable_of::<T>().cloned();
+            let (addr, ty, counter) = heap.try_alloc_userdata(self, metatable)?;
             Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
@@ -1114,6 +1151,7 @@ impl<T, M, P> AllocateAs<dyn Userdata<P>, Heap<M, P>> for T
 where
     T: Trace,
     P: Params,
+    M: Trace,
 {
 }
 

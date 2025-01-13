@@ -658,7 +658,7 @@ mod test {
     impl Params for ReturnU32 {
         type Id<'id> = ();
         type Rt<'rt> = ();
-        type Res = u32;
+        type Res = String;
     }
 
     #[test]
@@ -669,31 +669,31 @@ mod test {
         let b: Root<dyn FullUserdata<_, _>> = heap.alloc_as(5_u32);
         let c: Root<dyn Userdata<_>> = heap.alloc_as(7_u64);
 
-        assert_eq!(heap.get_root(&a).method((), ()), None);
-        assert_eq!(heap.get_root(&b).method((), ()), None);
-        assert_eq!(heap.get_root(&c).method((), ()), None);
+        assert_eq!(heap.get_root(&a).method(()), None);
+        assert_eq!(heap.get_root(&b).method(()), None);
+        assert_eq!(heap.get_root(&c).method(()), None);
 
-        heap.set_dispatcher_of::<u32>(|value, _, _| Some(*value));
+        heap.set_dispatcher_of::<u32>(|value, _| Some(format!("{:p}", value)));
 
-        assert_eq!(heap.get_root(&a).method((), ()), Some(3));
-        assert_eq!(heap.get_root(&b).method((), ()), Some(5));
-        assert_eq!(heap.get_root(&c).method((), ()), None);
+        assert_eq!(heap.get_root(&a).method(()).as_deref(), Some("0x0:0"));
+        assert_eq!(heap.get_root(&b).method(()).as_deref(), Some("0x1:0"));
+        assert_eq!(heap.get_root(&c).method(()), None);
 
-        heap.set_dispatcher_of::<u64>(|_, _, _| Some(0));
+        heap.set_dispatcher_of::<u64>(|_, _| Some("123".to_string()));
 
-        assert_eq!(heap.get_root(&a).method((), ()), Some(3));
-        assert_eq!(heap.get_root(&b).method((), ()), Some(5));
-        assert_eq!(heap.get_root(&c).method((), ()), Some(0));
+        assert_eq!(heap.get_root(&a).method(()).as_deref(), Some("0x0:0"));
+        assert_eq!(heap.get_root(&b).method(()).as_deref(), Some("0x1:0"));
+        assert_eq!(heap.get_root(&c).method(()).as_deref(), Some("123"));
 
-        heap.set_dispatcher_of::<u32>(|value, _, _| Some(*value + 1));
+        heap.set_dispatcher_of::<u32>(|value, _| Some(format!("{:p} + 2", value)));
 
-        assert_eq!(heap.get_root(&a).method((), ()), Some(4));
-        assert_eq!(heap.get_root(&b).method((), ()), Some(6));
-        assert_eq!(heap.get_root(&c).method((), ()), Some(0));
+        assert_eq!(heap.get_root(&a).method(()).as_deref(), Some("0x0:0 + 2"));
+        assert_eq!(heap.get_root(&b).method(()).as_deref(), Some("0x1:0 + 2"));
+        assert_eq!(heap.get_root(&c).method(()).as_deref(), Some("123"));
 
         let d: Root<dyn Userdata<_>> = heap.alloc_as(9_u32);
 
-        assert_eq!(heap.get_root(&d).method((), ()), Some(10));
+        assert_eq!(heap.get_root(&d).method(()).as_deref(), Some("0x2:0 + 2"));
     }
 
     #[test]

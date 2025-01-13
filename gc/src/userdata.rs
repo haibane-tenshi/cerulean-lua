@@ -71,6 +71,8 @@
 //! For this reason it is meaningless to implement [`Userdata`] trait on its own -
 //! unless you wish to completely replace provided mechanism.
 
+use crate::Root;
+
 /// Type constructor for arguments and output of userdata dispacher.
 pub trait Params: 'static {
     type Id<'id>;
@@ -89,12 +91,11 @@ pub trait Userdata<P>
 where
     P: Params,
 {
-    fn method(&self, ident: P::Id<'_>, rt: P::Rt<'_>) -> Option<P::Res>;
+    fn method(&self, ident: P::Id<'_>) -> Option<P::Res>;
 }
 
 /// Signature of method dispatcher function for type `T`.
-pub type Dispatcher<T, P> =
-    fn(&T, <P as Params>::Id<'_>, <P as Params>::Rt<'_>) -> Option<<P as Params>::Res>;
+pub type Dispatcher<T, P> = fn(Root<T>, <P as Params>::Id<'_>) -> Option<<P as Params>::Res>;
 
 /// Trait describing types that contain its own Lua metatable.
 pub trait Metatable<M> {

@@ -18,10 +18,9 @@ use crate::index::{
 };
 use crate::trace::Trace;
 use crate::userdata::{Dispatcher, FullUserdata, Params};
-use arena::Arena;
+use arena::{Arena, Insert};
 use interned::{Interned, InternedStore};
 use store::{Addr, Counter};
-use userdata_store::Views;
 
 #[expect(unused_imports, reason = "frequently referenced in doc comments")]
 use crate::index::{Gc, GcCell};
@@ -143,7 +142,7 @@ use crate::index::{Gc, GcCell};
 /// let a: Root<Interned<usize>> = heap.intern(3_usize);
 /// let b: Root<Interned<usize>> = heap.intern(3_usize);
 ///
-/// assert_eq!(a.location() == b.location());
+/// assert_eq!(a.location(), b.location());
 /// ```
 ///
 /// Because of this guarantee, interned object can only exist behind `Root`.
@@ -159,7 +158,7 @@ use crate::index::{Gc, GcCell};
 /// let a: Root<Interned<String>> = heap.intern(String::from("foobar"));
 /// let b: Root<Interned<String>> = heap.intern_from("foobar");
 ///
-/// assert_eq!(a.location() == b.location());
+/// assert_eq!(a.location(), b.location());
 /// ```
 ///
 /// Commonly, object you are trying to intern might already exist,
@@ -231,79 +230,136 @@ where
         self.arenas.get_mut(ty).map(AsMut::as_mut)
     }
 
-    fn arena_or_insert<T>(&mut self) -> (TypeIndex, &mut dyn Arena<M, P>)
-    where
-        T: Trace + Views<M, P>,
-    {
-        use userdata_store::UserdataStore;
-
-        let id = TypeId::of::<T>();
-        let index = *self.type_map.entry(id).or_insert_with(|| {
-            self.arenas
-                .push_and_get_key(Box::new(UserdataStore::<T, P>::new()))
-        });
-        let store = self.arenas.get_mut(index).unwrap().as_mut();
-        (index, store)
-    }
-
-    fn interned_store<T>(&mut self) -> (TypeIndex, &mut InternedStore<T>)
+    fn arena_or_insert_with<T, A>(&mut self, f: impl FnOnce() -> A) -> (TypeIndex, &mut A)
     where
         T: Trace,
+        A: Arena<M, P> + 'static,
     {
-        let id = TypeId::of::<Interned<T>>();
-        let index = *self.type_map.entry(id).or_insert_with(|| {
-            self.arenas
-                .push_and_get_key(Box::new(InternedStore::<T>::new()))
-        });
-        let store = self
-            .arenas
-            .get_mut(index)
-            .unwrap()
-            .as_mut()
-            .as_any_mut()
-            .downcast_mut()
-            .unwrap();
-
+        let id = TypeId::of::<T>();
+        let index = *self
+            .type_map
+            .entry(id)
+            .or_insert_with(|| self.arenas.push_and_get_key(Box::new(f())));
+        let store = self.arenas.get_mut(index).unwrap().as_mut();
+        let store: &mut A = store.downcast_mut().unwrap();
         (index, store)
     }
 
     #[inline(never)]
-    fn alloc_slow<T>(&mut self, ty: TypeIndex, value: T) -> (Addr, Counter)
+    fn alloc_slow<T, A>(&mut self, ty: TypeIndex, value: T) -> (Addr, Counter)
     where
-        T: Trace + Views<M, P>,
+        T: Trace,
+        A: Insert<T> + 'static,
     {
         self.gc_with(&value);
-        self.arenas
-            .get_mut(ty)
-            .unwrap()
-            .cast_as_mut()
-            .unwrap()
-            .insert(value)
+        let arena: &mut A = self.arenas.get_mut(ty).unwrap().downcast_mut().unwrap();
+
+        arena.insert(value)
     }
 
-    pub(crate) fn alloc_inner<T>(&mut self, value: T) -> (Addr, TypeIndex, Counter)
+    fn alloc_inner<T, A>(&mut self, value: T, f: impl FnOnce() -> A) -> (Addr, TypeIndex, Counter)
     where
-        T: Trace + Views<M, P>,
+        T: Trace,
+        A: Arena<M, P> + Insert<T> + 'static,
     {
-        let (ty, arena) = self.arena_or_insert::<T>();
-        let (addr, counter) = match arena.cast_as_mut().unwrap().try_insert(value) {
+        let (ty, arena) = self.arena_or_insert_with::<T, _>(f);
+        let (addr, counter) = match arena.try_insert(value) {
             Ok(ptr) => ptr,
-            Err(value) => self.alloc_slow(ty, value),
+            Err(value) => self.alloc_slow::<_, A>(ty, value),
         };
 
         (addr, ty, counter)
     }
 
-    pub(crate) fn try_alloc_inner<T>(&mut self, value: T) -> Result<(Addr, TypeIndex, Counter), T>
+    fn try_alloc_inner<T, A>(
+        &mut self,
+        value: T,
+        f: impl FnOnce() -> A,
+    ) -> Result<(Addr, TypeIndex, Counter), T>
     where
-        T: Trace + Views<M, P>,
+        T: Trace,
+        A: Arena<M, P> + Insert<T> + 'static,
     {
-        let (ty, arena) = self.arena_or_insert::<T>();
+        let (ty, arena) = self.arena_or_insert_with::<T, _>(f);
+
         arena
-            .cast_as_mut()
-            .unwrap()
             .try_insert(value)
             .map(|(addr, counter)| (addr, ty, counter))
+    }
+
+    fn pure_alloc<T, A>(&mut self, value: T, f: impl FnOnce() -> A) -> (Addr, TypeIndex, Counter)
+    where
+        T: Trace,
+        A: Arena<M, P> + Insert<T> + 'static,
+    {
+        let (ty, arena) = self.arena_or_insert_with::<T, _>(f);
+        let (addr, counter) = arena.insert(value);
+        (addr, ty, counter)
+    }
+
+    pub(crate) fn alloc_verbatim<T>(&mut self, value: T) -> (Addr, TypeIndex, Counter)
+    where
+        T: Trace,
+    {
+        use store::Store;
+
+        self.alloc_inner(value, || Store::<T>::new())
+    }
+
+    pub(crate) fn try_alloc_verbatim<T>(
+        &mut self,
+        value: T,
+    ) -> Result<(Addr, TypeIndex, Counter), T>
+    where
+        T: Trace,
+    {
+        use store::Store;
+
+        self.try_alloc_inner(value, || Store::<T>::new())
+    }
+
+    pub(crate) fn alloc_userdata<T>(
+        &mut self,
+        value: T,
+        metatable: Option<M>,
+    ) -> (Addr, TypeIndex, Counter)
+    where
+        T: Trace,
+        M: Trace,
+    {
+        use crate::heap::userdata_store::{UserdataObject, UserdataStore};
+        use crate::index::WeakRoot;
+
+        let (addr, ty, counter) = self.alloc_verbatim(value);
+
+        let root = WeakRoot::<T>::new(addr, ty, counter.weaken());
+        let value = UserdataObject::new(root, metatable);
+
+        self.alloc_inner(value, || UserdataStore::<T, P, M>::new())
+    }
+
+    pub(crate) fn try_alloc_userdata<T>(
+        &mut self,
+        value: T,
+        metatable: Option<M>,
+    ) -> Result<(Addr, TypeIndex, Counter), T>
+    where
+        T: Trace,
+        M: Trace,
+    {
+        use crate::heap::userdata_store::{UserdataObject, UserdataStore};
+        use crate::index::WeakRoot;
+
+        let (addr, ty, counter) = self.try_alloc_verbatim(value)?;
+
+        let root = WeakRoot::<T>::new(addr, ty, counter.weaken());
+        let value = UserdataObject::new(root, metatable);
+
+        // Unfortunately, failing this alloc is problematic, since the value itself is already embedded.
+        // Instead we force non-gc allocation.
+        // Possibly, can be done better by querying whether arena have free space instead.
+        let r = self.pure_alloc(value, || UserdataStore::<T, P, M>::new());
+        Ok(r)
     }
 
     /// Convenience function to allocate `T` as [`Root<T>`].
@@ -396,11 +452,7 @@ where
         M: Trace,
         A: Access,
     {
-        use userdata_store::FullUd;
-
-        let value = FullUd::new(value, metatable);
-        let (addr, ty, counter) = self.alloc_inner(value);
-
+        let (addr, ty, counter) = self.alloc_userdata(value, metatable);
         RootPtr::new(addr, ty, counter)
     }
 
@@ -500,8 +552,16 @@ where
     where
         T: Trace + Hash + Eq,
     {
-        let (ty, arena) = self.interned_store::<T>();
-        let (addr, counter) = arena.insert(value);
+        let (ty, arena) = self.arena_or_insert_with::<Interned<T>, _>(|| InternedStore::<T>::new());
+        let (addr, counter) = match arena.try_insert(value) {
+            Ok(r) => r,
+            Err(value) => {
+                self.gc_with(&value);
+                let arena: &mut InternedStore<T> =
+                    self.arena_mut(ty).unwrap().downcast_mut().unwrap();
+                arena.insert(value)
+            }
+        };
 
         Root::new(addr, ty, counter)
     }
@@ -511,8 +571,16 @@ where
         U: Hash + Eq + ToOwned<T> + ?Sized,
         T: Trace + Hash + Eq + Borrow<U>,
     {
-        let (ty, arena) = self.interned_store::<T>();
-        let (addr, counter) = arena.insert_from(value);
+        let (ty, arena) = self.arena_or_insert_with::<Interned<T>, _>(|| InternedStore::<T>::new());
+        let (addr, counter) = match arena.try_insert_from(value) {
+            Ok(r) => r,
+            Err(value) => {
+                self.gc_with(&value);
+                let arena: &mut InternedStore<T> =
+                    self.arena_mut(ty).unwrap().downcast_mut().unwrap();
+                arena.insert(value)
+            }
+        };
 
         Root::new(addr, ty, counter)
     }
@@ -521,7 +589,7 @@ where
     where
         T: Trace + Hash + Eq,
     {
-        let (ty, arena) = self.interned_store::<T>();
+        let (ty, arena) = self.arena_or_insert_with::<Interned<T>, _>(|| InternedStore::<T>::new());
         let (addr, counter) = arena.try_insert(value)?;
 
         Ok(Root::new(addr, ty, counter))
@@ -532,7 +600,7 @@ where
         U: Hash + Eq + ToOwned<T> + ?Sized,
         T: Trace + Hash + Eq + Borrow<U>,
     {
-        let (ty, arena) = self.interned_store::<T>();
+        let (ty, arena) = self.arena_or_insert_with::<Interned<T>, _>(|| InternedStore::<T>::new());
         let (addr, counter) = arena.try_insert_from(value)?;
 
         Ok(Root::new(addr, ty, counter))
@@ -667,27 +735,13 @@ where
         U: ?Sized,
         A: Access,
     {
-        use userdata_store::{Concrete, FullUd, LightUd};
+        use userdata_store::UserdataStore;
 
-        if let Some(&ty) = self.type_map.get(&TypeId::of::<FullUd<T, M, P>>()) {
-            if ty == ptr.ty() {
-                return Some(ptr.transmute());
-            }
-        }
+        let arena = self.arena(ptr.ty())?;
+        let arena: &UserdataStore<T, P, M> = arena.downcast_ref()?;
 
-        if let Some(&ty) = self.type_map.get(&TypeId::of::<LightUd<T, P>>()) {
-            if ty == ptr.ty() {
-                return Some(ptr.transmute());
-            }
-        }
-
-        if let Some(&ty) = self.type_map.get(&TypeId::of::<Concrete<T>>()) {
-            if ty == ptr.ty() {
-                return Some(ptr.transmute());
-            }
-        }
-
-        None
+        let ptr = arena.get(ptr.addr())?.value.downgrade();
+        Some(ptr)
     }
 
     /// Downcast wrapped type of strong reference to a concrete type.
@@ -707,8 +761,9 @@ where
             "attempt to downcast a pointer created from a different heap"
         );
 
-        let new_ptr = self.downcast(ptr.downgrade())?;
-        Some(self.upgrade(new_ptr).unwrap())
+        let ptr = self.downcast(ptr.downgrade())?;
+        let ptr = self.upgrade(ptr).unwrap();
+        Some(ptr)
     }
 
     /// Set dispatcher method for the type.
@@ -722,12 +777,11 @@ where
         T: Trace,
         M: Trace,
     {
-        use userdata_store::{FullUd, LightUd};
+        use arena::Getters;
+        use userdata_store::{UserdataObject, UserdataStore};
 
-        let (_, arena) = self.arena_or_insert::<LightUd<T, P>>();
-        arena.set_dispatcher(&dispatcher);
-
-        let (_, arena) = self.arena_or_insert::<FullUd<T, M, P>>();
+        let (_, arena) = self
+            .arena_or_insert_with::<UserdataObject<T, P, M>, _>(|| UserdataStore::<T, P, M>::new());
         arena.set_dispatcher(&dispatcher);
     }
 

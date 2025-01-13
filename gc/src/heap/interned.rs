@@ -6,7 +6,7 @@ use std::ops::Deref;
 use hashbrown::HashTable;
 
 use super::arena::{AsAny, Getters, HandleStrongRef, Traceable};
-use super::store::{Addr, Counter, Store};
+use super::store::{Addr, Counter, Store, StrongRefPolicy};
 use crate::index::ToOwned;
 use crate::userdata::Params;
 use crate::Trace;
@@ -142,7 +142,7 @@ where
             return r;
         }
 
-        let (addr, counter) = self.store.insert(Interned(value));
+        let (addr, counter) = self.store.insert(Interned(value), StrongRefPolicy::Dealloc);
         self.interner.insert(addr, &self.store);
 
         (addr, counter)
@@ -153,23 +153,26 @@ where
             return Ok(r);
         }
 
-        let (addr, counter) = self.store.try_insert(Interned(value)).map_err(|t| t.0)?;
+        let (addr, counter) = self
+            .store
+            .try_insert(Interned(value), StrongRefPolicy::Dealloc)
+            .map_err(|t| t.0)?;
         self.interner.insert(addr, &self.store);
 
         Ok((addr, counter))
     }
 
-    pub(crate) fn insert_from<U>(&mut self, value: &U) -> (Addr, Counter)
-    where
-        U: Hash + Eq + ToOwned<T> + ?Sized,
-        T: Borrow<U>,
-    {
-        if let Some(r) = self.find(value) {
-            return r;
-        }
+    // pub(crate) fn insert_from<U>(&mut self, value: &U) -> (Addr, Counter)
+    // where
+    //     U: Hash + Eq + ToOwned<T> + ?Sized,
+    //     T: Borrow<U>,
+    // {
+    //     if let Some(r) = self.find(value) {
+    //         return r;
+    //     }
 
-        self.insert(value.to_owned())
-    }
+    //     self.insert(value.to_owned())
+    // }
 
     pub(crate) fn try_insert_from<U>(&mut self, value: &U) -> Result<(Addr, Counter), T>
     where
@@ -205,6 +208,10 @@ impl<T> AsAny for InternedStore<T>
 where
     T: 'static,
 {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

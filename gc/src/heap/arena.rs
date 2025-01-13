@@ -1,7 +1,6 @@
 use bitvec::prelude::{BitSlice, BitVec};
 use std::any::Any;
 
-use super::userdata_store::{Dispatched, UserdataStore};
 use super::{Addr, Collector, Counter};
 use crate::userdata::{FullUserdata, Params, Userdata};
 
@@ -12,7 +11,7 @@ pub(crate) trait Traceable {
 }
 
 pub(crate) trait AsAny {
-    // fn as_any(&self) -> &dyn Any;
+    fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
@@ -67,17 +66,22 @@ where
         self.get_value_mut(addr)?.downcast_mut()
     }
 
-    // pub(crate) fn cast_as<T>(&self) -> Option<&UserdataStore<T, M, P>>
-    // where
-    //     T: Dispatched<M, P> + 'static
-    // {
-    //     self.as_any().downcast_ref()
-    // }
-
-    pub(crate) fn cast_as_mut<T>(&mut self) -> Option<&mut UserdataStore<T, P>>
+    pub(crate) fn downcast_ref<T>(&self) -> Option<&T>
     where
-        T: Dispatched<P> + 'static,
+        T: 'static,
+    {
+        self.as_any().downcast_ref()
+    }
+
+    pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut T>
+    where
+        T: 'static,
     {
         self.as_any_mut().downcast_mut()
     }
+}
+
+pub(crate) trait Insert<T> {
+    fn insert(&mut self, value: T) -> (Addr, Counter);
+    fn try_insert(&mut self, value: T) -> Result<(Addr, Counter), T>;
 }
