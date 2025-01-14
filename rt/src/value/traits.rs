@@ -55,8 +55,7 @@ pub trait Types: Sized + 'static {
         + Hash
         + Display
         + From<String>
-        + From<&'static str>
-        + AsRef<[u8]>;
+        + From<&'static str>;
     type LuaClosure: Trace;
     type RustClosure: Trace;
     type Table: Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;

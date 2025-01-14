@@ -1344,7 +1344,7 @@ where
 
 pub struct FromLuaString<T>(pub T);
 
-pub trait ParseFrom<T>: Sized {
+pub trait ParseFrom<T: ?Sized>: Sized {
     type Error;
 
     fn parse(value: &T) -> Result<Self, Self::Error>;

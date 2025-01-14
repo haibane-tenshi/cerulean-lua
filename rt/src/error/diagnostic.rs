@@ -1,7 +1,8 @@
-use codespan_reporting::diagnostic::Diagnostic as Message;
-use codespan_reporting::files::{Error, SimpleFile};
 use codespan_reporting::term::termcolor::WriteColor;
-use codespan_reporting::term::Config;
+
+pub use codespan_reporting::diagnostic::{Diagnostic as Message, Label};
+pub use codespan_reporting::files::{Error, SimpleFile};
+pub use codespan_reporting::term::Config;
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -10,6 +11,13 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    pub fn with_message(message: Message<()>) -> Self {
+        Diagnostic {
+            files: SimpleFile::new("".into(), "".into()),
+            message,
+        }
+    }
+
     pub fn emit(&self, writer: &mut dyn WriteColor, config: &Config) -> Result<(), Error> {
         use codespan_reporting::term::emit;
 

@@ -78,7 +78,7 @@ where
 {
     pub fn into_diagnostic(self, heap: &Heap<Ty>, chunk_cache: &dyn ChunkCache) -> Diagnostic
     where
-        Ty::String: AsRef<[u8]>,
+        Ty::String: TryInto<String>,
         StrongValue<Ty>: DisplayWith<Heap<Ty>>,
     {
         use codespan_reporting::files::SimpleFile;

@@ -10,7 +10,7 @@ pub struct ValueError<Value>(pub Value);
 impl<Ty> ValueError<StrongValue<Ty>>
 where
     Ty: Types,
-    Ty::String: AsRef<[u8]>,
+    Ty::String: TryInto<String>,
     StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub(crate) fn into_diagnostic<FileId>(self, heap: &Heap<Ty>) -> Diagnostic<FileId> {
@@ -23,8 +23,10 @@ where
         let mut diag = Diagnostic::error();
         let valid_utf8 = match &value {
             String(LuaPtr(s)) => {
-                if let Ok(s) = std::str::from_utf8(heap.get_root(s).as_ref().as_ref()) {
-                    diag.message = s.into();
+                let value = heap.get_root(s).as_inner().clone().try_into().ok();
+
+                if let Some(s) = value {
+                    diag.message = s;
                     true
                 } else {
                     false

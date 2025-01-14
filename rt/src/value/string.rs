@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Debug, Display};
@@ -191,3 +192,52 @@ impl Display for InvalidUtf8Error {
 }
 
 impl Error for InvalidUtf8Error {}
+
+pub trait AsEncoding {
+    /// View raw byte content of a Lua string.
+    fn as_bytes(&self) -> Option<&[u8]>;
+
+    /// View Lua string content as utf8-encoded string.
+    fn as_utf8(&self) -> Option<&str>;
+}
+
+impl AsEncoding for Vec<u8> {
+    fn as_bytes(&self) -> Option<&[u8]> {
+        Some(self)
+    }
+
+    fn as_utf8(&self) -> Option<&str> {
+        None
+    }
+}
+
+impl AsEncoding for String {
+    fn as_bytes(&self) -> Option<&[u8]> {
+        Some(self.as_bytes())
+    }
+
+    fn as_utf8(&self) -> Option<&str> {
+        Some(self)
+    }
+}
+
+impl AsEncoding for PossiblyUtf8Vec {
+    fn as_bytes(&self) -> Option<&[u8]> {
+        Some(self.as_ref())
+    }
+
+    fn as_utf8(&self) -> Option<&str> {
+        std::str::from_utf8(self.as_ref()).ok()
+    }
+}
+
+pub fn into_utf8<T>(value: &T) -> Result<Cow<str>, <T as TryInto<String>>::Error>
+where
+    T: Clone + AsEncoding + TryInto<String>,
+{
+    if let Some(s) = value.as_utf8() {
+        Ok(Cow::Borrowed(s))
+    } else {
+        value.clone().try_into().map(Cow::Owned)
+    }
+}
