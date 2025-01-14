@@ -20,7 +20,7 @@ use rt::value::{Callable, StrongValue, Types, Value, WeakValue};
 ///
 /// # From Lua documentation
 ///
-/// Signature: `(v [, message]) -> ()`
+/// Signature: `(v: any [, message: any]) -> ()`
 ///
 /// Raises an error if the value of its argument `v` is false (i.e., `nil` or `false`); otherwise, returns all its arguments.
 /// In case of error, `message` is the error object; when absent, it defaults to "assertion failed!"
@@ -31,21 +31,15 @@ where
     ffi::from_fn(
         || {
             delegate::from_mut(|rt| {
-                let Some(cond) = rt.stack.get(StackSlot(0)) else {
-                    let msg = rt
-                        .core
-                        .alloc_string("assert expects at least one argument".into());
-                    return Err(RuntimeError::from_msg(msg));
-                };
+                let (cond, msg): (WeakValue<Ty>, Maybe<WeakValue<Ty>>) =
+                    rt.stack.parse(&mut rt.core.gc)?;
 
                 if cond.to_bool() {
                     Ok(())
                 } else {
-                    let err = rt
-                        .stack
-                        .get(StackSlot(1))
-                        .copied()
-                        .map(|err| err.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
+                    let err = msg
+                        .into_option()
+                        .map(|t| t.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
                         .transpose()?
                         .unwrap_or_else(|| {
                             let msg = rt.core.alloc_string("assertion failed!".into());
