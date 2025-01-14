@@ -687,56 +687,57 @@ where
     )
 }
 
+/// Query metatable of an object.
+///
+/// # From Lua documentation
+///
+/// Signature: `(object: any) -> any`
+///
+/// If object does not have a metatable, returns `nil`.
+/// Otherwise, if the object's metatable has a `__metatable` field, returns the associated value.
+/// Otherwise, returns the metatable of the given object.
 pub fn getmetatable<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,
-    // Value<Gc>: Debug + Display,
 {
-    ffi::from_fn(
-        || {
-            delegate::from_mut(|mut rt| {
-                use rt::ffi::arg_parser::ParseArgs;
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            let value: WeakValue<Ty> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
 
-                let value: WeakValue<Ty> = rt.stack.parse(&mut rt.core.gc).map_err(|err| {
-                    let msg = rt.core.alloc_string(err.to_string().into());
-                    RtError::from_msg(msg)
-                })?;
-                rt.stack.clear();
+            let results = rt
+                .core
+                .metatable_of(&value)?
+                .map(|metatable| -> Result<WeakValue<Ty>, AlreadyDroppedError> {
+                    use rt::value::TableIndex;
 
-                let results = rt
-                    .core
-                    .metatable_of(&value)?
-                    .map(|metatable| -> Result<WeakValue<Ty>, RefAccessError> {
-                        use rt::value::TableIndex;
+                    let __metatable = {
+                        let key = rt.core.alloc_string("__metatable".into()).downgrade();
+                        rt.core
+                            .gc
+                            .get(metatable)
+                            .ok_or(AlreadyDroppedError)?
+                            .get(&KeyValue::String(LuaPtr(key)))
+                    };
 
-                        let __metatable = {
-                            let key = rt.core.alloc_string("__metatable".into()).downgrade();
-                            rt.core
-                                .gc
-                                .get(metatable)
-                                .ok_or(AlreadyDroppedError)?
-                                .get(&KeyValue::String(LuaPtr(key)))
-                        };
+                    let r = if let Value::Nil = __metatable {
+                        Value::Table(LuaPtr(metatable))
+                    } else {
+                        __metatable
+                    };
 
-                        let r = if let Value::Nil = __metatable {
-                            Value::Table(LuaPtr(metatable))
-                        } else {
-                            __metatable
-                        };
+                    Ok(r)
+                })
+                .transpose()?
+                .unwrap_or_default();
 
-                        Ok(r)
-                    })
-                    .transpose()?
-                    .unwrap_or_default();
+            rt.stack.transient().format(results);
 
-                rt.stack.transient().format(results);
+            Ok(())
+        })
+    };
 
-                Ok(())
-            })
-        },
-        "lua_std::getmetatable",
-        (),
-    )
+    ffi::from_fn(body, "lua_std::getmetatable", ())
 }
 
 pub fn setmetatable<Ty>() -> impl LuaFfi<Ty>

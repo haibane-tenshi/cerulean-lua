@@ -274,6 +274,15 @@ where
     }
 }
 
+/// Query metatable of an object.
+///
+/// # From Lua documentation
+///
+/// Signature: `(object: any) -> any`
+///
+/// If object does not have a metatable, returns `nil`.
+/// Otherwise, if the object's metatable has a `__metatable` field, returns the associated value.
+/// Otherwise, returns the metatable of the given object.
 #[expect(non_camel_case_types)]
 pub struct getmetatable;
 
@@ -282,9 +291,9 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let f = crate::ffi::getmetatable();
+        let fn_body = crate::ffi::getmetatable();
         let key = core.alloc_string("getmetatable".into());
-        let callback = core.gc.alloc_cell(boxed(f));
+        let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
             KeyValue::String(LuaPtr(key.downgrade())),
