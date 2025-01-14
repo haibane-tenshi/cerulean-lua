@@ -139,6 +139,28 @@ where
     }
 }
 
+/// Global variable holding global env.
+///
+/// # From Lua documentation
+///
+/// A global variable (not a function) that holds the global environment (see §2.2).
+/// Lua itself does not use this variable; changing its value does not affect any environment, nor vice versa.
+pub struct _G;
+
+impl<Ty> StdPlugin<Ty> for _G
+where
+    Ty: Types,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let key = core.alloc_string("_G".into());
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Table(LuaPtr(value.downgrade())),
+        );
+    }
+}
+
 #[expect(non_camel_case_types)]
 pub struct pcall;
 
