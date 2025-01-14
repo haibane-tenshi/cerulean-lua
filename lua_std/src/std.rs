@@ -108,6 +108,37 @@ where
     }
 }
 
+/// Load file and execute as Lua chunk.
+///
+/// # From Lua documentation
+///
+/// Signature: `([filename: string]) -> [any,...]`
+///
+/// Opens the named file and executes its content as a Lua chunk.
+/// When called without arguments, `dofile` executes the content of the standard input (`stdin`).
+/// Returns all values returned by the chunk.
+/// In case of errors, `dofile` propagates the error to its caller.
+/// (That is, `dofile` does not run in protected mode.)
+#[expect(non_camel_case_types)]
+pub struct dofile;
+
+impl<Ty> StdPlugin<Ty> for dofile
+where
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    PathBuf: ParseFrom<Ty::String>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::dofile();
+        let key = core.alloc_string("dofile".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
 #[expect(non_camel_case_types)]
 pub struct pcall;
 

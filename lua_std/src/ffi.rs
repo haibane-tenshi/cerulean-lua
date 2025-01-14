@@ -8,8 +8,8 @@ use rt::ffi::arg_parser::{
     FormatReturns, FromLuaString, LuaString, LuaTable, Maybe, NilOr, Opts, ParseArgs, ParseAtom,
     ParseFrom, Split, WeakConvertError,
 };
-use rt::ffi::delegate::RuntimeView;
-use rt::ffi::{self, delegate, LuaFfi};
+use rt::ffi::delegate::{Request, RuntimeView};
+use rt::ffi::{self, boxed, delegate, DLuaFfi, LuaFfi};
 use rt::gc::{DisplayWith, Heap, LuaPtr};
 use rt::runtime::Closure;
 use rt::value::string::{into_utf8, AsEncoding};
@@ -252,6 +252,66 @@ where
         "lua_std::collectgarbage",
         (),
     )
+}
+
+/// Load file and execute as Lua chunk.
+///
+/// # From Lua documentation
+///
+/// Signature: `([filename: string]) -> [any,...]`
+///
+/// Opens the named file and executes its content as a Lua chunk.
+/// When called without arguments, `dofile` executes the content of the standard input (`stdin`).
+/// Returns all values returned by the chunk.
+/// In case of errors, `dofile` propagates the error to its caller.
+/// (That is, `dofile` does not run in protected mode.)
+pub fn dofile<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    PathBuf: ParseFrom<Ty::String>,
+{
+    let body = || {
+        delegate::yield_1(
+            |mut rt| {
+                let filename: Maybe<FromLuaString<PathBuf>> = rt.stack.parse(&mut rt.core.gc)?;
+                let filename = filename.into_option().map(|t| t.0);
+                rt.stack.clear();
+
+                let chunk_id = match filename {
+                    Some(path) => rt.load_from_file(path)?,
+                    None => {
+                        use std::io::Read;
+
+                        let mut buf = Vec::new();
+                        std::io::stdin().read_to_end(&mut buf).map_err(|err| {
+                            rt.core
+                                .alloc_error_msg(format!("failed to read from stdin: {err}"))
+                        })?;
+
+                        let source = String::from_utf8(buf).map_err(|err| {
+                            rt.core.alloc_error_msg(format!(
+                                "stdin does not contain valid utf8: {err}"
+                            ))
+                        })?;
+
+                        rt.load(source, None)?
+                    }
+                };
+
+                let callable = rt.core.gc.alloc_cell(boxed(ffi::call_chunk(chunk_id)));
+                let callable = Callable::Rust(LuaPtr(callable));
+                let request = Request::Invoke {
+                    callable,
+                    start: StackSlot(0),
+                };
+
+                Ok(request)
+            },
+            |_| Ok(()),
+        )
+    };
+
+    ffi::from_fn(body, "lua_std::dofile", ())
 }
 
 pub fn print<Ty>() -> impl LuaFfi<Ty>
