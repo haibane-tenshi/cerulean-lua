@@ -82,7 +82,8 @@ fn main() -> Result<()> {
                 .with(std::load)
                 .with(std::loadfile)
                 .with(std::setmetatable)
-                .with(std::getmetatable);
+                .with(std::getmetatable)
+                .with(std::collectgarbage);
 
             runtime.include(env);
 
