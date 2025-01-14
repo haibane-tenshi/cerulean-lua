@@ -84,7 +84,9 @@ fn main() -> Result<()> {
                 .with(std::setmetatable)
                 .with(std::getmetatable)
                 .with(std::collectgarbage)
-                .with(std::dofile);
+                .with(std::dofile)
+                .with(std::_G)
+                .with(std::ipairs);
 
             runtime.include(env);
 

@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
 use repr::index::StackSlot;
-use rt::error::{AlreadyDroppedError, AlreadyDroppedOr, RefAccessError, RtError, RuntimeError};
+use rt::error::{AlreadyDroppedError, AlreadyDroppedOr, RtError, RuntimeError};
 use rt::ffi::arg_parser::{
     FormatReturns, FromLuaString, LuaString, LuaTable, Maybe, NilOr, Opts, ParseArgs, ParseAtom,
     ParseFrom, Split, WeakConvertError,
@@ -14,7 +14,7 @@ use rt::gc::{DisplayWith, Heap, LuaPtr};
 use rt::runtime::Closure;
 use rt::value::string::{into_utf8, AsEncoding};
 use rt::value::table::KeyValue;
-use rt::value::{Callable, StrongValue, Types, Value, WeakValue};
+use rt::value::{Callable, Int, Nil, StrongValue, Types, Value, WeakValue};
 
 /// Runtime assertion.
 ///
@@ -334,6 +334,67 @@ where
         "lua_std::print",
         (),
     )
+}
+
+/// Iterate over table's integer indices.
+///
+/// # From Lua documentation
+///
+/// Signature: `(t: table,) -> (function, table, int)`
+///
+/// Returns three values (an iterator function, the table `t`, and `0`) so that the construction
+///
+/// ```lua
+/// for i,v in ipairs(t) do body end
+/// ```
+///
+/// will iterate over the key–value pairs `(1,t[1])`, `(2,t[2])`, ..., up to the first absent index.
+pub fn ipairs<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn iter<Ty>() -> impl LuaFfi<Ty>
+    where
+        Ty: Types,
+    {
+        let body = || {
+            delegate::from_mut(|mut rt| {
+                use rt::value::traits::TableIndex;
+
+                let (LuaTable(LuaPtr(table)), Int(prev)) = rt.stack.parse(&mut rt.core.gc)?;
+                rt.stack.clear();
+
+                let table: &Ty::Table = rt.core.gc.get(table).ok_or(AlreadyDroppedError)?;
+                match table.next_key(&KeyValue::Int(prev)).copied() {
+                    Some(key) => {
+                        let value = table.get(&key);
+                        rt.stack.transient().format((key, value));
+                    }
+                    None => rt.stack.transient().format(Nil),
+                }
+
+                Ok(())
+            })
+        };
+
+        ffi::from_fn(body, "lua_std::ipairs::iter", ())
+    }
+
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            let table: LuaTable<_> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let iter = heap.alloc_cell(boxed(iter::<Ty>())).downgrade();
+                stack.format((Callable::Rust(LuaPtr(iter)), table, Int(0)));
+            });
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::ipairs", ())
 }
 
 pub fn pcall<Ty>() -> impl LuaFfi<Ty>

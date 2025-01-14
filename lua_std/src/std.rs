@@ -161,6 +161,38 @@ where
     }
 }
 
+/// Iterate over table's integer indices.
+///
+/// # From Lua documentation
+///
+/// Signature: `(t: table,) -> (function, table, int)`
+///
+/// Returns three values (an iterator function, the table `t`, and `0`) so that the construction
+///
+/// ```lua
+/// for i,v in ipairs(t) do body end
+/// ```
+///
+/// will iterate over the key–value pairs `(1,t[1])`, `(2,t[2])`, ..., up to the first absent index.
+#[expect(non_camel_case_types)]
+pub struct ipairs;
+
+impl<Ty> StdPlugin<Ty> for ipairs
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::ipairs();
+        let key = core.alloc_string("ipairs".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
 #[expect(non_camel_case_types)]
 pub struct pcall;
 
