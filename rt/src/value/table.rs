@@ -39,6 +39,16 @@ where
         }
     }
 
+    fn next_key(&self, key: &KeyValue<Rf, Ty>) -> Option<&KeyValue<Rf, Ty>> {
+        use std::ops::Bound;
+
+        let (key, _) = self
+            .data
+            .range((Bound::Excluded(key), Bound::Unbounded))
+            .next()?;
+        Some(key)
+    }
+
     fn border(&self) -> i64 {
         Table::border(self)
     }
