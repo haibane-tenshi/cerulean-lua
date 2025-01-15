@@ -3,10 +3,10 @@ use std::path::PathBuf;
 
 use rt::ffi::arg_parser::ParseFrom;
 use rt::ffi::{boxed, DLuaFfi};
-use rt::gc::{DisplayWith, Heap, LuaPtr};
+use rt::gc::LuaPtr;
 use rt::runtime::{Closure, Core};
 use rt::value::string::AsEncoding;
-use rt::value::{Callable, KeyValue, TableIndex, Types, Value, WeakValue};
+use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
 
 use crate::plugin::{RootTable, StdPlugin};
 
@@ -482,12 +482,16 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `([_: any...]) -> ()`
+/// Signature: `(_: any...) -> ()`
 ///
 /// Receives any number of arguments and prints their values to `stdout``, converting each argument to a string following the same rules of `tostring`.
 ///
 /// The function `print` is not intended for formatted output, but only as a quick way to show a value, for instance for debugging.
 /// For complete control over the output, use `string.format` and `io.write`.
+///
+/// # Implementation-specific behavior
+///
+/// If `__tostring` metamethod returns something but a string it will be printed raw, without recursively invoking `tostring` on it.
 #[expect(non_camel_case_types)]
 pub struct print;
 

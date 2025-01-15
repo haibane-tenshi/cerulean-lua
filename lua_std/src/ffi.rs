@@ -288,7 +288,7 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `([filename: string]) -> [any...]`
+/// Signature: `([filename: string]) -> any...`
 ///
 /// Opens the named file and executes its content as a Lua chunk.
 /// When called without arguments, `dofile` executes the content of the standard input (`stdin`).
@@ -1219,25 +1219,137 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `([_: any...]) -> ()`
+/// Signature: `(_: any...) -> ()`
 ///
 /// Receives any number of arguments and prints their values to `stdout``, converting each argument to a string following the same rules of `tostring`.
 ///
 /// The function `print` is not intended for formatted output, but only as a quick way to show a value, for instance for debugging.
 /// For complete control over the output, use `string.format` and `io.write`.
+///
+/// # Implementation-specific behavior
+///
+/// If `__tostring` metamethod returns something but a string it will be printed raw, without recursively invoking `tostring` on it.
 pub fn print<Ty>() -> impl LuaFfi<Ty>
 where
-    Ty: Types,
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
+    use rt::value::Weak;
+
+    fn find_first<Ty>(
+        rt: &RuntimeView<'_, Ty>,
+        key: KeyValue<Weak, Ty>,
+    ) -> Result<usize, AlreadyDroppedError>
+    where
+        Ty: Types,
+    {
+        let r = rt
+            .stack
+            .iter()
+            .enumerate()
+            .find_map(|(i, value)| {
+                let metavalue = rt::builtins::find_metavalue(
+                    [*value],
+                    key,
+                    &rt.core.gc,
+                    &rt.core.metatable_registry,
+                );
+                match metavalue {
+                    Ok(Value::Nil) => None,
+                    Ok(_) => Some(Ok(i)),
+                    Err(err) => Some(Err(err)),
+                }
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok(r)
+    }
+
     let body = || {
-        delegate::from_mut(|mut rt| {
-            for value in rt.stack.iter() {
-                print!("{}", value.display(&rt.core.gc));
+        enum State {
+            Started,
+            CalledToString,
+            Finished,
+        }
+
+        let mut state = State::Started;
+        let mut persist_key = None;
+        let mut persist_tostring = None;
+        delegate::try_repeat(move |mut rt| {
+            use std::io::Write;
+
+            let current = std::mem::replace(&mut state, State::Finished);
+            match current {
+                State::Started => {
+                    let s = rt.core.alloc_string("__tostring".into());
+                    let key = KeyValue::String(LuaPtr(s.downgrade()));
+
+                    // The first value that needs metamethod call for conversion.
+                    // Everything before it can be safely rendered using default Display impl.
+                    // This is much faster compared to repeated `tostring` calls, and also should be very frequent.
+                    let last = find_first(&rt, key)?;
+
+                    let mut stdout = std::io::stdout().lock();
+                    for value in rt.stack.drain(..StackSlot(last)) {
+                        write!(&mut stdout, "{}", value.display(&rt.core.gc))
+                            .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+                    }
+
+                    let Some(value) = rt.stack.remove(StackSlot(0)) else {
+                        return Ok(delegate::State::Complete(()));
+                    };
+
+                    let tostring = rt.core.gc.alloc_cell(boxed(tostring()));
+                    let tostring = Callable::Rust(LuaPtr(tostring));
+
+                    let start = StackSlot(rt.stack.len());
+                    rt.stack.transient().push(value);
+
+                    let request = Request::Invoke {
+                        callable: tostring.clone(),
+                        start,
+                    };
+
+                    persist_key = Some(s);
+                    persist_tostring = Some(tostring);
+                    state = State::CalledToString;
+                    Ok(delegate::State::Yielded(request))
+                }
+                State::CalledToString => {
+                    // Technically, stack after call can be in any state.
+                    // However we call a known trusted function that always produces exactly 1 value or errors.
+                    let value = rt.stack.pop().unwrap();
+
+                    let mut stdout = std::io::stdout().lock();
+
+                    write!(&mut stdout, "{}", value.display(&rt.core.gc))
+                        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+
+                    let key = KeyValue::String(LuaPtr(persist_key.as_ref().unwrap().downgrade()));
+                    let last = find_first(&rt, key)?;
+
+                    for value in rt.stack.drain(..StackSlot(last)) {
+                        write!(&mut stdout, "{}", value.display(&rt.core.gc))
+                            .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+                    }
+
+                    let Some(value) = rt.stack.remove(StackSlot(0)) else {
+                        return Ok(delegate::State::Complete(()));
+                    };
+
+                    let start = StackSlot(rt.stack.len());
+                    rt.stack.transient().push(value);
+
+                    let request = Request::Invoke {
+                        callable: persist_tostring.clone().unwrap(),
+                        start,
+                    };
+
+                    state = State::CalledToString;
+                    Ok(delegate::State::Yielded(request))
+                }
+                State::Finished => Ok(delegate::State::Complete(())),
             }
-
-            rt.stack.clear();
-
-            Ok(())
         })
     };
 
