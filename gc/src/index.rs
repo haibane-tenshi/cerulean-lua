@@ -287,6 +287,13 @@ where
     }
 }
 
+impl<T, A> Unpin for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+}
+
 /// Common type for all strong references.
 ///
 /// Exact behavior of this type will differ based on access parameter.
@@ -420,6 +427,13 @@ where
     fn as_ref(&self) -> &Self {
         self
     }
+}
+
+impl<T, A> Unpin for RootPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
 }
 
 /// A weak reference to gc-allocated mutable value.
