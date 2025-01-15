@@ -288,7 +288,7 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `([filename: string]) -> [any,...]`
+/// Signature: `([filename: string]) -> [any...]`
 ///
 /// Opens the named file and executes its content as a Lua chunk.
 /// When called without arguments, `dofile` executes the content of the standard input (`stdin`).
@@ -337,28 +337,6 @@ where
     };
 
     ffi::from_fn(body, "lua_std::dofile", ())
-}
-
-pub fn print<Ty>() -> impl LuaFfi<Ty>
-where
-    Ty: Types,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
-{
-    ffi::from_fn(
-        || {
-            delegate::from_mut(|mut rt| {
-                for value in rt.stack.iter() {
-                    print!("{}", value.display(&rt.core.gc));
-                }
-
-                rt.stack.clear();
-
-                Ok(())
-            })
-        },
-        "lua_std::print",
-        (),
-    )
 }
 
 /// Iterate over table's integer indices.
@@ -1235,4 +1213,134 @@ where
         "lua_std::getmetatable",
         (),
     )
+}
+
+/// Print all values
+///
+/// # From Lua documentation
+///
+/// Signature: `([_: any...]) -> ()`
+///
+/// Receives any number of arguments and prints their values to `stdout``, converting each argument to a string following the same rules of `tostring`.
+///
+/// The function `print` is not intended for formatted output, but only as a quick way to show a value, for instance for debugging.
+/// For complete control over the output, use `string.format` and `io.write`.
+pub fn print<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            for value in rt.stack.iter() {
+                print!("{}", value.display(&rt.core.gc));
+            }
+
+            rt.stack.clear();
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::print", ())
+}
+
+/// Convert value to string.
+///
+/// # From Lua documentation
+///
+/// Signature:
+///
+/// * `(v: any) -> string`
+/// * `(v: any) -> any`
+///
+/// Receives a value of any type and converts it to a string in a human-readable format.
+///
+/// If the metatable of `v` has a `__tostring` field, then `tostring` calls the corresponding value with `v` as argument,
+/// and uses the result of the call as its result.
+/// Otherwise, if the metatable of `v` has a `__name` field with a string value, `tostring` may use that string in its final result.
+///
+/// For complete control of how numbers are converted, use `string.format`.
+///
+/// # Implementation-specific behavior
+///
+/// * Despite its name, this function is not guaranteed to produce a string.
+///
+///     While default behavior of this function indeed produces a string, the same guarantee does not extend to metamethod.
+///     Lua does not specify any behavior for this case, so the result will be propagated as is.
+///
+/// * You should be cautions with your expectations of how numbers (both ints and floats) are handled.
+///     This function renders numbers using Rust's standard formatting, which is different from Lua's number formats.
+///
+/// * After calling `__tostring` metamethod stack will be adjusted to 1 value.
+///  
+/// * Currently, `__name` metavalue is unused.
+pub fn tostring<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        enum State {
+            Started,
+            CalledMetamethod,
+            Finished,
+        }
+
+        let mut state = State::Started;
+        delegate::try_repeat(move |mut rt| {
+            let current = std::mem::replace(&mut state, State::Finished);
+            match current {
+                State::Started => {
+                    let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
+
+                    let s = rt.core.alloc_string("__tostring".into());
+                    let key = KeyValue::String(LuaPtr(s.downgrade()));
+                    let metavalue = rt::builtins::find_metavalue(
+                        [value],
+                        key,
+                        &rt.core.gc,
+                        &rt.core.metatable_registry,
+                    )?;
+
+                    match metavalue {
+                        Value::Nil => {
+                            let s = format!("{}", value.display(&rt.core.gc));
+
+                            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                                let s = heap.intern(s.into());
+                                stack.clear();
+                                stack.push(Value::String(LuaPtr(s.downgrade())));
+                            });
+
+                            Ok(delegate::State::Complete(()))
+                        }
+                        metamethod => {
+                            let callable =
+                                rt.stack.transient_in(&mut rt.core.gc, |stack, heap| {
+                                    rt::builtins::prepare_invoke(
+                                        metamethod,
+                                        stack,
+                                        heap,
+                                        &rt.core.metatable_registry,
+                                    )
+                                })?;
+
+                            let request = Request::Invoke {
+                                callable,
+                                start: StackSlot(0),
+                            };
+                            state = State::CalledMetamethod;
+                            Ok(delegate::State::Yielded(request))
+                        }
+                    }
+                }
+                State::CalledMetamethod => {
+                    rt.stack.adjust_height(StackSlot(1));
+                    Ok(delegate::State::Complete(()))
+                }
+                State::Finished => Ok(delegate::State::Complete(())),
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::tostring", ())
 }

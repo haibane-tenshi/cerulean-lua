@@ -79,6 +79,7 @@ fn main() -> Result<()> {
                 .with(std::assert)
                 .with(std::pcall)
                 .with(std::print)
+                .with(std::tostring)
                 .with(std::load)
                 .with(std::loadfile)
                 .with(std::setmetatable)

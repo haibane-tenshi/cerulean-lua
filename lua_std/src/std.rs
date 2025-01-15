@@ -239,27 +239,6 @@ where
     }
 }
 
-#[expect(non_camel_case_types)]
-pub struct print;
-
-impl<Ty> StdPlugin<Ty> for print
-where
-    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: TryInto<String> + From<&'static str>,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
-{
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_print = crate::ffi::print();
-        let key = core.alloc_string("print".into());
-        let callback = core.gc.alloc_cell(boxed(fn_print));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
-    }
-}
-
 /// Load a chunk.
 ///
 /// # From Lua documentation
@@ -490,6 +469,84 @@ where
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::getmetatable();
         let key = core.alloc_string("getmetatable".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
+/// Print all values
+///
+/// # From Lua documentation
+///
+/// Signature: `([_: any...]) -> ()`
+///
+/// Receives any number of arguments and prints their values to `stdout``, converting each argument to a string following the same rules of `tostring`.
+///
+/// The function `print` is not intended for formatted output, but only as a quick way to show a value, for instance for debugging.
+/// For complete control over the output, use `string.format` and `io.write`.
+#[expect(non_camel_case_types)]
+pub struct print;
+
+impl<Ty> StdPlugin<Ty> for print
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::print();
+        let key = core.alloc_string("print".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
+/// Convert value to string.
+///
+/// # From Lua documentation
+///
+/// Signature:
+///
+/// * `(v: any) -> string`
+/// * `(v: any) -> any`
+///
+/// Receives a value of any type and converts it to a string in a human-readable format.
+///
+/// If the metatable of `v` has a `__tostring` field, then `tostring` calls the corresponding value with `v` as argument,
+/// and uses the result of the call as its result.
+/// Otherwise, if the metatable of `v` has a `__name` field with a string value, `tostring` may use that string in its final result.
+///
+/// For complete control of how numbers are converted, use `string.format`.
+///
+/// # Implementation-specific behavior
+///
+/// * Despite its name, this function is not guaranteed to produce a string.
+///
+///     While default behavior of this function indeed produces a string, the same guarantee does not extend to metamethod.
+///     Lua does not specify any behavior for this case, so the result will be propagated as is.
+///
+/// * You should be cautions with your expectations of how numbers (both ints and floats) are handled.
+///     This function renders numbers using Rust's standard formatting, which is different from Lua's number formats.
+///
+/// * After calling `__tostring` metamethod stack will be adjusted to 1 value.
+///  
+/// * Currently, `__name` metavalue is unused.
+#[expect(non_camel_case_types)]
+pub struct tostring;
+
+impl<Ty> StdPlugin<Ty> for tostring
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::tostring();
+        let key = core.alloc_string("tostring".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
