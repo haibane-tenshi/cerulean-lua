@@ -2,6 +2,7 @@ pub mod already_dropped;
 pub mod borrow;
 mod closure;
 pub mod diagnostic;
+pub mod not_callable;
 pub mod opcode;
 pub mod out_of_bounds_stack;
 pub mod signature;
@@ -23,6 +24,7 @@ pub use already_dropped::AlreadyDroppedError;
 pub use borrow::BorrowError;
 pub use closure::{CapturesMismatch, MalformedClosureError, MissingChunk, MissingFunction};
 pub use diagnostic::Diagnostic;
+pub use not_callable::NotCallableError;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use signature::SignatureError;
@@ -43,6 +45,7 @@ pub enum RuntimeError<Value> {
     OutOfBoundsStack(OutOfBoundsStack),
     UpvalueCountMismatch(CapturesMismatch),
     Signature(SignatureError),
+    NotCallable(NotCallableError<Value>),
     Thread(ThreadError),
     OpCode(OpCodeError),
 }
@@ -96,6 +99,7 @@ where
             RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
             RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
             RuntimeError::Signature(err) => err.into_diagnostic(),
+            RuntimeError::NotCallable(err) => err.into_diagnostic(),
             RuntimeError::Thread(err) => err.into_diagnostic(),
             RuntimeError::OpCode(err) => err.into_diagnostic((), chunk_cache),
         };
@@ -261,6 +265,18 @@ impl<E> Error for AlreadyDroppedOr<E> where E: Debug + Display {}
 impl<E> From<AlreadyDroppedError> for AlreadyDroppedOr<E> {
     fn from(value: AlreadyDroppedError) -> Self {
         AlreadyDroppedOr::Dropped(value)
+    }
+}
+
+impl<Value, E> From<AlreadyDroppedOr<E>> for RuntimeError<Value>
+where
+    E: Into<RuntimeError<Value>>,
+{
+    fn from(value: AlreadyDroppedOr<E>) -> Self {
+        match value {
+            AlreadyDroppedOr::Dropped(err) => RuntimeError::AlreadyDropped(err),
+            AlreadyDroppedOr::Other(err) => err.into(),
+        }
     }
 }
 

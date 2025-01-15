@@ -65,13 +65,11 @@ pub mod coerce;
 pub mod full;
 pub mod raw;
 
-use std::fmt::Display;
-
-use crate::error::{AlreadyDroppedError, AlreadyDroppedOr};
+use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, NotCallableError};
 use crate::gc::Heap;
 use crate::runtime::thread::TransientStackGuard;
 use crate::runtime::MetatableRegistry;
-use crate::value::{Callable, KeyValue, Strong, Types, Value, Weak, WeakValue};
+use crate::value::{Callable, KeyValue, Strong, StrongValue, Types, Value, Weak, WeakValue};
 
 /// Resolve metavalue out of a list of values.
 ///
@@ -115,7 +113,7 @@ pub fn prepare_invoke<Ty>(
     stack: TransientStackGuard<'_, Ty>,
     heap: &mut Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
-) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError>>
+) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError<StrongValue<Ty>>>>
 where
     Ty: Types,
 {
@@ -127,7 +125,13 @@ where
         .downgrade();
     let key = KeyValue::String(LuaPtr(s));
 
-    inner_prepare_invoke(callable, stack, heap, registry, key)
+    inner_prepare_invoke(callable, stack, heap, registry, key).map_err(|err| match err {
+        AlreadyDroppedOr::Dropped(err) => AlreadyDroppedOr::Dropped(err),
+        AlreadyDroppedOr::Other(_) => match callable.upgrade(heap) {
+            Some(value) => AlreadyDroppedOr::Other(NotCallableError(value)),
+            None => AlreadyDroppedOr::Dropped(AlreadyDroppedError),
+        },
+    })
 }
 
 pub(crate) fn inner_prepare_invoke<Ty>(
@@ -136,7 +140,7 @@ pub(crate) fn inner_prepare_invoke<Ty>(
     heap: &Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
     key: KeyValue<Weak, Ty>,
-) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError>>
+) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<InnerNotCallableError>>
 where
     Ty: Types,
 {
@@ -160,7 +164,7 @@ where
 
         // Keys associated with nil are not considered part of the table.
         if metavalue == Value::Nil {
-            break NotCallableError;
+            break InnerNotCallableError;
         }
 
         stack.insert(StackSlot(0), callable);
@@ -174,11 +178,4 @@ where
     Err(AlreadyDroppedOr::Other(err))
 }
 
-#[derive(Debug)]
-pub struct NotCallableError;
-
-impl Display for NotCallableError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "value already dropped")
-    }
-}
+pub(crate) struct InnerNotCallableError;

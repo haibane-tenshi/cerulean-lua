@@ -13,7 +13,7 @@ use repr::tivec::TiSlice;
 
 use super::super::stack::StackGuard;
 use crate::backtrace::BacktraceFrame;
-use crate::builtins::NotCallableError;
+use crate::builtins::InnerNotCallableError;
 use crate::chunk_cache::ChunkCache;
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
@@ -1031,7 +1031,7 @@ where
         &mut self,
         callable: WeakValue<Ty>,
         start: StackSlot,
-    ) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError>> {
+    ) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<InnerNotCallableError>> {
         use crate::builtins::inner_prepare_invoke;
 
         let key = self.internal_cache.lookup_event(Event::Call);
