@@ -1039,7 +1039,7 @@ where
     }
 
     pub fn clear(&mut self) {
-        self.stack.main.clear()
+        self.stack.main.truncate(self.boundary.0)
     }
 
     pub fn adjust_height(&mut self, height: StackSlot) -> std::vec::Drain<'_, WeakValue<Ty>> {
