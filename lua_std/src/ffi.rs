@@ -961,6 +961,69 @@ where
     ffi::from_fn(body, "lua_std::loadfile", ())
 }
 
+/// Query next key/value pair in the table
+///
+/// # From Lua documentation
+///
+/// Signature: `(table: table [, index: any]) -> nil | (any, any)`
+///
+/// Allows a program to traverse all fields of a table.
+/// Its first argument is a table and its second argument is an index in this table.
+/// A call to `next` returns the next index of the table and its associated value.
+/// When called with `nil` as its second argument, `next` returns an initial index and its associated value.
+/// When called with the last index, or with `nil` in an empty table, `next` returns `nil`.
+/// If the second argument is absent, then it is interpreted as `nil`.
+/// In particular, you can use `next(t)` to check whether a table is empty.
+///
+/// The order in which the indices are enumerated is not specified, *even for numeric indices*.
+/// (To traverse a table in numerical order, use a numerical **for**.)
+///
+/// You should not assign any value to a non-existent field in a table during its traversal.
+/// You may however modify existing fields.
+/// In particular, you may set existing fields to `nil`.
+pub fn next<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use rt::value::traits::TableIndex;
+
+            let (table, index): (LuaTable<_>, Maybe<WeakValue<Ty>>) =
+                rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            let table = rt.core.gc.get(table.0 .0).ok_or(AlreadyDroppedError)?;
+
+            let index = index.into_option().unwrap_or_default();
+            let next_key = match index {
+                Value::Nil => table.first_key(),
+                value => match value.try_into() {
+                    Ok(key) => table.next_key(&key),
+                    Err(err) => {
+                        let err = rt.core.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                },
+            };
+
+            let results = match next_key {
+                Some(key) => {
+                    let value = table.get(key);
+                    let key: WeakValue<_> = (*key).into();
+                    (key, Maybe::Some(value))
+                }
+                None => (Nil.into(), Maybe::None),
+            };
+
+            rt.stack.transient().format(results);
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::next", ())
+}
+
 /// Query metatable of an object.
 ///
 /// # From Lua documentation

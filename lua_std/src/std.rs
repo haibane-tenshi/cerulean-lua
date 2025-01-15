@@ -362,6 +362,45 @@ where
     }
 }
 
+/// Query next key/value pair in the table
+///
+/// # From Lua documentation
+///
+/// Signature: `(table: table [, index: any]) -> nil | (any, any)`
+///
+/// Allows a program to traverse all fields of a table.
+/// Its first argument is a table and its second argument is an index in this table.
+/// A call to `next` returns the next index of the table and its associated value.
+/// When called with `nil` as its second argument, `next` returns an initial index and its associated value.
+/// When called with the last index, or with `nil` in an empty table, `next` returns `nil`.
+/// If the second argument is absent, then it is interpreted as `nil`.
+/// In particular, you can use `next(t)` to check whether a table is empty.
+///
+/// The order in which the indices are enumerated is not specified, *even for numeric indices*.
+/// (To traverse a table in numerical order, use a numerical **for**.)
+///
+/// You should not assign any value to a non-existent field in a table during its traversal.
+/// You may however modify existing fields.
+/// In particular, you may set existing fields to `nil`.
+#[expect(non_camel_case_types)]
+pub struct next;
+
+impl<Ty> StdPlugin<Ty> for next
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::next();
+        let key = core.alloc_string("next".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
 #[expect(non_camel_case_types)]
 pub struct setmetatable;
 
