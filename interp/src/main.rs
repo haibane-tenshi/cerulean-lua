@@ -87,7 +87,8 @@ fn main() -> Result<()> {
                 .with(std::dofile)
                 .with(std::_G)
                 .with(std::ipairs)
-                .with(std::next);
+                .with(std::next)
+                .with(std::pairs);
 
             runtime.include(env);
 

@@ -1024,6 +1024,99 @@ where
     ffi::from_fn(body, "lua_std::next", ())
 }
 
+/// Iterate over all key/value pairs of table or object.
+///
+/// # From Lua documentation
+///
+/// Signature:
+/// * `(t: any,) -> (any, any, any)`
+/// * `(t: table,) -> (function, table, nil)`
+///
+///
+/// If `t` has a metamethod `__pairs`, calls it with `t` as argument and returns the first three results from the call.
+///
+/// Otherwise, returns three values: the `next` function, the table `t`, and `nil`, so that the construction
+///
+/// ```lua
+/// for k,v in pairs(t) do body end
+/// ```
+///
+/// will iterate over all key–value pairs of table `t`.
+///
+/// See function next for the caveats of modifying the table during its traversal.
+///
+/// # Implementation-specific behavior
+///
+/// After calling `__pairs` metamethod stack will be forcefully adjusted to 3 elements, padding with `nil` if necessary.
+pub fn pairs<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    let body = || {
+        enum State {
+            Started,
+            CalledMetamethod,
+            Finished,
+        }
+
+        let mut state = State::Started;
+        delegate::try_repeat(move |mut rt| {
+            let current = std::mem::replace(&mut state, State::Finished);
+            match current {
+                State::Started => {
+                    let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
+
+                    let key_string = rt.core.alloc_string("__pairs".into());
+                    let key = KeyValue::String(LuaPtr(key_string.downgrade()));
+                    let metavalue = rt::builtins::find_metavalue(
+                        [value],
+                        key,
+                        &rt.core.gc,
+                        &rt.core.metatable_registry,
+                    )?;
+
+                    match metavalue {
+                        Value::Nil => {
+                            rt.stack.clear();
+                            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                                let callback = heap.alloc_cell(boxed(next())).downgrade();
+                                let next = Callable::Rust(LuaPtr(callback));
+                                stack.format((next, value, Nil))
+                            });
+
+                            Ok(delegate::State::Complete(()))
+                        }
+                        metamethod => {
+                            let callable = rt::builtins::prepare_invoke(
+                                metamethod,
+                                rt.stack.transient(),
+                                &mut rt.core.gc,
+                                &rt.core.metatable_registry,
+                            )?;
+
+                            // Table is still on the stack, but the latter is exactly the state the function should receive.
+                            let request = Request::Invoke {
+                                callable,
+                                start: StackSlot(0),
+                            };
+
+                            state = State::CalledMetamethod;
+                            Ok(delegate::State::Yielded(request))
+                        }
+                    }
+                }
+                State::CalledMetamethod => {
+                    rt.stack.adjust_height(StackSlot(3));
+                    Ok(delegate::State::Complete(()))
+                }
+                State::Finished => Ok(delegate::State::Complete(())),
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::pairs", ())
+}
+
 /// Query metatable of an object.
 ///
 /// # From Lua documentation

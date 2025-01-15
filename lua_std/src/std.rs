@@ -401,6 +401,49 @@ where
     }
 }
 
+/// Iterate over all key/value pairs of table or object.
+///
+/// # From Lua documentation
+///
+/// Signature:
+/// * `(t: any,) -> (any, any, any)`
+/// * `(t: table,) -> (function, table, nil)`
+///
+///
+/// If `t` has a metamethod `__pairs`, calls it with `t` as argument and returns the first three results from the call.
+///
+/// Otherwise, returns three values: the `next` function, the table `t`, and `nil`, so that the construction
+///
+/// ```lua
+/// for k,v in pairs(t) do body end
+/// ```
+///
+/// will iterate over all key–value pairs of table `t`.
+///
+/// See function next for the caveats of modifying the table during its traversal.
+///
+/// # Implementation-specific behavior
+///
+/// After calling `__pairs` metamethod stack will be forcefully adjusted to 3 elements, padding with `nil` if necessary.
+#[expect(non_camel_case_types)]
+pub struct pairs;
+
+impl<Ty> StdPlugin<Ty> for pairs
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::pairs();
+        let key = core.alloc_string("pairs".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
 #[expect(non_camel_case_types)]
 pub struct setmetatable;
 
