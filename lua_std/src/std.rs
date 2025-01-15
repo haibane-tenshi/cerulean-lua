@@ -6,7 +6,7 @@ use rt::ffi::{boxed, DLuaFfi};
 use rt::gc::{DisplayWith, Heap, LuaPtr};
 use rt::runtime::{Closure, Core};
 use rt::value::string::AsEncoding;
-use rt::value::{Callable, KeyValue, StrongValue, TableIndex, Types, Value, WeakValue};
+use rt::value::{Callable, KeyValue, TableIndex, Types, Value, WeakValue};
 
 use crate::plugin::{RootTable, StdPlugin};
 
@@ -209,6 +209,16 @@ where
     }
 }
 
+/// Call another function in protected mode.
+///
+/// # From Lua documentation
+///
+/// Calls the function `f` with the given arguments in protected mode.
+/// This means that any error inside `f` is not propagated; instead, `pcall` catches the error and returns a status code.
+/// Its first result is the status code (a boolean), which is `true` if the call succeeds without errors.
+/// In such case, `pcall` also returns all results from the call, after this first result.
+/// In case of any error, `pcall` returns `false` plus the error object.
+/// Note that errors caught by `pcall` do not call a message handler.
 #[expect(non_camel_case_types)]
 pub struct pcall;
 
@@ -216,13 +226,11 @@ impl<Ty> StdPlugin<Ty> for pcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     Ty::String: AsEncoding + TryInto<String>,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
-    StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_pcall = crate::ffi::pcall();
+        let fn_body = crate::ffi::pcall();
         let key = core.alloc_string("pcall".into());
-        let callback = core.gc.alloc_cell(boxed(fn_pcall));
+        let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
             KeyValue::String(LuaPtr(key.downgrade())),

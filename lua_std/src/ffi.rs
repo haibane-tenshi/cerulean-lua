@@ -422,12 +422,20 @@ where
     ffi::from_fn(body, "lua_std::ipairs", ())
 }
 
+/// Call another function in protected mode.
+///
+/// # From Lua documentation
+///
+/// Calls the function `f` with the given arguments in protected mode.
+/// This means that any error inside `f` is not propagated; instead, `pcall` catches the error and returns a status code.
+/// Its first result is the status code (a boolean), which is `true` if the call succeeds without errors.
+/// In such case, `pcall` also returns all results from the call, after this first result.
+/// In case of any error, `pcall` returns `false` plus the error object.
+/// Note that errors caught by `pcall` do not call a message handler.
 pub fn pcall<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
-    Ty::String: AsEncoding + TryInto<String> + Display,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
-    StrongValue<Ty>: DisplayWith<Heap<Ty>>,
+    Ty::String: AsEncoding + TryInto<String>,
 {
     use rt::ffi::coroutine::State as CoState;
     use std::pin::Pin;
@@ -437,6 +445,7 @@ where
         #[default]
         Started,
         Called,
+        Finished,
     }
 
     #[derive(Default)]
@@ -452,46 +461,35 @@ where
             mut rt: RuntimeView<'_, Ty>,
             response: delegate::Response<Ty>,
         ) -> CoState<delegate::Request<Ty>, Result<(), RtError<Ty>>> {
+            use rt::error::SignatureError;
             use rt::ffi::delegate::Response;
 
-            match self.0 {
+            let current = std::mem::replace(&mut self.0, State::Finished);
+            match current {
                 State::Started => {
-                    let callable = {
-                        let mut stack = rt.stack.synchronized(&mut rt.core.gc);
-                        let Some(mut value) = stack.get_mut(StackSlot(0)) else {
-                            // Drop forces stack to stay alive until end of block (where its drop impl is called).
-                            // Have to drop it manually on divergent branches.
-                            drop(stack);
-                            let msg = rt
-                                .core
-                                .alloc_string("pcall expects at least one argument".into());
-                            return CoState::Complete(Err(RuntimeError::from_msg(msg)));
-                        };
-
-                        let Value::Function(func) = value.take() else {
-                            drop(value);
-                            drop(stack);
-                            let msg = rt.core.alloc_string(
-                                "pcall expects the first argument to be a function".into(),
-                            );
-                            return CoState::Complete(Err(RuntimeError::from_msg(msg)));
-                        };
-
-                        func
+                    let Some(value) = rt.stack.get(StackSlot(0)) else {
+                        let err = SignatureError::TooFewArgs { found: 0 };
+                        return CoState::Complete(Err(err.into()));
                     };
 
-                    match callable.upgrade(&rt.core.gc) {
-                        Some(callable) => {
-                            let r = delegate::Request::Invoke {
-                                callable,
-                                start: StackSlot(1),
-                            };
+                    let Value::Function(callable) = value else {
+                        let msg = rt.core.alloc_string(
+                            "pcall expects the first argument to be a function".into(),
+                        );
+                        return CoState::Complete(Err(RuntimeError::from_msg(msg)));
+                    };
 
-                            self.0 = State::Called;
-                            CoState::Yielded(r)
-                        }
-                        None => CoState::Complete(Err(AlreadyDroppedError.into())),
-                    }
+                    let Some(callable) = callable.upgrade(&rt.core.gc) else {
+                        return CoState::Complete(Err(AlreadyDroppedError.into()));
+                    };
+
+                    let r = delegate::Request::Invoke {
+                        callable,
+                        start: StackSlot(1),
+                    };
+
+                    self.0 = State::Called;
+                    CoState::Yielded(r)
                 }
                 State::Called => {
                     match response {
@@ -515,19 +513,19 @@ where
                                 .into_diagnostic(&rt.core.gc, rt.chunk_cache)
                                 .emit(&mut NoColor::new(&mut s), &Default::default());
                             let string = String::from_utf8_lossy(&s).to_string();
-                            let msg = rt.core.alloc_string(string.into());
 
-                            let mut stack = rt.stack.transient();
-                            stack.push(Value::Bool(false));
-                            stack.push(Value::String(LuaPtr(msg.downgrade())));
-                            stack.sync(&mut rt.core.gc);
+                            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                                let msg = heap.intern(string.into()).downgrade();
+                                stack.push(Value::Bool(false));
+                                stack.push(Value::String(LuaPtr(msg)));
+                            });
                         }
                         Response::Resume => unreachable!(),
                     }
 
-                    self.0 = State::Started;
                     CoState::Complete(Ok(()))
                 }
+                State::Finished => unreachable!(),
             }
         }
     }
