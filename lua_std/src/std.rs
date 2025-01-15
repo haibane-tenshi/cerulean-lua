@@ -236,18 +236,60 @@ where
     }
 }
 
+/// Load a chunk.
+///
+/// # From Lua documentation
+///
+/// Signature: `(chunk: string | function [, chunkname: string [, mode: string [, env: any]]]) -> function | (fail, any)`
+///
+/// Loads a chunk.
+///
+/// If `chunk` is a string, the chunk is this string.
+/// If `chunk` is a function, `load` calls it repeatedly to get the chunk pieces.
+/// Each call to chunk must return a string that concatenates with previous results.
+/// A return of an empty string, `nil`, or no value signals the end of the chunk.
+///
+/// If there are no syntactic errors, `load` returns the compiled chunk as a function;
+/// otherwise, it returns **fail** plus the error message.
+///
+/// When you load a main chunk, the resulting function will always have exactly one upvalue, the `_ENV` variable (see §2.2).
+/// However, when you load a binary chunk created from a function (see `string.dump`),
+/// the resulting function can have an arbitrary number of upvalues,
+/// and there is no guarantee that its first upvalue will be the `_ENV` variable.
+/// (A non-main function may not even have an `_ENV` upvalue.)
+///
+/// Regardless, if the resulting function has any upvalues, its first upvalue is set to the value of `env`,
+/// if that parameter is given, or to the value of the global environment.
+/// Other upvalues are initialized with `nil`.
+/// All upvalues are fresh, that is, they are not shared with any other function.
+///
+/// `chunkname` is used as the name of the chunk for error messages and debug information (see §4.7).
+/// When absent, it defaults to chunk, if chunk is a string, or to **"=(load)"** otherwise.
+///
+/// The string `mode` controls whether the chunk can be text or binary (that is, a precompiled chunk).
+/// It may be the string **"b"** (only binary chunks), **"t"** (only text chunks), or **"bt"** (both binary and text).
+/// The default is **"bt"**.
+///
+/// It is safe to load malformed binary chunks; `load` signals an appropriate error.
+/// However, Lua does not check the consistency of the code inside binary chunks;
+/// running maliciously crafted bytecode can crash the interpreter.
+///
+/// # Implementation-specific behavior
+///
+/// * Strings produced by `chunk` function are concatenated in the same sense as Lua understands.
+/// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
 #[expect(non_camel_case_types)]
 pub struct load;
 
 impl<Ty> StdPlugin<Ty> for load
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String> + Display,
+    Ty::String: AsEncoding + TryInto<String>,
+    <Ty::String as TryInto<String>>::Error: Display,
     String: ParseFrom<Ty::String>,
-    StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 
-    // Temporary bound
-    <Ty::String as TryInto<String>>::Error: Debug,
+    // Temp bound, remove when we are done with unpin.
+    Ty::String: Unpin,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_load = crate::ffi::load();

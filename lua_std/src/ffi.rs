@@ -510,7 +510,7 @@ where
     ffi::from_fn(Delegate::default, "lua_std::pcall", ())
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 enum Mode {
     Binary,
     Text,
@@ -554,15 +554,61 @@ where
     }
 }
 
+/// Load a chunk.
+///
+/// # From Lua documentation
+///
+/// Signature: `(chunk: string | function [, chunkname: string [, mode: string [, env: any]]]) -> function | (fail, any)`
+///
+/// Loads a chunk.
+///
+/// If `chunk` is a string, the chunk is this string.
+/// If `chunk` is a function, `load` calls it repeatedly to get the chunk pieces.
+/// Each call to chunk must return a string that concatenates with previous results.
+/// A return of an empty string, `nil`, or no value signals the end of the chunk.
+///
+/// If there are no syntactic errors, `load` returns the compiled chunk as a function;
+/// otherwise, it returns **fail** plus the error message.
+///
+/// When you load a main chunk, the resulting function will always have exactly one upvalue, the `_ENV` variable (see §2.2).
+/// However, when you load a binary chunk created from a function (see `string.dump`),
+/// the resulting function can have an arbitrary number of upvalues,
+/// and there is no guarantee that its first upvalue will be the `_ENV` variable.
+/// (A non-main function may not even have an `_ENV` upvalue.)
+///
+/// Regardless, if the resulting function has any upvalues, its first upvalue is set to the value of `env`,
+/// if that parameter is given, or to the value of the global environment.
+/// Other upvalues are initialized with `nil`.
+/// All upvalues are fresh, that is, they are not shared with any other function.
+///
+/// `chunkname` is used as the name of the chunk for error messages and debug information (see §4.7).
+/// When absent, it defaults to chunk, if chunk is a string, or to **"=(load)"** otherwise.
+///
+/// The string `mode` controls whether the chunk can be text or binary (that is, a precompiled chunk).
+/// It may be the string **"b"** (only binary chunks), **"t"** (only text chunks), or **"bt"** (both binary and text).
+/// The default is **"bt"**.
+///
+/// It is safe to load malformed binary chunks; `load` signals an appropriate error.
+/// However, Lua does not check the consistency of the code inside binary chunks;
+/// running maliciously crafted bytecode can crash the interpreter.
+///
+/// # Implementation-specific behavior
+///
+/// * Strings produced by `chunk` function are concatenated in the same sense as Lua understands.
+/// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
 pub fn load<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
-    Ty::String: AsEncoding + TryInto<String> + Display,
+    Ty::String: AsEncoding + TryInto<String>,
+    <Ty::String as TryInto<String>>::Error: Display,
     String: ParseFrom<Ty::String>,
-    StrongValue<Ty>: DisplayWith<Heap<Ty>>,
-    // Temporary bound
-    <Ty::String as TryInto<String>>::Error: Debug,
+
+    // Temp bound, remove when we are done with unpin.
+    Ty::String: Unpin,
 {
+    use repr::index::FunctionId;
+    use rt::ffi::arg_parser::{ParseArgs, Split};
+    use rt::runtime::FunctionPtr;
     use rt::value::{Type, Weak};
 
     enum ChunkSource<Ty: Types> {
@@ -571,33 +617,44 @@ where
     }
 
     #[derive(Debug)]
-    struct ChunkSourceError {
-        found: Type,
+    enum ChunkSourceError<E> {
+        TypeMismatch(Type),
+        AlreadyDropped(AlreadyDroppedError),
+        Conversion(E),
     }
 
-    impl Display for ChunkSourceError {
+    impl<E> Display for ChunkSourceError<E>
+    where
+        E: Display,
+    {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let Self { found } = self;
-
-            write!(
-                f,
-                "expected value of type `{}` or `{}`, found `{found}`",
-                Type::String,
-                Type::Function
-            )
+            match self {
+                ChunkSourceError::TypeMismatch(found) => write!(
+                    f,
+                    "expected value of type `{}` or `{}`, found `{found}`",
+                    Type::String,
+                    Type::Function
+                ),
+                ChunkSourceError::AlreadyDropped(err) => write!(f, "{err}"),
+                ChunkSourceError::Conversion(err) => write!(f, "{err}"),
+            }
         }
     }
 
-    impl Error for ChunkSourceError {}
+    impl<E> Error for ChunkSourceError<E> where E: Debug + Display {}
+
+    impl<E> From<AlreadyDroppedError> for ChunkSourceError<E> {
+        fn from(value: AlreadyDroppedError) -> Self {
+            ChunkSourceError::AlreadyDropped(value)
+        }
+    }
 
     impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for ChunkSource<Ty>
     where
         Ty: Types,
         Ty::String: TryInto<String>,
-        // Temporary bound
-        <Ty::String as TryInto<String>>::Error: Debug,
     {
-        type Error = ChunkSourceError;
+        type Error = ChunkSourceError<<Ty::String as TryInto<String>>::Error>;
 
         fn parse_atom(value: WeakValue<Ty>, heap: &mut Heap<Ty>) -> Result<Self, Self::Error> {
             match value {
@@ -605,82 +662,196 @@ where
                 Value::String(LuaPtr(t)) => {
                     let s = heap
                         .get(t)
-                        .expect("fix this")
+                        .ok_or(AlreadyDroppedError)?
                         .as_inner()
                         .clone()
                         .try_into()
-                        .expect("fix this");
+                        .map_err(ChunkSourceError::Conversion)?;
+
                     Ok(ChunkSource::String(s))
                 }
                 value => {
-                    let err = ChunkSourceError {
-                        found: value.type_(),
-                    };
-
+                    let err = ChunkSourceError::TypeMismatch(value.type_());
                     Err(err)
                 }
             }
         }
     }
 
-    ffi::from_fn(
-        || {
-            delegate::from_mut(|mut rt| {
-                use repr::index::FunctionId;
-                use rt::ffi::arg_parser::{ParseArgs, Split};
-                use rt::runtime::FunctionPtr;
+    fn finish<Ty>(
+        mut rt: RuntimeView<'_, Ty>,
+        source: String,
+        name: Option<String>,
+        mode: Mode,
+        env: Option<WeakValue<Ty>>,
+    ) -> Result<(), RtError<Ty>>
+    where
+        Ty: Types<LuaClosure = Closure<Ty>>,
+        Ty::String: AsEncoding + TryInto<String>,
+    {
+        use rt::backtrace::Location;
 
-                #[expect(clippy::type_complexity)]
-                let (source, opts): (
-                    ChunkSource<Ty>,
-                    Opts<(FromLuaString<String>, Mode, WeakValue<Ty>)>,
-                ) = rt.stack.parse(&mut rt.core.gc)?;
-                rt.stack.clear();
+        match mode {
+            Mode::Text | Mode::BinaryOrText => (),
+            Mode::Binary => {
+                let err = rt
+                    .core
+                    .alloc_error_msg("attempt to load text chunk in binary-only mode");
+                return Err(err);
+            }
+        }
 
-                let (_name, mode, env) = opts.split();
+        let name = name.unwrap_or_else(|| format!(r#""{source}""#));
 
-                let _mode = mode.unwrap_or_default();
+        let location = Location {
+            file: name,
+            line: 0,
+            column: 0,
+        };
 
-                let source = match source {
-                    ChunkSource::String(s) => s,
-                    ChunkSource::Function(_) => {
-                        let msg = rt
-                            .core
-                            .alloc_string("source functions are not yet supported".into());
-                        return Err(RuntimeError::from_msg(msg));
-                    }
+        let results = match rt.load(source, Some(location)) {
+            Ok(chunk_id) => {
+                let ptr = FunctionPtr {
+                    chunk_id,
+                    function_id: FunctionId(0),
                 };
+                let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
+                let closure = rt.construct_closure(ptr, [env])?.downgrade();
 
-                let results = match rt.load(source, None) {
-                    Ok(chunk_id) => {
-                        let ptr = FunctionPtr {
-                            chunk_id,
-                            function_id: FunctionId(0),
+                (NilOr::Some(Callable::Lua(LuaPtr(closure))), Maybe::None)
+            }
+            Err(err) => {
+                let err: RtError<_> = err.into();
+                let msg = err
+                    .into_diagnostic(&rt.core.gc, rt.chunk_cache)
+                    .emit_to_string();
+                let msg = rt.core.alloc_string(msg.into());
+
+                (NilOr::Nil, Maybe::Some(StrongValue::String(LuaPtr(msg))))
+            }
+        };
+
+        rt.stack.transient().format(results);
+
+        Ok(())
+    }
+
+    let body = || {
+        enum State {
+            Started,
+            CalledChunkSource,
+            Finished,
+        }
+
+        let mut state = State::Started;
+        let mut persist_callable = None;
+        let mut persist_source: Option<Ty::String> = None;
+        let mut persist_name = None;
+        let mut persist_mode = Mode::default();
+        let mut persist_env = None;
+        delegate::try_repeat(move |mut rt| {
+            let current = std::mem::replace(&mut state, State::Finished);
+            match current {
+                State::Started => {
+                    #[expect(clippy::type_complexity)]
+                    let (source, opts): (
+                        ChunkSource<Ty>,
+                        Opts<(FromLuaString<String>, Mode, WeakValue<Ty>)>,
+                    ) = rt.stack.parse(&mut rt.core.gc)?;
+                    rt.stack.clear();
+
+                    let (name, mode, env) = opts.split();
+                    let name = name.map(|t| t.0);
+                    let mode = mode.unwrap_or_default();
+
+                    let source = match source {
+                        ChunkSource::String(s) => s,
+                        ChunkSource::Function(callable) => {
+                            let callable =
+                                callable.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
+
+                            persist_callable = Some(callable.clone());
+                            persist_name = name;
+                            persist_mode = mode;
+                            persist_env = env
+                                .map(|value| value.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
+                                .transpose()?;
+
+                            let request = Request::Invoke {
+                                callable,
+                                start: StackSlot(0),
+                            };
+
+                            state = State::CalledChunkSource;
+                            return Ok(delegate::State::Yielded(request));
+                        }
+                    };
+
+                    finish(rt, source, name, mode, env)?;
+
+                    Ok(delegate::State::Complete(()))
+                }
+                State::CalledChunkSource => {
+                    let args: Opts<(LuaString<_>,)> = rt.stack.parse(&mut rt.core.gc)?;
+                    rt.stack.clear();
+
+                    let (part,) = args.split();
+
+                    let finalize = match part {
+                        Some(LuaString(LuaPtr(ptr))) => {
+                            use rt::value::traits::{Concat, Len};
+
+                            let part = rt.core.gc.get(ptr).ok_or(AlreadyDroppedError)?.as_inner();
+
+                            if part.is_empty() {
+                                true
+                            } else {
+                                let source = persist_source
+                                    .take()
+                                    .map(|mut source| {
+                                        source.concat(part);
+                                        source
+                                    })
+                                    .unwrap_or_else(|| part.clone());
+
+                                persist_source = Some(source);
+                                false
+                            }
+                        }
+                        None => true,
+                    };
+
+                    if finalize {
+                        let source = persist_source
+                            .take()
+                            .map(TryInto::try_into)
+                            .transpose()
+                            .map_err(|_| {
+                                rt.core
+                                    .alloc_error_msg("binary chunks are not (yet) supported")
+                            })?
+                            .unwrap_or_default();
+                        let name = persist_name.take();
+                        let env = persist_env.as_ref().map(|value| value.downgrade());
+                        finish(rt, source, name, persist_mode, env)?;
+
+                        Ok(delegate::State::Complete(()))
+                    } else {
+                        let request = Request::Invoke {
+                            callable: persist_callable.clone().unwrap(),
+                            start: StackSlot(0),
                         };
-                        let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
-                        let closure = rt.construct_closure(ptr, [env])?.downgrade();
 
-                        (NilOr::Some(Callable::Lua(LuaPtr(closure))), Maybe::None)
+                        state = State::CalledChunkSource;
+                        Ok(delegate::State::Yielded(request))
                     }
-                    Err(err) => {
-                        let err: RtError<_> = err.into();
-                        let msg = err
-                            .into_diagnostic(&rt.core.gc, rt.chunk_cache)
-                            .emit_to_string();
-                        let msg = rt.core.alloc_string(msg.into());
+                }
+                State::Finished => Ok(delegate::State::Complete(())),
+            }
+        })
+    };
 
-                        (NilOr::Nil, Maybe::Some(StrongValue::String(LuaPtr(msg))))
-                    }
-                };
-
-                rt.stack.transient().format(results);
-
-                Ok(())
-            })
-        },
-        "lua_std::load",
-        (),
-    )
+    ffi::from_fn(body, "lua_std::load", ())
 }
 
 pub fn loadfile<Ty>() -> impl LuaFfi<Ty>
