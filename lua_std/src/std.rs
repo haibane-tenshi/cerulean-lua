@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 use std::path::PathBuf;
 
 use rt::ffi::arg_parser::ParseFrom;
@@ -292,9 +292,9 @@ where
     Ty::String: Unpin,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_load = crate::ffi::load();
+        let fn_body = crate::ffi::load();
         let key = core.alloc_string("load".into());
-        let callback = core.gc.alloc_cell(boxed(fn_load));
+        let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
             KeyValue::String(LuaPtr(key.downgrade())),
@@ -309,18 +309,13 @@ pub struct loadfile;
 impl<Ty> StdPlugin<Ty> for loadfile
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String> + Display,
-    StrongValue<Ty>: DisplayWith<Heap<Ty>>,
-    String: ParseFrom<Ty::String>,
+    Ty::String: AsEncoding + TryInto<String>,
     PathBuf: ParseFrom<Ty::String>,
-
-    // Temporary bound
-    <Ty::String as TryInto<String>>::Error: Debug,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_loadfile = crate::ffi::loadfile();
+        let fn_body = crate::ffi::loadfile();
         let key = core.alloc_string("loadfile".into());
-        let callback = core.gc.alloc_cell(boxed(fn_loadfile));
+        let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
             KeyValue::String(LuaPtr(key.downgrade())),

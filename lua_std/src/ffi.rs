@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
 use repr::index::StackSlot;
+use rt::chunk_cache::ChunkId;
 use rt::error::{AlreadyDroppedError, AlreadyDroppedOr, RtError, RuntimeError};
 use rt::ffi::arg_parser::{
     FormatReturns, FromLuaString, LuaString, LuaTable, Maybe, NilOr, Opts, ParseArgs, ParseAtom,
@@ -254,6 +255,34 @@ where
     )
 }
 
+fn load_chunk<Ty>(
+    rt: &mut RuntimeView<'_, Ty>,
+    file_name: Option<PathBuf>,
+) -> Result<ChunkId, RtError<Ty>>
+where
+    Ty: Types,
+{
+    match file_name {
+        Some(path) => rt.load_from_file(path),
+        None => {
+            use std::io::Read;
+
+            let mut buf = Vec::new();
+            std::io::stdin().read_to_end(&mut buf).map_err(|err| {
+                rt.core
+                    .alloc_error_msg(format!("failed to read from stdin: {err}"))
+            })?;
+
+            let source = String::from_utf8(buf).map_err(|err| {
+                rt.core
+                    .alloc_error_msg(format!("stdin does not contain valid utf8: {err}"))
+            })?;
+
+            rt.load(source, None).map_err(Into::into)
+        }
+    }
+}
+
 /// Load file and execute as Lua chunk.
 ///
 /// # From Lua documentation
@@ -265,6 +294,11 @@ where
 /// Returns all values returned by the chunk.
 /// In case of errors, `dofile` propagates the error to its caller.
 /// (That is, `dofile` does not run in protected mode.)
+///
+/// # Implementation-specific behavior
+///
+/// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
+/// * Source is expected to be valid utf8.
 pub fn dofile<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
@@ -274,30 +308,10 @@ where
         delegate::yield_1(
             |mut rt| {
                 let filename: Maybe<FromLuaString<PathBuf>> = rt.stack.parse(&mut rt.core.gc)?;
-                let filename = filename.into_option().map(|t| t.0);
+                let file_name = filename.into_option().map(|t| t.0);
                 rt.stack.clear();
 
-                let chunk_id = match filename {
-                    Some(path) => rt.load_from_file(path)?,
-                    None => {
-                        use std::io::Read;
-
-                        let mut buf = Vec::new();
-                        std::io::stdin().read_to_end(&mut buf).map_err(|err| {
-                            rt.core
-                                .alloc_error_msg(format!("failed to read from stdin: {err}"))
-                        })?;
-
-                        let source = String::from_utf8(buf).map_err(|err| {
-                            rt.core.alloc_error_msg(format!(
-                                "stdin does not contain valid utf8: {err}"
-                            ))
-                        })?;
-
-                        rt.load(source, None)?
-                    }
-                };
-
+                let chunk_id = load_chunk(&mut rt, file_name)?;
                 let callable = rt.core.gc.alloc_cell(boxed(ffi::call_chunk(chunk_id)));
                 let callable = Callable::Rust(LuaPtr(callable));
                 let request = Request::Invoke {
@@ -854,69 +868,76 @@ where
     ffi::from_fn(body, "lua_std::load", ())
 }
 
+/// Load chunk from a file.
+///
+/// # From Lua documentation
+///
+/// Signature: `([filename: string [, mode: string [, env: any]]]) -> function | (fail, any)`
+///
+/// Similar to `load`, but gets the chunk from file `filename` or from the standard input, if no file name is given.
+///
+/// # Implementation-specific behavior
+///
+/// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
+/// * Source is expected to be valid utf8.
 pub fn loadfile<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
-    Ty::String: AsEncoding + TryInto<String> + Display,
-    // WeakValue<Ty>: DisplayWith<Heap<Ty>> + TryConvertInto<LuaString<PathBuf>, Heap<Ty>>,
-    // <WeakValue<Ty> as TryConvertInto<LuaString<PathBuf>, Heap<Ty>>>::Error: Error,
-    String: ParseFrom<Ty::String>,
+    Ty::String: AsEncoding + TryInto<String>,
     PathBuf: ParseFrom<Ty::String>,
-    StrongValue<Ty>: DisplayWith<Heap<Ty>>,
 {
-    ffi::from_fn(
-        || {
-            delegate::from_mut(|mut rt| {
-                use repr::index::FunctionId;
-                use rt::ffi::arg_parser::{ParseArgs, Split};
-                use rt::runtime::FunctionPtr;
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use repr::index::FunctionId;
+            use rt::ffi::arg_parser::{ParseArgs, Split};
+            use rt::runtime::FunctionPtr;
 
-                let opts: Opts<(FromLuaString<PathBuf>, Mode, WeakValue<Ty>)> =
-                    rt.stack.parse(&mut rt.core.gc).map_err(|err| {
-                        let msg = rt.core.alloc_string(err.to_string().into());
-                        RtError::from_msg(msg)
-                    })?;
-                rt.stack.clear();
+            let opts: Opts<(FromLuaString<PathBuf>, Mode, WeakValue<Ty>)> =
+                rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
 
-                let (filename, mode, env) = opts.split();
-                let _mode = mode.unwrap_or_default();
+            let (file_name, mode, env) = opts.split();
+            let file_name = file_name.map(|t| t.0);
+            let mode = mode.unwrap_or_default();
 
-                let Some(FromLuaString(filename)) = filename else {
-                    let msg = rt.core.alloc_string(
-                        "loadfile doesn't yet support loading chunks from stdin".into(),
-                    );
-                    return Err(RuntimeError::from_msg(msg));
-                };
+            match mode {
+                Mode::Text | Mode::BinaryOrText => (),
+                Mode::Binary => {
+                    let err = rt
+                        .core
+                        .alloc_error_msg("attempt to load text chunk in binary-only mode");
+                    return Err(err);
+                }
+            }
 
-                let results = match rt.load_from_file(&filename) {
-                    Ok(chunk_id) => {
-                        let ptr = FunctionPtr {
-                            chunk_id,
-                            function_id: FunctionId(0),
-                        };
-                        let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
-                        let closure = rt.construct_closure(ptr, [env])?.downgrade();
+            let results = match load_chunk(&mut rt, file_name) {
+                Ok(chunk_id) => {
+                    let ptr = FunctionPtr {
+                        chunk_id,
+                        function_id: FunctionId(0),
+                    };
+                    let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
+                    let closure = rt.construct_closure(ptr, [env])?.downgrade();
 
-                        (NilOr::Some(Callable::Lua(LuaPtr(closure))), Maybe::None)
-                    }
-                    Err(err) => {
-                        let msg = err
-                            .into_diagnostic(&rt.core.gc, rt.chunk_cache)
-                            .emit_to_string();
-                        let msg = rt.core.alloc_string(msg.into());
+                    (NilOr::Some(Callable::Lua(LuaPtr(closure))), Maybe::None)
+                }
+                Err(err) => {
+                    let msg = err
+                        .into_diagnostic(&rt.core.gc, rt.chunk_cache)
+                        .emit_to_string();
+                    let msg = rt.core.alloc_string(msg.into());
 
-                        (NilOr::Nil, Maybe::Some(StrongValue::String(LuaPtr(msg))))
-                    }
-                };
+                    (NilOr::Nil, Maybe::Some(StrongValue::String(LuaPtr(msg))))
+                }
+            };
 
-                rt.stack.transient().format(results);
+            rt.stack.transient().format(results);
 
-                Ok(())
-            })
-        },
-        "lua_std::loadfile",
-        (),
-    )
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::loadfile", ())
 }
 
 /// Query metatable of an object.
