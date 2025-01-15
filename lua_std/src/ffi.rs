@@ -299,6 +299,16 @@ where
 ///
 /// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
 /// * Source is expected to be valid utf8.
+/// * On Windows platform only valid utf8 sequences can be read from `stdin`.
+///     This limitation is imposed by [Rust's implementation](std::io::stdin).
+///
+/// # Notes
+///
+/// When reading from `stdin` this function will continue reading until reaching EoF.
+///
+/// On Linux this can be triggered by typing Ctrl-D in terminal.
+///
+/// On Windows this can be triggered by typing Ctrl-Z in terminal.
 pub fn dofile<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
@@ -880,6 +890,16 @@ where
 ///
 /// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
 /// * Source is expected to be valid utf8.
+/// * On Windows platform only valid utf8 sequences can be read from `stdin`.
+///     This limitation is imposed by [Rust's implementation](std::io::stdin).
+///
+/// # Notes
+///
+/// When reading from `stdin` this function will continue reading until reaching EoF.
+///
+/// On Linux this can be triggered by typing Ctrl-D in terminal.
+///
+/// On Windows this can be triggered by typing Ctrl-Z in terminal.
 pub fn loadfile<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,

@@ -119,6 +119,21 @@ where
 /// Returns all values returned by the chunk.
 /// In case of errors, `dofile` propagates the error to its caller.
 /// (That is, `dofile` does not run in protected mode.)
+///
+/// # Implementation-specific behavior
+///
+/// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
+/// * Source is expected to be valid utf8.
+/// * On Windows platform only valid utf8 sequences can be read from `stdin`.
+///     This limitation is imposed by [Rust's implementation](std::io::stdin).
+///
+/// # Notes
+///
+/// When reading from `stdin` this function will continue reading until reaching EoF.
+///
+/// On Linux this can be triggered by typing Ctrl-D in terminal.
+///
+/// On Windows this can be triggered by typing Ctrl-Z in terminal.
 #[expect(non_camel_case_types)]
 pub struct dofile;
 
@@ -303,6 +318,28 @@ where
     }
 }
 
+/// Load chunk from a file.
+///
+/// # From Lua documentation
+///
+/// Signature: `([filename: string [, mode: string [, env: any]]]) -> function | (fail, any)`
+///
+/// Similar to `load`, but gets the chunk from file `filename` or from the standard input, if no file name is given.
+///
+/// # Implementation-specific behavior
+///
+/// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
+/// * Source is expected to be valid utf8.
+/// * On Windows platform only valid utf8 sequences can be read from `stdin`.
+///     This limitation is imposed by [Rust's implementation](std::io::stdin).
+///
+/// # Notes
+///
+/// When reading from `stdin` this function will continue reading until reaching EoF.
+///
+/// On Linux this can be triggered by typing Ctrl-D in terminal.
+///
+/// On Windows this can be triggered by typing Ctrl-Z in terminal.
 #[expect(non_camel_case_types)]
 pub struct loadfile;
 
