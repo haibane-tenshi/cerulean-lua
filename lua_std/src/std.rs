@@ -80,10 +80,11 @@ where
 ///     * Object don't have to be reachable from inside runtime.
 ///         It is possible for host program to allocate and keep certain objects alive without ever exposing them to runtime.
 ///     * Memory reserved by heap but not used by any objects is not included.
-///     * Memory used by internal auxiliary structures is not included.
+///     * Memory used by heap's internal auxiliary structures is not included.
+///     * Memory allocated by runtime in any other way is not included.
 ///
 ///     Additionally, resulting value is provided on best-effort basis.
-///     Memory management have a lot of nuance such as accounting for padding caused by alignment and partition into individual memory allocations.
+///     Memory management have nuances which makes it difficult to provide *exact* number.
 ///     It is also possible that some internal structures are allocated alongside objects and will be included in the count.
 /// * **"step"** - Unsupported, silently ignored.
 /// * **"incremental"** - Unsupported, silently ignored.
