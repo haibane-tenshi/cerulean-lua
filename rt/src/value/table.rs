@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
 use gc::Trace;
@@ -37,6 +37,10 @@ where
                 self.data.insert(key, value);
             }
         }
+    }
+
+    fn first_key(&self) -> Option<&KeyValue<Rf, Ty>> {
+        self.data.first_key_value().map(|(key, _)| key)
     }
 
     fn next_key(&self, key: &KeyValue<Rf, Ty>) -> Option<&KeyValue<Rf, Ty>> {
@@ -397,6 +401,12 @@ impl InvalidTableKeyError {
             InvalidTableKeyError::Nan => "NaN",
             InvalidTableKeyError::Nil => "nil",
         }
+    }
+}
+
+impl Display for InvalidTableKeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} cannot be used to index tables", self.value_str())
     }
 }
 

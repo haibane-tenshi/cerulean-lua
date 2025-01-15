@@ -83,6 +83,7 @@ where
 {
     fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty>;
     fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>);
+    fn first_key(&self) -> Option<&KeyValue<Rf, Ty>>;
     fn next_key(&self, key: &KeyValue<Rf, Ty>) -> Option<&KeyValue<Rf, Ty>>;
     fn border(&self) -> i64;
     fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
