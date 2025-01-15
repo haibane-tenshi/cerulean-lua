@@ -1260,7 +1260,7 @@ where
                 }
             })
             .transpose()?
-            .unwrap_or_default();
+            .unwrap_or(rt.stack.len());
 
         Ok(r)
     }
