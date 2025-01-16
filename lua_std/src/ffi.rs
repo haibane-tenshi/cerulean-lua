@@ -1619,3 +1619,46 @@ where
 
     ffi::from_fn(body, "lua_std::rawget", ())
 }
+
+/// Get value directly out of table.
+///
+/// # From Lua documentation
+///
+/// **Singature:**
+/// * `(table: table, index: any, value: any) -> table`
+///
+/// Sets the real value of `table[index]` to `value`, without using the `__newindex` metavalue.
+/// `table` must be a table, `index` any value different from `nil` and `NaN`, and `value` any Lua value.
+///
+/// This function returns `table`.
+///
+/// # Implementation-specific behavior
+///
+/// * The lookup is still subject to usual rules about table indices,
+///     `nil` and `NaN` are not permitted and will cause Lua panic.
+/// * This function will never perform index coercions.
+///     In particular floats containing exact integer values will not get coerced.
+///     This is of importance because the runtime (and consequently tables) considers ints and floats to be distinct.
+pub fn rawset<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use rt::value::traits::TableIndex;
+
+            let (table, index, value): (LuaTable<_>, WeakValue<_>, WeakValue<_>) =
+                rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.truncate(StackSlot(1));
+
+            let key = index.into_key()?;
+            let table: &mut Ty::Table = rt.core.gc.try_get_mut(table.0 .0)?;
+
+            table.set(key, value);
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::rawset", ())
+}
