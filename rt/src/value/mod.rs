@@ -17,6 +17,8 @@ use crate::error::AlreadyDroppedError;
 use crate::gc::{DisplayWith, Heap};
 use crate::runtime::MetatableRegistry;
 
+use table::InvalidTableKeyError;
+
 pub use boolean::Boolean;
 pub use callable::Callable;
 pub use float::Float;
@@ -236,6 +238,17 @@ where
 
     pub fn take(&mut self) -> Self {
         std::mem::take(self)
+    }
+
+    /// Convert value into table key.
+    ///
+    /// Lua does not permit table indexing using `nil` or `NaN`.
+    /// This function ensures that value does not contain invalid entry.
+    ///
+    /// If you are in charge of constructing a key, it might be better to do it directly
+    /// in case the value is not float.
+    pub fn into_key(self) -> Result<KeyValue<Rf, Ty>, InvalidTableKeyError> {
+        self.try_into()
     }
 }
 
