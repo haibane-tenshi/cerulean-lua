@@ -11,7 +11,7 @@ use rt::ffi::arg_parser::{
 };
 use rt::ffi::delegate::{Request, RuntimeView};
 use rt::ffi::{self, boxed, delegate, DLuaFfi, LuaFfi};
-use rt::gc::{DisplayWith, Heap, LuaPtr};
+use rt::gc::{DisplayWith, Heap, LuaPtr, TryGet};
 use rt::runtime::Closure;
 use rt::value::string::{into_utf8, AsEncoding};
 use rt::value::table::KeyValue;
@@ -1576,4 +1576,46 @@ where
     };
 
     ffi::from_fn(body, "lua_std::rawlen", ())
+}
+
+/// Get value directly out of table.
+///
+/// # From Lua documentation
+///
+/// **Singature:**
+/// * `(table: table, index: any) -> any`
+///
+/// Gets the real value of `table[index]`, without using the `__index` metavalue.
+/// `table` must be a table; `index` may be any value.
+///
+/// # Implementation-specific behavior
+///
+/// * The lookup is still subject to usual rules about table indices,
+///     `nil` and NaN are not permitted and will cause Lua panic.
+/// * This function will never perform index coercions.
+///     In particular floats containing exact integer values will not get coerced.
+///     This is of importance because the runtime (and consequently tables) considers ints and floats to be distinct.
+pub fn rawget<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use rt::value::traits::TableIndex;
+
+            let (table, index): (LuaTable<_>, WeakValue<_>) = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            let key = index.into_key()?;
+            let table: &Ty::Table = rt.core.gc.try_get(table.0 .0)?;
+
+            let value = table.get(&key);
+            rt.stack
+                .transient_in(&mut rt.core.gc, |mut stack, _| stack.push(value));
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::rawget", ())
 }

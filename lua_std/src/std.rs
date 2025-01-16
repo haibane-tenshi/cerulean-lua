@@ -629,3 +629,39 @@ where
         );
     }
 }
+
+/// Get value directly out of table.
+///
+/// # From Lua documentation
+///
+/// **Singature:**
+/// * `(table: table, index: any) -> any`
+///
+/// Gets the real value of `table[index]`, without using the `__index` metavalue.
+/// `table` must be a table; `index` may be any value.
+///
+/// # Implementation-specific behavior
+///
+/// * The lookup is still subject to usual rules about table indices,
+///     `nil` and NaN are not permitted and will cause Lua panic.
+/// * This function will never perform index coercions.
+///     In particular floats containing exact integer values will not get coerced.
+///     This is of importance because the runtime (and consequently tables) considers ints and floats to be distinct.
+#[expect(non_camel_case_types)]
+pub struct rawget;
+
+impl<Ty> StdPlugin<Ty> for rawget
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::rawget();
+        let key = core.alloc_string("rawget".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
