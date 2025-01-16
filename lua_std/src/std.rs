@@ -601,3 +601,31 @@ where
         );
     }
 }
+
+/// Return raw length of object.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(v: string | table) -> int`
+///
+/// Returns the length of the object `v`, which must be a table or a string, without invoking the `__len` metamethod.
+/// Returns an integer.
+#[expect(non_camel_case_types)]
+pub struct rawlen;
+
+impl<Ty> StdPlugin<Ty> for rawlen
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::rawlen();
+        let key = core.alloc_string("rawlen".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}

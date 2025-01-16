@@ -1497,3 +1497,83 @@ where
 
     ffi::from_fn(body, "lua_std::rawequal", ())
 }
+
+/// Return raw length of object.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(v: string | table) -> int`
+///
+/// Returns the length of the object `v`, which must be a table or a string, without invoking the `__len` metamethod.
+/// Returns an integer.
+pub fn rawlen<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    use gc::{Gc, GcCell, Interned};
+    use rt::value::Type;
+
+    enum StringOrTable<Ty>
+    where
+        Ty: Types,
+    {
+        String(Gc<Interned<Ty::String>>),
+        Table(GcCell<Ty::Table>),
+    }
+
+    impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for StringOrTable<Ty>
+    where
+        Ty: Types,
+    {
+        type Error = Error;
+
+        fn parse_atom(value: WeakValue<Ty>, _: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+            match value {
+                Value::String(LuaPtr(t)) => Ok(StringOrTable::String(t)),
+                Value::Table(LuaPtr(t)) => Ok(StringOrTable::Table(t)),
+                value => Err(Error(value.type_())),
+            }
+        }
+    }
+
+    struct Error(Type);
+
+    impl Display for Error {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "expected value of type {} or {}, found {}",
+                Type::String,
+                Type::Table,
+                self.0
+            )
+        }
+    }
+
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use rt::value::traits::{Len, TableIndex};
+
+            let value: StringOrTable<Ty> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            let r = match value {
+                StringOrTable::String(value) => {
+                    let s = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
+                    s.len().try_into().unwrap()
+                }
+                StringOrTable::Table(value) => {
+                    let t = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
+                    t.border()
+                }
+            };
+
+            rt.stack.transient().push(Value::Int(r));
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::rawlen", ())
+}
