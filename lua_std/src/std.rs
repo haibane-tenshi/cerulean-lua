@@ -440,6 +440,20 @@ where
     }
 }
 
+/// Set metatable on table.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(table: table, metatable: nil | table) -> table`
+///
+/// Sets the metatable for the given table.
+/// If `metatable` is `nil`, removes the metatable of the given table.
+/// If the original metatable has a `__metatable` field, raises an error.
+///
+/// This function returns `table`.
+///
+/// To change the metatable of other types from Lua code, you must use the debug library (§6.10).
 #[expect(non_camel_case_types)]
 pub struct setmetatable;
 
@@ -448,9 +462,9 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let f = crate::ffi::setmetatable();
+        let fn_body = crate::ffi::setmetatable();
         let key = core.alloc_string("setmetatable".into());
-        let callback = core.gc.alloc_cell(boxed(f));
+        let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
             KeyValue::String(LuaPtr(key.downgrade())),

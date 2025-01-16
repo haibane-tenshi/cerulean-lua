@@ -1156,73 +1156,70 @@ where
     ffi::from_fn(body, "lua_std::getmetatable", ())
 }
 
+/// Set metatable on table.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(table: table, metatable: nil | table) -> table`
+///
+/// Sets the metatable for the given table.
+/// If `metatable` is `nil`, removes the metatable of the given table.
+/// If the original metatable has a `__metatable` field, raises an error.
+///
+/// This function returns `table`.
+///
+/// To change the metatable of other types from Lua code, you must use the debug library (§6.10).
 pub fn setmetatable<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,
-    // Value<Gc>: Debug + Display,
 {
-    ffi::from_fn(
-        || {
-            delegate::from_mut(|mut rt| {
-                use gc::GcCell;
-                use rt::ffi::arg_parser::ParseArgs;
-                use rt::value::{Metatable, TableIndex};
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use gc::GcCell;
+            use rt::ffi::arg_parser::ParseArgs;
+            use rt::value::{Metatable, TableIndex};
 
-                let (table, metatable): (LuaTable<_>, NilOr<LuaTable<_>>) =
-                    rt.stack.parse(&mut rt.core.gc).map_err(|err| {
-                        let msg = rt.core.alloc_string(err.to_string().into());
-                        RtError::from_msg(msg)
-                    })?;
-                rt.stack.clear();
+            let (table, metatable): (LuaTable<_>, NilOr<LuaTable<_>>) =
+                rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
 
-                // Type hint.
-                // rustc gets confused and loses track of table type inside reference for some reason.
-                let table: GcCell<Ty::Table> = table.0 .0;
-                let metatable = metatable.into_option().map(|LuaTable(LuaPtr(t))| t);
+            // Type hint.
+            // rustc gets confused and loses track of table type inside reference for some reason.
+            let table: GcCell<Ty::Table> = table.0 .0;
+            let metatable = metatable.into_option().map(|LuaTable(LuaPtr(t))| t);
 
-                let old_metatable = rt
-                    .core
-                    .gc
-                    .get(table)
-                    .ok_or(AlreadyDroppedError)?
-                    .metatable()
-                    .copied();
+            let old_metatable = rt.core.gc.try_get(table)?.metatable().copied();
 
-                let has_meta_field = match old_metatable {
-                    Some(metatable) => {
-                        let key = rt.core.alloc_string("__metatable".into()).downgrade();
-                        rt.core
-                            .gc
-                            .get(metatable)
-                            .ok_or(AlreadyDroppedError)?
-                            .contains_key(&KeyValue::String(LuaPtr(key)))
-                    }
-                    None => false,
-                };
-
-                if has_meta_field {
-                    let msg = rt.core.alloc_string(
-                        "table already has metatable with '__metatable' field".into(),
-                    );
-                    return Err(RuntimeError::from_msg(msg));
+            let has_meta_field = match old_metatable {
+                Some(metatable) => {
+                    let key = rt.core.alloc_string("__metatable".into()).downgrade();
+                    rt.core
+                        .gc
+                        .try_get(metatable)?
+                        .contains_key(&KeyValue::String(LuaPtr(key)))
                 }
+                None => false,
+            };
 
-                rt.core
-                    .gc
-                    .get_mut(table)
-                    .ok_or(AlreadyDroppedError)?
-                    .set_metatable(metatable);
+            if has_meta_field {
+                let msg = rt
+                    .core
+                    .alloc_string("table already has metatable with '__metatable' field".into());
+                return Err(RuntimeError::from_msg(msg));
+            }
 
-                let results = WeakValue::Table(LuaPtr(table));
+            rt.core.gc.try_get_mut(table)?.set_metatable(metatable);
 
-                rt.stack.transient().format(results);
+            let results = WeakValue::Table(LuaPtr(table));
 
-                Ok(())
-            })
-        },
-        "lua_std::getmetatable",
-        (),
-    )
+            rt.stack.transient().format(results);
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::getmetatable", ())
 }
 
 /// Print all values

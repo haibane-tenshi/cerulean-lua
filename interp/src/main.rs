@@ -89,7 +89,8 @@ fn main() -> Result<()> {
                 .with(std::_G)
                 .with(std::ipairs)
                 .with(std::next)
-                .with(std::pairs);
+                .with(std::pairs)
+                .with(std::select);
 
             runtime.include(env);
 
