@@ -1,14 +1,16 @@
-//! Utilities to deal with our garbage collector idiosyncracies.
+//! Utilities to help dealing with our garbage collector idiosyncrasies.
 
 use std::fmt::Display;
 use std::hash::Hash;
 
-use gc::index::{Access, Allocated, GcPtr, RootPtr};
+use gc::index::{Access, Allocated, GcPtr, MutAccess, RefAccess, RootPtr};
 use gc::userdata::Params;
 use gc::{Gc, GcCell, Heap as TrueHeap, Root, RootCell, Trace};
 
 use crate::value::userdata::DefaultParams;
 use crate::value::Meta;
+
+pub use crate::error::AlreadyDroppedError;
 
 pub type Heap<Ty> = TrueHeap<Meta<Ty>, DefaultParams<Ty>>;
 
@@ -279,5 +281,49 @@ where
 
         let value = heap.get_root(*ptr);
         write!(f, "{value}")
+    }
+}
+
+pub trait TryGet<T>
+where
+    T: ?Sized,
+{
+    fn try_get<A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
+    where
+        A: RefAccess;
+
+    fn try_get_mut<A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
+    where
+        A: MutAccess;
+
+    fn try_upgrade<A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
+    where
+        A: Access;
+}
+
+impl<T, P, M> TryGet<T> for TrueHeap<M, P>
+where
+    T: Allocated<Self> + ?Sized,
+    P: Params,
+{
+    fn try_get<A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
+    where
+        A: RefAccess,
+    {
+        self.get(ptr).ok_or(AlreadyDroppedError)
+    }
+
+    fn try_get_mut<A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
+    where
+        A: MutAccess,
+    {
+        self.get_mut(ptr).ok_or(AlreadyDroppedError)
+    }
+
+    fn try_upgrade<A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
+    where
+        A: Access,
+    {
+        self.upgrade(ptr).ok_or(AlreadyDroppedError)
     }
 }
