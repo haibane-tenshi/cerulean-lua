@@ -559,3 +559,35 @@ where
         );
     }
 }
+
+/// Directly compare two values for equality.
+///
+/// # From Lua documentation
+///
+/// Signature:
+/// * `(v1: any, v2: any) -> bool`
+///
+/// Checks whether `v1` is equal to `v2`, without invoking the `__eq` metamethod.
+/// Returns a boolean.
+///
+/// # Implementation-specific behavior
+///
+/// Arguments are compared using [`Value`]'s `Eq` trait impl.
+#[expect(non_camel_case_types)]
+pub struct rawequal;
+
+impl<Ty> StdPlugin<Ty> for rawequal
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::rawequal();
+        let key = core.alloc_string("rawequal".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}

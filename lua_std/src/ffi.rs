@@ -1456,3 +1456,34 @@ where
 
     ffi::from_fn(body, "lua_std::tostring", ())
 }
+
+/// Directly compare two values for equality.
+///
+/// # From Lua documentation
+///
+/// Signature:
+/// * `(v1: any, v2: any) -> bool`
+///
+/// Checks whether `v1` is equal to `v2`, without invoking the `__eq` metamethod.
+/// Returns a boolean.
+///
+/// # Implementation-specific behavior
+///
+/// Arguments are compared using [`Value`]'s `Eq` trait impl.
+pub fn rawequal<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            let [lhs, rhs]: [WeakValue<_>; 2] = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            rt.stack.transient().push(Value::Bool(lhs == rhs));
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::rawequal", ())
+}
