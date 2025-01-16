@@ -21,7 +21,8 @@ use rt::value::{Callable, Int, Nil, StrongValue, Types, Value, WeakValue};
 ///
 /// # From Lua documentation
 ///
-/// Signature: `(v: any [, message: any]) -> ()`
+/// **Signature:**
+/// * `(v: any [, message: any]) -> ()`
 ///
 /// Raises an error if the value of its argument `v` is false (i.e., `nil` or `false`); otherwise, returns all its arguments.
 /// In case of error, `message` is the error object; when absent, it defaults to "assertion failed!"
@@ -59,7 +60,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `([opt: string [, arg: any]]) -> [float | boolean]`
+/// **Signature:**
+/// * `([opt: string [, arg: any]]) -> [float | boolean]`
 ///
 /// This function is a generic interface to the garbage collector. It performs different functions according to its first argument, `opt`:
 ///
@@ -288,7 +290,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `([filename: string]) -> any...`
+/// **Signature:**
+/// * `([filename: string]) -> [any,...]`
 ///
 /// Opens the named file and executes its content as a Lua chunk.
 /// When called without arguments, `dofile` executes the content of the standard input (`stdin`).
@@ -343,7 +346,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `(t: table,) -> (function, table, int)`
+/// **Signature:**
+/// * `(t: table,) -> (function, table, int)`
 ///
 /// Returns three values (an iterator function, the table `t`, and `0`) so that the construction
 ///
@@ -403,6 +407,9 @@ where
 /// Call another function in protected mode.
 ///
 /// # From Lua documentation
+///
+/// **Signature:**
+/// * `(f: any, [args: any...]) -> any...`
 ///
 /// Calls the function `f` with the given arguments in protected mode.
 /// This means that any error inside `f` is not propagated; instead, `pcall` catches the error and returns a status code.
@@ -559,7 +566,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `(chunk: string | function [, chunkname: string [, mode: string [, env: any]]]) -> function | (fail, any)`
+/// **Signature:**
+/// * `(chunk: string | function [, chunkname: string [, mode: string [, env: any]]]) -> function | (fail, any)`
 ///
 /// Loads a chunk.
 ///
@@ -859,7 +867,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `([filename: string [, mode: string [, env: any]]]) -> function | (fail, any)`
+/// **Signature:**
+/// * `([filename: string [, mode: string [, env: any]]]) -> function | (fail, any)`
 ///
 /// Similar to `load`, but gets the chunk from file `filename` or from the standard input, if no file name is given.
 ///
@@ -941,7 +950,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `(table: table [, index: any]) -> nil | (any, any)`
+/// **Signature:**
+/// * `(table: table [, index: any]) -> nil | (any, any)`
 ///
 /// Allows a program to traverse all fields of a table.
 /// Its first argument is a table and its second argument is an index in this table.
@@ -1004,10 +1014,9 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature:
+/// **Signature:**
 /// * `(t: any,) -> (any, any, any)`
 /// * `(t: table,) -> (function, table, nil)`
-///
 ///
 /// If `t` has a metamethod `__pairs`, calls it with `t` as argument and returns the first three results from the call.
 ///
@@ -1097,7 +1106,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `(object: any) -> any`
+/// **Signature:**
+/// * `(object: any) -> any`
 ///
 /// If object does not have a metatable, returns `nil`.
 /// Otherwise, if the object's metatable has a `__metatable` field, returns the associated value.
@@ -1219,7 +1229,8 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature: `(_: any...) -> ()`
+/// **Signature:**
+/// * `(_: any...) -> ()`
 ///
 /// Receives any number of arguments and prints their values to `stdout``, converting each argument to a string following the same rules of `tostring`.
 ///
@@ -1360,8 +1371,7 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature:
-///
+/// **Signature:**
 /// * `(v: any) -> string`
 /// * `(v: any) -> any`
 ///
@@ -1461,7 +1471,7 @@ where
 ///
 /// # From Lua documentation
 ///
-/// Signature:
+/// **Signature:**
 /// * `(v1: any, v2: any) -> bool`
 ///
 /// Checks whether `v1` is equal to `v2`, without invoking the `__eq` metamethod.
