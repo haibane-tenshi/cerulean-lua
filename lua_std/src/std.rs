@@ -703,3 +703,39 @@ where
         );
     }
 }
+
+/// Select argument out of arg list or their total count.
+///
+/// # From Lua documentation
+///
+/// **Singature:**
+/// * `(index: int | string, args: any...) -> any`
+///
+/// If `index` is a number, returns all arguments after argument number `index`;
+/// a negative number indexes from the end (-1 is the last argument).
+/// Otherwise, `index` must be the string "#", and `select` returns the total number of extra arguments it received.
+///
+/// # Implementation-specific behavior
+///
+/// When `index` is integer it is treated as offset into argument list (from the beginning when non-negative, from the end when negative).
+/// Offsetting outside of `[0; len+1]` range (where `len` is total number of args) will result in Lua panic.
+#[expect(non_camel_case_types)]
+pub struct select;
+
+impl<Ty> StdPlugin<Ty> for select
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty::String: AsEncoding + TryInto<String>,
+    <Ty::String as TryInto<String>>::Error: Display,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::select();
+        let key = core.alloc_string("select".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}

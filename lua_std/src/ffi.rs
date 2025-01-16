@@ -1662,3 +1662,133 @@ where
 
     ffi::from_fn(body, "lua_std::rawset", ())
 }
+
+/// Select argument out of arg list or their total count.
+///
+/// # From Lua documentation
+///
+/// **Singature:**
+/// * `(index: int | string, args: any...) -> any`
+///
+/// If `index` is a number, returns all arguments after argument number `index`;
+/// a negative number indexes from the end (-1 is the last argument).
+/// Otherwise, `index` must be the string "#", and `select` returns the total number of extra arguments it received.
+///
+/// # Implementation-specific behavior
+///
+/// When `index` is integer it is treated as offset into argument list (from the beginning when non-negative, from the end when negative).
+/// Offsetting outside of `[0; len+1]` range (where `len` is total number of args) will result in Lua panic.
+pub fn select<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+    Ty::String: AsEncoding + TryInto<String>,
+    <Ty::String as TryInto<String>>::Error: Display,
+{
+    use rt::value::Type;
+
+    enum Index {
+        Int(i64),
+        Len,
+    }
+
+    impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for Index
+    where
+        Ty: Types,
+        Ty::String: AsEncoding + TryInto<String>,
+    {
+        type Error = Error<<Ty::String as TryInto<String>>::Error>;
+
+        fn parse_atom(value: WeakValue<Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+            use rt::value::string::into_utf8;
+
+            match value {
+                Value::Int(v) => Ok(Index::Int(v)),
+                Value::String(LuaPtr(s)) => {
+                    let s = into_utf8(extra.try_get(s)?.as_inner()).map_err(Error::Other)?;
+                    if s == "#" {
+                        Ok(Index::Len)
+                    } else {
+                        Err(Error::UnknownString)
+                    }
+                }
+                value => Err(Error::TypeMismatch(value.type_())),
+            }
+        }
+    }
+
+    enum Error<E> {
+        AlreadyDropped(AlreadyDroppedError),
+        TypeMismatch(Type),
+        UnknownString,
+        Other(E),
+    }
+
+    impl<E> Display for Error<E>
+    where
+        E: Display,
+    {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Error::AlreadyDropped(err) => write!(f, "{err}"),
+                Error::Other(err) => write!(f, "{err}"),
+                Error::TypeMismatch(ty) => write!(
+                    f,
+                    "expected value of type {} or {}, found {ty}",
+                    Type::Int,
+                    Type::String
+                ),
+                Error::UnknownString => write!(
+                    f,
+                    r##"unknown command; select recognizes only "#" as command"##
+                ),
+            }
+        }
+    }
+
+    impl<E> From<AlreadyDroppedError> for Error<E> {
+        fn from(value: AlreadyDroppedError) -> Self {
+            Error::AlreadyDropped(value)
+        }
+    }
+
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            let index: Index = rt
+                .stack
+                .as_slice()
+                .get(..1)
+                .unwrap_or_default()
+                .parse(&mut rt.core.gc)?;
+
+            match index {
+                Index::Int(i) => {
+                    let len = rt.stack.len();
+                    let index: Option<usize> = i.try_into().ok().or_else(|| {
+                        let offset: usize = (-i).try_into().ok()?;
+                        len.checked_sub(offset)
+                    });
+
+                    match index {
+                        Some(index) if index <= len => {
+                            let _ = rt.stack.drain(..StackSlot(index));
+                            Ok(())
+                        }
+                        _ => {
+                            let err = rt.core.alloc_error_msg("index out of bounds".to_string());
+                            Err(err)
+                        }
+                    }
+                }
+                Index::Len => {
+                    let len = rt.stack[1..].len().try_into().unwrap();
+                    rt.stack.clear();
+                    rt.stack.transient().push(Value::Int(len));
+
+                    Ok(())
+                }
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::select", ())
+}
