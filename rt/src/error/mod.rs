@@ -2,6 +2,7 @@ pub mod already_dropped;
 pub mod borrow;
 mod closure;
 pub mod diagnostic;
+pub mod invalid_key;
 pub mod not_callable;
 pub mod opcode;
 pub mod out_of_bounds_stack;
@@ -24,6 +25,7 @@ pub use already_dropped::AlreadyDroppedError;
 pub use borrow::BorrowError;
 pub use closure::{CapturesMismatch, MalformedClosureError, MissingChunk, MissingFunction};
 pub use diagnostic::Diagnostic;
+pub use invalid_key::InvalidKeyError;
 pub use not_callable::NotCallableError;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
@@ -38,6 +40,7 @@ pub enum RuntimeError<Value> {
     Value(ValueError<Value>),
     Borrow(BorrowError),
     AlreadyDropped(AlreadyDroppedError),
+    InvalidKey(InvalidKeyError),
     Immutable(ImmutableCacheError),
     Diagnostic(Box<Diagnostic>),
     MissingChunk(MissingChunk),
@@ -92,6 +95,7 @@ where
             RuntimeError::Value(err) => err.into_diagnostic(heap),
             RuntimeError::Borrow(err) => err.into_diagnostic(),
             RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
+            RuntimeError::InvalidKey(err) => err.into_diagnostic(),
             RuntimeError::Immutable(err) => err.into_diagnostic(),
             RuntimeError::Diagnostic(diag) => return *diag,
             RuntimeError::MissingChunk(err) => err.into_diagnostic(),

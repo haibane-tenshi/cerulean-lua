@@ -2,14 +2,14 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use repr::debug_info::opcode::{DebugInfo, TabConstructor};
 use std::ops::Range;
 
+use super::super::InvalidKeyError;
 use super::{ExtraDiagnostic, TotalSpan};
-use crate::value::table::InvalidTableKeyError;
 use crate::value::Type;
 
 #[derive(Debug, Clone, Copy)]
 pub enum RuntimeCause {
     TableTypeMismatch(Type),
-    InvalidKey(InvalidTableKeyError),
+    InvalidKey(InvalidKeyError),
 }
 
 impl RuntimeCause {
@@ -151,11 +151,11 @@ impl RuntimeCause {
         match self {
             TableTypeMismatch(_) => (),
             InvalidKey(err) => match err {
-                InvalidTableKeyError::Nan => diag.with_note([
+                InvalidKeyError::Nan => diag.with_note([
                     "Lua does not permit indexing tables using float NaN (not a number)",
                     "Lua follows floating point standard which mandates that no two NaN values are equal even if their bitwise representation is identical\ntherefore, values under NaN keys would be impossible to look up",
                 ]),
-                InvalidTableKeyError::Nil => diag.with_note(["Lua does not permit indexing tables using `nil`"]),
+                InvalidKeyError::Nil => diag.with_note(["Lua does not permit indexing tables using `nil`"]),
             }
         };
 

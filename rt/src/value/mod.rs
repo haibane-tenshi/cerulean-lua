@@ -13,11 +13,9 @@ use std::fmt::{Debug, Display};
 use enumoid::Enumoid;
 use gc::Trace;
 
-use crate::error::AlreadyDroppedError;
+use crate::error::{AlreadyDroppedError, InvalidKeyError};
 use crate::gc::{DisplayWith, Heap};
 use crate::runtime::MetatableRegistry;
-
-use table::InvalidTableKeyError;
 
 pub use boolean::Boolean;
 pub use callable::Callable;
@@ -247,7 +245,7 @@ where
     ///
     /// If you are in charge of constructing a key, it might be better to do it directly
     /// in case the value is not float.
-    pub fn into_key(self) -> Result<KeyValue<Rf, Ty>, InvalidTableKeyError> {
+    pub fn into_key(self) -> Result<KeyValue<Rf, Ty>, InvalidKeyError> {
         self.try_into()
     }
 }

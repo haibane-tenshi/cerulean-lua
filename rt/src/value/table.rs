@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
 
 use gc::Trace;
@@ -7,6 +7,7 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::{Meta, Metatable, Refs, TableIndex, Type, Types, Value};
+use crate::error::InvalidKeyError;
 
 pub struct Table<Rf, Ty>
 where
@@ -389,47 +390,26 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum InvalidTableKeyError {
-    Nil,
-    Nan,
-}
-
-impl InvalidTableKeyError {
-    pub(crate) fn value_str(self) -> &'static str {
-        match self {
-            InvalidTableKeyError::Nan => "NaN",
-            InvalidTableKeyError::Nil => "nil",
-        }
-    }
-}
-
-impl Display for InvalidTableKeyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} cannot be used to index tables", self.value_str())
-    }
-}
-
 impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for KeyValue<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
 {
-    type Error = InvalidTableKeyError;
+    type Error = InvalidKeyError;
 
     fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         let r = match value {
             Value::Bool(t) => KeyValue::Bool(t),
             Value::Int(t) => KeyValue::Int(t),
             Value::Float(t) => {
-                let t = NotNan::new(t).map_err(|_| InvalidTableKeyError::Nan)?;
+                let t = NotNan::new(t).map_err(|_| InvalidKeyError::Nan)?;
                 KeyValue::Float(t)
             }
             Value::String(t) => KeyValue::String(t),
             Value::Function(t) => KeyValue::Function(t),
             Value::Table(t) => KeyValue::Table(t),
             Value::Userdata(t) => KeyValue::Userdata(t),
-            Value::Nil => return Err(InvalidTableKeyError::Nil),
+            Value::Nil => return Err(InvalidKeyError::Nil),
         };
 
         Ok(r)
