@@ -213,7 +213,8 @@ fn convert<'a>(
     let mut iter = iter.peekable();
 
     std::iter::from_fn(move || {
-        let r = match iter.next()? {
+        let item = iter.next()?;
+        let body = || match item {
             Ok((_, Part::Slice(t))) => Ok(Utf8Part::Slice(t)),
             Ok((_, Part::Char(t))) => Ok(Utf8Part::Char(t)),
             Err(err) => Err(err.into()),
@@ -229,13 +230,10 @@ fn convert<'a>(
                 }
             },
             Ok((range, Part::Byte(byte))) => {
-                let Some(count) = utf8_byte_count(byte) else {
-                    let err = InvalidUnicodeError {
-                        range,
-                        code_point: Some(byte.into()),
-                    };
-                    return Some(Err(err.into()));
-                };
+                let count = utf8_byte_count(byte).ok_or_else(|| InvalidUnicodeError {
+                    range: range.clone(),
+                    code_point: Some(byte.into()),
+                })?;
 
                 let mut buf = [byte, 0, 0, 0];
                 let start = range.start;
@@ -248,26 +246,23 @@ fn convert<'a>(
                             range: start..end,
                             code_point: None,
                         };
-                        return Some(Err(err.into()));
+                        return Err(err.into());
                     };
                     *place = next;
                     end = range.end;
                 }
 
-                let Ok(s) = std::str::from_utf8(&buf[..count]) else {
-                    let err = InvalidUnicodeError {
-                        range: start..end,
-                        code_point: None,
-                    };
-                    return Some(Err(err.into()));
-                };
+                let s = std::str::from_utf8(&buf[..count]).map_err(|_| InvalidUnicodeError {
+                    range: start..end,
+                    code_point: None,
+                })?;
                 let ch = s.chars().next().unwrap();
 
                 Ok(Utf8Part::Char(ch))
             }
         };
 
-        Some(r)
+        Some(body())
     })
 }
 
