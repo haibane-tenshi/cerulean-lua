@@ -323,20 +323,20 @@ fn convert_lossy<'a>(
 ///
 /// Single character sequences:
 ///
-/// * `\a` => ASCII `0x07` (bell)
-/// * `\b` => ASCII `0x08` (backspace)
-/// * `\f` => ASCII `0x0c` (form feed)
-/// * `\n` => ASCII `0x0a` (line feed)
-/// * `\r` => ASCII `0x0d` (carriage return)
-/// * `\t` => ASCII `0x09` (horizontal tab)
-/// * `\v` => ASCII `0x0b` (vertical tab)
-/// * `\\` => ASCII `0x5c` (`\`, backslash)
-/// * `\"` => ASCII `0x22` (`"`, double quote)
-/// * `\'` => ASCII `0x27` (`'`, single quote)
+/// * `\a` => `U+0007` (bell)
+/// * `\b` => `U+0008` (backspace)
+/// * `\f` => `U+000c` (form feed)
+/// * `\n` => `U+000a` (line feed)
+/// * `\r` => `U+000d` (carriage return)
+/// * `\t` => `U+0009` (horizontal tab)
+/// * `\v` => `U+000b` (vertical tab)
+/// * `\\` => `U+005c` (`\`, backslash)
+/// * `\"` => `U+0022` (`"`, double quote)
+/// * `\'` => `U+0027` (`'`, single quote)
 ///
 /// Additionally, there are escape sequences for manipulating whitespace:
 ///
-/// * `\` followed by line break (either `\n` or `\r\n`) => ASCII `0x0a` (line feed)
+/// * `\` followed by line break (either `LF` or `CRLF`) => `U+000a` (line feed)
 /// * `\z` is removed along with any whitespace following it.
 ///
 /// Lua also supports unicode escape sequences:
