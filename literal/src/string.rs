@@ -214,11 +214,10 @@ fn convert<'a>(
 
     std::iter::from_fn(move || {
         let item = iter.next()?;
-        let body = || match item {
-            Ok((_, Part::Slice(t))) => Ok(Utf8Part::Slice(t)),
-            Ok((_, Part::Char(t))) => Ok(Utf8Part::Char(t)),
-            Err(err) => Err(err.into()),
-            Ok((range, Part::CodePoint(code))) => match char::from_u32(code) {
+        let body = || match item? {
+            (_, Part::Slice(t)) => Ok(Utf8Part::Slice(t)),
+            (_, Part::Char(t)) => Ok(Utf8Part::Char(t)),
+            (range, Part::CodePoint(code)) => match char::from_u32(code) {
                 Some(ch) => Ok(Utf8Part::Char(ch)),
                 None => {
                     let err = InvalidUnicodeError {
@@ -229,7 +228,7 @@ fn convert<'a>(
                     Err(err.into())
                 }
             },
-            Ok((range, Part::Byte(byte))) => {
+            (range, Part::Byte(byte)) => {
                 let count = utf8_byte_count(byte).ok_or_else(|| InvalidUnicodeError {
                     range: range.clone(),
                     code_point: Some(byte.into()),
@@ -266,6 +265,50 @@ fn convert<'a>(
     })
 }
 
+fn convert_lossy<'a>(
+    iter: impl Iterator<Item = Result<(Range<usize>, Part<'a>), MalformedEscapeError>>,
+) -> impl Iterator<Item = Result<Utf8Part<'a>, MalformedEscapeError>> {
+    let mut iter = iter.map(|item| item.map(|(_, part)| part)).peekable();
+
+    std::iter::from_fn(move || {
+        let item = iter.next()?;
+        let body = || match item? {
+            Part::Slice(t) => Ok(Utf8Part::Slice(t)),
+            Part::Char(t) => Ok(Utf8Part::Char(t)),
+            Part::CodePoint(code) => match char::from_u32(code) {
+                Some(ch) => Ok(Utf8Part::Char(ch)),
+                None => Ok(Utf8Part::Char(char::REPLACEMENT_CHARACTER)),
+            },
+            Part::Byte(byte) => {
+                let Some(count) = utf8_byte_count(byte) else {
+                    return Ok(Utf8Part::Char(char::REPLACEMENT_CHARACTER));
+                };
+
+                const REPLACEMENT: &str = "����";
+
+                let mut buf = [byte, 0, 0, 0];
+
+                for i in 1..count {
+                    let next = iter.next_if(|item| matches!(item, Ok(Part::Byte(_))));
+                    let Some(Ok(Part::Byte(next))) = next else {
+                        return Ok(Utf8Part::Slice(&REPLACEMENT[..i]));
+                    };
+                    buf[i] = next;
+                }
+
+                let Ok(s) = std::str::from_utf8(&buf[..count]) else {
+                    return Ok(Utf8Part::Slice(&REPLACEMENT[..count]));
+                };
+                let ch = s.chars().next().unwrap();
+
+                Ok(Utf8Part::Char(ch))
+            }
+        };
+
+        Some(body())
+    })
+}
+
 /// Replace escape sequences in a Lua string.
 pub fn unescape(s: &str) -> Result<Cow<'_, str>, UnescapeError> {
     if !s.contains('\\') {
@@ -275,6 +318,23 @@ pub fn unescape(s: &str) -> Result<Cow<'_, str>, UnescapeError> {
     let mut r = String::with_capacity(s.len());
 
     for part in convert(unescaped_parts(s)) {
+        match part? {
+            Utf8Part::Slice(s) => r += s,
+            Utf8Part::Char(s) => r.push(s),
+        }
+    }
+
+    Ok(r.into())
+}
+
+pub fn unescape_lossy(s: &str) -> Result<Cow<'_, str>, MalformedEscapeError> {
+    if !s.contains('\\') {
+        return Ok(s.into());
+    }
+
+    let mut r = String::with_capacity(s.len());
+
+    for part in convert_lossy(unescaped_parts(s)) {
         match part? {
             Utf8Part::Slice(s) => r += s,
             Utf8Part::Char(s) => r.push(s),

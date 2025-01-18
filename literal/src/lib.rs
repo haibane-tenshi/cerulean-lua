@@ -12,4 +12,6 @@ mod number;
 mod string;
 
 pub use number::{parse, parse_float, parse_int, Number, UnknownNumberFormatError};
-pub use string::{unescape, InvalidUnicodeError, MalformedEscapeError, UnescapeError};
+pub use string::{
+    unescape, unescape_lossy, InvalidUnicodeError, MalformedEscapeError, UnescapeError,
+};
