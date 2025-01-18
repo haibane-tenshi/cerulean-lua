@@ -309,7 +309,96 @@ fn convert_lossy<'a>(
     })
 }
 
-/// Replace escape sequences in a Lua string.
+/// Replace escape sequences in a Lua string literal.
+///
+/// This function will recognize and replace all escape sequences permitted in [Lua short string literals][lua#3.1].
+/// It does not enforce any additional validity rules imposed by language (such as no unescaped line breaks or internal quotes).
+/// Those limitations exist to simplify tokenizing and disambiguating Lua programs and of no particular consequence out of that context.
+///
+/// However, you will get errors if input contains unknown or malformed escape sequences.
+///
+/// [lua#3.1]: https://www.lua.org/manual/5.4/manual.html#3.1
+///
+/// # Recognized escape sequences
+///
+/// Single character sequences:
+///
+/// * `\a` => ASCII `0x07` (bell)
+/// * `\b` => ASCII `0x08` (backspace)
+/// * `\f` => ASCII `0x0c` (form feed)
+/// * `\n` => ASCII `0x0a` (line feed)
+/// * `\r` => ASCII `0x0d` (carriage return)
+/// * `\t` => ASCII `0x09` (horizontal tab)
+/// * `\v` => ASCII `0x0b` (vertical tab)
+/// * `\\` => ASCII `0x5c` (`\`, backslash)
+/// * `\"` => ASCII `0x22` (`"`, double quote)
+/// * `\'` => ASCII `0x27` (`'`, single quote)
+///
+/// Additionally, there are escape sequences for manipulating whitespace:
+///
+/// * `\` followed by line break (either `\n` or `\r\n`) => ASCII `0x0a` (line feed)
+/// * `\z` is removed along with any whitespace following it.
+///
+/// Lua also supports unicode escape sequences:
+///
+/// * `\u{XXXXX}`, where `XXXXX` is hexadecimal literal representing desired code point
+///
+/// Lastly, there is support for embedding bytes directly:
+///
+/// * `\xNN`, where `NN` is exactly 2-digit hexadecimal literal, representing byte content.
+/// *   `\N` `\NN` `\NNN`, where `N`, `NN`, `NNN` is a decimal literal, representing byte content.
+///     This escape sequence is *greedy* and will consume as many digits as it can.
+///
+/// # Examples
+///
+/// Embedding Unicode:
+///
+/// ```
+/// # use std::error::Error;
+/// # use literal::unescape;
+/// assert_eq!(unescape(r"\u{2764FE0F}")?, "❤️");
+/// assert_eq!(unescape(r"\x27\x64\xfe\x0f")?, "❤️");
+/// assert_eq!(unescape(r"\39\100\254\015")?, "❤️");
+/// # Ok::<_, Box<dyn Error>>(())
+/// ```
+///
+/// `\z` can remove extraneous whitespace and newlines:
+///
+/// ```
+/// # use std::error::Error;
+/// # use literal::unescape;
+/// assert_eq!(unescape(r"jump \z     
+///                            over")?, "jump over");
+/// # Ok::<_, Box<dyn Error>>(())
+/// ```
+///
+/// Strings without any escapes returned as-is:
+/// ```
+/// # use std::error::Error;
+/// # use literal::unescape;
+/// assert_eq!(unescape(r"Lua")?, "Lua");
+/// # Ok::<_, Box<dyn Error>>(())
+/// ```
+///
+/// # Differences from Lua spec
+///
+/// *   As you likely noticed, this function operates only with utf8-encoded strings.
+///     This puts certain limitations on allowed escape sequences:
+///     
+///     * Unicode escape sequences must contain a valid code point, which is divergent from Lua spec.
+///     * Byte escape sequences are allowed, but when embedded into final string they must form a valid utf8 sequence.
+///
+/// *  Whitespace consumed by `\z` escape is understood as unicode chars [containing `White_Space` property](char::is_whitespace).
+///    Original spec recognizes only ASCII whitespace (which is a subset).
+///
+/// *  For the sake of simplicity, hexadecimals inside unicode escape sequences can only be up to 8 characters long.
+///    This allows to specify up to 32 bits, which is sufficient to represent any unicode code point.
+///
+/// # Alternatives
+///
+/// If you don't care about faithfully representing escaped string content (e.g. for purpose of debug printing), consider using [`unescape_lossy`].
+///
+/// If you work with binary content, consider using [`unescape_bytes`].
 pub fn unescape(s: &str) -> Result<Cow<'_, str>, UnescapeError> {
     if !s.contains('\\') {
         return Ok(s.into());
@@ -327,6 +416,32 @@ pub fn unescape(s: &str) -> Result<Cow<'_, str>, UnescapeError> {
     Ok(r.into())
 }
 
+/// Replace escape sequences in a Lua string literal, gracefully handling bad byte sequences.
+///
+/// This function will recognize and replace all escape sequences permitted in [Lua short string literals][lua#3.1].
+/// See [`unescape`] for details on recognized escapes and how it compares to original Lua spec.
+///
+/// Unlike `unescape`, bad unicode embeddings will be replaced with '�' (`U+FFFD`, replacement character).
+/// This makes unescaping process *lossy*, but guarantees to produce output (unless running into malformed escapes).
+/// This function is useful if you intend to print/inspect content for diagnostic purposes.
+///
+/// # Behavior
+///
+/// This function affects only escape sequences that can potentially produce invalid unicode:
+///
+/// * Unicode escape (`\u{XXXXX}`), containing invalid unicode code point will be replaced with '�'.
+/// * Each byte escape (`\xNN` or `\NNN`), which is not part of valid utf8 sequence will be replaced with '�'.
+///
+/// # Examples
+///
+/// ```
+/// # use std::error::Error;
+/// # use literal::unescape_lossy;
+/// assert_eq!(unescape_lossy(r"\129\130\76\u{75}\x61")?, "��Lua");
+/// # Ok::<_, Box<dyn Error>>(())
+/// ```
+///
+/// [lua#3.1]: https://www.lua.org/manual/5.4/manual.html#3.1
 pub fn unescape_lossy(s: &str) -> Result<Cow<'_, str>, MalformedEscapeError> {
     if !s.contains('\\') {
         return Ok(s.into());
@@ -344,6 +459,19 @@ pub fn unescape_lossy(s: &str) -> Result<Cow<'_, str>, MalformedEscapeError> {
     Ok(r.into())
 }
 
+/// Replace all byte escape sequences in Lua string literal, producing `Vec<u8>`.
+///
+/// Input must contain only [byte escapes](unescape#recognized-escape-sequences),
+/// no other characters or escape sequences are allowed.
+///
+/// # Examples
+///
+/// ```
+/// # use std::error::Error;
+/// # use literal::unescape_bytes;
+/// assert_eq!(unescape_bytes(r"\129\130\76\x75\097")?, [129, 130, 76, 117, 97]);
+/// # Ok::<_, Box<dyn Error>>(())
+/// ```
 pub fn unescape_bytes(s: &str) -> Result<Vec<u8>, MalformedByteEscapeError> {
     unescaped_parts(s)
         .map(|part| {
