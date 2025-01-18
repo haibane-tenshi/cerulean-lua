@@ -1,8 +1,8 @@
 use std::borrow::Cow;
-use std::str::FromStr;
 
 use thiserror::Error;
 
+pub use literal::{Number, UnescapeError, UnknownNumberFormatError};
 pub use logos::Logos;
 
 pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
@@ -203,143 +203,10 @@ impl<'s> RawLiteralString<'s> {
         &self.0[1..self.0.len() - 1]
     }
 
-    pub fn unescape(&self) -> Result<Cow<'s, str>, UnknownEscapeSequenceError> {
-        let mut s = self.raw_value();
-
-        if !s.contains('\\') {
-            return Ok(s.into());
-        }
-
-        fn hex_digit(c: char) -> Option<u32> {
-            let r = match c {
-                '0'..='9' => c as u32 - '0' as u32,
-                'a'..='f' => 10 + (c as u32 - 'a' as u32),
-                'A'..='F' => 10 + (c as u32 - 'A' as u32),
-                _ => return None,
-            };
-
-            Some(r)
-        }
-
-        fn digit(c: char) -> Option<u32> {
-            match c {
-                '0'..='9' => Some(c as u32 - '0' as u32),
-                _ => None,
-            }
-        }
-
-        let mut r = String::with_capacity(s.len());
-
-        while let Some(i) = s.find('\\') {
-            r += &s[..i];
-            s = &s[i..];
-
-            let mut iter = s.char_indices().peekable();
-            let _ = iter.next();
-            let (_, c) = iter.next().unwrap();
-
-            let unescaped = {
-                let code = match c {
-                    'a' => Some(0x07),
-                    'b' => Some(0x08),
-                    'f' => Some(0x0c),
-                    'r' => Some(0x0d),
-                    't' => Some(0x09),
-                    'v' => Some(0x0b),
-                    'n' => Some(0x0a),
-                    '\\' => Some(0x5c),
-                    '"' => Some(0x22),
-                    '\'' => Some(0x27),
-                    '\n' => Some(0x0a),
-                    '\r' => {
-                        let r = iter
-                            .next_if(|&(_, c)| c == '\n')
-                            .map(|_| 0x0a)
-                            .ok_or(UnknownEscapeSequenceError)?;
-
-                        Some(r)
-                    }
-                    'z' => {
-                        while iter.next_if(|(_, c)| c.is_whitespace()).is_some() {}
-
-                        None
-                    }
-                    'x' => {
-                        let (_, n1) = iter.next().ok_or(UnknownEscapeSequenceError)?;
-                        let (_, n0) = iter.next().ok_or(UnknownEscapeSequenceError)?;
-
-                        let n1 = hex_digit(n1).ok_or(UnknownEscapeSequenceError)?;
-                        let n0 = hex_digit(n0).ok_or(UnknownEscapeSequenceError)?;
-
-                        let r = n1 * 16 + n0;
-
-                        Some(r)
-                    }
-                    'u' => {
-                        match iter.next() {
-                            Some((_, '{')) => (),
-                            _ => return Err(UnknownEscapeSequenceError),
-                        }
-
-                        let mut r = 0;
-
-                        loop {
-                            match iter.next() {
-                                Some((_, d @ '0'..='9')) => {
-                                    r *= 16;
-                                    r += hex_digit(d).unwrap();
-                                }
-                                Some((_, '}')) => break,
-                                _ => return Err(UnknownEscapeSequenceError),
-                            }
-                        }
-
-                        Some(r)
-                    }
-                    '0'..='9' => {
-                        let mut r = digit(c).unwrap();
-
-                        for _ in 0..2 {
-                            if let Some(digit) = iter
-                                .next_if(|(_, c)| c.is_numeric())
-                                .map(|(_, c)| digit(c).unwrap())
-                            {
-                                r *= 10;
-                                r += digit;
-                            } else {
-                                break;
-                            }
-                        }
-
-                        Some(r)
-                    }
-                    _ => return Err(UnknownEscapeSequenceError),
-                };
-
-                code.map(|code| char::from_u32(code).ok_or(UnknownEscapeSequenceError))
-                    .transpose()?
-            };
-
-            if let Some(c) = unescaped {
-                r.push(c);
-            }
-
-            s = if let Some((i, _)) = iter.next() {
-                &s[i..]
-            } else {
-                ""
-            };
-        }
-
-        r += s;
-
-        Ok(r.into())
+    pub fn unescape(&self) -> Result<Cow<'s, str>, UnescapeError> {
+        literal::unescape(self.raw_value())
     }
 }
-
-#[derive(Debug, Error)]
-#[error("encountered unknown escape sequence")]
-pub struct UnknownEscapeSequenceError;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct RawNumber<'s>(&'s str);
@@ -350,124 +217,9 @@ impl<'s> RawNumber<'s> {
     }
 
     pub fn parse(&self) -> Result<Number, UnknownNumberFormatError> {
-        self.0.parse()
+        literal::parse(self.raw_value())
     }
 }
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Number {
-    Int(i64),
-    Float(f64),
-}
-
-impl FromStr for Number {
-    type Err = UnknownNumberFormatError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use lexical::{
-            parse_with_options, NumberFormatBuilder, ParseFloatOptions, ParseIntegerOptions,
-        };
-        use static_assertions::const_assert;
-        use std::num::NonZeroU8;
-
-        // Option::unwrap is not const-usable yet, so here goes much unneeded unsafe :(
-
-        // SAFETY: trivial
-        const TWO: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(2) };
-        const TEN: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(10) };
-
-        const BASE_10: u128 = NumberFormatBuilder::new()
-            .mantissa_radix(10)
-            .exponent_base(Some(TEN))
-            .exponent_radix(Some(TEN))
-            .required_integer_digits(true)
-            .required_fraction_digits(true)
-            .required_exponent_digits(true)
-            .no_special(true)
-            .build();
-
-        const BASE_16: u128 = NumberFormatBuilder::new()
-            .mantissa_radix(16)
-            .exponent_base(Some(TWO))
-            .exponent_radix(Some(TEN))
-            .required_integer_digits(true)
-            .required_fraction_digits(true)
-            .required_exponent_digits(true)
-            .no_special(true)
-            .build();
-
-        const INT: ParseIntegerOptions = ParseIntegerOptions::new();
-
-        // SAFETY: call to .build_unchecked is always safe in compatible versions of lexical.
-        // https://docs.rs/lexical/latest/lexical/parse_float_options/struct.OptionsBuilder.html#safety
-        const FLOAT_E: ParseFloatOptions = unsafe {
-            ParseFloatOptions::builder()
-                .decimal_point(b'.')
-                .exponent(b'e')
-                .build_unchecked()
-        };
-
-        const FLOAT_E2: ParseFloatOptions = unsafe {
-            ParseFloatOptions::builder()
-                .decimal_point(b'.')
-                .exponent(b'E')
-                .build_unchecked()
-        };
-
-        const FLOAT_P: ParseFloatOptions = unsafe {
-            ParseFloatOptions::builder()
-                .decimal_point(b'.')
-                .exponent(b'p')
-                .build_unchecked()
-        };
-
-        const FLOAT_P2: ParseFloatOptions = unsafe {
-            ParseFloatOptions::builder()
-                .decimal_point(b'.')
-                .exponent(b'P')
-                .build_unchecked()
-        };
-
-        const_assert!(INT.is_valid());
-        const_assert!(FLOAT_E.is_valid());
-        const_assert!(FLOAT_E2.is_valid());
-        const_assert!(FLOAT_P.is_valid());
-        const_assert!(FLOAT_P2.is_valid());
-
-        let hex = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"));
-
-        let r = match hex {
-            Some(s) => {
-                if let Ok(value) = parse_with_options::<_, _, BASE_16>(s, &INT) {
-                    Number::Int(value)
-                } else if let Ok(value) = parse_with_options::<f64, _, BASE_16>(s, &FLOAT_P) {
-                    Number::Float(value)
-                } else if let Ok(value) = parse_with_options::<f64, _, BASE_16>(s, &FLOAT_P2) {
-                    Number::Float(value)
-                } else {
-                    return Err(UnknownNumberFormatError);
-                }
-            }
-            None => {
-                if let Ok(value) = parse_with_options::<_, _, BASE_10>(s, &INT) {
-                    Number::Int(value)
-                } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &FLOAT_E) {
-                    Number::Float(value)
-                } else if let Ok(value) = parse_with_options::<f64, _, BASE_10>(s, &FLOAT_E2) {
-                    Number::Float(value)
-                } else {
-                    return Err(UnknownNumberFormatError);
-                }
-            }
-        };
-
-        Ok(r)
-    }
-}
-
-#[derive(Debug, Copy, Clone, Error)]
-#[error("unrecognized number format")]
-pub struct UnknownNumberFormatError;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Error)]
 #[error("unrecognized character sequence")]
