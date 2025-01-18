@@ -1464,6 +1464,102 @@ where
     ffi::from_fn(body, "lua_std::tostring", ())
 }
 
+/// Convert value to number
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(e: any,) -> int | float | fail`
+/// * `(e: string, base: int) -> int | fail`
+///
+/// When called with no `base`, `tonumber` tries to convert its argument to a number.
+/// If the argument is already a number or a string convertible to a number, then `tonumber` returns this number; otherwise, it returns **fail**.
+///
+/// The conversion of strings can result in integers or floats, according to the lexical conventions of Lua (see §3.1).
+/// The string may have leading and trailing spaces and a sign.
+///
+/// When called with base, then `e` must be a string to be interpreted as an integer numeral in that base.
+/// The base may be any integer between 2 and 36, inclusive.
+/// In bases above 10, the letter 'A' (in either upper or lower case) represents 10, 'B' represents 11, and so forth, with 'Z' representing 35.
+/// If the string `e` is not a valid numeral in the given base, the function returns fail.
+pub fn tonumber<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+    Ty::String: AsEncoding + TryInto<String>,
+    <Ty::String as TryInto<String>>::Error: Display,
+    String: ParseFrom<Ty::String>,
+    <String as ParseFrom<Ty::String>>::Error: Display,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use rt::error::SignatureError;
+
+            match rt.stack.as_slice() {
+                [] => {
+                    let err = SignatureError::TooFewArgs { found: 0 };
+                    Err(err.into())
+                }
+                [value] => {
+                    let r = match *value {
+                        Value::Int(v) => Value::Int(v),
+                        Value::Float(v) => Value::Float(v),
+                        Value::String(LuaPtr(ptr)) => {
+                            use literal::Number;
+
+                            // rustc being all confused here for some reason.
+                            // Could not deduce inner type of Interned.
+                            let s: &gc::Interned<Ty::String> = rt.core.gc.try_get(ptr)?;
+                            let content = match into_utf8(s.as_ref()) {
+                                Ok(t) => t,
+                                Err(err) => return Err(rt.core.alloc_error_msg(err.to_string())),
+                            };
+
+                            let number = literal::parse(content.as_ref().trim())
+                                .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+                            match number {
+                                Number::Int(n) => Value::Int(n),
+                                Number::Float(n) => Value::Float(n),
+                            }
+                        }
+                        _ => Value::Nil,
+                    };
+
+                    rt.stack.clear();
+                    rt.stack.transient().push(r);
+                    Ok(())
+                }
+                stack @ [_, _] => {
+                    let (s, radix): (FromLuaString<String>, Int) = stack.parse(&mut rt.core.gc)?;
+                    let FromLuaString(s) = s;
+                    let Int(radix) = radix;
+
+                    if !(2..36).contains(&radix) {
+                        let err = rt.core.alloc_error_msg(format!("cannot parse numeral with base {radix}, only bases in range 2..36 are allowed"));
+                        return Err(err);
+                    }
+
+                    let radix = radix.try_into().unwrap();
+                    let r = i64::from_str_radix(s.trim(), radix)
+                        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+
+                    rt.stack.clear();
+                    rt.stack.transient().push(Value::Int(r));
+                    Ok(())
+                }
+                _ => {
+                    let err = SignatureError::TooManyArgs {
+                        found: rt.stack.len(),
+                        expected: 2,
+                    };
+                    Err(err.into())
+                }
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::tonumber", ())
+}
+
 /// Directly compare two values for equality.
 ///
 /// # From Lua documentation

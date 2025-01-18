@@ -584,6 +584,47 @@ where
     }
 }
 
+/// Convert value to number
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(e: any,) -> int | float | fail`
+/// * `(e: string, base: int) -> int | fail`
+///
+/// When called with no `base`, `tonumber` tries to convert its argument to a number.
+/// If the argument is already a number or a string convertible to a number, then `tonumber` returns this number; otherwise, it returns **fail**.
+///
+/// The conversion of strings can result in integers or floats, according to the lexical conventions of Lua (see §3.1).
+/// The string may have leading and trailing spaces and a sign.
+///
+/// When called with base, then `e` must be a string to be interpreted as an integer numeral in that base.
+/// The base may be any integer between 2 and 36, inclusive.
+/// In bases above 10, the letter 'A' (in either upper or lower case) represents 10, 'B' represents 11, and so forth, with 'Z' representing 35.
+/// If the string `e` is not a valid numeral in the given base, the function returns fail.
+#[expect(non_camel_case_types)]
+pub struct tonumber;
+
+impl<Ty> StdPlugin<Ty> for tonumber
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty::String: AsEncoding + TryInto<String>,
+    <Ty::String as TryInto<String>>::Error: Display,
+    String: ParseFrom<Ty::String>,
+    <String as ParseFrom<Ty::String>>::Error: Display,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::tonumber();
+        let key = core.alloc_string("tonumber".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
 /// Directly compare two values for equality.
 ///
 /// # From Lua documentation
