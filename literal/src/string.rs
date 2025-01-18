@@ -344,6 +344,18 @@ pub fn unescape_lossy(s: &str) -> Result<Cow<'_, str>, MalformedEscapeError> {
     Ok(r.into())
 }
 
+pub fn unescape_bytes(s: &str) -> Result<Vec<u8>, MalformedByteEscapeError> {
+    unescaped_parts(s)
+        .map(|part| {
+            let part = part.map_err(MalformedByteEscapeError::from_full)?;
+            match part {
+                (_, Part::Byte(byte)) => Ok(byte),
+                (range, _) => Err(MalformedByteEscapeError::Unknown { index: range.start }),
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub enum UnescapeError {
     MalformedEscape(MalformedEscapeError),
@@ -411,6 +423,18 @@ pub enum MalformedEscapeError {
     DecByte { range: Range<usize>, value: u32 },
 }
 
+impl MalformedEscapeError {
+    fn from_byte(value: MalformedByteEscapeError) -> Self {
+        match value {
+            MalformedByteEscapeError::Unknown { index } => MalformedEscapeError::Unknown { index },
+            MalformedByteEscapeError::HexByte { range } => MalformedEscapeError::HexByte { range },
+            MalformedByteEscapeError::DecByte { range, value } => {
+                MalformedEscapeError::DecByte { range, value }
+            }
+        }
+    }
+}
+
 impl Display for MalformedEscapeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -431,3 +455,36 @@ impl Display for MalformedEscapeError {
 }
 
 impl Error for MalformedEscapeError {}
+
+#[derive(Debug, Clone)]
+pub enum MalformedByteEscapeError {
+    /// Backslash is not followed by any recognized escape sequence.
+    Unknown { index: usize },
+    /// Malformed hex byte escape sequence.
+    HexByte { range: Range<usize> },
+    /// Value in decimal byte escape sequence is too big to fit into a byte.
+    DecByte { range: Range<usize>, value: u32 },
+}
+
+impl MalformedByteEscapeError {
+    fn from_full(value: MalformedEscapeError) -> Self {
+        match value {
+            MalformedEscapeError::Unknown { index } => MalformedByteEscapeError::Unknown { index },
+            MalformedEscapeError::HexByte { range } => MalformedByteEscapeError::HexByte { range },
+            MalformedEscapeError::DecByte { range, value } => {
+                MalformedByteEscapeError::DecByte { range, value }
+            }
+            MalformedEscapeError::Unicode { range } => {
+                MalformedByteEscapeError::Unknown { index: range.start }
+            }
+        }
+    }
+}
+
+impl Display for MalformedByteEscapeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", MalformedEscapeError::from_byte(self.clone()))
+    }
+}
+
+impl Error for MalformedByteEscapeError {}
