@@ -43,6 +43,7 @@ fn parse_dec_byte(s: &[u8]) -> Option<(u32, usize)> {
     parse_partial_with_options::<_, _, INT_BASE10>(s, &ParseIntegerOptions::new()).ok()
 }
 
+#[derive(Debug)]
 enum Part<'a> {
     Slice(&'a str),
     Char(char),
@@ -60,7 +61,7 @@ fn unescaped_parts(
         }
 
         let mut body = || {
-            let Some(body) = s.strip_prefix('\\') else {
+            if s.strip_prefix('\\').is_none() {
                 let (end, part, leftover) = if let Some(index) = s.find('\\') {
                     let (part, leftover) = s.split_at(index);
                     (index, part, leftover)
@@ -77,32 +78,34 @@ fn unescaped_parts(
 
             let unknown = MalformedEscapeError::Unknown { index: offset };
 
-            let mut iter = body.char_indices().peekable();
+            let mut iter = s.char_indices().peekable();
+            let backslash = iter.next();
+            debug_assert!(matches!(backslash, Some((_, '\\'))));
 
             let Some((_, ch)) = iter.next() else {
                 return Err(unknown);
             };
 
-            let part = match ch {
-                'a' => Part::Char('\u{07}'),
-                'b' => Part::Char('\u{08}'),
-                'f' => Part::Char('\u{0c}'),
-                'r' => Part::Char('\u{0d}'),
-                't' => Part::Char('\u{09}'),
-                'v' => Part::Char('\u{0b}'),
-                'n' => Part::Char('\u{0a}'),
-                '\\' => Part::Char('\u{5c}'),
-                '"' => Part::Char('\u{22}'),
-                '\'' => Part::Char('\u{27}'),
-                '\n' => Part::Char('\u{0a}'),
+            let (part, end) = match ch {
+                'a' => (Part::Char('\u{07}'), None),
+                'b' => (Part::Char('\u{08}'), None),
+                'f' => (Part::Char('\u{0c}'), None),
+                'r' => (Part::Char('\u{0d}'), None),
+                't' => (Part::Char('\u{09}'), None),
+                'v' => (Part::Char('\u{0b}'), None),
+                'n' => (Part::Char('\u{0a}'), None),
+                '\\' => (Part::Char('\u{5c}'), None),
+                '"' => (Part::Char('\u{22}'), None),
+                '\'' => (Part::Char('\u{27}'), None),
+                '\n' => (Part::Char('\u{0a}'), None),
                 '\r' => match iter.peek() {
-                    Some((_, '\n')) => Part::Slice(""),
+                    Some((_, '\n')) => (Part::Slice(""), None),
                     _ => return Err(unknown),
                 },
                 'z' => {
                     while iter.next_if(|(_, ch)| ch.is_whitespace()).is_some() {}
 
-                    Part::Slice("")
+                    (Part::Slice(""), None)
                 }
                 'u' => {
                     if !matches!(iter.next(), Some((_, '{'))) {
@@ -113,16 +116,14 @@ fn unescaped_parts(
                         return Err(unknown);
                     };
 
-                    let Some(end) = s[start..].find('}') else {
+                    let Some(end_offset) = s[start..].find('}') else {
                         return Err(unknown);
                     };
+                    let end = start + end_offset;
+                    let outer_end = end + '}'.len_utf8();
+                    let range = offset..offset + outer_end;
 
-                    assert_eq!('}'.len_utf8(), 1);
-                    let outer_end = end + 1;
-
-                    let err = MalformedEscapeError::Unicode {
-                        range: offset..offset + outer_end,
-                    };
+                    let err = MalformedEscapeError::Unicode { range };
 
                     if (start..end).len() > 8 {
                         return Err(err);
@@ -132,9 +133,7 @@ fn unescaped_parts(
                         return Err(err);
                     };
 
-                    iter = s[outer_end..].char_indices().peekable();
-
-                    Part::CodePoint(code)
+                    (Part::CodePoint(code), Some(outer_end))
                 }
                 'x' => {
                     let err = MalformedEscapeError::HexByte {
@@ -150,9 +149,7 @@ fn unescaped_parts(
                     let inner = &s.as_bytes()[2..4];
                     let byte = parse_hex_byte(inner).ok_or(err)?;
 
-                    iter = s[4..].char_indices().peekable();
-
-                    Part::Byte(byte)
+                    (Part::Byte(byte), Some(4))
                 }
                 '0'..='9' => {
                     let end = 4.min(s.len());
@@ -172,14 +169,14 @@ fn unescaped_parts(
                             value,
                         })?;
 
-                    iter = s[end..].char_indices().peekable();
-
-                    Part::Byte(byte)
+                    (Part::Byte(byte), Some(end))
                 }
                 _ => return Err(unknown),
             };
 
-            let end = iter.next().map(|(offset, _)| offset).unwrap_or(s.len());
+            let end = end
+                .or_else(|| iter.next().map(|(offset, _)| offset))
+                .unwrap_or(s.len());
 
             let range = offset..offset + end;
             offset += end;
@@ -356,9 +353,29 @@ fn convert_lossy<'a>(
 /// ```
 /// # use std::error::Error;
 /// # use literal::unescape;
-/// assert_eq!(unescape(r"\u{2764FE0F}")?, "❤️");
-/// assert_eq!(unescape(r"\x27\x64\xfe\x0f")?, "❤️");
-/// assert_eq!(unescape(r"\39\100\254\015")?, "❤️");
+/// assert_eq!(unescape(r"\u{2B50}")?, "⭐");
+/// assert_eq!(unescape(r"\xe2\xad\x90")?, "⭐");
+/// assert_eq!(unescape(r"\226\173\144")?, "⭐");
+/// # Ok::<_, Box<dyn Error>>(())
+/// ```
+///
+/// Include complex combinations:
+///
+/// ```
+/// # use std::error::Error;
+/// # use literal::unescape;
+/// assert_eq!(unescape(r"\xe2\x9d\xa4\xef\xb8\x8f")?, "❤️");
+/// assert_eq!(unescape(r"\226\157\164\239\184\143")?, "❤️");
+/// # Ok::<_, Box<dyn Error>>(())
+/// ```
+///
+/// `\` normalizes following newline:
+///
+/// ```
+/// # use std::error::Error;
+/// # use literal::unescape;
+/// assert_eq!(unescape(r"break \
+/// here")?, "break \nhere");
 /// # Ok::<_, Box<dyn Error>>(())
 /// ```
 ///
@@ -376,7 +393,7 @@ fn convert_lossy<'a>(
 /// ```
 /// # use std::error::Error;
 /// # use literal::unescape;
-/// assert_eq!(unescape(r"Lua")?, "Lua");
+/// assert_eq!(unescape(r"Lua❤️")?, "Lua❤️");
 /// # Ok::<_, Box<dyn Error>>(())
 /// ```
 ///
@@ -616,3 +633,132 @@ impl Display for MalformedByteEscapeError {
 }
 
 impl Error for MalformedByteEscapeError {}
+
+#[cfg(test)]
+mod tests {
+    fn test(origin: &str, expected: &str) {
+        assert_eq!(super::unescape(origin).unwrap(), expected);
+    }
+
+    fn fail(origin: &str) {
+        super::unescape(origin).unwrap_err();
+    }
+
+    #[test]
+    fn verbatim() {
+        test("", "");
+        test("abcde", "abcde");
+        test("Lua", "Lua");
+
+        test("\n", "\n");
+        test("\r\n", "\r\n");
+
+        test("❤️", "❤️");
+    }
+
+    #[test]
+    fn single_character() {
+        test(r"\a", "\u{07}");
+        test(r"\b", "\u{08}");
+        test(r"\f", "\u{0c}");
+        test(r"\t", "\u{09}");
+        test(r"\v", "\u{0b}");
+
+        test(r"\n", "\n");
+        test(r"\r", "\r");
+
+        test(r"\\", "\\");
+        test(r#"\""#, "\"");
+        test(r"\'", "\'");
+
+        test(r"a\ab", "a\u{07}b");
+        test(r"a\bb", "a\u{08}b");
+        test(r"a\fb", "a\u{0c}b");
+        test(r"a\tb", "a\u{09}b");
+        test(r"a\vb", "a\u{0b}b");
+
+        test(r"a\nb", "a\nb");
+        test(r"a\rb", "a\rb");
+
+        test(r"a\\b", "a\\b");
+        test(r#"a\"b"#, "a\"b");
+        test(r"a\'b", "a\'b");
+    }
+
+    #[test]
+    fn whitespace() {
+        test("a\\\n  b", "a\n  b");
+        test("a\\\r\n  b", "a\n  b");
+
+        test("a \\\nb", "a \nb");
+        test("a \\\r\nb", "a \nb");
+
+        test(r"a \z     b", "a b");
+        test("a \\z \n    b", "a b");
+        test("a \\z \r\n    b", "a b");
+    }
+
+    #[test]
+    fn unicode() {
+        test(r"\u{0}", "\u{0000}");
+        test(r"\u{0041}", "A");
+        test(r"\u{1F527}", "🔧");
+
+        test(r"L\u{75}a", "Lua");
+    }
+
+    #[test]
+    fn hex_bytes() {
+        test(r"\x00", "\u{0000}");
+        test(r"\x41", "A");
+        test(r"\xf0\x9f\x94\xa7", "🔧");
+
+        test(r"L\x75a", "Lua");
+    }
+
+    #[test]
+    fn dec_bytes() {
+        test(r"\000", "\u{0000}");
+        test(r"\065", "A");
+        test(r"\240\159\148\167", "🔧");
+
+        test(r"\0", "\u{0000}");
+        test(r"\00", "\u{0000}");
+        test(r"\000", "\u{0000}");
+        test(r"\0000", "\u{0000}0");
+
+        test(r"\7", "\u{0007}");
+        test(r"\07", "\u{0007}");
+        test(r"\007", "\u{0007}");
+        test(r"\0007", "\u{0000}7");
+
+        test(r"L\117a", "Lua");
+
+        test(r"\7🔧", "\u{0007}🔧");
+        test(r"\07🔧", "\u{0007}🔧");
+        test(r"\007🔧", "\u{0007}🔧");
+    }
+
+    #[test]
+    fn hex_byte_fails() {
+        fail(r"\x🔧");
+        fail(r"\x0🔧");
+
+        fail(r"\xf0");
+        fail(r"\xf0\x9f");
+        fail(r"\xf0\x9f\x94");
+        fail(r"\xf0\x9f\x94\xe7");
+    }
+
+    #[test]
+    fn dec_byte_fails() {
+        fail(r"\128");
+        fail(r"\256");
+        fail(r"\999");
+
+        fail(r"\240");
+        fail(r"\240\159");
+        fail(r"\240\159\148");
+        fail(r"\240\159\148\231");
+    }
+}
