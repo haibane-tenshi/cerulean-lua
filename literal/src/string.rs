@@ -1,6 +1,6 @@
 use std::borrow::Cow;
-// use std::error::Error;
-// use std::fmt::Display;
+use std::error::Error;
+use std::fmt::Display;
 use std::ops::Range;
 
 use lexical::NumberFormatBuilder;
@@ -37,7 +37,7 @@ fn parse_hex_byte(s: &[u8]) -> Option<u8> {
     parse_with_options::<_, _, INT_BASE16>(s, &ParseIntegerOptions::new()).ok()
 }
 
-fn parse_dec_byte(s: &[u8]) -> Option<(u8, usize)> {
+fn parse_dec_byte(s: &[u8]) -> Option<(u32, usize)> {
     use lexical::{parse_partial_with_options, ParseIntegerOptions};
 
     parse_partial_with_options::<_, _, INT_BASE10>(s, &ParseIntegerOptions::new()).ok()
@@ -52,122 +52,143 @@ enum Part<'a> {
 
 fn unescaped_parts(
     mut s: &str,
-) -> impl Iterator<Item = Result<(Range<usize>, Part<'_>), UnknownEscape>> {
+) -> impl Iterator<Item = Result<(Range<usize>, Part<'_>), MalformedEscapeError>> {
     let mut offset = 0;
     std::iter::from_fn(move || {
         if s.is_empty() {
             return None;
         }
 
-        let Some(body) = s.strip_prefix('\\') else {
-            let (end, part, leftover) = if let Some(index) = s.find('\\') {
-                let (part, leftover) = s.split_at(index);
-                (index, part, leftover)
-            } else {
-                (s.len(), s, "")
+        let mut body = || {
+            let Some(body) = s.strip_prefix('\\') else {
+                let (end, part, leftover) = if let Some(index) = s.find('\\') {
+                    let (part, leftover) = s.split_at(index);
+                    (index, part, leftover)
+                } else {
+                    (s.len(), s, "")
+                };
+
+                let range = offset..offset + end;
+                offset += end;
+                s = leftover;
+
+                return Ok((range, Part::Slice(part)));
             };
+
+            let unknown = MalformedEscapeError::Unknown { index: offset };
+
+            let mut iter = body.char_indices().peekable();
+
+            let Some((_, ch)) = iter.next() else {
+                return Err(unknown);
+            };
+
+            let part = match ch {
+                'a' => Part::Char('\u{07}'),
+                'b' => Part::Char('\u{08}'),
+                'f' => Part::Char('\u{0c}'),
+                'r' => Part::Char('\u{0d}'),
+                't' => Part::Char('\u{09}'),
+                'v' => Part::Char('\u{0b}'),
+                'n' => Part::Char('\u{0a}'),
+                '\\' => Part::Char('\u{5c}'),
+                '"' => Part::Char('\u{22}'),
+                '\'' => Part::Char('\u{27}'),
+                '\n' => Part::Char('\u{0a}'),
+                '\r' => match iter.peek() {
+                    Some((_, '\n')) => Part::Slice(""),
+                    _ => return Err(unknown),
+                },
+                'z' => {
+                    while iter.next_if(|(_, ch)| ch.is_whitespace()).is_some() {}
+
+                    Part::Slice("")
+                }
+                'u' => {
+                    if !matches!(iter.next(), Some((_, '{'))) {
+                        return Err(unknown);
+                    }
+
+                    let Some((start, _)) = iter.next() else {
+                        return Err(unknown);
+                    };
+
+                    let Some(end) = s[start..].find('}') else {
+                        return Err(unknown);
+                    };
+
+                    assert_eq!('}'.len_utf8(), 1);
+                    let outer_end = end + 1;
+
+                    let err = MalformedEscapeError::Unicode {
+                        range: offset..offset + outer_end,
+                    };
+
+                    if (start..end).len() > 8 {
+                        return Err(err);
+                    }
+
+                    let Some(code) = parse_hex(&s[start..end]) else {
+                        return Err(err);
+                    };
+
+                    iter = s[outer_end..].char_indices().peekable();
+
+                    Part::CodePoint(code)
+                }
+                'x' => {
+                    let err = MalformedEscapeError::HexByte {
+                        range: offset..offset + 4.min(s.len()),
+                    };
+
+                    if s.len() < 4 {
+                        return Err(err);
+                    }
+
+                    // Convert to byte slice.
+                    // Second boundary is not guaranteed to be on codepoint boundary.
+                    let inner = &s.as_bytes()[2..4];
+                    let byte = parse_hex_byte(inner).ok_or(err)?;
+
+                    iter = s[4..].char_indices().peekable();
+
+                    Part::Byte(byte)
+                }
+                '0'..='9' => {
+                    let end = 4.min(s.len());
+
+                    // Convert to byte slice.
+                    // Second boundary is not guaranteed to be on codepoint boundary.
+                    let inner = &s.as_bytes()[1..end];
+                    let (value, end) =
+                        parse_dec_byte(inner).expect("input should contain at least 1 digit");
+                    // +1 to account for skipped backslash byte.
+                    let end = end + 1;
+
+                    let byte = value
+                        .try_into()
+                        .map_err(|_| MalformedEscapeError::DecByte {
+                            range: offset..offset + end,
+                            value,
+                        })?;
+
+                    iter = s[end..].char_indices().peekable();
+
+                    Part::Byte(byte)
+                }
+                _ => return Err(unknown),
+            };
+
+            let end = iter.next().map(|(offset, _)| offset).unwrap_or(s.len());
 
             let range = offset..offset + end;
             offset += end;
-            s = leftover;
+            s = &s[end..];
 
-            return Some(Ok((range, Part::Slice(part))));
+            Ok((range, part))
         };
 
-        let unknown = UnknownEscape { index: offset };
-
-        let mut iter = body.char_indices().peekable();
-
-        let Some((_, ch)) = iter.next() else {
-            return Some(Err(unknown));
-        };
-
-        let part = match ch {
-            'a' => Part::Char('\u{07}'),
-            'b' => Part::Char('\u{08}'),
-            'f' => Part::Char('\u{0c}'),
-            'r' => Part::Char('\u{0d}'),
-            't' => Part::Char('\u{09}'),
-            'v' => Part::Char('\u{0b}'),
-            'n' => Part::Char('\u{0a}'),
-            '\\' => Part::Char('\u{5c}'),
-            '"' => Part::Char('\u{22}'),
-            '\'' => Part::Char('\u{27}'),
-            '\n' => Part::Char('\u{0a}'),
-            '\r' => match iter.peek() {
-                Some((_, '\n')) => Part::Slice(""),
-                _ => return Some(Err(unknown)),
-            },
-            'z' => {
-                while iter.next_if(|(_, ch)| ch.is_whitespace()).is_some() {}
-
-                Part::Slice("")
-            }
-            'u' => {
-                if !matches!(iter.next(), Some((_, '{'))) {
-                    return Some(Err(unknown));
-                }
-
-                let Some((start, _)) = iter.next() else {
-                    return Some(Err(unknown));
-                };
-
-                let Some(end) = s[start..].find('}') else {
-                    return Some(Err(unknown));
-                };
-
-                if (start..end).len() > 8 {
-                    return Some(Err(unknown));
-                }
-
-                let Some(code) = parse_hex(&s[start..end]) else {
-                    return Some(Err(unknown));
-                };
-
-                iter = s[end..].char_indices().peekable();
-                let closing_brace = iter.next();
-                debug_assert!(matches!(closing_brace, Some((_, '}'))));
-
-                Part::CodePoint(code)
-            }
-            'x' => {
-                if s.len() < 4 {
-                    return Some(Err(unknown));
-                }
-
-                // Convert to byte slice.
-                // Second boundary is not guaranteed to be on codepoint boundary.
-                let inner = &s.as_bytes()[2..4];
-                let Some(byte) = parse_hex_byte(inner) else {
-                    return Some(Err(unknown));
-                };
-
-                iter = s[4..].char_indices().peekable();
-
-                Part::Byte(byte)
-            }
-            '0'..='9' => {
-                let end = 4.min(s.len());
-
-                // Convert to byte slice.
-                // Second boundary is not guaranteed to be on codepoint boundary.
-                let inner = &s.as_bytes()[1..end];
-                let (byte, offset) = parse_dec_byte(inner)?;
-
-                iter = s[offset + 1..].char_indices().peekable();
-
-                Part::Byte(byte)
-            }
-            _ => return Some(Err(unknown)),
-        };
-
-        let end = iter.next().map(|(offset, _)| offset).unwrap_or(s.len());
-
-        let range = offset..offset + end;
-        offset += end;
-        s = &s[end..];
-
-        Some(Ok((range, part)))
+        Some(body())
     })
 }
 
@@ -187,7 +208,7 @@ enum Utf8Part<'a> {
 }
 
 fn convert<'a>(
-    iter: impl Iterator<Item = Result<(Range<usize>, Part<'a>), UnknownEscape>>,
+    iter: impl Iterator<Item = Result<(Range<usize>, Part<'a>), MalformedEscapeError>>,
 ) -> impl Iterator<Item = Result<Utf8Part<'a>, UnescapeError>> {
     let mut iter = iter.peekable();
 
@@ -270,28 +291,24 @@ pub fn unescape(s: &str) -> Result<Cow<'_, str>, UnescapeError> {
 
 #[derive(Debug, Clone)]
 pub enum UnescapeError {
-    UnknownEscape(UnknownEscape),
+    MalformedEscape(MalformedEscapeError),
     InvalidUnicode(InvalidUnicodeError),
 }
 
-// impl Display for UnescapeError {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let s = match self {
-//             UnescapeError::UnknownEscape => "unknown escape sequence",
-//             UnescapeError::InvalidUnicode => {
-//                 "escape sequence does not represent valid Unicode code point"
-//             }
-//         };
+impl Display for UnescapeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnescapeError::MalformedEscape(err) => write!(f, "{err}"),
+            UnescapeError::InvalidUnicode(err) => write!(f, "{err}"),
+        }
+    }
+}
 
-//         write!(f, "{s}")
-//     }
-// }
+impl Error for UnescapeError {}
 
-// impl Error for UnescapeError {}
-
-impl From<UnknownEscape> for UnescapeError {
-    fn from(value: UnknownEscape) -> Self {
-        UnescapeError::UnknownEscape(value)
+impl From<MalformedEscapeError> for UnescapeError {
+    fn from(value: MalformedEscapeError) -> Self {
+        UnescapeError::MalformedEscape(value)
     }
 }
 
@@ -299,12 +316,6 @@ impl From<InvalidUnicodeError> for UnescapeError {
     fn from(value: InvalidUnicodeError) -> Self {
         UnescapeError::InvalidUnicode(value)
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct UnknownEscape {
-    /// Backslash index.
-    pub index: usize,
 }
 
 /// Escape sequence does not denote valid Unicode code point.
@@ -318,3 +329,50 @@ pub struct InvalidUnicodeError {
     /// This value will be `None` for bad byte sequences.
     pub code_point: Option<u32>,
 }
+
+impl Display for InvalidUnicodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let InvalidUnicodeError { range, code_point } = self;
+
+        if let Some(code_point) = code_point {
+            write!(f, "utf8 escape sequence at range {range:?} was recognized, but does not contain valid unicode code point (evaluated to {code_point})")
+        } else {
+            write!(f, "utf8 escape sequence at range {range:?} was recognized, but does not contain valid unicode code point")
+        }
+    }
+}
+
+impl Error for InvalidUnicodeError {}
+
+#[derive(Debug, Clone)]
+pub enum MalformedEscapeError {
+    /// Backslash is not followed by any recognized escape sequence.
+    Unknown { index: usize },
+    /// Malformed unicode escape sequence.
+    Unicode { range: Range<usize> },
+    /// Malformed hex byte escape sequence.
+    HexByte { range: Range<usize> },
+    /// Value in decimal byte escape sequence is too big to fit into a byte.
+    DecByte { range: Range<usize>, value: u32 },
+}
+
+impl Display for MalformedEscapeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MalformedEscapeError::Unknown { index } => {
+                write!(f, "encountered backslash `\\` at index {index}, which is not followed by any recognized escape sequence")
+            }
+            MalformedEscapeError::Unicode { range } => {
+                write!(f, "malformed unicode escape sequence at range {range:?}")
+            }
+            MalformedEscapeError::HexByte { range } => {
+                write!(f, "malfromed hex byte escape sequence at range {range:?}")
+            }
+            MalformedEscapeError::DecByte { range, value } => {
+                write!(f, "decimal byte escape sequence at range {range:?} evaluated to {value}, which doesn fit into single byte (u8::MAX = {})", u8::MAX)
+            }
+        }
+    }
+}
+
+impl Error for MalformedEscapeError {}
