@@ -353,7 +353,7 @@ fn convert_lossy<'a>(
 /// ```
 /// # use std::error::Error;
 /// # use literal::unescape;
-/// assert_eq!(unescape(r"\u{2B50}")?, "⭐");
+/// assert_eq!(unescape(r"\u{2b50}")?, "⭐");
 /// assert_eq!(unescape(r"\xe2\xad\x90")?, "⭐");
 /// assert_eq!(unescape(r"\226\173\144")?, "⭐");
 /// # Ok::<_, Box<dyn Error>>(())
@@ -364,7 +364,8 @@ fn convert_lossy<'a>(
 /// ```
 /// # use std::error::Error;
 /// # use literal::unescape;
-/// assert_eq!(unescape(r"\xe2\x9d\xa4\xef\xb8\x8f")?, "❤️");
+/// assert_eq!(unescape(r"\u{2764}\u{FE0F}")?, "❤️");
+/// assert_eq!(unescape(r"\xE2\x9D\xA4\xEF\xB8\x8F")?, "❤️");
 /// assert_eq!(unescape(r"\226\157\164\239\184\143")?, "❤️");
 /// # Ok::<_, Box<dyn Error>>(())
 /// ```
