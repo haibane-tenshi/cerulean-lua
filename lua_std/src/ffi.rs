@@ -1885,3 +1885,36 @@ where
 
     ffi::from_fn(body, "lua_std::select", ())
 }
+
+/// Produce string with name of value's type.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(v: any) -> string`
+///
+/// Returns the type of its only argument, coded as a string.
+/// The possible results of this function are "nil" (a string, not the value `nil`),
+/// "number", "string", "boolean", "table", "function", "thread", and "userdata".
+pub fn type_<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let t = value.type_().to_lua_name();
+
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let s = heap.intern(t.into());
+                let r = Value::String(LuaPtr(s.downgrade()));
+                stack.push(r);
+            });
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::type", ())
+}

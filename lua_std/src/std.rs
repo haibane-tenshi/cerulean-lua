@@ -794,3 +794,32 @@ where
         );
     }
 }
+
+/// Produce string with name of value's type.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(v: any) -> string`
+///
+/// Returns the type of its only argument, coded as a string.
+/// The possible results of this function are "nil" (a string, not the value `nil`),
+/// "number", "string", "boolean", "table", "function", "thread", and "userdata".
+#[expect(non_camel_case_types)]
+pub struct type_;
+
+impl<Ty> StdPlugin<Ty> for type_
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::type_();
+        let key = core.alloc_string("type".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}

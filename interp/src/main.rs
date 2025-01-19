@@ -90,7 +90,9 @@ fn main() -> Result<()> {
                 .with(std::ipairs)
                 .with(std::next)
                 .with(std::pairs)
-                .with(std::select);
+                .with(std::select)
+                .with(std::tonumber)
+                .with(std::type_);
 
             runtime.include(env);
 
