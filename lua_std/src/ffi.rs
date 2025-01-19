@@ -6,8 +6,8 @@ use repr::index::StackSlot;
 use rt::chunk_cache::ChunkId;
 use rt::error::{AlreadyDroppedError, AlreadyDroppedOr, RtError, RuntimeError};
 use rt::ffi::arg_parser::{
-    FormatReturns, FromLuaString, LuaString, LuaTable, Maybe, NilOr, Opts, ParseArgs, ParseAtom,
-    ParseFrom, Split, WeakConvertError,
+    Adapt, FormatReturns, FromLuaString, LuaString, LuaTable, Maybe, NilOr, Opts, ParseArgs,
+    ParseAtom, ParseFrom, Split, WeakConvertError,
 };
 use rt::ffi::delegate::{Request, RuntimeView};
 use rt::ffi::{self, boxed, delegate, DLuaFfi, LuaFfi};
@@ -1902,17 +1902,14 @@ where
 {
     let body = || {
         delegate::from_mut(|mut rt| {
-            let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
-            let t = value.type_().to_lua_name();
+            rt.stack
+                .adapt(&mut rt.core.gc, |heap, value: WeakValue<Ty>| {
+                    let t = value.type_().to_lua_name();
+                    let s = heap.intern(t.into());
+                    let r = LuaString(LuaPtr(s.downgrade()));
 
-            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                let s = heap.intern(t.into());
-                let r = Value::String(LuaPtr(s.downgrade()));
-                stack.push(r);
-            });
-
-            Ok(())
+                    Ok(r)
+                })
         })
     };
 

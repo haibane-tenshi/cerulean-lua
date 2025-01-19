@@ -194,10 +194,10 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use super::tuple::Tuple;
-// use crate::gc::{ConvertInto, Heap, TryConvertInto, TryConvertFrom};
-use crate::error::AlreadyDroppedError;
+use crate::error::{AlreadyDroppedError, RtError};
 use crate::gc::Heap;
-use crate::value::{Refs, Strong, Type, Types, Value, Weak};
+use crate::runtime::thread::{StackGuard, TransientStackGuard};
+use crate::value::{Refs, Strong, Type, Types, Value, Weak, WeakValue};
 use sealed::{BubbleUp, Sealed};
 
 pub use crate::value::{Boolean, Callable, Float, Int, Nil};
@@ -739,6 +739,38 @@ where
     fn format(&mut self, value: R) {
         let value = value.into();
         self.extend([value]);
+    }
+}
+
+pub trait Adapt<Ty, Args, R>
+where
+    Ty: Types,
+{
+    fn adapt<F>(&mut self, heap: &mut Heap<Ty>, f: F) -> Result<(), RtError<Ty>>
+    where
+        F: FnOnce(&mut Heap<Ty>, Args) -> Result<R, RtError<Ty>>;
+}
+
+impl<Ty, Args, R> Adapt<Ty, Args, R> for StackGuard<'_, Ty>
+where
+    Ty: Types,
+    for<'a> &'a [WeakValue<Ty>]: ParseArgs<Args, Heap<Ty>>,
+    for<'a> <&'a [WeakValue<Ty>] as ParseArgs<Args, Heap<Ty>>>::Error: Display,
+    for<'a> TransientStackGuard<'a, Ty>: FormatReturns<Ty, R>,
+{
+    fn adapt<F>(&mut self, heap: &mut Heap<Ty>, f: F) -> Result<(), RtError<Ty>>
+    where
+        F: FnOnce(&mut Heap<Ty>, Args) -> Result<R, RtError<Ty>>,
+    {
+        self.transient_in(heap, |mut stack, heap| {
+            let args = stack.parse(heap)?;
+            stack.clear();
+
+            let ret = f(heap, args)?;
+
+            stack.format(ret);
+            Ok(())
+        })
     }
 }
 
