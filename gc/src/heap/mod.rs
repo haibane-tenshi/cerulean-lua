@@ -6,7 +6,7 @@ pub(crate) mod userdata_store;
 use std::any::TypeId;
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 
@@ -1133,6 +1133,12 @@ impl From<usize> for TypeIndex {
 impl From<TypeIndex> for usize {
     fn from(value: TypeIndex) -> Self {
         value.0.into()
+    }
+}
+
+impl Display for TypeIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

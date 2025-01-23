@@ -987,7 +987,7 @@ where
     T: ?Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}:{}", self.index, self.gen)
+        write!(f, "{}:{:p}:{}", self.ty, self.index, self.gen)
     }
 }
 
