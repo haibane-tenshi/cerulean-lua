@@ -4,7 +4,7 @@ mod closure;
 pub mod diagnostic;
 pub mod invalid_key;
 pub mod not_callable;
-// pub mod not_text;
+pub mod not_text;
 pub mod opcode;
 pub mod out_of_bounds_stack;
 pub mod signature;
@@ -28,6 +28,7 @@ pub use closure::{CapturesMismatch, MalformedClosureError, MissingChunk, Missing
 pub use diagnostic::Diagnostic;
 pub use invalid_key::InvalidKeyError;
 pub use not_callable::NotCallableError;
+pub use not_text::NotTextError;
 pub use opcode::Error as OpCodeError;
 pub use out_of_bounds_stack::OutOfBoundsStack;
 pub use signature::SignatureError;
@@ -52,6 +53,7 @@ where
     UpvalueCountMismatch(CapturesMismatch),
     Signature(SignatureError),
     NotCallable(NotCallableError<Ty>),
+    NotText(NotTextError<Ty::String>),
     Thread(ThreadError),
     OpCode(OpCodeError),
 }
@@ -102,6 +104,7 @@ where
             RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
             RuntimeError::Signature(err) => err.into_diagnostic(),
             RuntimeError::NotCallable(err) => err.into_diagnostic(),
+            RuntimeError::NotText(err) => err.into_diagnostic(),
             RuntimeError::Thread(err) => err.into_diagnostic(),
             RuntimeError::OpCode(err) => err.into_diagnostic((), chunk_cache),
         };
@@ -241,6 +244,15 @@ where
     }
 }
 
+impl<Ty> From<NotTextError<Ty::String>> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: NotTextError<Ty::String>) -> Self {
+        RuntimeError::NotText(value)
+    }
+}
+
 impl<Ty> From<MalformedClosureError> for RuntimeError<Ty>
 where
     Ty: Types,
@@ -283,6 +295,7 @@ where
             }
             Self::Signature(arg0) => f.debug_tuple("Signature").field(arg0).finish(),
             Self::NotCallable(arg0) => f.debug_tuple("NotCallable").field(arg0).finish(),
+            Self::NotText(arg0) => f.debug_tuple("NotText").field(arg0).finish(),
             Self::Thread(arg0) => f.debug_tuple("Thread").field(arg0).finish(),
             Self::OpCode(arg0) => f.debug_tuple("OpCode").field(arg0).finish(),
         }
@@ -318,6 +331,7 @@ where
             Self::UpvalueCountMismatch(arg0) => Self::UpvalueCountMismatch(arg0.clone()),
             Self::Signature(arg0) => Self::Signature(arg0.clone()),
             Self::NotCallable(arg0) => Self::NotCallable(arg0.clone()),
+            Self::NotText(arg0) => Self::NotText(arg0.clone()),
             Self::Thread(arg0) => Self::Thread(arg0.clone()),
             Self::OpCode(arg0) => Self::OpCode(arg0.clone()),
         }

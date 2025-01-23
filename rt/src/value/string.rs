@@ -303,3 +303,43 @@ impl IntoEncoding for PossiblyUtf8Vec {
         Some(s.into())
     }
 }
+
+use gc::userdata::Params;
+use gc::{Gc, Interned, Root};
+
+use crate::error::{AlreadyDroppedOr, NotTextError};
+
+pub fn try_gc_to_str<T, M, P>(
+    ptr: Gc<Interned<T>>,
+    heap: &gc::Heap<M, P>,
+) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<T>>>
+where
+    T: IntoEncoding + 'static,
+    P: Params,
+{
+    use crate::gc::TryGet;
+
+    let value = heap.try_get(ptr)?;
+    match value.to_str() {
+        Some(r) => Ok(r),
+        None => {
+            let value = heap.try_upgrade(ptr)?;
+            Err(AlreadyDroppedOr::Other(NotTextError(value)))
+        }
+    }
+}
+
+pub fn try_root_to_str<'h, T, M, P>(
+    ptr: &Root<Interned<T>>,
+    heap: &'h gc::Heap<M, P>,
+) -> Result<Cow<'h, str>, NotTextError<T>>
+where
+    T: IntoEncoding + 'static,
+    P: Params,
+{
+    let value = heap.get_root(ptr);
+    match value.to_str() {
+        Some(r) => Ok(r),
+        None => Err(NotTextError(ptr.clone())),
+    }
+}

@@ -190,6 +190,7 @@
 //!
 //! Combinators may contain any other parsers including combinators.
 
+use std::borrow::Cow;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
@@ -197,7 +198,7 @@ use gc::index::{Access, Gc, GcPtr, Interned, Root, RootPtr};
 use gc::userdata::Params;
 
 use super::tuple::Tuple;
-use crate::error::{AlreadyDroppedError, RtError};
+use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, NotTextError, RtError};
 use crate::gc::{Heap, LuaPtr};
 use crate::runtime::thread::{StackGuard, TransientStackGuard};
 use crate::value::string::IntoEncoding;
@@ -1460,6 +1461,16 @@ where
 
         Ok(FmtWith(string))
     }
+
+    pub fn to_str<M, P>(
+        self,
+        heap: &gc::Heap<M, P>,
+    ) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<T>>>
+    where
+        P: Params,
+    {
+        crate::value::string::try_gc_to_str(self.0, heap)
+    }
 }
 
 impl<T> LuaString<Gc<Interned<T>>> {
@@ -1485,6 +1496,16 @@ where
 
         Ok(FmtWith(string))
     }
+
+    pub fn to_str<M, P>(
+        self,
+        heap: &gc::Heap<M, P>,
+    ) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<T>>>
+    where
+        P: Params,
+    {
+        crate::value::string::try_gc_to_str(self.0 .0, heap)
+    }
 }
 
 impl<T> LuaString<LuaPtr<Gc<Interned<T>>>> {
@@ -1507,6 +1528,16 @@ where
         let string = heap.get_root(&self.0).as_inner();
         FmtWith(string)
     }
+
+    pub fn to_str<'h, M, P>(
+        &self,
+        heap: &'h gc::Heap<M, P>,
+    ) -> Result<Cow<'h, str>, NotTextError<T>>
+    where
+        P: Params,
+    {
+        crate::value::string::try_root_to_str(&self.0, heap)
+    }
 }
 
 impl<T> LuaString<Root<Interned<T>>> {
@@ -1528,6 +1559,16 @@ where
     {
         let string = heap.get_root(&self.0 .0).as_inner();
         FmtWith(string)
+    }
+
+    pub fn to_str<'h, M, P>(
+        &self,
+        heap: &'h gc::Heap<M, P>,
+    ) -> Result<Cow<'h, str>, NotTextError<T>>
+    where
+        P: Params,
+    {
+        crate::value::string::try_root_to_str(&self.0 .0, heap)
     }
 }
 
