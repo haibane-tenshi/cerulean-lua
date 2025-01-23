@@ -18,7 +18,7 @@ use std::fmt::{Debug, Display};
 use gc::{Interned, Root};
 
 use crate::chunk_cache::{ChunkCache, ChunkId};
-use crate::gc::{DisplayWith, Heap};
+use crate::gc::Heap;
 use crate::value::{StrongValue, Types, Value};
 
 pub use crate::chunk_cache::ImmutableCacheError;
@@ -84,7 +84,6 @@ where
     pub fn into_diagnostic(self, heap: &Heap<Ty>, chunk_cache: &dyn ChunkCache) -> Diagnostic
     where
         Ty::String: TryInto<String>,
-        StrongValue<Ty>: DisplayWith<Heap<Ty>>,
     {
         use codespan_reporting::files::SimpleFile;
 

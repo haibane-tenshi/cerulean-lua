@@ -1,11 +1,10 @@
 //! Utilities to help dealing with our garbage collector idiosyncrasies.
 
-use std::fmt::Display;
 use std::hash::Hash;
 
 use gc::index::{Access, Allocated, GcPtr, MutAccess, RefAccess, RootPtr};
 use gc::userdata::Params;
-use gc::{Gc, GcCell, Heap as TrueHeap, Root, RootCell, Trace};
+use gc::{Heap as TrueHeap, Trace};
 
 use crate::value::userdata::DefaultParams;
 use crate::value::Meta;
@@ -13,15 +12,6 @@ use crate::value::Meta;
 pub use crate::error::AlreadyDroppedError;
 
 pub type Heap<Ty> = TrueHeap<Meta<Ty>, DefaultParams<Ty>>;
-
-pub trait DisplayWith<Gc> {
-    type Output<'a>: Display
-    where
-        Self: 'a,
-        Gc: 'a;
-
-    fn display<'a>(&'a self, extra: &'a Gc) -> Self::Output<'a>;
-}
 
 #[derive(Debug, Clone, Copy, Trace)]
 pub struct LuaPtr<P>(pub P);
@@ -154,133 +144,6 @@ where
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.location().hash(state);
-    }
-}
-
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Gc<T>>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
-    M: 'static,
-    P: Params,
-{
-    type Output<'a> = LuaPtrDisplay<'a, Gc<T>, M, P>;
-
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
-    }
-}
-
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<GcCell<T>>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
-    M: 'static,
-    P: Params,
-{
-    type Output<'a> = LuaPtrDisplay<'a, GcCell<T>, M, P>;
-
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
-    }
-}
-
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Root<T>>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
-    M: 'static,
-    P: Params,
-{
-    type Output<'a> = LuaPtrDisplay<'a, Root<T>, M, P>;
-
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
-    }
-}
-
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<RootCell<T>>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized + 'static,
-    M: 'static,
-    P: Params,
-{
-    type Output<'a> = LuaPtrDisplay<'a, RootCell<T>, M, P>;
-
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
-    }
-}
-
-pub struct LuaPtrDisplay<'a, Ptr, M, P> {
-    ptr: &'a Ptr,
-    heap: &'a TrueHeap<M, P>,
-}
-
-impl<T, M, P> Display for LuaPtrDisplay<'_, Gc<T>, M, P>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
-    P: Params,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
-
-        if let Some(value) = heap.get(**ptr) {
-            write!(f, "{value}")?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<T, M, P> Display for LuaPtrDisplay<'_, GcCell<T>, M, P>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
-    P: Params,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
-
-        if let Some(value) = heap.get(**ptr) {
-            write!(f, "{value}")?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<T, M, P> Display for LuaPtrDisplay<'_, Root<T>, M, P>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
-    P: Params,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
-
-        let value = heap.get_root(*ptr);
-        write!(f, "{value}")
-    }
-}
-
-impl<T, M, P> Display for LuaPtrDisplay<'_, RootCell<T>, M, P>
-where
-    T: Allocated<TrueHeap<M, P>> + Display + ?Sized,
-    P: Params,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
-
-        let value = heap.get_root(*ptr);
-        write!(f, "{value}")
     }
 }
 
