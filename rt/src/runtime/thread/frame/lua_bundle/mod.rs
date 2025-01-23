@@ -22,7 +22,7 @@ use crate::error::{
     AlreadyDroppedError, AlreadyDroppedOr, BorrowError, MalformedClosureError, RefAccessError,
     RuntimeError,
 };
-use crate::gc::{DisplayWith, Heap, LuaPtr};
+use crate::gc::{Heap, LuaPtr};
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadManagerGuard;
 use crate::runtime::{Cache, Closure, Core, Interned, ThreadId};
@@ -205,10 +205,7 @@ where
     pub(crate) fn activate<'a>(
         &'a mut self,
         ctx: Context<'a, Ty>,
-    ) -> Result<ActiveFrame<'a, Ty>, MalformedClosureError>
-    where
-        WeakValue<Ty>: DisplayWith<Heap<Ty>>,
-    {
+    ) -> Result<ActiveFrame<'a, Ty>, MalformedClosureError> {
         use crate::error::{MissingChunk, MissingFunction};
         use upvalue_register::preload_upvalues;
 
@@ -460,7 +457,6 @@ where
 impl<Ty> ActiveFrame<'_, Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub(crate) fn eval(&mut self) -> Result<ChangeFrame<Ty>, RefAccessOrError<opcode_err::Error>> {
         let r = loop {
@@ -1222,9 +1218,10 @@ where
     }
 }
 
-impl<E, Value> From<RefAccessOrError<E>> for RuntimeError<Value>
+impl<E, Ty> From<RefAccessOrError<E>> for RuntimeError<Ty>
 where
-    E: Into<RuntimeError<Value>>,
+    Ty: Types,
+    E: Into<RuntimeError<Ty>>,
 {
     fn from(value: RefAccessOrError<E>) -> Self {
         match value {

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use super::{Message, RuntimeError};
+use super::Message;
 
 #[derive(Debug, Clone, Copy)]
 pub enum InvalidKeyError {
@@ -28,11 +28,5 @@ impl InvalidKeyError {
 impl Display for InvalidKeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} cannot be used to index tables", self.value_str())
-    }
-}
-
-impl<T> From<InvalidKeyError> for RuntimeError<T> {
-    fn from(value: InvalidKeyError) -> Self {
-        RuntimeError::InvalidKey(value)
     }
 }

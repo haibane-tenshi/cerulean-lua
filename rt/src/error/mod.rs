@@ -4,6 +4,7 @@ mod closure;
 pub mod diagnostic;
 pub mod invalid_key;
 pub mod not_callable;
+// pub mod not_text;
 pub mod opcode;
 pub mod out_of_bounds_stack;
 pub mod signature;
@@ -18,10 +19,10 @@ use gc::{Interned, Root};
 
 use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::gc::{DisplayWith, Heap};
-use crate::value::{Refs, Strong, StrongValue, Types, Value};
+use crate::value::{StrongValue, Types, Value};
 
 pub use crate::chunk_cache::ImmutableCacheError;
-pub use already_dropped::AlreadyDroppedError;
+pub use already_dropped::{AlreadyDroppedError, AlreadyDroppedOr};
 pub use borrow::BorrowError;
 pub use closure::{CapturesMismatch, MalformedClosureError, MissingChunk, MissingFunction};
 pub use diagnostic::Diagnostic;
@@ -33,11 +34,13 @@ pub use signature::SignatureError;
 pub use thread::{ReentryFailure, ThreadError, ThreadPanicked};
 pub use value::ValueError;
 
-pub type RtError<Ty> = RuntimeError<Value<Strong, Ty>>;
+pub type RtError<Ty> = RuntimeError<Ty>;
 
-#[derive(Debug, Clone)]
-pub enum RuntimeError<Value> {
-    Value(ValueError<Value>),
+pub enum RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    Value(ValueError<Ty>),
     Borrow(BorrowError),
     AlreadyDropped(AlreadyDroppedError),
     InvalidKey(InvalidKeyError),
@@ -48,24 +51,20 @@ pub enum RuntimeError<Value> {
     OutOfBoundsStack(OutOfBoundsStack),
     UpvalueCountMismatch(CapturesMismatch),
     Signature(SignatureError),
-    NotCallable(NotCallableError<Value>),
+    NotCallable(NotCallableError<Ty>),
     Thread(ThreadError),
     OpCode(OpCodeError),
 }
 
-impl<Rf, Ty> RuntimeError<Value<Rf, Ty>>
+impl<Ty> RuntimeError<Ty>
 where
-    Rf: Refs,
     Ty: Types,
-    Rf::String<Ty::String>: From<Root<Interned<Ty::String>>>,
 {
     pub fn from_msg(msg: Root<Interned<Ty::String>>) -> Self {
         RuntimeError::Value(ValueError(Value::String(msg.into())))
     }
-}
 
-impl<Value> RuntimeError<Value> {
-    pub fn from_value(value: Value) -> Self {
+    pub fn from_value(value: StrongValue<Ty>) -> Self {
         RuntimeError::Value(ValueError(value))
     }
 
@@ -78,7 +77,7 @@ impl<Value> RuntimeError<Value> {
     }
 }
 
-impl<Ty> RuntimeError<StrongValue<Ty>>
+impl<Ty> RuntimeError<Ty>
 where
     Ty: Types,
 {
@@ -121,67 +120,132 @@ where
     }
 }
 
-impl<Value> From<BorrowError> for RuntimeError<Value> {
-    fn from(value: BorrowError) -> Self {
-        Self::Borrow(value)
-    }
-}
-
-impl<Value> From<AlreadyDroppedError> for RuntimeError<Value> {
+impl<Ty> From<AlreadyDroppedError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: AlreadyDroppedError) -> Self {
         Self::AlreadyDropped(value)
     }
 }
 
-impl<Value> From<MissingChunk> for RuntimeError<Value> {
+impl<Ty, E> From<AlreadyDroppedOr<E>> for RuntimeError<Ty>
+where
+    Ty: Types,
+    E: Into<Self>,
+{
+    fn from(value: AlreadyDroppedOr<E>) -> Self {
+        match value {
+            AlreadyDroppedOr::Dropped(err) => RuntimeError::AlreadyDropped(err),
+            AlreadyDroppedOr::Other(err) => err.into(),
+        }
+    }
+}
+
+impl<Ty> From<BorrowError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: BorrowError) -> Self {
+        Self::Borrow(value)
+    }
+}
+
+impl<Ty> From<MissingChunk> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: MissingChunk) -> Self {
         RuntimeError::MissingChunk(value)
     }
 }
 
-impl<Value> From<MissingFunction> for RuntimeError<Value> {
+impl<Ty> From<MissingFunction> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: MissingFunction) -> Self {
         RuntimeError::MissingFunction(value)
     }
 }
 
-impl<Value> From<OutOfBoundsStack> for RuntimeError<Value> {
+impl<Ty> From<OutOfBoundsStack> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: OutOfBoundsStack) -> Self {
         RuntimeError::OutOfBoundsStack(value)
     }
 }
 
-impl<Value> From<CapturesMismatch> for RuntimeError<Value> {
+impl<Ty> From<CapturesMismatch> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: CapturesMismatch) -> Self {
         RuntimeError::UpvalueCountMismatch(value)
     }
 }
 
-impl<Value> From<ValueError<Value>> for RuntimeError<Value> {
-    fn from(value: ValueError<Value>) -> Self {
+impl<Ty> From<ValueError<Ty>> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: ValueError<Ty>) -> Self {
         RuntimeError::Value(value)
     }
 }
 
-impl<Value> From<OpCodeError> for RuntimeError<Value> {
+impl<Ty> From<OpCodeError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: OpCodeError) -> Self {
         RuntimeError::OpCode(value)
     }
 }
 
-impl<Value> From<ThreadError> for RuntimeError<Value> {
+impl<Ty> From<ThreadError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: ThreadError) -> Self {
         RuntimeError::Thread(value)
     }
 }
 
-impl<Value> From<SignatureError> for RuntimeError<Value> {
+impl<Ty> From<SignatureError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: SignatureError) -> Self {
         RuntimeError::Signature(value)
     }
 }
 
-impl<Value> From<MalformedClosureError> for RuntimeError<Value> {
+impl<E, Ty> From<crate::ffi::arg_parser::ParseError<E>> for RuntimeError<Ty>
+where
+    Ty: Types,
+    E: Display,
+{
+    fn from(value: crate::ffi::arg_parser::ParseError<E>) -> Self {
+        SignatureError::from(value).into()
+    }
+}
+
+impl<Ty> From<NotCallableError<Ty>> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: NotCallableError<Ty>) -> Self {
+        RuntimeError::NotCallable(value)
+    }
+}
+
+impl<Ty> From<MalformedClosureError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: MalformedClosureError) -> Self {
         match value {
             MalformedClosureError::MissingChunk(err) => RuntimeError::MissingChunk(err),
@@ -191,13 +255,82 @@ impl<Value> From<MalformedClosureError> for RuntimeError<Value> {
     }
 }
 
-impl<Value> Display for RuntimeError<Value> {
+impl<Ty> From<InvalidKeyError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: InvalidKeyError) -> Self {
+        RuntimeError::InvalidKey(value)
+    }
+}
+
+impl<Ty> Debug for RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
+            Self::Borrow(arg0) => f.debug_tuple("Borrow").field(arg0).finish(),
+            Self::AlreadyDropped(arg0) => f.debug_tuple("AlreadyDropped").field(arg0).finish(),
+            Self::InvalidKey(arg0) => f.debug_tuple("InvalidKey").field(arg0).finish(),
+            Self::Immutable(arg0) => f.debug_tuple("Immutable").field(arg0).finish(),
+            Self::Diagnostic(arg0) => f.debug_tuple("Diagnostic").field(arg0).finish(),
+            Self::MissingChunk(arg0) => f.debug_tuple("MissingChunk").field(arg0).finish(),
+            Self::MissingFunction(arg0) => f.debug_tuple("MissingFunction").field(arg0).finish(),
+            Self::OutOfBoundsStack(arg0) => f.debug_tuple("OutOfBoundsStack").field(arg0).finish(),
+            Self::UpvalueCountMismatch(arg0) => {
+                f.debug_tuple("UpvalueCountMismatch").field(arg0).finish()
+            }
+            Self::Signature(arg0) => f.debug_tuple("Signature").field(arg0).finish(),
+            Self::NotCallable(arg0) => f.debug_tuple("NotCallable").field(arg0).finish(),
+            Self::Thread(arg0) => f.debug_tuple("Thread").field(arg0).finish(),
+            Self::OpCode(arg0) => f.debug_tuple("OpCode").field(arg0).finish(),
+        }
+    }
+}
+
+impl<Ty> Display for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "runtime error")
     }
 }
 
-impl<Value> Error for RuntimeError<Value> where Self: Debug + Display {}
+// This impl is autogenerated.
+#[expect(clippy::clone_on_copy)]
+impl<Ty> Clone for RuntimeError<Ty>
+where
+    Ty: Types,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Value(arg0) => Self::Value(arg0.clone()),
+            Self::Borrow(arg0) => Self::Borrow(arg0.clone()),
+            Self::AlreadyDropped(arg0) => Self::AlreadyDropped(arg0.clone()),
+            Self::InvalidKey(arg0) => Self::InvalidKey(arg0.clone()),
+            Self::Immutable(arg0) => Self::Immutable(arg0.clone()),
+            Self::Diagnostic(arg0) => Self::Diagnostic(arg0.clone()),
+            Self::MissingChunk(arg0) => Self::MissingChunk(arg0.clone()),
+            Self::MissingFunction(arg0) => Self::MissingFunction(arg0.clone()),
+            Self::OutOfBoundsStack(arg0) => Self::OutOfBoundsStack(arg0.clone()),
+            Self::UpvalueCountMismatch(arg0) => Self::UpvalueCountMismatch(arg0.clone()),
+            Self::Signature(arg0) => Self::Signature(arg0.clone()),
+            Self::NotCallable(arg0) => Self::NotCallable(arg0.clone()),
+            Self::Thread(arg0) => Self::Thread(arg0.clone()),
+            Self::OpCode(arg0) => Self::OpCode(arg0.clone()),
+        }
+    }
+}
+
+impl<Ty> Error for RuntimeError<Ty>
+where
+    Ty: Types,
+    Self: Debug + Display,
+{
+}
 
 #[derive(Debug)]
 pub enum RefAccessError {
@@ -228,58 +361,14 @@ impl From<BorrowError> for RefAccessError {
     }
 }
 
-impl<Value> From<RefAccessError> for RuntimeError<Value> {
+impl<Ty> From<RefAccessError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: RefAccessError) -> Self {
         match value {
             RefAccessError::Dropped(err) => err.into(),
             RefAccessError::Borrowed(err) => err.into(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum AlreadyDroppedOr<E> {
-    Dropped(AlreadyDroppedError),
-    Other(E),
-}
-
-impl<E> AlreadyDroppedOr<E> {
-    pub fn map_other<T>(self, f: impl FnOnce(E) -> T) -> AlreadyDroppedOr<T> {
-        match self {
-            AlreadyDroppedOr::Dropped(t) => AlreadyDroppedOr::Dropped(t),
-            AlreadyDroppedOr::Other(t) => AlreadyDroppedOr::Other(f(t)),
-        }
-    }
-}
-
-impl<E> Display for AlreadyDroppedOr<E>
-where
-    E: Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AlreadyDroppedOr::Dropped(err) => write!(f, "{}", err),
-            AlreadyDroppedOr::Other(err) => write!(f, "{}", err),
-        }
-    }
-}
-
-impl<E> Error for AlreadyDroppedOr<E> where E: Debug + Display {}
-
-impl<E> From<AlreadyDroppedError> for AlreadyDroppedOr<E> {
-    fn from(value: AlreadyDroppedError) -> Self {
-        AlreadyDroppedOr::Dropped(value)
-    }
-}
-
-impl<Value, E> From<AlreadyDroppedOr<E>> for RuntimeError<Value>
-where
-    E: Into<RuntimeError<Value>>,
-{
-    fn from(value: AlreadyDroppedOr<E>) -> Self {
-        match value {
-            AlreadyDroppedOr::Dropped(err) => RuntimeError::AlreadyDropped(err),
-            AlreadyDroppedOr::Other(err) => err.into(),
         }
     }
 }

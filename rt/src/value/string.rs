@@ -36,14 +36,20 @@ impl From<Vec<u8>> for PossiblyUtf8Vec {
     }
 }
 
+impl From<&[u8]> for PossiblyUtf8Vec {
+    fn from(value: &[u8]) -> Self {
+        Self(value.to_vec())
+    }
+}
+
 impl From<String> for PossiblyUtf8Vec {
     fn from(value: String) -> Self {
         Self(value.into())
     }
 }
 
-impl<'a> From<&'a str> for PossiblyUtf8Vec {
-    fn from(value: &'a str) -> Self {
+impl From<&str> for PossiblyUtf8Vec {
+    fn from(value: &str) -> Self {
         value.to_string().into()
     }
 }
@@ -198,7 +204,43 @@ pub trait AsEncoding {
     fn as_bytes(&self) -> Option<&[u8]>;
 
     /// View Lua string content as utf8-encoded string.
-    fn as_utf8(&self) -> Option<&str>;
+    fn as_str(&self) -> Option<&str>;
+}
+
+pub trait IntoEncoding: AsEncoding {
+    /// Convert Lua string into byte array.
+    ///
+    /// Notice that this function is *infallible*.
+    /// Lua inherently expects that it can always treat strings as bag-of-bytes.
+    ///
+    /// The return type is [`Cow`] because a lot of the time Rust side doesn't require ownership in order to perform work,
+    /// so if your type already keeps the data in contiguous memory you may simply return a `&[u8]` pointing to it
+    /// and let Rust decide whether it needs to take ownership.
+    fn to_bytes(&self) -> Cow<'_, [u8]>;
+
+    /// Convert Lua string into utf8-encoded string.
+    ///
+    /// This function should return `None` when value cannot be interpreted as text.
+    ///
+    /// This function is an important interaction point between Lua-specific type and Rust ecosystem.
+    /// Lua states that it is encoding-agnostic, that is its string type can have arbitrary encoding.
+    /// This becomes a point of contention when interacting with Rust ecosystem:
+    /// Rust functions that work with strings expect it to be utf8-encoded, e.g. `&str` or `String`.
+    /// This method provides you with a way to convert from one to another.
+    ///
+    /// The return type is [`Cow`] because a lot of the time Rust side doesn't require ownership in order to perform work,
+    /// so if your type already contains text encoded in utf8 you may simply return a `&str` pointing into it.
+    fn to_str(&self) -> Option<Cow<'_, str>>;
+}
+
+pub trait FromEncoding:
+    for<'a> From<&'a [u8]> + From<Vec<u8>> + for<'a> From<&'a str> + From<String>
+{
+}
+
+impl<T> FromEncoding for T where
+    T: for<'a> From<&'a [u8]> + From<Vec<u8>> + for<'a> From<&'a str> + From<String>
+{
 }
 
 impl AsEncoding for Vec<u8> {
@@ -206,7 +248,7 @@ impl AsEncoding for Vec<u8> {
         Some(self)
     }
 
-    fn as_utf8(&self) -> Option<&str> {
+    fn as_str(&self) -> Option<&str> {
         None
     }
 }
@@ -216,7 +258,7 @@ impl AsEncoding for String {
         Some(self.as_bytes())
     }
 
-    fn as_utf8(&self) -> Option<&str> {
+    fn as_str(&self) -> Option<&str> {
         Some(self)
     }
 }
@@ -226,18 +268,38 @@ impl AsEncoding for PossiblyUtf8Vec {
         Some(self.as_ref())
     }
 
-    fn as_utf8(&self) -> Option<&str> {
+    fn as_str(&self) -> Option<&str> {
         std::str::from_utf8(self.as_ref()).ok()
     }
 }
 
-pub fn into_utf8<T>(value: &T) -> Result<Cow<str>, <T as TryInto<String>>::Error>
-where
-    T: Clone + AsEncoding + TryInto<String>,
-{
-    if let Some(s) = value.as_utf8() {
-        Ok(Cow::Borrowed(s))
-    } else {
-        value.clone().try_into().map(Cow::Owned)
+impl IntoEncoding for Vec<u8> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.as_slice().into()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        None
+    }
+}
+
+impl IntoEncoding for String {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.as_bytes().into()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        Some(self.into())
+    }
+}
+
+impl IntoEncoding for PossiblyUtf8Vec {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.0.as_slice().into()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        let s = std::str::from_utf8(&self.0).ok()?;
+        Some(s.into())
     }
 }

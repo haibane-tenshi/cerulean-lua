@@ -1,13 +1,14 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use super::{Message, RuntimeError};
+use super::Message;
 use crate::value::{StrongValue, Types};
 
-#[derive(Debug, Clone, Copy)]
-pub struct NotCallableError<Value>(pub Value);
+pub struct NotCallableError<Ty>(pub StrongValue<Ty>)
+where
+    Ty: Types;
 
-impl<Ty> NotCallableError<StrongValue<Ty>>
+impl<Ty> NotCallableError<Ty>
 where
     Ty: Types,
 {
@@ -21,7 +22,16 @@ where
     }
 }
 
-impl<Ty> Display for NotCallableError<StrongValue<Ty>>
+impl<Ty> Debug for NotCallableError<Ty>
+where
+    Ty: Types,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("NotCallableError").field(&self.0).finish()
+    }
+}
+
+impl<Ty> Display for NotCallableError<Ty>
 where
     Ty: Types,
 {
@@ -30,10 +40,18 @@ where
     }
 }
 
-impl<Value> Error for NotCallableError<Value> where Self: Debug + Display {}
-
-impl<Value> From<NotCallableError<Value>> for RuntimeError<Value> {
-    fn from(value: NotCallableError<Value>) -> Self {
-        RuntimeError::NotCallable(value)
+impl<Ty> Clone for NotCallableError<Ty>
+where
+    Ty: Types,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
+}
+
+impl<Ty> Error for NotCallableError<Ty>
+where
+    Ty: Types,
+    Self: Debug + Display,
+{
 }

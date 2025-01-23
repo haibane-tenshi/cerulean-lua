@@ -9,7 +9,7 @@ use repr::tivec::TiVec;
 
 use super::frame::Event;
 use crate::error::opcode::MissingArgsError;
-use crate::gc::{DisplayWith, Heap};
+use crate::gc::Heap;
 use crate::runtime::closure::{Closure, UpvaluePlace};
 use crate::value::{Types, Value, WeakValue};
 
@@ -703,7 +703,6 @@ where
 impl<Ty> StackGuard<'_, Ty>
 where
     Ty: Types,
-    WeakValue<Ty>: DisplayWith<Heap<Ty>>,
 {
     pub fn emit_pretty(
         &self,
@@ -718,11 +717,11 @@ where
         for (slot, value) in self.iter_enumerated() {
             let upvalue_mark = ' ';
 
-            writeln!(
-                writer,
-                "    {upvalue_mark}[{slot:>2}] {value:#}",
-                value = value.display(heap)
-            )?;
+            if let Ok(value) = value.fmt_with(heap) {
+                writeln!(writer, "    {upvalue_mark}[{slot:>2}] {value:#}",)?
+            } else {
+                writeln!(writer, "    {upvalue_mark}[{slot:>2}] <gc-collected>",)?
+            };
         }
 
         writeln!(writer, "]")?;

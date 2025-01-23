@@ -193,10 +193,14 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
+use gc::index::{Access, Gc, GcPtr, Interned, Root, RootPtr};
+use gc::userdata::Params;
+
 use super::tuple::Tuple;
 use crate::error::{AlreadyDroppedError, RtError};
-use crate::gc::Heap;
+use crate::gc::{Heap, LuaPtr};
 use crate::runtime::thread::{StackGuard, TransientStackGuard};
+use crate::value::string::IntoEncoding;
 use crate::value::{Refs, Strong, Type, Types, Value, Weak, WeakValue};
 use sealed::{BubbleUp, Sealed};
 
@@ -1436,7 +1440,158 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct LuaString<T>(pub T);
+
+impl<T> LuaString<Gc<Interned<T>>>
+where
+    T: IntoEncoding + 'static,
+{
+    pub fn fmt_with<'h, M, P>(
+        &self,
+        heap: &'h gc::Heap<M, P>,
+    ) -> Result<impl Debug + Display + use<'h, T, M, P>, AlreadyDroppedError>
+    where
+        P: Params,
+    {
+        use crate::gc::TryGet;
+
+        let string = heap.try_get(self.0)?.as_inner();
+
+        Ok(FmtWith(string))
+    }
+}
+
+impl<T> LuaString<Gc<Interned<T>>> {
+    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
+        FmtStringless(self.0)
+    }
+}
+
+impl<T> LuaString<LuaPtr<Gc<Interned<T>>>>
+where
+    T: IntoEncoding + 'static,
+{
+    pub fn fmt_with<'h, M, P>(
+        &self,
+        heap: &'h gc::Heap<M, P>,
+    ) -> Result<impl Debug + Display + use<'h, T, M, P>, AlreadyDroppedError>
+    where
+        P: Params,
+    {
+        use crate::gc::TryGet;
+
+        let string = heap.try_get(self.0 .0)?.as_inner();
+
+        Ok(FmtWith(string))
+    }
+}
+
+impl<T> LuaString<LuaPtr<Gc<Interned<T>>>> {
+    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
+        FmtStringless(self.0 .0)
+    }
+}
+
+impl<T> LuaString<Root<Interned<T>>>
+where
+    T: IntoEncoding + 'static,
+{
+    pub fn fmt_with<'h, M, P>(
+        &self,
+        heap: &'h gc::Heap<M, P>,
+    ) -> impl Debug + Display + use<'h, T, M, P>
+    where
+        P: Params,
+    {
+        let string = heap.get_root(&self.0).as_inner();
+        FmtWith(string)
+    }
+}
+
+impl<T> LuaString<Root<Interned<T>>> {
+    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
+        FmtStringless(self.0.downgrade())
+    }
+}
+
+impl<T> LuaString<LuaPtr<Root<Interned<T>>>>
+where
+    T: IntoEncoding + 'static,
+{
+    pub fn fmt_with<'h, M, P>(
+        &self,
+        heap: &'h gc::Heap<M, P>,
+    ) -> impl Debug + Display + use<'h, T, M, P>
+    where
+        P: Params,
+    {
+        let string = heap.get_root(&self.0 .0).as_inner();
+        FmtWith(string)
+    }
+}
+
+impl<T> LuaString<LuaPtr<Root<Interned<T>>>> {
+    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
+        FmtStringless(self.0 .0.downgrade())
+    }
+}
+
+pub(crate) struct FmtWith<T>(T);
+
+impl<'a, T> FmtWith<&'a T> {
+    // Used directly by `Value`'s  formatting machinery.
+    pub(crate) fn new(value: &'a T) -> Self {
+        FmtWith(value)
+    }
+}
+
+impl<T> Debug for FmtWith<&T>
+where
+    T: IntoEncoding,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self)
+    }
+}
+
+impl<T> Display for FmtWith<&T>
+where
+    T: IntoEncoding,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(s) = self.0.to_str() {
+            if f.alternate() {
+                write!(f, "{:?}", s)
+            } else {
+                write!(f, "{}", s)
+            }
+        } else {
+            let bytes = self.0.to_bytes();
+            write!(f, "{:02X?}", bytes)
+        }
+    }
+}
+
+struct FmtStringless<T>(T);
+
+impl<T> Debug for FmtStringless<Gc<T>>
+where
+    T: ?Sized,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl<T> Display for FmtStringless<Gc<T>>
+where
+    T: ?Sized,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{string <{:p}>}}", self.0)
+    }
+}
 
 impl<T, Rf, Ty> From<LuaString<T>> for Value<Rf, Ty>
 where
@@ -1473,6 +1628,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct LuaTable<T>(pub T);
 
 impl<Rf, Ty, T> From<LuaTable<T>> for Value<Rf, Ty>
@@ -1506,6 +1662,123 @@ where
                 Err(err)
             }
         }
+    }
+}
+
+impl<T, A> Display for LuaTable<GcPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{table <{:p}>}}", self.0)
+    }
+}
+
+impl<T, A> Display for LuaTable<LuaPtr<GcPtr<T, A>>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", LuaTable(self.0 .0))
+    }
+}
+
+impl<T, A> Display for LuaTable<RootPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", LuaTable(self.0.downgrade()))
+    }
+}
+
+impl<T, A> Display for LuaTable<LuaPtr<RootPtr<T, A>>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", LuaTable(self.0 .0.downgrade()))
+    }
+}
+
+#[derive(Debug)]
+pub struct LuaUserdata<T>(pub T);
+
+impl<Rf, Ty, T> From<LuaUserdata<T>> for Value<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+    Rf::FullUserdata<Ty::FullUserdata>: From<T>,
+{
+    fn from(value: LuaUserdata<T>) -> Self {
+        let LuaUserdata(value) = value;
+        Value::Userdata(value.into())
+    }
+}
+
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaUserdata<Rf::FullUserdata<Ty::FullUserdata>>
+where
+    Rf: Refs,
+    Ty: Types,
+{
+    type Error = TypeMismatchError;
+
+    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Userdata(t) => Ok(LuaUserdata(t)),
+            value => {
+                let err = TypeMismatchError {
+                    found: value.type_(),
+                    expected: Type::Userdata,
+                };
+
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<T, A> Display for LuaUserdata<GcPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{userdata <{:p}>}}", self.0)
+    }
+}
+
+impl<T, A> Display for LuaUserdata<LuaPtr<GcPtr<T, A>>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", LuaUserdata(self.0 .0))
+    }
+}
+
+impl<T, A> Display for LuaUserdata<RootPtr<T, A>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", LuaUserdata(self.0.downgrade()))
+    }
+}
+
+impl<T, A> Display for LuaUserdata<LuaPtr<RootPtr<T, A>>>
+where
+    T: ?Sized,
+    A: Access,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", LuaUserdata(self.0 .0.downgrade()))
     }
 }
 

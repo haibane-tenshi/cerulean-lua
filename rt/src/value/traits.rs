@@ -1,10 +1,84 @@
-use std::fmt::Display;
+//! Raw operations on Lua primitives.
+//!
+//! This module contains traits describing all ops permitted on Lua primitive values.
+//! It mostly consist of reimports of `std` ops (such as [`Add`], [`Mul`] and others),
+//! but there are also Lua-specific methods mixed in (such as [`Len`])
+//!
+//! Note that traits inside this module adhere to Rust's conventions.
+//! From perspective of Lua they describe **raw** operations on underlying values.
+//! It is used as a building block to build more complex and featureful operations.
+//! For this reason traits are only implemented on selection of strongly-typed Lua values
+//! ([`Int`](super::Int), [`Float`](super::Float) and others) but not on [`Value`]s.
+//!
+//! If you are looking for a way to operate on `Value`s or handle metamethods/coercions,
+//! refer to [`builtins`](crate::builtins) module instead.
+//!
+//! # Provided ops
+//!
+//! Unmarked traits are simply reimports from Rust's `std::ops`.
+//!
+//! Arithmetic ops:
+//!
+//! * [`Neg`]
+//! * [`Add`]
+//! * [`AddAssign`]
+//! * [`Sub`]
+//! * [`SubAssign`]
+//! * [`Mul`]
+//! * [`MulAssign`]
+//! * [`Div`]
+//! * [`DivAssign`]
+//! * `CheckedDiv` - to add
+//! * [`FloorDiv`] - [Lua specific] division that rounds to nearest smaller integer
+//! * `CheckedFloorDic` - to add?
+//! * [`Rem`]
+//! * [`RemAssign`]
+//! * `CheckedRem` - to add
+//! * [`Pow`] - [Lua specific] raise number to the power
+//! * `CheckedPow` - to add?
+//!
+//! Bitwise ops:
+//!
+//! * [`BitNot`]
+//! * [`BitAnd`]
+//! * [`BitAndAssign`]
+//! * [`BitOr`]
+//! * [`BitOrAssign`]
+//! * [`BitXor`]
+//! * [`BitXorAssign`]
+//! * [`Shl`]
+//! * [`ShlAssign`]
+//! * [`Shr`]
+//! * [`ShrAssign`]
+//!
+//! String ops:
+//!
+//! * [`Concat`] - [Lua specific] concatenate byte content of two strings
+//! * [`Len`] - [Lua specific] length of a string in bytes or *border* of a table
+//!
+//! # Checked vs unchecked ops
+//!
+//! Some arithmetic operations exist in both checked ([`CheckedDiv`], [`CheckedFloorDiv`], [`CheckedRem`] and [`CheckedPow`]) and
+//! unchecked form ([`Div`], [`FloorDiv`], [`Rem`] and [`Pow`]).
+//!
+//! According to Lua spec, before performing any of those operations integer arguments must get coerced to floats.
+//! For float values there is no reason to have checked versions: it can always emit a `NaN` in case of trouble,
+//! and most programs expect this behavior.
+//!
+//! However, coercions inside our runtime are configurable.
+//! This means that it is possible that those ops will be performed on integer arguments,
+//! which can lead to Rust panics when provided with bad inputs.
+//!
+//! To handle the matter gracefully, when those ops of when invoked
+//! runtime and builtins will always use **checked versions for integers** (and **unchecked for floats**).
+//! Failing to produce a value is then elevated into Lua runtime error.
+
 use std::hash::Hash;
 
 use gc::index::Allocated;
 use gc::{Gc, GcCell, Interned, Root, RootCell, Trace};
 
-use super::string::PossiblyUtf8Vec;
+use super::string::{FromEncoding, IntoEncoding, PossiblyUtf8Vec};
 use super::userdata::{DefaultParams, FullUserdata};
 use super::{KeyValue, Value};
 use crate::ffi::DLuaFfi;
@@ -47,15 +121,7 @@ impl Refs for Weak {
 }
 
 pub trait Types: Sized + 'static {
-    type String: Trace
-        + Concat
-        + Len
-        + Clone
-        + Ord
-        + Hash
-        + Display
-        + From<String>
-        + From<&'static str>;
+    type String: Trace + Concat + Len + Clone + Ord + Hash + IntoEncoding + FromEncoding;
     type LuaClosure: Trace;
     type RustClosure: Trace;
     type Table: Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;

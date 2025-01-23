@@ -290,7 +290,10 @@ impl From<Diagnostic> for LoadError {
     }
 }
 
-impl<Value> From<LoadError> for RuntimeError<Value> {
+impl<Ty> From<LoadError> for RuntimeError<Ty>
+where
+    Ty: Types,
+{
     fn from(value: LoadError) -> Self {
         match value {
             LoadError::Immutable(err) => RuntimeError::Immutable(err),

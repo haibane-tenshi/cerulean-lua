@@ -9,12 +9,13 @@ pub mod traits;
 pub mod userdata;
 
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 
 use enumoid::Enumoid;
 use gc::Trace;
 
 use crate::error::{AlreadyDroppedError, InvalidKeyError};
-use crate::gc::{DisplayWith, Heap};
+use crate::gc::Heap;
 use crate::runtime::MetatableRegistry;
 
 pub use boolean::Boolean;
@@ -293,6 +294,31 @@ where
             Value::Userdata(LuaPtr(t)) => heap.get_root(t).metatable().copied(),
         }
     }
+
+    pub fn fmt_with<'s, 'h>(
+        &'s self,
+        heap: &'h Heap<Ty>,
+    ) -> impl Debug + Display + use<'s, 'h, Ty> {
+        use crate::ffi::arg_parser::FmtWith as FmtStringWith;
+
+        let string = if let Value::String(s) = self {
+            let s = heap.get_root(&s.0).as_inner();
+            Some(FmtStringWith::new(s))
+        } else {
+            None
+        };
+
+        FmtWith {
+            value: self.downgrade(),
+            string,
+        }
+    }
+
+    pub fn fmt_stringless<'s>(&self) -> impl Debug + Display + use<'s, Ty> {
+        FmtStringless {
+            value: self.downgrade(),
+        }
+    }
 }
 
 impl<Ty> WeakValue<Ty>
@@ -351,6 +377,30 @@ where
 
         Ok(r)
     }
+
+    pub fn fmt_with<'s, 'h>(
+        &'s self,
+        heap: &'h Heap<Ty>,
+    ) -> Result<impl Debug + Display + use<'s, 'h, Ty>, AlreadyDroppedError> {
+        use crate::ffi::arg_parser::LuaString;
+
+        let string = if let Value::String(s) = self {
+            Some(LuaString(*s).fmt_with(heap)?)
+        } else {
+            None
+        };
+
+        let r = FmtWith {
+            value: *self,
+            string,
+        };
+
+        Ok(r)
+    }
+
+    pub fn fmt_stringless(&self) -> impl Debug + Display + use<'_, Ty> {
+        FmtStringless { value: *self }
+    }
 }
 
 impl<Ty> WeakValue<Ty>
@@ -379,19 +429,6 @@ where
         value.downgrade()
     }
 }
-
-// impl<Ty> TryConvertFrom<WeakValue<Ty>, Heap<Ty>> for StrongValue<Ty>
-// where
-//     Ty: CoreTypes,
-// {
-//     type Error = crate::error::AlreadyDroppedError;
-
-//     fn try_from_with_gc(value: WeakValue<Ty>, heap: &mut Heap<Ty>) -> Result<Self, Self::Error> {
-//         use crate::error::AlreadyDroppedError;
-
-//         value.upgrade(heap).ok_or(AlreadyDroppedError)
-//     }
-// }
 
 impl<Rf, Ty> Trace for Value<Rf, Ty>
 where
@@ -519,87 +556,94 @@ where
     }
 }
 
-pub struct ValueWith<'a, Value, Heap>(&'a Value, &'a Heap);
+struct FmtWith<T, S> {
+    value: T,
+    string: Option<S>,
+}
 
-impl<Ty> Display for ValueWith<'_, WeakValue<Ty>, Heap<Ty>>
+impl<Ty, S> Debug for FmtWith<WeakValue<Ty>, S>
 where
     Ty: Types,
+    S: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Value::*;
-
-        let ValueWith(value, heap) = self;
-
-        match value {
-            Nil => write!(f, "nil"),
-            Bool(t) => write!(f, "{t}"),
-            Int(t) => write!(f, "{t}"),
-            Float(t) => write!(f, "{t}"),
-            String(t) => {
-                if let Some(s) = heap.get(t.0).map(AsRef::as_ref) {
-                    write!(f, "{s}")
-                } else {
-                    Ok(())
-                }
-            }
-            Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Function(Callable::Rust(t)) => write!(f, "{{[rust] closure <{t:p}>}}"),
-            Table(t) => write!(f, "{{table <{t:p}>}}"),
-            Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
+        match &self.value {
+            Value::Nil => write!(f, "Nil"),
+            Value::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
+            Value::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
+            Value::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
+            Value::String(_) => f
+                .debug_tuple("String")
+                .field(self.string.as_ref().unwrap())
+                .finish(),
+            Value::Function(arg0) => f.debug_tuple("Function").field(arg0).finish(),
+            Value::Table(arg0) => f.debug_tuple("Table").field(arg0).finish(),
+            Value::Userdata(arg0) => f.debug_tuple("Userdata").field(arg0).finish(),
         }
     }
 }
 
-impl<Ty> Display for ValueWith<'_, StrongValue<Ty>, Heap<Ty>>
+impl<Ty, S> Display for FmtWith<WeakValue<Ty>, S>
 where
     Ty: Types,
+    S: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Value::*;
+        use crate::ffi::arg_parser::{LuaTable, LuaUserdata};
 
-        let ValueWith(value, heap) = self;
-
-        match value {
-            Nil => write!(f, "nil"),
-            Bool(t) => write!(f, "{t}"),
-            Int(t) => write!(f, "{t}"),
-            Float(t) => write!(f, "{t}"),
-            String(t) => {
-                let s = heap.get_root(&t.0).as_ref();
-                write!(f, "{s}")
-            }
-            Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Function(Callable::Rust(t)) => write!(f, "{{[rust] closure <{t:p}>}}"),
-            Table(t) => write!(f, "{{table <{t:p}>}}"),
-            Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
+        match &self.value {
+            Value::Nil => Display::fmt(&Nil, f),
+            Value::Bool(v) => Display::fmt(&Boolean(*v), f),
+            Value::Int(v) => Display::fmt(&Int(*v), f),
+            Value::Float(v) => Display::fmt(&Float(*v), f),
+            Value::String(_) => Display::fmt(self.string.as_ref().unwrap(), f),
+            Value::Function(v) => Display::fmt(v, f),
+            Value::Table(v) => Display::fmt(&LuaTable(*v), f),
+            Value::Userdata(v) => Display::fmt(&LuaUserdata(*v), f),
         }
     }
 }
 
-impl<Ty> DisplayWith<Heap<Ty>> for WeakValue<Ty>
+struct FmtStringless<T> {
+    value: T,
+}
+
+impl<Ty> Debug for FmtStringless<WeakValue<Ty>>
 where
     Ty: Types,
 {
-    type Output<'a>
-        = ValueWith<'a, Self, Heap<Ty>>
-    where
-        Self: 'a;
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::ffi::arg_parser::LuaString;
 
-    fn display<'a>(&'a self, extra: &'a Heap<Ty>) -> Self::Output<'a> {
-        ValueWith(self, extra)
+        match &self.value {
+            Value::Nil => write!(f, "Nil"),
+            Value::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
+            Value::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
+            Value::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
+            Value::String(arg0) => f.debug_tuple("String").field(&LuaString(*arg0)).finish(),
+            Value::Function(arg0) => f.debug_tuple("Function").field(arg0).finish(),
+            Value::Table(arg0) => f.debug_tuple("Table").field(arg0).finish(),
+            Value::Userdata(arg0) => f.debug_tuple("Userdata").field(arg0).finish(),
+        }
     }
 }
 
-impl<Ty> DisplayWith<Heap<Ty>> for StrongValue<Ty>
+impl<Ty> Display for FmtStringless<WeakValue<Ty>>
 where
     Ty: Types,
 {
-    type Output<'a>
-        = ValueWith<'a, Self, Heap<Ty>>
-    where
-        Self: 'a;
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::ffi::arg_parser::{LuaString, LuaTable, LuaUserdata};
 
-    fn display<'a>(&'a self, extra: &'a Heap<Ty>) -> Self::Output<'a> {
-        ValueWith(self, extra)
+        match &self.value {
+            Value::Nil => Display::fmt(&Nil, f),
+            Value::Bool(v) => Display::fmt(&Boolean(*v), f),
+            Value::Int(v) => Display::fmt(&Int(*v), f),
+            Value::Float(v) => Display::fmt(&Float(*v), f),
+            Value::String(v) => Display::fmt(&LuaString(*v).fmt_stringless(), f),
+            Value::Function(v) => Display::fmt(v, f),
+            Value::Table(v) => Display::fmt(&LuaTable(*v), f),
+            Value::Userdata(v) => Display::fmt(&LuaUserdata(*v), f),
+        }
     }
 }

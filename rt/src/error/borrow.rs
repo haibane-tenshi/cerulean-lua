@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt::Display;
 
-use codespan_reporting::diagnostic::Diagnostic;
+use super::Message;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BorrowError {
@@ -10,7 +10,7 @@ pub enum BorrowError {
 }
 
 impl BorrowError {
-    pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
+    pub(crate) fn into_diagnostic<FileId>(self) -> Message<FileId> {
         use super::ExtraDiagnostic;
 
         let msg = match self {
@@ -18,7 +18,7 @@ impl BorrowError {
             BorrowError::Mut => "value is already borrowed",
         };
 
-        let mut diag = Diagnostic::error().with_message(msg);
+        let mut diag = Message::error().with_message(msg);
 
         diag.with_help([
             "you see this error because an access pattern violated Rust aliasing rules:\nthere can only exist one mutable reference to a value at a time",

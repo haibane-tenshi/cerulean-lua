@@ -69,7 +69,7 @@ use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, NotCallableError};
 use crate::gc::Heap;
 use crate::runtime::thread::TransientStackGuard;
 use crate::runtime::MetatableRegistry;
-use crate::value::{Callable, KeyValue, Strong, StrongValue, Types, Value, Weak, WeakValue};
+use crate::value::{Callable, KeyValue, Strong, Types, Value, Weak, WeakValue};
 
 /// Resolve metavalue out of a list of values.
 ///
@@ -113,7 +113,7 @@ pub fn prepare_invoke<Ty>(
     stack: TransientStackGuard<'_, Ty>,
     heap: &mut Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
-) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError<StrongValue<Ty>>>>
+) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError<Ty>>>
 where
     Ty: Types,
 {

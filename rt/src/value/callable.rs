@@ -80,17 +80,26 @@ where
     }
 }
 
-impl<Rf, Ty> Display for Callable<Rf, Ty>
+impl<Ty> Display for WeakCallable<Ty>
 where
-    Rf: Refs,
     Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Display,
-    Rf::RustCallable<Ty::RustClosure>: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Lua(t) => write!(f, "{t}"),
-            Self::Rust(t) => write!(f, "{t}"),
+            Callable::Lua(t) => write!(f, "{{[lua] closure <{t:p}>}}"),
+            Callable::Rust(t) => write!(f, "{{[rust] closure <{t:p}>}}"),
+        }
+    }
+}
+
+impl<Ty> Display for StrongCallable<Ty>
+where
+    Ty: Types,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Callable::Lua(t) => write!(f, "{{[lua] closure <{t:p}>}}"),
+            Callable::Rust(t) => write!(f, "{{[rust] closure <{t:p}>}}"),
         }
     }
 }

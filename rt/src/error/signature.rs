@@ -59,12 +59,3 @@ where
         }
     }
 }
-
-impl<E, Value> From<ParseError<E>> for super::RuntimeError<Value>
-where
-    E: Display,
-{
-    fn from(value: ParseError<E>) -> Self {
-        SignatureError::from(value).into()
-    }
-}
