@@ -178,6 +178,33 @@ where
     }
 }
 
+/// Global variable containing Lua version as a string.
+///
+/// # From Lua documentation
+///
+/// A global variable (not a function) that holds a string containing the running Lua version.
+/// The current value of this variable is "Lua 5.4".
+///
+/// # Implementation-specific behavior
+///
+/// Variable will always have string "Lua 5.4", currently this is the only Lua version supported by runtime.
+pub struct _VERSION;
+
+impl<Ty> StdPlugin<Ty> for _VERSION
+where
+    Ty: Types,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let key = core.alloc_string("_VERSION".into());
+        let version = core.alloc_string("Lua 5.4".into());
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::String(LuaPtr(version.downgrade())),
+        );
+    }
+}
+
 /// Iterate over table's integer indices.
 ///
 /// # From Lua documentation

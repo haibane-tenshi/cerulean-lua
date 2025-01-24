@@ -87,6 +87,7 @@ fn main() -> Result<()> {
                 .with(std::collectgarbage)
                 .with(std::dofile)
                 .with(std::_G)
+                .with(std::_VERSION)
                 .with(std::ipairs)
                 .with(std::next)
                 .with(std::pairs)
