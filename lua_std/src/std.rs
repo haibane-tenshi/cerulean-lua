@@ -869,6 +869,11 @@ where
 ///
 /// When `index` is integer it is treated as offset into argument list (from the beginning when non-negative, from the end when negative).
 /// Offsetting outside of `[0; len]` range (where `len` is total number of args) will result in Lua panic.
+///
+/// Note that Lua customarily start enumeration from 1, not 0 how Rust does it.
+/// For example, Lua considers `index` an argument with index 1,
+/// so `select(1, ...)` will choose all arguments excluding the index itself.
+/// This behavior coincides with notion of Rustic offsets for the purposes of this function.
 #[expect(non_camel_case_types)]
 pub struct select;
 
