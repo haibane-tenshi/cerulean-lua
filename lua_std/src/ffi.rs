@@ -394,6 +394,13 @@ where
 /// In such case, `pcall` also returns all results from the call, after this first result.
 /// In case of any error, `pcall` returns `false` plus the error object.
 /// Note that errors caught by `pcall` do not call a message handler.
+///
+/// # Implementation-specific behavior
+///
+/// Note that in our evaluation model `pcall` doesn't do anything special.
+/// During unwinding every rust-backed frame receives runtime error to process in order,
+/// `pcall` simply doesn't propagate it which indicates that Lua panic was handled.
+/// See [delegate contract](rt::ffi::delegate#error-handling) for more details.
 pub fn pcall<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
@@ -491,6 +498,59 @@ where
     }
 
     ffi::from_fn(Delegate::default, "lua_std::pcall", ())
+}
+
+/// Call another function in protected mode, setting a message handler.
+///
+/// # From Lua documentation
+///
+/// This function is similar to pcall, except that it sets a new message handler msgh.
+///
+/// # Implementation-specific behavior
+///
+/// Currently, message handlers are not supported, so this function is equivalent to `pcall`.
+pub fn xpcall<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    let body = || {
+        enum State {
+            Started,
+            CalledPcall,
+            Finished,
+        }
+
+        let mut state = State::Started;
+        delegate::try_repeat(move |mut rt| {
+            let current = std::mem::replace(&mut state, State::Finished);
+            match current {
+                State::Started => {
+                    if rt.stack.len() < 2 {
+                        let err = rt::error::SignatureError::TooFewArgs {
+                            found: rt.stack.len(),
+                        };
+                        return Err(err.into());
+                    }
+
+                    // Remove message handler
+                    let _ = rt.stack.drain(StackSlot(1)..StackSlot(2));
+
+                    let callable = Callable::Rust(LuaPtr(rt.core.gc.alloc_cell(boxed(pcall()))));
+                    let request = Request::Invoke {
+                        callable,
+                        start: StackSlot(0),
+                    };
+
+                    state = State::CalledPcall;
+                    Ok(delegate::State::Yielded(request))
+                }
+                State::CalledPcall => Ok(delegate::State::Complete(())),
+                State::Finished => Ok(delegate::State::Complete(())),
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::xpcall", ())
 }
 
 #[derive(Default, Clone, Copy)]

@@ -251,6 +251,13 @@ where
 /// In such case, `pcall` also returns all results from the call, after this first result.
 /// In case of any error, `pcall` returns `false` plus the error object.
 /// Note that errors caught by `pcall` do not call a message handler.
+///
+/// # Implementation-specific behavior
+///
+/// Note that in our evaluation model `pcall` doesn't do anything special.
+/// During unwinding every rust-backed frame receives runtime error to process in order,
+/// `pcall` simply doesn't propagate it which indicates that Lua panic was handled.
+/// See [delegate contract](rt::ffi::delegate#error-handling) for more details.
 #[expect(non_camel_case_types)]
 pub struct pcall;
 
@@ -261,6 +268,34 @@ where
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::pcall();
         let key = core.alloc_string("pcall".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
+/// Call another function in protected mode, setting a message handler.
+///
+/// # From Lua documentation
+///
+/// This function is similar to pcall, except that it sets a new message handler msgh.
+///
+/// # Implementation-specific behavior
+///
+/// Currently, message handlers are not supported, so this function is equivalent to `pcall`.
+#[expect(non_camel_case_types)]
+pub struct xpcall;
+
+impl<Ty> StdPlugin<Ty> for xpcall
+where
+    Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::xpcall();
+        let key = core.alloc_string("xpcall".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
