@@ -77,6 +77,7 @@ fn main() -> Result<()> {
 
             let env = Std::empty()
                 .with(std::assert)
+                .with(std::error)
                 .with(std::pcall)
                 .with(std::print)
                 .with(std::tostring)

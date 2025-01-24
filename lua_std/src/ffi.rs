@@ -55,6 +55,45 @@ where
     )
 }
 
+/// Trigger runtime error.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(message: any [, level: int]) -> !`
+///
+/// Raises an error (see §2.3) with message as the error object.
+/// This function never returns.
+///
+/// Usually, error adds some information about the error position at the beginning of the message, if the message is a string.
+/// The level argument specifies how to get the error position.
+/// With level 1 (the default), the error position is where the error function was called.
+/// Level 2 points the error to where the function that called error was called; and so on.
+/// Passing a level 0 avoids the addition of error position information to the message.
+///
+/// # Implementation-specific behavior
+///
+/// Levels are currently unsupported and ignored.
+pub fn error<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            let (msg, level): (WeakValue<_>, Opts<(Int,)>) = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let (level,) = level.split();
+            let _level = level.unwrap_or(Int(1)).0;
+
+            let msg = msg.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
+            let err = RuntimeError::from_value(msg);
+            Err(err)
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::error", ())
+}
+
 /// Issue command to garbage collector.
 ///
 /// # From Lua documentation

@@ -37,6 +37,44 @@ where
     }
 }
 
+/// Trigger runtime error.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(message: any [, level: int]) -> !`
+///
+/// Raises an error (see §2.3) with message as the error object.
+/// This function never returns.
+///
+/// Usually, error adds some information about the error position at the beginning of the message, if the message is a string.
+/// The level argument specifies how to get the error position.
+/// With level 1 (the default), the error position is where the error function was called.
+/// Level 2 points the error to where the function that called error was called; and so on.
+/// Passing a level 0 avoids the addition of error position information to the message.
+///
+/// # Implementation-specific behavior
+///
+/// Levels are currently unsupported and ignored.
+#[expect(non_camel_case_types)]
+pub struct error;
+
+impl<Ty> StdPlugin<Ty> for error
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::error();
+        let key = core.alloc_string("error".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
 /// Issue command to garbage collector.
 ///
 /// # From Lua documentation
