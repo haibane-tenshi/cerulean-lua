@@ -5,7 +5,6 @@ use rt::ffi::arg_parser::ParseFrom;
 use rt::ffi::{boxed, DLuaFfi};
 use rt::gc::LuaPtr;
 use rt::runtime::{Closure, Core};
-use rt::value::string::AsEncoding;
 use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
 
 use crate::plugin::{RootTable, StdPlugin};
@@ -97,7 +96,6 @@ pub struct collectgarbage;
 impl<Ty> StdPlugin<Ty> for collectgarbage
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String>,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::collectgarbage();
@@ -232,7 +230,6 @@ pub struct pcall;
 impl<Ty> StdPlugin<Ty> for pcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String>,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::pcall();
@@ -295,8 +292,6 @@ pub struct load;
 impl<Ty> StdPlugin<Ty> for load
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String>,
-    <Ty::String as TryInto<String>>::Error: Display,
     String: ParseFrom<Ty::String>,
 
     // Temp bound, remove when we are done with unpin.
@@ -343,7 +338,6 @@ pub struct loadfile;
 impl<Ty> StdPlugin<Ty> for loadfile
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String>,
     PathBuf: ParseFrom<Ty::String>,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
@@ -608,8 +602,6 @@ pub struct tonumber;
 impl<Ty> StdPlugin<Ty> for tonumber
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String>,
-    <Ty::String as TryInto<String>>::Error: Display,
     String: ParseFrom<Ty::String>,
     <String as ParseFrom<Ty::String>>::Error: Display,
 {
@@ -780,8 +772,6 @@ pub struct select;
 impl<Ty> StdPlugin<Ty> for select
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    Ty::String: AsEncoding + TryInto<String>,
-    <Ty::String as TryInto<String>>::Error: Display,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::select();

@@ -4,16 +4,15 @@ use std::path::PathBuf;
 
 use repr::index::StackSlot;
 use rt::chunk_cache::ChunkId;
-use rt::error::{AlreadyDroppedError, AlreadyDroppedOr, RtError, RuntimeError};
+use rt::error::{AlreadyDroppedError, AlreadyDroppedOr, NotTextError, RtError, RuntimeError};
 use rt::ffi::arg_parser::{
     Adapt, FormatReturns, FromLuaString, LuaString, LuaTable, Maybe, NilOr, Opts, ParseArgs,
     ParseAtom, ParseFrom, Split, WeakConvertError,
 };
 use rt::ffi::delegate::{Request, RuntimeView};
 use rt::ffi::{self, boxed, delegate, DLuaFfi, LuaFfi};
-use rt::gc::{DisplayWith, Heap, LuaPtr, TryGet};
+use rt::gc::{Heap, LuaPtr, TryGet};
 use rt::runtime::Closure;
-use rt::value::string::{into_utf8, AsEncoding};
 use rt::value::table::KeyValue;
 use rt::value::{Callable, Int, Nil, StrongValue, Types, Value, WeakValue};
 
@@ -112,10 +111,8 @@ where
 pub fn collectgarbage<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,
-    Ty::String: AsEncoding + TryInto<String>,
 {
-    use rt::error::Diagnostic;
-    use std::borrow::Cow;
+    use rt::ffi::arg_parser::TypeMismatchError;
     use std::fmt::Display;
 
     #[derive(Debug, Clone, Copy, Default)]
@@ -132,8 +129,8 @@ where
     }
 
     impl Command {
-        fn parse_from(value: Cow<str>) -> Result<Command, Error> {
-            let r = match value.as_ref() {
+        fn parse_from(value: &str) -> Option<Command> {
+            let r = match value {
                 "collect" => Command::Collect,
                 "stop" => Command::Stop,
                 "restart" => Command::Restart,
@@ -142,10 +139,10 @@ where
                 "isrunning" => Command::IsRunnning,
                 "incremental" => Command::Incremental,
                 "generational" => Command::Generational,
-                _ => return Err(Error::Unknown(value)),
+                _ => return None,
             };
 
-            Ok(r)
+            Some(r)
         }
     }
 
@@ -166,72 +163,52 @@ where
         }
     }
 
-    #[derive(Debug)]
-    enum Error<'a> {
-        InvalidUtf8,
-        Unknown(Cow<'a, str>),
+    impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for Command
+    where
+        Ty: Types,
+    {
+        type Error = Error<Ty::String>;
+
+        fn parse_atom(value: WeakValue<Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+            let value: LuaString<_> = value.try_into()?;
+            let s = value.to_str(extra)?;
+            Command::parse_from(&s).ok_or(Error::InvalidCommand)
+        }
     }
 
-    impl Error<'_> {
-        fn into_diagnostic(self) -> Diagnostic {
-            use rt::error::diagnostic::Message;
+    // Because final output is wrapped in Opts this error is never printed, triggering `dead_code`.
+    // Expect this to be needed when arg parsing setup is fixed.
+    #[expect(dead_code)]
+    #[derive(Debug)]
+    enum Error<T> {
+        TypeMismatch(TypeMismatchError),
+        AlreadyDropped(AlreadyDroppedError),
+        NotText(NotTextError<T>),
+        InvalidCommand,
+    }
 
-            let s = match self {
-                Error::InvalidUtf8 => "function recieved invalid command".into(),
-                Error::Unknown(s) => format!(r#""{s}" is an unknown command"#),
-            };
+    impl<T> From<AlreadyDroppedOr<NotTextError<T>>> for Error<T> {
+        fn from(value: AlreadyDroppedOr<NotTextError<T>>) -> Self {
+            match value {
+                AlreadyDroppedOr::Dropped(err) => Error::AlreadyDropped(err),
+                AlreadyDroppedOr::Other(err) => Error::NotText(err),
+            }
+        }
+    }
 
-            let message = Message::error().with_message(s).with_notes(vec![
-                "this function expects a command in its first argument".into(),
-                format!(
-                    r#"recognized commands are: "{}", "{}", "{}", "{}", "{}", "{}", "{}", "{}""#,
-                    Command::Collect,
-                    Command::Count,
-                    Command::Restart,
-                    Command::Stop,
-                    Command::IsRunnning,
-                    Command::Step,
-                    Command::Incremental,
-                    Command::Generational
-                ),
-                format!(
-                    r#""{}" is used as default when arguments are absent"#,
-                    Command::default()
-                ),
-            ]);
-
-            Diagnostic::with_message(message)
+    impl<T> From<TypeMismatchError> for Error<T> {
+        fn from(value: TypeMismatchError) -> Self {
+            Error::TypeMismatch(value)
         }
     }
 
     ffi::from_fn(
         || {
             delegate::from_mut(|mut rt| {
-                let args: Opts<(LuaString<_>, WeakValue<Ty>)> = rt.stack.parse(&mut rt.core.gc)?;
+                let args: Opts<(Command, WeakValue<Ty>)> = rt.stack.parse(&mut rt.core.gc)?;
                 rt.stack.clear();
                 let (command, _) = args.split();
-                let command = command
-                    .map(|t| {
-                        let s = rt
-                            .core
-                            .gc
-                            .get(t.0 .0)
-                            .ok_or(AlreadyDroppedError)?
-                            .as_inner();
-                        let s = into_utf8(s)
-                            .map_err(|_| AlreadyDroppedOr::Other(Error::InvalidUtf8))?;
-                        let command = Command::parse_from(s).map_err(AlreadyDroppedOr::Other)?;
-
-                        Ok(command)
-                    })
-                    .transpose()
-                    .map_err(|err| match err {
-                        AlreadyDroppedOr::Dropped(err) => err.into(),
-                        AlreadyDroppedOr::Other(err) => {
-                            RtError::Diagnostic(Box::new(err.into_diagnostic()))
-                        }
-                    })?
-                    .unwrap_or_default();
+                let command = command.unwrap_or_default();
 
                 match command {
                     Command::Collect => rt.core.gc.gc(),
@@ -420,7 +397,6 @@ where
 pub fn pcall<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
-    Ty::String: AsEncoding + TryInto<String>,
 {
     use rt::ffi::coroutine::State as CoState;
     use std::pin::Pin;
@@ -439,7 +415,6 @@ where
     impl<Ty> delegate::Delegate<Ty> for Delegate
     where
         Ty: Types,
-        Ty::String: AsEncoding + TryInto<String>,
     {
         fn resume(
             mut self: Pin<&mut Self>,
@@ -540,16 +515,16 @@ impl Error for InvalidModeError {}
 impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for Mode
 where
     Ty: Types,
-    Ty::String: AsEncoding + TryInto<String>,
 {
     type Error = WeakConvertError<InvalidModeError>;
 
     fn parse_atom(value: WeakValue<Ty>, gc: &mut Heap<Ty>) -> Result<Self, Self::Error> {
         use rt::ffi::arg_parser::LuaString;
+        use rt::value::string::IntoEncoding;
 
-        let LuaString(LuaPtr(s)) = value.try_into()?;
-        let s = gc.get(s).ok_or(AlreadyDroppedError)?.as_ref();
-        let s = into_utf8(s).ok();
+        let LuaString(LuaPtr(ptr)) = value.try_into()?;
+        let s = gc.try_get(ptr)?.as_ref();
+        let s = s.to_str();
 
         let r = match s.as_ref().map(AsRef::as_ref) {
             Some("t") => Mode::Text,
@@ -608,14 +583,13 @@ where
 pub fn load<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
-    Ty::String: AsEncoding + TryInto<String>,
-    <Ty::String as TryInto<String>>::Error: Display,
     String: ParseFrom<Ty::String>,
 
     // Temp bound, remove when we are done with unpin.
     Ty::String: Unpin,
 {
     use repr::index::FunctionId;
+    use rt::error::NotTextError;
     use rt::ffi::arg_parser::{ParseArgs, Split};
     use rt::runtime::FunctionPtr;
     use rt::value::{Type, Weak};
@@ -625,62 +599,69 @@ where
         Function(Callable<Weak, Ty>),
     }
 
-    #[derive(Debug)]
-    enum ChunkSourceError<E> {
+    enum Error<T> {
         TypeMismatch(Type),
         AlreadyDropped(AlreadyDroppedError),
-        Conversion(E),
+        NotText(NotTextError<T>),
     }
 
-    impl<E> Display for ChunkSourceError<E>
-    where
-        E: Display,
-    {
+    impl<T> Debug for Error<T> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                ChunkSourceError::TypeMismatch(found) => write!(
+                Self::TypeMismatch(arg0) => f.debug_tuple("TypeMismatch").field(arg0).finish(),
+                Self::AlreadyDropped(arg0) => f.debug_tuple("AlreadyDropped").field(arg0).finish(),
+                Self::NotText(arg0) => f.debug_tuple("NotText").field(arg0).finish(),
+            }
+        }
+    }
+
+    impl<T> Display for Error<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Error::TypeMismatch(found) => write!(
                     f,
                     "expected value of type `{}` or `{}`, found `{found}`",
                     Type::String,
                     Type::Function
                 ),
-                ChunkSourceError::AlreadyDropped(err) => write!(f, "{err}"),
-                ChunkSourceError::Conversion(err) => write!(f, "{err}"),
+                Error::AlreadyDropped(err) => write!(f, "{err}"),
+                Error::NotText(err) => write!(f, "{err}"),
             }
         }
     }
 
-    impl<E> Error for ChunkSourceError<E> where E: Debug + Display {}
+    impl<T> std::error::Error for Error<T> where Self: Debug + Display {}
 
-    impl<E> From<AlreadyDroppedError> for ChunkSourceError<E> {
+    impl<T> From<AlreadyDroppedError> for Error<T> {
         fn from(value: AlreadyDroppedError) -> Self {
-            ChunkSourceError::AlreadyDropped(value)
+            Error::AlreadyDropped(value)
+        }
+    }
+
+    impl<T> From<AlreadyDroppedOr<NotTextError<T>>> for Error<T> {
+        fn from(value: AlreadyDroppedOr<NotTextError<T>>) -> Self {
+            match value {
+                AlreadyDroppedOr::Dropped(err) => Error::AlreadyDropped(err),
+                AlreadyDroppedOr::Other(err) => Error::NotText(err),
+            }
         }
     }
 
     impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for ChunkSource<Ty>
     where
         Ty: Types,
-        Ty::String: TryInto<String>,
     {
-        type Error = ChunkSourceError<<Ty::String as TryInto<String>>::Error>;
+        type Error = Error<Ty::String>;
 
         fn parse_atom(value: WeakValue<Ty>, heap: &mut Heap<Ty>) -> Result<Self, Self::Error> {
             match value {
                 Value::Function(t) => Ok(ChunkSource::Function(t)),
-                Value::String(LuaPtr(t)) => {
-                    let s = heap
-                        .get(t)
-                        .ok_or(AlreadyDroppedError)?
-                        .as_inner()
-                        .clone()
-                        .try_into()
-                        .map_err(ChunkSourceError::Conversion)?;
-
-                    Ok(ChunkSource::String(s))
+                Value::String(LuaPtr(ptr)) => {
+                    let content = rt::value::string::try_gc_to_str(ptr, heap)?;
+                    Ok(ChunkSource::String(content.into_owned()))
                 }
                 value => {
-                    let err = ChunkSourceError::TypeMismatch(value.type_());
+                    let err = Error::TypeMismatch(value.type_());
                     Err(err)
                 }
             }
@@ -696,7 +677,6 @@ where
     ) -> Result<(), RtError<Ty>>
     where
         Ty: Types<LuaClosure = Closure<Ty>>,
-        Ty::String: AsEncoding + TryInto<String>,
     {
         use rt::backtrace::Location;
 
@@ -831,14 +811,18 @@ where
                     };
 
                     if finalize {
+                        use rt::value::string::IntoEncoding;
+
                         let source = persist_source
                             .take()
-                            .map(TryInto::try_into)
-                            .transpose()
-                            .map_err(|_| {
-                                rt.core
-                                    .alloc_error_msg("binary chunks are not (yet) supported")
-                            })?
+                            .map(|s| -> Result<_, RuntimeError<_>> {
+                                let source = s.to_str().ok_or_else(|| {
+                                    rt.core
+                                        .alloc_error_msg("binary chunks are not (yet) supported")
+                                })?;
+                                Ok(source.into_owned())
+                            })
+                            .transpose()?
                             .unwrap_or_default();
                         let name = persist_name.take();
                         let env = persist_env.as_ref().map(|value| value.downgrade());
@@ -889,7 +873,6 @@ where
 pub fn loadfile<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
-    Ty::String: AsEncoding + TryInto<String>,
     PathBuf: ParseFrom<Ty::String>,
 {
     let body = || {
@@ -1241,7 +1224,9 @@ pub fn print<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
+    use rt::runtime::Core;
     use rt::value::Weak;
+    use std::io::Write;
 
     fn find_first<Ty>(
         rt: &RuntimeView<'_, Ty>,
@@ -1273,6 +1258,18 @@ where
         Ok(r)
     }
 
+    fn print_value<Ty>(
+        mut writer: impl Write,
+        value: WeakValue<Ty>,
+        core: &mut Core<Ty>,
+    ) -> Result<(), RuntimeError<Ty>>
+    where
+        Ty: Types,
+    {
+        let r = write!(writer, "{}", value.fmt_with(&core.gc)?);
+        r.map_err(|err| core.alloc_error_msg(err.to_string()))
+    }
+
     let body = || {
         enum State {
             Started,
@@ -1284,8 +1281,6 @@ where
         let mut persist_key = None;
         let mut persist_tostring = None;
         delegate::try_repeat(move |mut rt| {
-            use std::io::Write;
-
             let current = std::mem::replace(&mut state, State::Finished);
             match current {
                 State::Started => {
@@ -1299,8 +1294,7 @@ where
 
                     let mut stdout = std::io::stdout().lock();
                     for value in rt.stack.drain(..StackSlot(last)) {
-                        write!(&mut stdout, "{}", value.display(&rt.core.gc))
-                            .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+                        print_value(&mut stdout, value, rt.core)?;
                     }
 
                     let Some(value) = rt.stack.remove(StackSlot(0)) else {
@@ -1330,15 +1324,13 @@ where
 
                     let mut stdout = std::io::stdout().lock();
 
-                    write!(&mut stdout, "{}", value.display(&rt.core.gc))
-                        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+                    print_value(&mut stdout, value, rt.core)?;
 
                     let key = KeyValue::String(LuaPtr(persist_key.as_ref().unwrap().downgrade()));
                     let last = find_first(&rt, key)?;
 
                     for value in rt.stack.drain(..StackSlot(last)) {
-                        write!(&mut stdout, "{}", value.display(&rt.core.gc))
-                            .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+                        print_value(&mut stdout, value, rt.core)?;
                     }
 
                     let Some(value) = rt.stack.remove(StackSlot(0)) else {
@@ -1422,7 +1414,7 @@ where
 
                     match metavalue {
                         Value::Nil => {
-                            let s = format!("{}", value.display(&rt.core.gc));
+                            let s = format!("{}", value.fmt_with(&rt.core.gc)?);
 
                             rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
                                 let s = heap.intern(s.into());
@@ -1485,8 +1477,6 @@ where
 pub fn tonumber<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,
-    Ty::String: AsEncoding + TryInto<String>,
-    <Ty::String as TryInto<String>>::Error: Display,
     String: ParseFrom<Ty::String>,
     <String as ParseFrom<Ty::String>>::Error: Display,
 {
@@ -1506,14 +1496,7 @@ where
                         Value::String(LuaPtr(ptr)) => {
                             use literal::Number;
 
-                            // rustc being all confused here for some reason.
-                            // Could not deduce inner type of Interned.
-                            let s: &gc::Interned<Ty::String> = rt.core.gc.try_get(ptr)?;
-                            let content = match into_utf8(s.as_ref()) {
-                                Ok(t) => t,
-                                Err(err) => return Err(rt.core.alloc_error_msg(err.to_string())),
-                            };
-
+                            let content = rt::value::string::try_gc_to_str(ptr, &rt.core.gc)?;
                             let number = literal::parse(content.as_ref().trim())
                                 .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
                             match number {
@@ -1774,9 +1757,8 @@ where
 pub fn select<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,
-    Ty::String: AsEncoding + TryInto<String>,
-    <Ty::String as TryInto<String>>::Error: Display,
 {
+    use rt::error::NotTextError;
     use rt::value::Type;
 
     enum Index {
@@ -1787,17 +1769,14 @@ where
     impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for Index
     where
         Ty: Types,
-        Ty::String: AsEncoding + TryInto<String>,
     {
-        type Error = Error<<Ty::String as TryInto<String>>::Error>;
+        type Error = Error<Ty::String>;
 
         fn parse_atom(value: WeakValue<Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
-            use rt::value::string::into_utf8;
-
             match value {
                 Value::Int(v) => Ok(Index::Int(v)),
-                Value::String(LuaPtr(s)) => {
-                    let s = into_utf8(extra.try_get(s)?.as_inner()).map_err(Error::Other)?;
+                Value::String(LuaPtr(ptr)) => {
+                    let s = rt::value::string::try_gc_to_str(ptr, extra)?;
                     if s == "#" {
                         Ok(Index::Len)
                     } else {
@@ -1809,21 +1788,18 @@ where
         }
     }
 
-    enum Error<E> {
+    enum Error<T> {
         AlreadyDropped(AlreadyDroppedError),
+        NotText(NotTextError<T>),
         TypeMismatch(Type),
         UnknownString,
-        Other(E),
     }
 
-    impl<E> Display for Error<E>
-    where
-        E: Display,
-    {
+    impl<T> Display for Error<T> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 Error::AlreadyDropped(err) => write!(f, "{err}"),
-                Error::Other(err) => write!(f, "{err}"),
+                Error::NotText(err) => write!(f, "{err}"),
                 Error::TypeMismatch(ty) => write!(
                     f,
                     "expected value of type {} or {}, found {ty}",
@@ -1838,9 +1814,18 @@ where
         }
     }
 
-    impl<E> From<AlreadyDroppedError> for Error<E> {
+    impl<T> From<AlreadyDroppedError> for Error<T> {
         fn from(value: AlreadyDroppedError) -> Self {
             Error::AlreadyDropped(value)
+        }
+    }
+
+    impl<T> From<AlreadyDroppedOr<NotTextError<T>>> for Error<T> {
+        fn from(value: AlreadyDroppedOr<NotTextError<T>>) -> Self {
+            match value {
+                AlreadyDroppedOr::Dropped(err) => Error::AlreadyDropped(err),
+                AlreadyDroppedOr::Other(err) => Error::NotText(err),
+            }
         }
     }
 
