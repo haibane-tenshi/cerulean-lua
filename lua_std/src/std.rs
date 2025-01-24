@@ -319,6 +319,9 @@ where
 ///
 /// # From Lua documentation
 ///
+/// **Signature:**
+/// * `(f: any, msgh: function, [args: any...]) -> any...`
+///
 /// This function is similar to pcall, except that it sets a new message handler msgh.
 ///
 /// # Implementation-specific behavior
@@ -917,6 +920,10 @@ where
 /// Emit a warning message.
 ///
 /// # From Lua documentation
+///
+///
+/// **Signature:**
+/// * `(msg1: string, _: string...) -> ()`
 ///
 /// Emits a warning with a message composed by the concatenation of all its arguments (which should be strings).
 ///
