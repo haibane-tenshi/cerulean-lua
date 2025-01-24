@@ -513,7 +513,7 @@ where
 ///
 /// will iterate over all key–value pairs of table `t`.
 ///
-/// See function next for the caveats of modifying the table during its traversal.
+/// See function `next` for the caveats of modifying the table during its traversal.
 ///
 /// # Implementation-specific behavior
 ///
@@ -606,7 +606,7 @@ where
 /// **Signature:**
 /// * `(_: any...) -> ()`
 ///
-/// Receives any number of arguments and prints their values to `stdout``, converting each argument to a string following the same rules of `tostring`.
+/// Receives any number of arguments and prints their values to `stdout`, converting each argument to a string following the same rules of `tostring`.
 ///
 /// The function `print` is not intended for formatted output, but only as a quick way to show a value, for instance for debugging.
 /// For complete control over the output, use `string.format` and `io.write`.
@@ -868,7 +868,7 @@ where
 /// # Implementation-specific behavior
 ///
 /// When `index` is integer it is treated as offset into argument list (from the beginning when non-negative, from the end when negative).
-/// Offsetting outside of `[0; len+1]` range (where `len` is total number of args) will result in Lua panic.
+/// Offsetting outside of `[0; len]` range (where `len` is total number of args) will result in Lua panic.
 #[expect(non_camel_case_types)]
 pub struct select;
 
