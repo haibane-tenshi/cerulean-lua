@@ -92,7 +92,8 @@ fn main() -> Result<()> {
                 .with(std::pairs)
                 .with(std::select)
                 .with(std::tonumber)
-                .with(std::type_);
+                .with(std::type_)
+                .with(std::warn);
 
             runtime.include(env);
 

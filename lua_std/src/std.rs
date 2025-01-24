@@ -813,3 +813,39 @@ where
         );
     }
 }
+
+/// Emit a warning message.
+///
+/// # From Lua documentation
+///
+/// Emits a warning with a message composed by the concatenation of all its arguments (which should be strings).
+///
+/// By convention, a one-piece message starting with '@' is intended to be a control message,
+/// which is a message to the warning system itself.
+/// In particular, the standard warning function in Lua recognizes the control messages "@off", to stop the emission of warnings,
+/// and "@on", to (re)start the emission; it ignores unknown control messages.
+///
+/// # Implementation-specific behavior
+///
+/// * Output will be written into `stderr`.
+/// * Arguments are required to be text, Lua strings containing binary data will cause runtime error.
+/// *   Currently runtime contains no specific state related to warning system.
+///     Any control messages (including `@on` and `@off`) will be ignored.
+#[expect(non_camel_case_types)]
+pub struct warn;
+
+impl<Ty> StdPlugin<Ty> for warn
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::warn();
+        let key = core.alloc_string("warn".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}

@@ -1900,3 +1900,92 @@ where
 
     ffi::from_fn(body, "lua_std::type", ())
 }
+
+/// Emit a warning message.
+///
+/// # From Lua documentation
+///
+/// Emits a warning with a message composed by the concatenation of all its arguments (which should be strings).
+///
+/// By convention, a one-piece message starting with '@' is intended to be a control message,
+/// which is a message to the warning system itself.
+/// In particular, the standard warning function in Lua recognizes the control messages "@off", to stop the emission of warnings,
+/// and "@on", to (re)start the emission; it ignores unknown control messages.
+///
+/// # Implementation-specific behavior
+///
+/// * Output will be written into `stderr`.
+/// * Arguments are required to be text, Lua strings containing binary data will cause runtime error.
+/// *   Currently runtime contains no specific state related to warning system.
+///     Any control messages (including `@on` and `@off`) will be ignored.
+pub fn warn<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    use rt::runtime::Core;
+
+    fn map_err<Ty, T>(core: &mut Core<Ty>) -> impl FnMut(T) -> RuntimeError<Ty> + use<'_, T, Ty>
+    where
+        Ty: Types,
+        T: ToString,
+    {
+        |err| core.alloc_error_msg(err.to_string())
+    }
+
+    let body = || {
+        delegate::from_mut(|mut rt| {
+            use rt::error::SignatureError;
+            use std::io::Write;
+
+            // It seems that typechk loses track of a *part* of type inside slice.
+            // This causes `Heap::try_get` to fail, because compiler fails to deduce type inside `Interned<_>`?!
+            // It seems to correctly track type of slice returned by `.as_slice`,
+            // the match itself is fine, `Interned` wrapper is recognized, but its inner type is lost.
+            // Just from function signatures, everything should work just fine.
+            // I'm greatly confused by what is happening here.
+            // Possibly a rustc bug, likely related to GATs introduced by Rf?
+            let slice: &[WeakValue<Ty>] = rt.stack.as_slice();
+            match slice {
+                [] => {
+                    let err = SignatureError::TooFewArgs { found: 0 };
+                    Err(err.into())
+                }
+                [WeakValue::String(LuaPtr(ptr))] => {
+                    let s = rt::value::string::try_gc_to_str(*ptr, &rt.core.gc)?;
+                    rt.stack.clear();
+
+                    if s.strip_prefix('@').is_some() {
+                        // Ignore control messages.
+                        Ok(())
+                    } else {
+                        writeln!(std::io::stderr(), "{s}").map_err(map_err(rt.core))?;
+                        Ok(())
+                    }
+                }
+                slice @ [_, ..] => {
+                    let mut res = String::new();
+
+                    for (index, value) in slice.iter().enumerate() {
+                        if let Value::String(LuaPtr(ptr)) = value {
+                            let s = rt::value::string::try_gc_to_str(*ptr, &rt.core.gc)?;
+                            res += &s;
+                        } else {
+                            let err = SignatureError::ConversionFailure {
+                                index,
+                                msg: String::from("warn only accepts string arguments"),
+                            };
+                            return Err(err.into());
+                        }
+                    }
+
+                    writeln!(std::io::stderr(), "{res}").map_err(map_err(rt.core))?;
+                    rt.stack.clear();
+
+                    Ok(())
+                }
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::warn", ())
+}
