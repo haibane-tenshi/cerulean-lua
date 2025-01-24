@@ -83,10 +83,7 @@ impl<Ty> RuntimeError<Ty>
 where
     Ty: Types,
 {
-    pub fn into_diagnostic(self, heap: &Heap<Ty>, chunk_cache: &dyn ChunkCache) -> Diagnostic
-    where
-        Ty::String: TryInto<String>,
-    {
+    pub fn into_diagnostic(self, heap: &Heap<Ty>, chunk_cache: &dyn ChunkCache) -> Diagnostic {
         use codespan_reporting::files::SimpleFile;
 
         let chunk_id = self.chunk_id();
