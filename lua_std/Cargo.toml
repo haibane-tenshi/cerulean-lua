@@ -9,5 +9,7 @@ edition = "2021"
 codespan-reporting = "0.11.1"
 gc = { version = "0.1.0", path = "../gc" }
 literal = { version = "0.1.0", path = "../literal" }
+rand = { version = "0.8.5", default-features = false, features = ["getrandom"]}
+rand_hc = "0.3.2"
 repr = { version = "0.1.0", path = "../repr" }
 rt = { version = "0.1.0", path = "../rt" }

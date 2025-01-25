@@ -22,6 +22,7 @@
 //!
 //! [rust_ref#numeric-cast]: https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast
 
+use gc::RootCell;
 use rt::ffi::{self, delegate, DLuaFfi, LuaFfi};
 use rt::value::Types;
 
@@ -1155,4 +1156,188 @@ where
     };
 
     ffi::from_fn(body, "lua_std::math::max", ())
+}
+
+/// Generate a pseudo-random number.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `() -> float`
+/// * `(n: int) -> int`
+/// * `(m: int, n: int) -> int`
+///
+/// When called without arguments, returns a pseudo-random float with uniform distribution in the range `[0; 1)`.
+/// When called with two integers `m` and `n`, `math.random` returns a pseudo-random integer with uniform distribution in the range `[m; n]`.
+/// The call `math.random(n)`, for a positive `n`, is equivalent to `math.random(1,n)`.
+/// The call `math.random(0)` produces an integer with all bits (pseudo)random.
+///
+/// This function uses the xoshiro256** algorithm to produce pseudo-random 64-bit integers,
+/// which are the results of calls with argument 0.
+/// Other results (ranges and floats) are unbiased extracted from these integers.
+///
+/// Lua initializes its pseudo-random generator with the equivalent of a call to `math.randomseed` with no arguments,
+/// so that `math.random` should generate different sequences of results each time the program runs.
+///
+/// # Implementation-specific behavior
+///
+/// *   Lua comments on **algorithm and seeding do not apply**.
+///     Read below for details.
+///
+/// *   This function will use provided `rng_state` as RNG.
+///     It is expected that state is shared with [`randomseed`] function.
+///
+/// *   All values are generated using uniform distribution.
+///
+/// *   This function can operate on any RNG implementing [`rand::Rng`] trait.
+///     It is up to you to choose and properly initialize it.
+///
+/// *   Default setup provided by this library also uses `xoshiro256**` algorithm.
+///     It is a known general purpose algorithm providing both high quality and performance.
+///     However, it is **not cryptographically secure** and should not be used as such.
+///
+///     Default state will be seeded using [system entropy](rand::SeedableRng::from_entropy).
+///
+///     See [`MathRand`] documentation for more information about defaults and pointers for custom configuration.
+pub fn random<Ty, R>(rng_state: RootCell<R>) -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+    R: rand::Rng + 'static,
+{
+    use rt::ffi::arg_parser::{Int, Number, Opts, ParseArgs, Split};
+
+    let body = move || {
+        let rng_state = rng_state.clone();
+        delegate::from_mut(move |mut rt| {
+            let args: Opts<(Int, Int)> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            let rng = rt.core.gc.get_root_mut(&rng_state);
+
+            let res = match args.split() {
+                (None, None) => Number::Float(rng.gen()),
+                (Some(Int(m)), Some(Int(n))) => Number::Int(rng.gen_range(m..=n)),
+                (Some(Int(0)), None) => Number::Int(rng.gen()),
+                (Some(Int(n)), None) if n > 0 => Number::Int(rng.gen_range(1..=n)),
+                (Some(_), None) => {
+                    use rt::error::SignatureError;
+
+                    let err = SignatureError::ConversionFailure {
+                        index: 0,
+                        msg: String::from(
+                            "random expects an non-zero integer when invoked with single argument",
+                        ),
+                    };
+
+                    return Err(err.into());
+                }
+                (None, Some(_)) => unreachable!(),
+            };
+
+            rt.stack.transient().push(res.into());
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::math::random", ())
+}
+
+/// Seed pseudo-random generator used by `random`.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `([x: int, [y: int]]) -> ()`
+///
+/// When called with at least one argument,
+/// the integer parameters `x` and `y` are joined into a 128-bit seed that is used to reinitialize the pseudo-random generator;
+/// equal seeds produce equal sequences of numbers.
+/// The default for `y` is zero.
+///
+/// When called with no arguments, Lua generates a seed with a weak attempt for randomness.
+///
+/// This function returns the two seed components that were effectively used, so that setting them again repeats the sequence.
+///
+/// To ensure a required level of randomness to the initial state
+/// (or contrarily, to have a deterministic sequence, for instance when debugging a program),
+/// you should call `math.randomseed` with explicit arguments.
+///
+/// # Implementation-specific behavior
+///
+/// *   Lua comments **on seeding do not apply**.
+///     Read below for more details.
+///
+/// *   This function will use provided `rng_state` as RNG.
+///     It is expected that state is shared with [`random`] function.
+///
+/// *   When no arguments are provided, the state will be seeded from [system entropy](rand::SeedableRng::from_entropy).
+///
+/// *   When 1 integer is provided, it will be used to seed state directly using [`SeedableRng::seed_from_u64`](rand::SeedableRng::seed_from_u64).
+///     It should be reproducible and deterministic; default implementation makes an attempt to convert those into reasonably good seeds.
+///     See documentation of the method for more details.
+///
+///     This is **not suitable for cryptography**, as should be clear given that the input size is only 64 bits.
+///
+/// *   When 2 integers are provided, they will be concatenated into single 128-bit seed which is used to initialize an [HC-128](rand_hc::Hc128Rng) PRNG,
+///     output of which is then used to seed `rng_state`.
+///
+///     HC-128 is a cryptographically secure algorithm and at the time of writing has no known weaknesses.
+///     It should provide reasonably good output which doesn't compromise security in case the real PRNG you use is cryptographically secure.
+///
+///     We have to go through an indirection since most practical algorithms use 256 bit seeds (which includes `xoshiro256**` used as default by this crate).
+///     As a bonus current setup allows to initialize PRNGs with arbitrarily-sized state.
+///
+///     Note that while this is serviceable, it is still recommended to use 256 bits of entropy to initialize PRNG for cryptographic purposes.
+///
+/// *   When invoking this function with parameters you need to make sure to provide reasonably good seeds.
+///
+///     From [`SeedableRng::from_seed`](rand::SeedableRng::from_seed) documentation:
+///
+///     *PRNG implementations are allowed to assume that bits in the seed are well distributed.
+///     That means usually that the number of one and zero bits are roughly equal, and values like 0, 1 and (size - 1) are unlikely.
+///     Note that many non-cryptographic PRNGs will show poor quality output if this is not adhered to.*
+///
+///     This also applies to `xoshiro256**` algorithm which is used in the default configuration of [`MathRand`].
+pub fn randomseed<Ty, R>(rng_state: RootCell<R>) -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+    R: rand::SeedableRng + 'static,
+{
+    use rand::SeedableRng;
+    use rt::ffi::arg_parser::{Int, Opts, ParseArgs, Split};
+
+    let body = move || {
+        let rng_state = rng_state.clone();
+        delegate::from_mut(move |mut rt| {
+            let args: Opts<(Int, Int)> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            let new_rng = match args.split() {
+                (None, None) => R::from_entropy(),
+                (Some(Int(x)), None) => R::seed_from_u64(x as u64),
+                (Some(Int(x)), Some(Int(y))) => {
+                    use rand_hc::Hc128Rng;
+
+                    let seed = {
+                        let mut r = [0; 32];
+                        r[0..16].copy_from_slice(&x.to_be_bytes());
+                        r[16..32].copy_from_slice(&y.to_be_bytes());
+
+                        r
+                    };
+
+                    let seeder = Hc128Rng::from_seed(seed);
+                    R::from_rng(seeder).map_err(|err| rt.core.alloc_error_msg(err.to_string()))?
+                }
+                (None, Some(_)) => unreachable!(),
+            };
+
+            let rng = rt.core.gc.get_root_mut(&rng_state);
+            *rng = new_rng;
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::math::randomseed", ())
 }
