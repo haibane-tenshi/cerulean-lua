@@ -22,7 +22,7 @@
 //!
 //! [rust_ref#numeric-cast]: https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast
 
-use rt::ffi::{self, delegate, LuaFfi};
+use rt::ffi::{self, delegate, DLuaFfi, LuaFfi};
 use rt::value::Types;
 
 /// Compute absolute value of a number.
@@ -821,4 +821,338 @@ where
     };
 
     ffi::from_fn(body, "lua_std::math::ult", ())
+}
+
+/// Find minimum in a list of values.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(arg0: any, _: any...) -> any`
+///
+/// Returns the argument with the minimum value, according to the Lua operator `<`.
+///
+/// # Implementation-specific behavior
+///
+/// * This function will respect coercion policy set in [`Core`](rt::runtime::Core).
+pub fn min<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    let body = || {
+        use rt::builtins::coerce::CoerceArgs;
+        use rt::builtins::raw::{lt, MetamethodRequired};
+        use rt::ffi::arg_parser::FormatReturns;
+        use rt::ffi::delegate::{Request, StackSlot};
+        use rt::value::{Callable, Strong, Value};
+        use std::ops::ControlFlow;
+
+        enum State<Ty>
+        where
+            Ty: Types,
+        {
+            Started,
+            CalledLt {
+                current: Value<Strong, Ty>,
+                lt_callable: Callable<Strong, Ty>,
+                count: StackSlot,
+            },
+            Finished,
+        }
+
+        let mut state = State::Started;
+        delegate::try_repeat(move |mut rt| {
+            let current = std::mem::replace(&mut state, State::Finished);
+            match current {
+                State::Started => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                    match stack.as_slice() {
+                        [] => {
+                            use rt::error::SignatureError;
+
+                            let err = SignatureError::TooFewArgs { found: 0 };
+                            Err(err.into())
+                        }
+                        [_] => Ok(delegate::State::Complete(())),
+                        [arg0, rest @ ..] => {
+                            let mut current = *arg0;
+                            let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                            for (i, next) in rest.iter().copied().enumerate() {
+                                let cmp = match lt([next, current], heap, cmp_int_flt)? {
+                                    ControlFlow::Break(MetamethodRequired) => {
+                                        // +1 to account for first arg which is not part of `rest`.
+                                        // This leaves rhs in first stack slot.
+                                        let _ = stack.drain(..StackSlot(i + 1));
+                                        let count = stack.top();
+
+                                        stack.format([next, current]);
+
+                                        let current = current.try_upgrade(heap)?;
+                                        let lt_callable = {
+                                            use rt::builtins::full::lt as lt_ffi;
+                                            use rt::ffi::boxed;
+                                            use rt::gc::LuaPtr;
+                                            use rt::value::Callable;
+
+                                            let f =
+                                                ffi::from_fn(lt_ffi::<Ty>, "rt::builtins::lt", ());
+                                            let f = heap.alloc_cell(boxed(f));
+                                            Callable::Rust(LuaPtr(f))
+                                        };
+
+                                        let request = Request::Invoke {
+                                            callable: lt_callable.clone(),
+                                            start: count,
+                                        };
+
+                                        state = State::CalledLt {
+                                            current,
+                                            lt_callable,
+                                            count,
+                                        };
+                                        return Ok(delegate::State::Yielded(request));
+                                    }
+                                    ControlFlow::Continue(cmp) => cmp,
+                                };
+
+                                current = if cmp { next } else { current };
+                            }
+
+                            stack.clear();
+                            stack.push(current);
+
+                            Ok(delegate::State::Complete(()))
+                        }
+                    }
+                }),
+                State::CalledLt {
+                    current,
+                    lt_callable,
+                    count,
+                } => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                    assert_eq!(
+                        stack.len(),
+                        count.0 + 1,
+                        "lt should produce a single boolean"
+                    );
+
+                    let Some(Value::Bool(cmp)) = stack.pop() else {
+                        unreachable!("lt should produce a single boolean");
+                    };
+
+                    let mut current = if cmp {
+                        *stack.first().unwrap()
+                    } else {
+                        current.downgrade()
+                    };
+
+                    let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                    for (i, next) in stack[1..].iter().copied().enumerate() {
+                        let cmp = match lt([next, current], heap, cmp_int_flt)? {
+                            ControlFlow::Break(MetamethodRequired) => {
+                                // +1 to account for first arg which is not part of `rest`.
+                                // This leaves rhs in first stack slot.
+                                let _ = stack.drain(..StackSlot(i + 1));
+                                let count = stack.top();
+
+                                stack.format([next, current]);
+
+                                let current = current.try_upgrade(heap)?;
+                                let request = Request::Invoke {
+                                    callable: lt_callable.clone(),
+                                    start: count,
+                                };
+
+                                state = State::CalledLt {
+                                    current,
+                                    lt_callable,
+                                    count,
+                                };
+                                return Ok(delegate::State::Yielded(request));
+                            }
+                            ControlFlow::Continue(cmp) => cmp,
+                        };
+
+                        current = if cmp { next } else { current };
+                    }
+
+                    stack.clear();
+                    stack.push(current);
+
+                    Ok(delegate::State::Complete(()))
+                }),
+                State::Finished => Ok(delegate::State::Complete(())),
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::math::min", ())
+}
+
+/// Find maximum in a list of values.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(arg0: any, _: any...) -> any`
+///
+/// Returns the argument with the maximum value, according to the Lua operator `<`.
+///
+/// # Implementation-specific behavior
+///
+/// * This function will respect coercion policy set in [`Core`](rt::runtime::Core).
+pub fn max<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    let body = || {
+        use rt::builtins::coerce::CoerceArgs;
+        use rt::builtins::raw::{gt, MetamethodRequired};
+        use rt::ffi::arg_parser::FormatReturns;
+        use rt::ffi::delegate::{Request, StackSlot};
+        use rt::value::{Callable, Strong, Value};
+        use std::ops::ControlFlow;
+
+        enum State<Ty>
+        where
+            Ty: Types,
+        {
+            Started,
+            CalledGt {
+                current: Value<Strong, Ty>,
+                gt_callable: Callable<Strong, Ty>,
+                count: StackSlot,
+            },
+            Finished,
+        }
+
+        let mut state = State::Started;
+        delegate::try_repeat(move |mut rt| {
+            let current = std::mem::replace(&mut state, State::Finished);
+            match current {
+                State::Started => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                    match stack.as_slice() {
+                        [] => {
+                            use rt::error::SignatureError;
+
+                            let err = SignatureError::TooFewArgs { found: 0 };
+                            Err(err.into())
+                        }
+                        [_] => Ok(delegate::State::Complete(())),
+                        [arg0, rest @ ..] => {
+                            let mut current = *arg0;
+                            let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                            for (i, next) in rest.iter().copied().enumerate() {
+                                let cmp = match gt([next, current], heap, cmp_int_flt)? {
+                                    ControlFlow::Break(MetamethodRequired) => {
+                                        // +1 to account for first arg which is not part of `rest`.
+                                        // This leaves rhs in first stack slot.
+                                        let _ = stack.drain(..StackSlot(i + 1));
+                                        let count = stack.top();
+
+                                        stack.format([next, current]);
+
+                                        let current = current.try_upgrade(heap)?;
+                                        let gt_callable = {
+                                            use rt::builtins::full::gt as gt_ffi;
+                                            use rt::ffi::boxed;
+                                            use rt::gc::LuaPtr;
+                                            use rt::value::Callable;
+
+                                            let f =
+                                                ffi::from_fn(gt_ffi::<Ty>, "rt::builtins::gt", ());
+                                            let f = heap.alloc_cell(boxed(f));
+                                            Callable::Rust(LuaPtr(f))
+                                        };
+
+                                        let request = Request::Invoke {
+                                            callable: gt_callable.clone(),
+                                            start: count,
+                                        };
+
+                                        state = State::CalledGt {
+                                            current,
+                                            gt_callable,
+                                            count,
+                                        };
+                                        return Ok(delegate::State::Yielded(request));
+                                    }
+                                    ControlFlow::Continue(cmp) => cmp,
+                                };
+
+                                current = if cmp { next } else { current };
+                            }
+
+                            stack.clear();
+                            stack.push(current);
+
+                            Ok(delegate::State::Complete(()))
+                        }
+                    }
+                }),
+                State::CalledGt {
+                    current,
+                    gt_callable,
+                    count,
+                } => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                    assert_eq!(
+                        stack.len(),
+                        count.0 + 1,
+                        "lt should produce a single boolean"
+                    );
+
+                    let Some(Value::Bool(cmp)) = stack.pop() else {
+                        unreachable!("lt should produce a single boolean");
+                    };
+
+                    let mut current = if cmp {
+                        *stack.first().unwrap()
+                    } else {
+                        current.downgrade()
+                    };
+
+                    let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                    for (i, next) in stack[1..].iter().copied().enumerate() {
+                        let cmp = match gt([next, current], heap, cmp_int_flt)? {
+                            ControlFlow::Break(MetamethodRequired) => {
+                                // +1 to account for first arg which is not part of `rest`.
+                                // This leaves rhs in first stack slot.
+                                let _ = stack.drain(..StackSlot(i + 1));
+                                let count = stack.top();
+
+                                stack.format([next, current]);
+
+                                let current = current.try_upgrade(heap)?;
+                                let request = Request::Invoke {
+                                    callable: gt_callable.clone(),
+                                    start: count,
+                                };
+
+                                state = State::CalledGt {
+                                    current,
+                                    gt_callable,
+                                    count,
+                                };
+                                return Ok(delegate::State::Yielded(request));
+                            }
+                            ControlFlow::Continue(cmp) => cmp,
+                        };
+
+                        current = if cmp { next } else { current };
+                    }
+
+                    stack.clear();
+                    stack.push(current);
+
+                    Ok(delegate::State::Complete(()))
+                }),
+                State::Finished => Ok(delegate::State::Complete(())),
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::math::max", ())
 }
