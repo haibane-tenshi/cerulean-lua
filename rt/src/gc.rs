@@ -31,9 +31,19 @@ where
     where
         P: Params,
     {
+        self.try_upgrade(heap).ok()
+    }
+
+    pub fn try_upgrade<M, P>(
+        self,
+        heap: &TrueHeap<M, P>,
+    ) -> Result<LuaPtr<RootPtr<T, A>>, AlreadyDroppedError>
+    where
+        P: Params,
+    {
         let LuaPtr(ptr) = self;
-        let ptr = heap.upgrade(ptr)?;
-        Some(LuaPtr(ptr))
+        let ptr = heap.try_upgrade(ptr)?;
+        Ok(LuaPtr(ptr))
     }
 }
 
@@ -147,44 +157,46 @@ where
     }
 }
 
-pub trait TryGet<T>
-where
-    T: ?Sized,
-{
-    fn try_get<A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
+pub trait TryGet: Sized {
+    fn try_get<T, A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
     where
+        T: Allocated<Self> + ?Sized,
         A: RefAccess;
 
-    fn try_get_mut<A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
+    fn try_get_mut<T, A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
     where
+        T: Allocated<Self> + ?Sized,
         A: MutAccess;
 
-    fn try_upgrade<A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
+    fn try_upgrade<T, A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
     where
+        T: ?Sized,
         A: Access;
 }
 
-impl<T, P, M> TryGet<T> for TrueHeap<M, P>
+impl<P, M> TryGet for TrueHeap<M, P>
 where
-    T: Allocated<Self> + ?Sized,
     P: Params,
 {
-    fn try_get<A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
+    fn try_get<T, A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
     where
+        T: Allocated<Self> + ?Sized,
         A: RefAccess,
     {
         self.get(ptr).ok_or(AlreadyDroppedError)
     }
 
-    fn try_get_mut<A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
+    fn try_get_mut<T, A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
     where
+        T: Allocated<Self> + ?Sized,
         A: MutAccess,
     {
         self.get_mut(ptr).ok_or(AlreadyDroppedError)
     }
 
-    fn try_upgrade<A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
+    fn try_upgrade<T, A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
     where
+        T: ?Sized,
         A: Access,
     {
         self.upgrade(ptr).ok_or(AlreadyDroppedError)

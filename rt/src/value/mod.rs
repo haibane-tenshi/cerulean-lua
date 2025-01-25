@@ -326,19 +326,27 @@ where
     Ty: Types,
 {
     pub fn upgrade(self, heap: &Heap<Ty>) -> Option<StrongValue<Ty>> {
+        self.try_upgrade(heap).ok()
+    }
+
+    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<StrongValue<Ty>, AlreadyDroppedError> {
         let r = match self {
             Value::Nil => Value::Nil,
             Value::Bool(t) => Value::Bool(t),
             Value::Int(t) => Value::Int(t),
             Value::Float(t) => Value::Float(t),
-            Value::String(t) => Value::String(t.upgrade(heap)?),
-            Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.upgrade(heap)?)),
-            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t.upgrade(heap)?)),
-            Value::Table(t) => Value::Table(t.upgrade(heap)?),
-            Value::Userdata(t) => Value::Userdata(t.upgrade(heap)?),
+            Value::String(t) => Value::String(t.try_upgrade(heap)?),
+            Value::Function(Callable::Lua(t)) => {
+                Value::Function(Callable::Lua(t.try_upgrade(heap)?))
+            }
+            Value::Function(Callable::Rust(t)) => {
+                Value::Function(Callable::Rust(t.try_upgrade(heap)?))
+            }
+            Value::Table(t) => Value::Table(t.try_upgrade(heap)?),
+            Value::Userdata(t) => Value::Userdata(t.try_upgrade(heap)?),
         };
 
-        Some(r)
+        Ok(r)
     }
 
     /// Produce metatable reference.
