@@ -201,6 +201,7 @@ use super::tuple::Tuple;
 use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, NotTextError, RtError};
 use crate::gc::{Heap, LuaPtr};
 use crate::runtime::thread::{StackGuard, TransientStackGuard};
+use crate::value::int::NotExactIntError;
 use crate::value::string::IntoEncoding;
 use crate::value::{Refs, Strong, Type, Types, Value, Weak, WeakValue};
 use sealed::{BubbleUp, Sealed};
@@ -1822,6 +1823,90 @@ where
         write!(f, "{}", LuaUserdata(self.0 .0.downgrade()))
     }
 }
+
+/// Lua number, which can be either integer or float.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum Number {
+    Int(i64),
+    Float(f64),
+}
+
+impl Number {
+    pub fn to_float(self) -> Float {
+        match self {
+            Number::Int(v) => Int(v).into(),
+            Number::Float(v) => Float(v),
+        }
+    }
+
+    pub fn to_int(self) -> Result<Int, NotExactIntError> {
+        match self {
+            Number::Int(v) => Ok(Int(v)),
+            Number::Float(v) => Float(v).try_into(),
+        }
+    }
+}
+
+impl From<Int> for Number {
+    fn from(value: Int) -> Self {
+        Number::Int(value.0)
+    }
+}
+
+impl From<Float> for Number {
+    fn from(value: Float) -> Self {
+        Number::Float(value.0)
+    }
+}
+
+impl<Ty> TryFrom<WeakValue<Ty>> for Number
+where
+    Ty: Types,
+{
+    type Error = NotNumberError;
+
+    fn try_from(value: WeakValue<Ty>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Int(v) => Ok(Number::Int(v)),
+            Value::Float(v) => Ok(Number::Float(v)),
+            value => Err(NotNumberError(value.type_())),
+        }
+    }
+}
+
+impl<Ty> From<Number> for WeakValue<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: Number) -> Self {
+        match value {
+            Number::Int(v) => Value::Int(v),
+            Number::Float(v) => Value::Float(v),
+        }
+    }
+}
+
+impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for Number
+where
+    Ty: Types,
+{
+    type Error = NotNumberError;
+
+    fn parse_atom(value: WeakValue<Ty>, _: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct NotNumberError(pub Type);
+
+impl Display for NotNumberError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "expected integer or float, found `{}`", self.0)
+    }
+}
+
+impl Error for NotNumberError {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct TypeMismatchError {
