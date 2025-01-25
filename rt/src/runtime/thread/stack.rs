@@ -635,7 +635,7 @@ where
         self.stack.set(slot, value)
     }
 
-    pub fn next_slot(&self) -> StackSlot {
+    pub fn top(&self) -> StackSlot {
         self.stack.len() - self.boundary
     }
 
@@ -836,7 +836,7 @@ where
     }
 
     pub(super) fn next_slot(&self) -> StackSlot {
-        self.0.next_slot()
+        self.0.top()
     }
 
     // pub(super) fn insert(&mut self, slot: StackSlot, value: WeakValue<Ty>) {
@@ -998,7 +998,7 @@ where
         &mut self.stack.main[self.boundary..].raw
     }
 
-    pub fn next_slot(&self) -> StackSlot {
+    pub fn top(&self) -> StackSlot {
         self.stack.main.next_key() - self.boundary
     }
 

@@ -713,7 +713,7 @@ where
                         _ => Err(AlreadyDroppedOr::Other(err)),
                     },
                     metavalue => {
-                        let start = self.stack.next_slot();
+                        let start = self.stack.top();
                         let [arg] = args;
                         self.stack.lua_guard().push(arg);
 
@@ -815,7 +815,7 @@ where
                         }
                     }
                     metavalue => {
-                        let start = self.stack.next_slot();
+                        let start = self.stack.top();
                         self.stack.lua_guard().extend(args, false);
 
                         let callable = metavalue;
@@ -907,7 +907,7 @@ where
                     Value::Function(callable) => {
                         let callable =
                             callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
-                        let start = self.stack.next_slot();
+                        let start = self.stack.top();
                         let mut stack = self.stack.lua_guard();
                         stack.push(table);
                         stack.push(index);
@@ -1005,7 +1005,7 @@ where
                     Value::Function(callable) => {
                         let callable =
                             callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
-                        let start = self.stack.next_slot();
+                        let start = self.stack.top();
                         let mut stack = self.stack.lua_guard();
                         stack.push(table);
                         stack.push(index);
