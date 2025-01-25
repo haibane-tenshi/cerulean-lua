@@ -1,3 +1,5 @@
+pub mod math;
+
 use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
