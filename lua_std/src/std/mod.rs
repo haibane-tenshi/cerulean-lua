@@ -9,7 +9,7 @@ use rt::gc::LuaPtr;
 use rt::runtime::{Closure, Core};
 use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
 
-use crate::plugin::{RootTable, StdPlugin};
+use crate::traits::{RootTable, TableEntry};
 
 /// Runtime assertion.
 ///
@@ -23,7 +23,7 @@ use crate::plugin::{RootTable, StdPlugin};
 #[expect(non_camel_case_types)]
 pub struct assert;
 
-impl<Ty> StdPlugin<Ty> for assert
+impl<Ty> TableEntry<Ty> for assert
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -61,7 +61,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct error;
 
-impl<Ty> StdPlugin<Ty> for error
+impl<Ty> TableEntry<Ty> for error
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -133,7 +133,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct collectgarbage;
 
-impl<Ty> StdPlugin<Ty> for collectgarbage
+impl<Ty> TableEntry<Ty> for collectgarbage
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -179,7 +179,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct dofile;
 
-impl<Ty> StdPlugin<Ty> for dofile
+impl<Ty> TableEntry<Ty> for dofile
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     PathBuf: ParseFrom<Ty::String>,
@@ -204,7 +204,7 @@ where
 /// Lua itself does not use this variable; changing its value does not affect any environment, nor vice versa.
 pub struct _G;
 
-impl<Ty> StdPlugin<Ty> for _G
+impl<Ty> TableEntry<Ty> for _G
 where
     Ty: Types,
 {
@@ -230,7 +230,7 @@ where
 /// Variable will always have string "Lua 5.4", currently this is the only Lua version supported by runtime.
 pub struct _VERSION;
 
-impl<Ty> StdPlugin<Ty> for _VERSION
+impl<Ty> TableEntry<Ty> for _VERSION
 where
     Ty: Types,
 {
@@ -262,7 +262,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct ipairs;
 
-impl<Ty> StdPlugin<Ty> for ipairs
+impl<Ty> TableEntry<Ty> for ipairs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -301,7 +301,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct pcall;
 
-impl<Ty> StdPlugin<Ty> for pcall
+impl<Ty> TableEntry<Ty> for pcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -332,7 +332,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct xpcall;
 
-impl<Ty> StdPlugin<Ty> for xpcall
+impl<Ty> TableEntry<Ty> for xpcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -394,7 +394,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct load;
 
-impl<Ty> StdPlugin<Ty> for load
+impl<Ty> TableEntry<Ty> for load
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     String: ParseFrom<Ty::String>,
@@ -440,7 +440,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct loadfile;
 
-impl<Ty> StdPlugin<Ty> for loadfile
+impl<Ty> TableEntry<Ty> for loadfile
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     PathBuf: ParseFrom<Ty::String>,
@@ -481,7 +481,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct next;
 
-impl<Ty> StdPlugin<Ty> for next
+impl<Ty> TableEntry<Ty> for next
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -523,7 +523,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct pairs;
 
-impl<Ty> StdPlugin<Ty> for pairs
+impl<Ty> TableEntry<Ty> for pairs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -556,7 +556,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct setmetatable;
 
-impl<Ty> StdPlugin<Ty> for setmetatable
+impl<Ty> TableEntry<Ty> for setmetatable
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -585,7 +585,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct getmetatable;
 
-impl<Ty> StdPlugin<Ty> for getmetatable
+impl<Ty> TableEntry<Ty> for getmetatable
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -619,7 +619,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct print;
 
-impl<Ty> StdPlugin<Ty> for print
+impl<Ty> TableEntry<Ty> for print
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -667,7 +667,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct tostring;
 
-impl<Ty> StdPlugin<Ty> for tostring
+impl<Ty> TableEntry<Ty> for tostring
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -704,7 +704,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct tonumber;
 
-impl<Ty> StdPlugin<Ty> for tonumber
+impl<Ty> TableEntry<Ty> for tonumber
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
     String: ParseFrom<Ty::String>,
@@ -738,7 +738,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct rawequal;
 
-impl<Ty> StdPlugin<Ty> for rawequal
+impl<Ty> TableEntry<Ty> for rawequal
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -766,7 +766,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct rawlen;
 
-impl<Ty> StdPlugin<Ty> for rawlen
+impl<Ty> TableEntry<Ty> for rawlen
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -802,7 +802,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct rawget;
 
-impl<Ty> StdPlugin<Ty> for rawget
+impl<Ty> TableEntry<Ty> for rawget
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -840,7 +840,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct rawset;
 
-impl<Ty> StdPlugin<Ty> for rawset
+impl<Ty> TableEntry<Ty> for rawset
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -879,7 +879,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct select;
 
-impl<Ty> StdPlugin<Ty> for select
+impl<Ty> TableEntry<Ty> for select
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -908,7 +908,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct type_;
 
-impl<Ty> StdPlugin<Ty> for type_
+impl<Ty> TableEntry<Ty> for type_
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -948,7 +948,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct warn;
 
-impl<Ty> StdPlugin<Ty> for warn
+impl<Ty> TableEntry<Ty> for warn
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {

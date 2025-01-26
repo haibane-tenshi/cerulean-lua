@@ -1,5 +1,7 @@
 pub mod ffi;
-pub mod plugin;
+#[path = "./libs.rs"]
+pub mod lib;
 pub mod std;
+pub mod traits;
 
-pub use plugin::Std;
+pub use lib::Std;

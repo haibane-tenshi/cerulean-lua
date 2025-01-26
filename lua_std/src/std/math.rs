@@ -4,7 +4,7 @@ use rt::gc::LuaPtr;
 use rt::runtime::Core;
 use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
 
-use crate::plugin::{RootTable, StdPlugin};
+use crate::traits::{RootTable, TableEntry};
 
 /// Compute absolute value of a number.
 ///
@@ -22,7 +22,7 @@ use crate::plugin::{RootTable, StdPlugin};
 #[expect(non_camel_case_types)]
 pub struct abs;
 
-impl<Ty> StdPlugin<Ty> for abs
+impl<Ty> TableEntry<Ty> for abs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -57,7 +57,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct acos;
 
-impl<Ty> StdPlugin<Ty> for acos
+impl<Ty> TableEntry<Ty> for acos
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -91,7 +91,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct asin;
 
-impl<Ty> StdPlugin<Ty> for asin
+impl<Ty> TableEntry<Ty> for asin
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -128,7 +128,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct atan;
 
-impl<Ty> StdPlugin<Ty> for atan
+impl<Ty> TableEntry<Ty> for atan
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -162,7 +162,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct ceil;
 
-impl<Ty> StdPlugin<Ty> for ceil
+impl<Ty> TableEntry<Ty> for ceil
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -194,7 +194,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct cos;
 
-impl<Ty> StdPlugin<Ty> for cos
+impl<Ty> TableEntry<Ty> for cos
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -226,7 +226,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct deg;
 
-impl<Ty> StdPlugin<Ty> for deg
+impl<Ty> TableEntry<Ty> for deg
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -258,7 +258,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct exp;
 
-impl<Ty> StdPlugin<Ty> for exp
+impl<Ty> TableEntry<Ty> for exp
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -292,7 +292,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct floor;
 
-impl<Ty> StdPlugin<Ty> for floor
+impl<Ty> TableEntry<Ty> for floor
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -329,7 +329,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct fmod;
 
-impl<Ty> StdPlugin<Ty> for fmod
+impl<Ty> TableEntry<Ty> for fmod
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -357,7 +357,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct huge;
 
-impl<Ty> StdPlugin<Ty> for huge
+impl<Ty> TableEntry<Ty> for huge
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -389,7 +389,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct log;
 
-impl<Ty> StdPlugin<Ty> for log
+impl<Ty> TableEntry<Ty> for log
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -420,7 +420,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct max;
 
-impl<Ty> StdPlugin<Ty> for max
+impl<Ty> TableEntry<Ty> for max
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -448,7 +448,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct maxinteger;
 
-impl<Ty> StdPlugin<Ty> for maxinteger
+impl<Ty> TableEntry<Ty> for maxinteger
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -475,7 +475,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct min;
 
-impl<Ty> StdPlugin<Ty> for min
+impl<Ty> TableEntry<Ty> for min
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -503,7 +503,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct mininteger;
 
-impl<Ty> StdPlugin<Ty> for mininteger
+impl<Ty> TableEntry<Ty> for mininteger
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -534,7 +534,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct modf;
 
-impl<Ty> StdPlugin<Ty> for modf
+impl<Ty> TableEntry<Ty> for modf
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -562,7 +562,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct pi;
 
-impl<Ty> StdPlugin<Ty> for pi
+impl<Ty> TableEntry<Ty> for pi
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -593,7 +593,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct rad;
 
-impl<Ty> StdPlugin<Ty> for rad
+impl<Ty> TableEntry<Ty> for rad
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -662,7 +662,7 @@ impl<R> random<R> {
     }
 }
 
-impl<Ty, R> StdPlugin<Ty> for random<R>
+impl<Ty, R> TableEntry<Ty> for random<R>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
     R: rand::Rng + 'static,
@@ -693,7 +693,7 @@ impl<R> randomseed<R> {
     }
 }
 
-impl<Ty, R> StdPlugin<Ty> for randomseed<R>
+impl<Ty, R> TableEntry<Ty> for randomseed<R>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
     R: rand::SeedableRng + 'static,
@@ -728,7 +728,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct sin;
 
-impl<Ty> StdPlugin<Ty> for sin
+impl<Ty> TableEntry<Ty> for sin
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -761,7 +761,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct sqrt;
 
-impl<Ty> StdPlugin<Ty> for sqrt
+impl<Ty> TableEntry<Ty> for sqrt
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -793,7 +793,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct tan;
 
-impl<Ty> StdPlugin<Ty> for tan
+impl<Ty> TableEntry<Ty> for tan
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -826,7 +826,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct tointeger;
 
-impl<Ty> StdPlugin<Ty> for tointeger
+impl<Ty> TableEntry<Ty> for tointeger
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -853,7 +853,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct type_;
 
-impl<Ty> StdPlugin<Ty> for type_
+impl<Ty> TableEntry<Ty> for type_
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -889,7 +889,7 @@ where
 #[expect(non_camel_case_types)]
 pub struct ult;
 
-impl<Ty> StdPlugin<Ty> for ult
+impl<Ty> TableEntry<Ty> for ult
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
