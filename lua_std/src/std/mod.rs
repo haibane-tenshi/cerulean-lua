@@ -27,7 +27,7 @@ impl<Ty> TableEntry<Ty> for assert
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::assert();
         let key = core.alloc_string("assert".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -65,7 +65,7 @@ impl<Ty> TableEntry<Ty> for error
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::error();
         let key = core.alloc_string("error".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -137,7 +137,7 @@ impl<Ty> TableEntry<Ty> for collectgarbage
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::collectgarbage();
         let key = core.alloc_string("collectgarbage".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -184,7 +184,7 @@ where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     PathBuf: ParseFrom<Ty::String>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::dofile();
         let key = core.alloc_string("dofile".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -208,7 +208,7 @@ impl<Ty> TableEntry<Ty> for _G
 where
     Ty: Types,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let key = core.alloc_string("_G".into());
 
         core.gc[value].set(
@@ -234,7 +234,7 @@ impl<Ty> TableEntry<Ty> for _VERSION
 where
     Ty: Types,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let key = core.alloc_string("_VERSION".into());
         let version = core.alloc_string("Lua 5.4".into());
 
@@ -266,7 +266,7 @@ impl<Ty> TableEntry<Ty> for ipairs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::ipairs();
         let key = core.alloc_string("ipairs".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -305,7 +305,7 @@ impl<Ty> TableEntry<Ty> for pcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::pcall();
         let key = core.alloc_string("pcall".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -336,7 +336,7 @@ impl<Ty> TableEntry<Ty> for xpcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::xpcall();
         let key = core.alloc_string("xpcall".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -402,7 +402,7 @@ where
     // Temp bound, remove when we are done with unpin.
     Ty::String: Unpin,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::load();
         let key = core.alloc_string("load".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -445,7 +445,7 @@ where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     PathBuf: ParseFrom<Ty::String>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::loadfile();
         let key = core.alloc_string("loadfile".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -485,7 +485,7 @@ impl<Ty> TableEntry<Ty> for next
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::next();
         let key = core.alloc_string("next".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -527,7 +527,7 @@ impl<Ty> TableEntry<Ty> for pairs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::pairs();
         let key = core.alloc_string("pairs".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -560,7 +560,7 @@ impl<Ty> TableEntry<Ty> for setmetatable
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::setmetatable();
         let key = core.alloc_string("setmetatable".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -589,7 +589,7 @@ impl<Ty> TableEntry<Ty> for getmetatable
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::getmetatable();
         let key = core.alloc_string("getmetatable".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -623,7 +623,7 @@ impl<Ty> TableEntry<Ty> for print
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::print();
         let key = core.alloc_string("print".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -671,7 +671,7 @@ impl<Ty> TableEntry<Ty> for tostring
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::tostring();
         let key = core.alloc_string("tostring".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -710,7 +710,7 @@ where
     String: ParseFrom<Ty::String>,
     <String as ParseFrom<Ty::String>>::Error: Display,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::tonumber();
         let key = core.alloc_string("tonumber".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -742,7 +742,7 @@ impl<Ty> TableEntry<Ty> for rawequal
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::rawequal();
         let key = core.alloc_string("rawequal".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -770,7 +770,7 @@ impl<Ty> TableEntry<Ty> for rawlen
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::rawlen();
         let key = core.alloc_string("rawlen".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -806,7 +806,7 @@ impl<Ty> TableEntry<Ty> for rawget
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::rawget();
         let key = core.alloc_string("rawget".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -844,7 +844,7 @@ impl<Ty> TableEntry<Ty> for rawset
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::rawset();
         let key = core.alloc_string("rawset".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -883,7 +883,7 @@ impl<Ty> TableEntry<Ty> for select
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::select();
         let key = core.alloc_string("select".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -912,7 +912,7 @@ impl<Ty> TableEntry<Ty> for type_
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::type_();
         let key = core.alloc_string("type".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -952,7 +952,7 @@ impl<Ty> TableEntry<Ty> for warn
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         let fn_body = crate::ffi::warn();
         let key = core.alloc_string("warn".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));

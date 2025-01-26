@@ -37,7 +37,7 @@ where
         };
 
         let Std(builder) = self;
-        builder.build(&table, &mut rt.core);
+        builder.build(&table, &mut rt.core, &mut ());
 
         rt.core.global_env = Value::Table(LuaPtr(table));
     }
@@ -178,7 +178,7 @@ where
     Ty: Types,
     P: TableEntry<Ty>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
         use rt::gc::LuaPtr;
         use rt::value::{KeyValue, TableIndex, Value};
 
@@ -192,7 +192,7 @@ where
 
         let Math(builder) = self;
 
-        builder.build(&local_table, core);
+        builder.build(&local_table, core, &mut ());
 
         let value = Value::Table(LuaPtr(local_table.downgrade()));
         core.gc[table].set(key, value);

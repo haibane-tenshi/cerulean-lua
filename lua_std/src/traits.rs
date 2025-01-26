@@ -5,29 +5,29 @@ use rt::value::Types;
 
 pub type RootTable<Ty> = RootCell<<Ty as Types>::Table>;
 
-pub trait TableEntry<Ty>
+pub trait TableEntry<Ty, Ex = ()>
 where
     Ty: Types,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>);
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut Ex);
 }
 
-impl<Ty> TableEntry<Ty> for ()
+impl<Ty, Ex> TableEntry<Ty, Ex> for ()
 where
     Ty: Types,
 {
-    fn build(self, _value: &RootTable<Ty>, _core: &mut Core<Ty>) {}
+    fn build(self, _table: &RootTable<Ty>, _core: &mut Core<Ty>, _: &mut Ex) {}
 }
 
-impl<Ty, A, B> TableEntry<Ty> for (A, B)
+impl<Ty, Ex, A, B> TableEntry<Ty, Ex> for (A, B)
 where
     Ty: Types,
-    A: TableEntry<Ty>,
-    B: TableEntry<Ty>,
+    A: TableEntry<Ty, Ex>,
+    B: TableEntry<Ty, Ex>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, extra: &mut Ex) {
         let (a, b) = self;
-        a.build(value, core);
-        b.build(value, core);
+        a.build(table, core, extra);
+        b.build(table, core, extra);
     }
 }
