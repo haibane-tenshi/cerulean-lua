@@ -440,7 +440,7 @@ where
 ///
 /// # Implementation-specific behavior
 ///
-/// * This function will respect coercion policy set in [`Core`](rt::runtime::Core).
+/// * This function will respect coercion policy set in [`Core`].
 #[expect(non_camel_case_types)]
 pub struct max;
 
@@ -495,7 +495,7 @@ where
 ///
 /// # Implementation-specific behavior
 ///
-/// * This function will respect coercion policy set in [`Core`](rt::runtime::Core).
+/// * This function will respect coercion policy set in [`Core`].
 #[expect(non_camel_case_types)]
 pub struct min;
 
@@ -635,6 +635,12 @@ where
 
 /// Generate a pseudo-random number.
 ///
+/// Implementation of `random` expects to be provided with RNG state.
+/// Under normal circumstances it will be configured by [`MathRand`](crate::lib::MathRand)
+/// and passed in through an extra argument in [`TableEntryEx::build`] method.
+///
+/// However to get included from other libraries you need to provide state directly via [`with_state`](Self::with_state) method.
+///
 /// # From Lua documentation
 ///
 /// **Signature:**
@@ -673,7 +679,7 @@ where
 ///
 ///     Default state will be seeded using [system entropy](rand::SeedableRng::from_entropy).
 ///
-///     See [`MathRand`] documentation for more information about defaults and pointers for custom configuration.
+///     See [`MathRand`](crate::lib::MathRand) documentation for more information about defaults and pointers for custom configuration.
 #[expect(non_camel_case_types)]
 pub struct random;
 
@@ -726,6 +732,68 @@ where
     }
 }
 
+/// Seed pseudo-random generator used by `random`.
+///
+/// Implementation of `randomseed` expects to be provided with RNG state.
+/// Under normal circumstances it will be configured by [`MathRand`](crate::lib::MathRand)
+/// and passed in through an extra argument in [`TableEntryEx::build`] method.
+///
+/// However to get included from other libraries you need to provide state directly via [`with_state`](Self::with_state) method.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `([x: int, [y: int]]) -> ()`
+///
+/// When called with at least one argument,
+/// the integer parameters `x` and `y` are joined into a 128-bit seed that is used to reinitialize the pseudo-random generator;
+/// equal seeds produce equal sequences of numbers.
+/// The default for `y` is zero.
+///
+/// When called with no arguments, Lua generates a seed with a weak attempt for randomness.
+///
+/// This function returns the two seed components that were effectively used, so that setting them again repeats the sequence.
+///
+/// To ensure a required level of randomness to the initial state
+/// (or contrarily, to have a deterministic sequence, for instance when debugging a program),
+/// you should call `math.randomseed` with explicit arguments.
+///
+/// # Implementation-specific behavior
+///
+/// *   Lua comments **on seeding do not apply**.
+///     Read below for more details.
+///
+/// *   This function will use provided `rng_state` as RNG.
+///     It is expected that state is shared with [`random`] function.
+///
+/// *   When no arguments are provided, the state will be seeded from [system entropy](rand::SeedableRng::from_entropy).
+///
+/// *   When 1 integer is provided, it will be used to seed state directly using [`SeedableRng::seed_from_u64`](rand::SeedableRng::seed_from_u64).
+///     It should be reproducible and deterministic; default implementation makes an attempt to convert those into reasonably good seeds.
+///     See documentation of the method for more details.
+///
+///     This is **not suitable for cryptography**, as should be clear given that the input size is only 64 bits.
+///
+/// *   When 2 integers are provided, they will be concatenated into single 128-bit seed which is used to initialize an [HC-128](rand_hc::Hc128Rng) PRNG,
+///     output of which is then used to seed `rng_state`.
+///
+///     HC-128 is a cryptographically secure algorithm and at the time of writing has no known weaknesses.
+///     It should provide reasonably good output which doesn't compromise security in case the real PRNG you use is cryptographically secure.
+///
+///     We have to go through an indirection since most practical algorithms use 256 bit seeds (which includes `xoshiro256**` used as default by this crate).
+///     As a bonus current setup allows to initialize PRNGs with arbitrarily-sized state.
+///
+///     Note that while this is serviceable, it is still recommended to use 256 bits of entropy to initialize PRNG for cryptographic purposes.
+///
+/// *   When invoking this function with parameters you need to make sure to provide reasonably good seeds.
+///
+///     From [`SeedableRng::from_seed`](rand::SeedableRng::from_seed) documentation:
+///
+///     *PRNG implementations are allowed to assume that bits in the seed are well distributed.
+///     That means usually that the number of one and zero bits are roughly equal, and values like 0, 1 and (size - 1) are unlikely.
+///     Note that many non-cryptographic PRNGs will show poor quality output if this is not adhered to.*
+///
+///     This also applies to `xoshiro256**` algorithm which is used in the default configuration of [`MathRand`](crate::lib::MathRand).
 #[expect(non_camel_case_types)]
 pub struct randomseed;
 

@@ -1202,7 +1202,7 @@ where
 ///
 ///     Default state will be seeded using [system entropy](rand::SeedableRng::from_entropy).
 ///
-///     See [`MathRand`] documentation for more information about defaults and pointers for custom configuration.
+///     See [`MathRand`](crate::lib::MathRand) documentation for more information about defaults and pointers for custom configuration.
 pub fn random<Ty, R>(rng_state: RootCell<R>) -> impl LuaFfi<Ty>
 where
     Ty: Types,
@@ -1301,7 +1301,7 @@ where
 ///     That means usually that the number of one and zero bits are roughly equal, and values like 0, 1 and (size - 1) are unlikely.
 ///     Note that many non-cryptographic PRNGs will show poor quality output if this is not adhered to.*
 ///
-///     This also applies to `xoshiro256**` algorithm which is used in the default configuration of [`MathRand`].
+///     This also applies to `xoshiro256**` algorithm which is used in the default configuration of [`MathRand`](crate::lib::MathRand).
 pub fn randomseed<Ty, R>(rng_state: RootCell<R>) -> impl LuaFfi<Ty>
 where
     Ty: Types,
