@@ -96,7 +96,8 @@ fn main() -> Result<()> {
                 .include(std::tonumber)
                 .include(std::type_)
                 .include(std::warn)
-                .include(lib::Math::full());
+                .include(lib::Math::full())
+                .include(lib::MathRand::full());
 
             runtime.include(env);
 

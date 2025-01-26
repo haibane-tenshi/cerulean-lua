@@ -125,7 +125,7 @@ impl Math<()> {
         Math(())
     }
 
-    /// Construct table filled with all [Lua std's math APIs][lua#6.7] excluding random number generation.
+    /// Construct module introducing all math APIs included into [Lua std's math library][lua#6.7] excluding random number generation.
     ///
     /// This library module will use table under `math` key in parent table or construct a new one otherwise.
     /// All included items will be put into the table, potentially overriding existing entries.
@@ -169,7 +169,10 @@ impl Math<()> {
 }
 
 impl<P> Math<P> {
-    /// Include an API in the module.
+    /// Include API in the module.
+    ///
+    /// Requires [`T: TableEntry<Ty>`](TableEntry) bound.
+    /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
     pub fn include<T>(self, part: T) -> Math<(P, T)> {
         let Math(p) = self;
         Math((p, part))
@@ -202,99 +205,200 @@ where
     }
 }
 
-#[doc(hidden)]
-pub struct DelayInit<R>(PhantomData<R>);
-
+/// Random number generation library residing in `math` table.
+///
+/// This library module will use table under `math` key in parent table or construct a new one otherwise.
+/// All included items will be put into the table, potentially overriding existing entries.
+///
+/// This library module is designed to introduce `random` and `randomseed` functions from [Lua std's `math` library][lua#6.7].
+/// It is separated from [`Math`] module because, first, functions inside are intended to share state,
+/// second, you likely want to configure it to your needs.
+///
+/// The easiest way to get started is to use [`MathRand::full`] method.
+/// This will include both `random` and `randomseed` functions and configure them to use default PRNG.
+/// Alternatively, you can start with [`MathRand::empty`] to decide which APIs to include:
+///
+/// ```
+/// # use lua_std::lib::{Std, MathRand};
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(
+///         MathRand::empty()
+///             .include(std::math::random)
+///             .include(std::math::randomseed)
+///     );
+/// ```
+///
+/// [lua#6.7]: https://www.lua.org/manual/5.4/manual.html#6.7
+///
+/// # Default configuration
+///
+/// By default this library will choose for you [`xoshiro256**` algorithm](rand_xoshiro::Xoshiro256StarStar).
+/// It is a known general purpose algorithm providing both high quality and performance.
+/// However, it is **not cryptographically secure** and should not be used as such.
+///
+/// Default state is seeded using [system entropy](rand::SeedableRng::from_entropy).
+///
+/// Note that default configuration may change between releases (although it is unlikely).
+/// If you want to have stable behavior consider providing explicit configuration.
+///
+/// # Custom configuration
+///
+/// Functions that can be [`include`](MathRand::include)d into this module require to implement [`TableEntryEx`] trait.
+/// The [`build`](TableEntryEx::build) method will receive reference to RNG state in the extra parameter (as `RootCell<Rng>`).
+/// The entries are expected to memoize it internally, which both `random` and `randomseed` provided by this library do.
+///
+/// This setup means that the library module is in charge of configuring and constructing RNG state.
+/// You can do so by going through [`MathRand::builder`].
+/// It is a simple 2-step builder, where first you get to specify RNG and the way it is initialized
+/// and next you can choose library configuration (`empty` which does nothing or `full` which introduces all provided APIs).
+/// When it comes to RNG configuration there are a few options.
+///
+/// [`with_default`](MathRandBuilder::with_default) will simply choose default RNG.
+///
+/// If you only intend to fix algorithm, you may use [`with_xoshiro`](MathRandBuilder::with_xoshiro):
+///
+/// ```
+/// # use lua_std::lib::{Std, MathRand};
+/// let global_env = Std::empty()
+///     .include(
+///         MathRand::builder()
+///             .with_xoshiro()
+///             .full()
+///     );
+/// ```
+///
+/// We also provide a preconfig for [ChaCha algorithm with 12 rounds](rand_chacha::ChaCha12Rng).
+/// It is **cryptographically secure** algorithm, and can be easily configured using [`with_chacha`](MathRandBuilder::with_chacha):
+///
+/// ```
+/// # use lua_std::lib::{Std, MathRand};
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(
+///         MathRand::builder()
+///             .with_chacha()
+///             .empty()
+///             .include(std::math::random)
+///     );
+/// ```
+///
+/// Note that you may want to remove or replace `randomseed`:
+/// for certain inputs it permits seeding state with only 64 bits which is not suitable for cryptography.
+/// Obviously, if you actually intend to use this for cryptography it might be better to use custom configuration attuned for your needs,
+/// or even expose a set of dedicated APIs for the purpose.
+/// This configuration is provided on merits of an easy-to-enable stopgap measure.
+///
+/// Lastly, you can provide a custom RNG directly using [`with`](MathRandBuilder::with):
+///
+/// ```
+/// # use rand::SeedableRng;
+/// # use rand_hc::Hc128Rng;
+/// # use gc::Heap;
+/// # use gc::userdata::UnitParams;
+/// # use lua_std::lib::{Std, MathRand};
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// use lua_std::lib::UntraceRng;
+/// use lua_std::std;
+///
+/// // Init your own RNG.
+/// // `UntraceRng` provides noop `Trace` impl which is required for alloc.
+/// let rng = heap.alloc_cell(UntraceRng(Hc128Rng::from_entropy()));
+///
+/// let global_env = Std::empty()
+///     .include(
+///         MathRand::builder()
+///             .with(rng)
+///             .empty()
+///             .include(std::math::random)
+///     );
+/// ```
+///
+/// Additionally, there is [`from_entropy`](MathRandBuilder::from_entropy) as a convenience for the above.
+/// It will construct RNG instance from system entropy and place it on heap for you.
+/// However, it does require to specify type parameter explicitly:
+///
+/// ```
+/// # use rand::SeedableRng;
+/// # use rand_hc::Hc128Rng;
+/// # use gc::Heap;
+/// # use gc::userdata::UnitParams;
+/// # use lua_std::lib::{Std, MathRand};
+/// #
+/// # let mut heap = Heap::<(), UnitParams>::new();
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(
+///         MathRand::builder()
+///             .from_entropy::<Hc128Rng>()
+///             // Wrap type in `UntraceRng` so it can be placed on the heap.
+///             // You can also do it directly when passing to `from_entropy`.
+///             // This way it looks a bit cleaner.
+///             .untrace()
+///             .empty()
+///             .include(std::math::random)
+///     );
+/// ```
+///
+/// # Provided APIs
+///
+/// **Random number generation:**
+///
+/// * [`random`](crate::std::math::random)
+/// * [`randomseed`](crate::std::math::randomseed)
 pub struct MathRand<R, P> {
     rng_state: R,
     builder: P,
 }
 
 impl MathRand<(), ()> {
-    pub fn empty_with<R>(state: RootCell<R>) -> MathRand<RootCell<R>, ()> {
-        MathRand {
-            rng_state: state,
-            builder: (),
-        }
+    /// Construct a builder to configure this module.
+    ///
+    /// See [`MathRand` documentation](MathRand#custom-configuration) for usage examples.
+    pub fn builder() -> MathRandBuilder<math_rand_builder::Start> {
+        use math_rand_builder::Start;
+
+        MathRandBuilder(Start(()))
     }
 
-    pub fn empty_from_entropy<R>() -> MathRand<DelayInit<R>, ()> {
-        MathRand {
-            rng_state: DelayInit(PhantomData),
-            builder: (),
-        }
-    }
-
-    pub fn empty_with_xoshiro() -> MathRand<DelayInit<rand_xoshiro::Xoshiro256StarStar>, ()> {
-        MathRand::empty_from_entropy()
-    }
-
-    pub fn empty_with_chacha() -> MathRand<DelayInit<rand_chacha::ChaCha12Rng>, ()> {
-        MathRand::empty_from_entropy()
-    }
-
-    pub fn empty() -> MathRand<DelayInit<rand_xoshiro::Xoshiro256StarStar>, ()> {
-        MathRand::empty_with_xoshiro()
-    }
-
-    pub fn full_with<R, Ty>(
-        state: RootCell<R>,
-    ) -> MathRand<RootCell<R>, impl TableEntryEx<Ty, RootCell<R>>>
-    where
-        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-        R: rand::Rng + rand::SeedableRng + 'static,
+    /// Construct empty module.
+    ///
+    /// This library module will use table under `math` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// Module will be configured to use [default RNG configuration](MathRand#default-configuration).
+    ///
+    /// Table entries can included using [`include`](MathRand::include) method.
+    pub fn empty() -> MathRand<DelayInit<impl rand::Rng + rand::SeedableRng + Trace>, empty::Empty>
     {
-        use crate::std::math;
-
-        MathRand::empty_with(state)
-            .include(math::random)
-            .include(math::randomseed)
+        MathRand::builder().with_xoshiro().empty()
     }
 
-    pub fn full_from_entropy<R, Ty>() -> MathRand<DelayInit<R>, impl TableEntryEx<Ty, RootCell<R>>>
-    where
-        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-        R: rand::Rng + rand::SeedableRng + 'static,
+    /// Construct module introducing all APIs for random number generation included into [Lua std's math library][lua#6.7].
+    ///
+    /// This library module will use table under `math` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// Module will be configured to use [default RNG configuration](MathRand#default-configuration).
+    ///
+    /// See [provided APIs](MathRand#provided-apis) for full list.
+    ///
+    /// [lua#6.7]: https://www.lua.org/manual/5.4/manual.html#6.7
+    pub fn full() -> MathRand<DelayInit<impl rand::Rng + rand::SeedableRng + Trace>, math_rand::Full>
     {
-        use crate::std::math;
-
-        MathRand::empty_from_entropy()
-            .include(math::random)
-            .include(math::randomseed)
-    }
-
-    pub fn full_with_xoshiro<Ty>() -> MathRand<
-        DelayInit<rand_xoshiro::Xoshiro256StarStar>,
-        impl TableEntryEx<Ty, RootCell<rand_xoshiro::Xoshiro256StarStar>>,
-    >
-    where
-        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    {
-        MathRand::full_from_entropy()
-    }
-
-    pub fn full_with_chacha<Ty>() -> MathRand<
-        DelayInit<rand_chacha::ChaCha12Rng>,
-        impl TableEntryEx<Ty, RootCell<rand_chacha::ChaCha12Rng>>,
-    >
-    where
-        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    {
-        MathRand::full_from_entropy()
-    }
-
-    pub fn full<Ty>() -> MathRand<
-        DelayInit<rand_xoshiro::Xoshiro256StarStar>,
-        impl TableEntryEx<Ty, RootCell<rand_xoshiro::Xoshiro256StarStar>>,
-    >
-    where
-        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    {
-        MathRand::full_with_xoshiro()
+        MathRand::builder().with_xoshiro().full()
     }
 }
 
 impl<R, P> MathRand<R, P> {
+    /// Include API in this module.
+    ///
+    /// Requires [`T: TableEntryEx<Ty, R>`](TableEntryEx) bound.
+    /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
     pub fn include<T>(self, part: T) -> MathRand<R, (P, T)> {
         let MathRand { rng_state, builder } = self;
 
@@ -362,5 +466,258 @@ where
 
         let value = Value::Table(LuaPtr(local_table.downgrade()));
         core.gc[table].set(key, value);
+    }
+}
+
+/// Typestate indicating delayed RNG construction in `MathRand`.
+pub struct DelayInit<R>(PhantomData<R>);
+
+mod math_rand_builder {
+    #[doc(hidden)]
+    pub struct Start(pub(crate) ());
+
+    #[doc(hidden)]
+    pub struct WithRng<R>(pub(crate) R);
+}
+
+/// Builder for [`MathRand`] module.
+///
+/// This is a simple 2-step builder.
+/// First you may specify RNG and the way it is constructed, and second choose library configuration (`empty` or `full`).
+///
+/// See [`MathRand` documentation](MathRand#custom-configuration) for usage examples.
+pub struct MathRandBuilder<S>(S);
+
+impl MathRandBuilder<math_rand_builder::Start> {
+    /// Construct new builder.
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
+        use math_rand_builder::Start;
+
+        MathRandBuilder(Start(()))
+    }
+
+    /// Configure module to use provided RNG state.
+    pub fn with<R>(
+        self,
+        rng_state: RootCell<R>,
+    ) -> MathRandBuilder<math_rand_builder::WithRng<RootCell<R>>> {
+        use math_rand_builder::WithRng;
+
+        MathRandBuilder(WithRng(rng_state))
+    }
+
+    /// Configure module to construct new RNG state from system entropy.
+    pub fn from_entropy<R>(self) -> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
+        use math_rand_builder::WithRng;
+
+        MathRandBuilder(WithRng(DelayInit(PhantomData)))
+    }
+
+    /// Configure module to construct [`xoshiro256**` RNG](rand_xoshiro::Xoshiro256StarStar) from system entropy.
+    pub fn with_xoshiro(
+        self,
+    ) -> MathRandBuilder<
+        math_rand_builder::WithRng<DelayInit<UntraceRng<rand_xoshiro::Xoshiro256StarStar>>>,
+    > {
+        self.from_entropy()
+    }
+
+    /// Configure module to construct [`chach12` RNG](rand_chacha::ChaCha12Rng) from system entropy.
+    pub fn with_chacha(
+        self,
+    ) -> MathRandBuilder<math_rand_builder::WithRng<DelayInit<UntraceRng<rand_chacha::ChaCha12Rng>>>>
+    {
+        self.from_entropy()
+    }
+
+    /// Configure module to construct [default RNG](MathRand#default-configuration) from system entropy.
+    pub fn with_default(
+        self,
+    ) -> MathRandBuilder<
+        math_rand_builder::WithRng<DelayInit<impl rand::Rng + rand::SeedableRng + Trace>>,
+    > {
+        self.with_xoshiro()
+    }
+}
+
+impl<R> MathRandBuilder<math_rand_builder::WithRng<R>> {
+    /// Finish construction of empty module.
+    pub fn empty(self) -> MathRand<R, empty::Empty> {
+        use empty::Empty;
+        use math_rand_builder::WithRng;
+
+        let MathRandBuilder(WithRng(rng_state)) = self;
+
+        MathRand {
+            rng_state,
+            builder: Empty(()),
+        }
+    }
+}
+
+impl<R> MathRandBuilder<math_rand_builder::WithRng<RootCell<R>>> {
+    /// Finish construction by introducing [full set of APIs](MathRand#provided-apis) into module.
+    pub fn full<Ty>(self) -> MathRand<RootCell<R>, math_rand::Full> {
+        use math_rand::Full;
+        use math_rand_builder::WithRng;
+
+        let MathRandBuilder(WithRng(rng_state)) = self;
+
+        MathRand {
+            rng_state,
+            builder: Full(()),
+        }
+    }
+}
+
+impl<R> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
+    /// Wrap RNG type in [`UntraceRng`].
+    pub fn untrace(self) -> MathRandBuilder<math_rand_builder::WithRng<DelayInit<UntraceRng<R>>>> {
+        use math_rand_builder::WithRng;
+
+        MathRandBuilder(WithRng(DelayInit(PhantomData)))
+    }
+
+    /// Finish construction by introducing [full set of APIs](MathRand#provided-apis) into module.
+    pub fn full(self) -> MathRand<DelayInit<R>, math_rand::Full> {
+        use math_rand::Full;
+        use math_rand_builder::WithRng;
+
+        let MathRandBuilder(WithRng(rng_state)) = self;
+
+        MathRand {
+            rng_state,
+            builder: Full(()),
+        }
+    }
+}
+
+/// The untrace newtype for random number generators.
+///
+/// Objects are required to implement [`Trace`] trait in order to be put into our gc heap.
+/// This type provides a trivial implementation of `Trace` (so it is analogous to [`Untrace`](gc::Untrace))
+/// but additionally implements [`Rng`](rand::Rng) and [`SeedableRng`](rand::SeedableRng) by forwarding implementation to wrapped value.
+///
+/// This newtype is useful when you want to allocate a PRNG into heap without obscuring traits it is expected to implement.
+#[derive(Debug, Clone)]
+pub struct UntraceRng<Rng>(pub Rng)
+where
+    Rng: ?Sized;
+
+impl<Rng> Trace for UntraceRng<Rng>
+where
+    Rng: ?Sized + 'static,
+{
+    fn trace(&self, _collector: &mut gc::Collector) {}
+}
+
+impl<Rng> rand::RngCore for UntraceRng<Rng>
+where
+    Rng: rand::RngCore + ?Sized,
+{
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.fill_bytes(dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+        self.0.try_fill_bytes(dest)
+    }
+}
+
+impl<Rng> rand::SeedableRng for UntraceRng<Rng>
+where
+    Rng: rand::SeedableRng,
+{
+    type Seed = <Rng as rand::SeedableRng>::Seed;
+
+    fn from_seed(seed: Self::Seed) -> Self {
+        UntraceRng(Rng::from_seed(seed))
+    }
+
+    fn seed_from_u64(state: u64) -> Self {
+        UntraceRng(Rng::seed_from_u64(state))
+    }
+
+    fn from_rng<R: rand::RngCore>(rng: R) -> Result<Self, rand::Error> {
+        Ok(UntraceRng(Rng::from_rng(rng)?))
+    }
+
+    fn from_entropy() -> Self {
+        UntraceRng(Rng::from_entropy())
+    }
+}
+
+impl<Rng> rand::CryptoRng for UntraceRng<Rng> where Rng: rand::CryptoRng + ?Sized {}
+
+// Below are typestates for empty/full config for all library modules.
+// We use explicit types because if is just too silly to expose unholy incantations generated by `.include`s,
+// and type erasing them brings extra type parameters which in some configurations require type annotations to resolve.
+// All types below are public but unconstructible, uninteractable and hidden from docs to not pollute doc space.
+// We also put `Full`s into separate modules because rustdoc strips private module names leaving only struct name
+// (without linking it to anything since it is hidden).
+// This results in nice textual representation in generated docs.
+
+mod empty {
+    use crate::traits::{TableEntry, TableEntryEx};
+    use rt::value::Types;
+
+    #[doc(hidden)]
+    pub struct Empty(pub(crate) ());
+
+    impl<Ty> TableEntry<Ty> for Empty
+    where
+        Ty: Types,
+    {
+        fn build(self, _table: &crate::traits::RootTable<Ty>, _core: &mut rt::runtime::Core<Ty>) {}
+    }
+
+    impl<Ty, Ex> TableEntryEx<Ty, Ex> for Empty
+    where
+        Ty: Types,
+    {
+        fn build(
+            self,
+            _table: &crate::traits::RootTable<Ty>,
+            _core: &mut rt::runtime::Core<Ty>,
+            _: &mut Ex,
+        ) {
+        }
+    }
+}
+
+mod math_rand {
+    use crate::traits::TableEntryEx;
+    use gc::RootCell;
+    use rt::ffi::DLuaFfi;
+    use rt::value::Types;
+
+    #[doc(hidden)]
+    pub struct Full(pub(crate) ());
+
+    impl<Ty, R> TableEntryEx<Ty, RootCell<R>> for Full
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        R: rand::Rng + rand::SeedableRng + 'static,
+    {
+        fn build(
+            self,
+            table: &crate::traits::RootTable<Ty>,
+            core: &mut rt::runtime::Core<Ty>,
+            rng_state: &mut RootCell<R>,
+        ) {
+            use crate::std::math;
+
+            math::random.build(table, core, rng_state);
+            math::randomseed.build(table, core, rng_state);
+        }
     }
 }
