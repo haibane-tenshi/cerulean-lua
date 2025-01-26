@@ -383,7 +383,7 @@ pub struct huge;
 
 impl<Ty> TableEntry<Ty> for huge
 where
-    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("huge".into());
@@ -474,7 +474,7 @@ pub struct maxinteger;
 
 impl<Ty> TableEntry<Ty> for maxinteger
 where
-    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("maxinteger".into());
@@ -529,7 +529,7 @@ pub struct mininteger;
 
 impl<Ty> TableEntry<Ty> for mininteger
 where
-    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("mininteger".into());
@@ -588,7 +588,7 @@ pub struct pi;
 
 impl<Ty> TableEntry<Ty> for pi
 where
-    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    Ty: Types,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("pi".into());
