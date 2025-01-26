@@ -1,3 +1,27 @@
+//! Mathematical functions provided by [Lua `std`'s math library][lua#6.7]
+//!
+//! Note that all items from this module will insert directly into parent table when `.include`d ,
+//! they *will not* create an intermediate `math` table!
+//! This module exists primarily for ease of organization.
+//!
+//! To correctly namespace APIs you need to use [`Math`](crate::lib::Math) module:
+//!
+//! ```
+//! use lua_std::std;
+//! use lua_std::lib::{Std, Math};
+//!
+//! let global_env = Std::empty()
+//!     .include(
+//!         Math::empty()
+//!             .include(std::math::abs)
+//!             .include(std::math::floor)
+//!     );
+//! ```
+//!
+//! See documentation of [`lib`](crate::lib) module for more details.
+//!
+//! [lua#6.7]: https://www.lua.org/manual/5.4/manual.html#6.7
+
 use gc::RootCell;
 use rt::ffi::{boxed, DLuaFfi};
 use rt::gc::LuaPtr;
