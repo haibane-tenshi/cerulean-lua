@@ -1,9 +1,12 @@
+use std::marker::PhantomData;
+
+use gc::{RootCell, Trace};
 use rt::ffi::DLuaFfi;
 use rt::plugin::Plugin;
 use rt::runtime::{Core, Runtime};
 use rt::value::Types;
 
-use crate::traits::{RootTable, TableEntry};
+use crate::traits::{RootTable, TableEntry, TableEntryEx};
 
 pub struct Std<P>(P);
 
@@ -37,7 +40,7 @@ where
         };
 
         let Std(builder) = self;
-        builder.build(&table, &mut rt.core, &mut ());
+        builder.build(&table, &mut rt.core);
 
         rt.core.global_env = Value::Table(LuaPtr(table));
     }
@@ -178,7 +181,7 @@ where
     Ty: Types,
     P: TableEntry<Ty>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         use rt::gc::LuaPtr;
         use rt::value::{KeyValue, TableIndex, Value};
 
@@ -192,7 +195,170 @@ where
 
         let Math(builder) = self;
 
-        builder.build(&local_table, core, &mut ());
+        builder.build(&local_table, core);
+
+        let value = Value::Table(LuaPtr(local_table.downgrade()));
+        core.gc[table].set(key, value);
+    }
+}
+
+#[doc(hidden)]
+pub struct DelayInit<R>(PhantomData<R>);
+
+pub struct MathRand<R, P> {
+    rng_state: R,
+    builder: P,
+}
+
+impl MathRand<(), ()> {
+    pub fn empty_with<R>(state: RootCell<R>) -> MathRand<RootCell<R>, ()> {
+        MathRand {
+            rng_state: state,
+            builder: (),
+        }
+    }
+
+    pub fn empty_from_entropy<R>() -> MathRand<DelayInit<R>, ()> {
+        MathRand {
+            rng_state: DelayInit(PhantomData),
+            builder: (),
+        }
+    }
+
+    pub fn empty_with_xoshiro() -> MathRand<DelayInit<rand_xoshiro::Xoshiro256StarStar>, ()> {
+        MathRand::empty_from_entropy()
+    }
+
+    pub fn empty_with_chacha() -> MathRand<DelayInit<rand_chacha::ChaCha12Rng>, ()> {
+        MathRand::empty_from_entropy()
+    }
+
+    pub fn empty() -> MathRand<DelayInit<rand_xoshiro::Xoshiro256StarStar>, ()> {
+        MathRand::empty_with_xoshiro()
+    }
+
+    pub fn full_with<R, Ty>(
+        state: RootCell<R>,
+    ) -> MathRand<RootCell<R>, impl TableEntryEx<Ty, RootCell<R>>>
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        R: rand::Rng + rand::SeedableRng + 'static,
+    {
+        use crate::std::math;
+
+        MathRand::empty_with(state)
+            .include(math::random)
+            .include(math::randomseed)
+    }
+
+    pub fn full_from_entropy<R, Ty>() -> MathRand<DelayInit<R>, impl TableEntryEx<Ty, RootCell<R>>>
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        R: rand::Rng + rand::SeedableRng + 'static,
+    {
+        use crate::std::math;
+
+        MathRand::empty_from_entropy()
+            .include(math::random)
+            .include(math::randomseed)
+    }
+
+    pub fn full_with_xoshiro<Ty>() -> MathRand<
+        DelayInit<rand_xoshiro::Xoshiro256StarStar>,
+        impl TableEntryEx<Ty, RootCell<rand_xoshiro::Xoshiro256StarStar>>,
+    >
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    {
+        MathRand::full_from_entropy()
+    }
+
+    pub fn full_with_chacha<Ty>() -> MathRand<
+        DelayInit<rand_chacha::ChaCha12Rng>,
+        impl TableEntryEx<Ty, RootCell<rand_chacha::ChaCha12Rng>>,
+    >
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    {
+        MathRand::full_from_entropy()
+    }
+
+    pub fn full<Ty>() -> MathRand<
+        DelayInit<rand_xoshiro::Xoshiro256StarStar>,
+        impl TableEntryEx<Ty, RootCell<rand_xoshiro::Xoshiro256StarStar>>,
+    >
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    {
+        MathRand::full_with_xoshiro()
+    }
+}
+
+impl<R, P> MathRand<R, P> {
+    pub fn include<T>(self, part: T) -> MathRand<R, (P, T)> {
+        let MathRand { rng_state, builder } = self;
+
+        MathRand {
+            rng_state,
+            builder: (builder, part),
+        }
+    }
+}
+
+impl<Ty, R, P> TableEntry<Ty> for MathRand<RootCell<R>, P>
+where
+    Ty: Types,
+    P: TableEntryEx<Ty, RootCell<R>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        use rt::gc::LuaPtr;
+        use rt::value::{KeyValue, TableIndex, Value};
+
+        let key = core.gc.intern("math".into());
+        let key = KeyValue::String(LuaPtr(key.downgrade()));
+        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
+            core.gc.upgrade(ptr).unwrap()
+        } else {
+            core.gc.alloc_cell(Default::default())
+        };
+
+        let MathRand {
+            mut rng_state,
+            builder,
+        } = self;
+
+        builder.build(&local_table, core, &mut rng_state);
+
+        let value = Value::Table(LuaPtr(local_table.downgrade()));
+        core.gc[table].set(key, value);
+    }
+}
+
+impl<Ty, R, P> TableEntry<Ty> for MathRand<DelayInit<R>, P>
+where
+    Ty: Types,
+    P: TableEntryEx<Ty, RootCell<R>>,
+    R: Trace + rand::SeedableRng,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        use rt::gc::LuaPtr;
+        use rt::value::{KeyValue, TableIndex, Value};
+
+        let key = core.gc.intern("math".into());
+        let key = KeyValue::String(LuaPtr(key.downgrade()));
+        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
+            core.gc.upgrade(ptr).unwrap()
+        } else {
+            core.gc.alloc_cell(Default::default())
+        };
+
+        let MathRand {
+            rng_state: _,
+            builder,
+        } = self;
+        let mut rng_state = core.gc.alloc_cell(R::from_entropy());
+
+        builder.build(&local_table, core, &mut rng_state);
 
         let value = Value::Table(LuaPtr(local_table.downgrade()));
         core.gc[table].set(key, value);

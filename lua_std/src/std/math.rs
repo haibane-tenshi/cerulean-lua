@@ -28,7 +28,7 @@ use rt::gc::LuaPtr;
 use rt::runtime::Core;
 use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
 
-use crate::traits::{RootTable, TableEntry};
+use crate::traits::{RootTable, TableEntry, TableEntryEx};
 
 /// Compute absolute value of a number.
 ///
@@ -50,7 +50,7 @@ impl<Ty> TableEntry<Ty> for abs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::abs();
         let key = core.gc.intern("abs".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -85,7 +85,7 @@ impl<Ty> TableEntry<Ty> for acos
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::acos();
         let key = core.gc.intern("acos".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -119,7 +119,7 @@ impl<Ty> TableEntry<Ty> for asin
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::asin();
         let key = core.gc.intern("asin".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -156,7 +156,7 @@ impl<Ty> TableEntry<Ty> for atan
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::atan();
         let key = core.gc.intern("atan".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -190,7 +190,7 @@ impl<Ty> TableEntry<Ty> for ceil
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::ceil();
         let key = core.gc.intern("ceil".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -222,7 +222,7 @@ impl<Ty> TableEntry<Ty> for cos
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::cos();
         let key = core.gc.intern("cos".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -254,7 +254,7 @@ impl<Ty> TableEntry<Ty> for deg
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::deg();
         let key = core.gc.intern("deg".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -286,7 +286,7 @@ impl<Ty> TableEntry<Ty> for exp
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::exp();
         let key = core.gc.intern("exp".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -320,7 +320,7 @@ impl<Ty> TableEntry<Ty> for floor
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::floor();
         let key = core.gc.intern("floor".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -357,7 +357,7 @@ impl<Ty> TableEntry<Ty> for fmod
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::fmod();
         let key = core.gc.intern("fmod".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -385,7 +385,7 @@ impl<Ty> TableEntry<Ty> for huge
 where
     Ty: Types,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("huge".into());
         let value = f64::INFINITY;
 
@@ -417,7 +417,7 @@ impl<Ty> TableEntry<Ty> for log
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::log();
         let key = core.gc.intern("log".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -448,7 +448,7 @@ impl<Ty> TableEntry<Ty> for max
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::max();
         let key = core.gc.intern("max".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -476,7 +476,7 @@ impl<Ty> TableEntry<Ty> for maxinteger
 where
     Ty: Types,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("maxinteger".into());
         let value = i64::MAX;
 
@@ -503,7 +503,7 @@ impl<Ty> TableEntry<Ty> for min
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::min();
         let key = core.gc.intern("min".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -531,7 +531,7 @@ impl<Ty> TableEntry<Ty> for mininteger
 where
     Ty: Types,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("mininteger".into());
         let value = i64::MIN;
 
@@ -562,7 +562,7 @@ impl<Ty> TableEntry<Ty> for modf
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::modf();
         let key = core.gc.intern("modf".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -590,7 +590,7 @@ impl<Ty> TableEntry<Ty> for pi
 where
     Ty: Types,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let key = core.gc.intern("pi".into());
         let value = std::f64::consts::PI;
 
@@ -621,7 +621,7 @@ impl<Ty> TableEntry<Ty> for rad
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::rad();
         let key = core.gc.intern("rad".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -675,26 +675,47 @@ where
 ///
 ///     See [`MathRand`] documentation for more information about defaults and pointers for custom configuration.
 #[expect(non_camel_case_types)]
-pub struct random<R>(RootCell<R>);
+pub struct random;
 
-impl<R> random<R> {
+impl random {
     /// Use provided RNG state.
     ///
     /// The state is expected to be shared with [`randomseed`].
-    pub fn with_state(rng_state: RootCell<R>) -> Self {
-        Self(rng_state)
+    pub fn with_state<R, Ty>(rng_state: RootCell<R>) -> impl TableEntry<Ty>
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        R: rand::Rng + 'static,
+    {
+        struct RandomWith<R>(RootCell<R>);
+
+        impl<Ty, R> TableEntry<Ty> for RandomWith<R>
+        where
+            Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+            R: rand::Rng + 'static,
+        {
+            fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+                let fn_body = crate::ffi::math::random(self.0);
+                let key = core.gc.intern("random".into());
+                let callback = core.gc.alloc_cell(boxed(fn_body));
+
+                core.gc[table].set(
+                    KeyValue::String(LuaPtr(key.downgrade())),
+                    Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+                );
+            }
+        }
+
+        RandomWith(rng_state)
     }
 }
 
-impl<Ty, R> TableEntry<Ty> for random<R>
+impl<Ty, R> TableEntryEx<Ty, RootCell<R>> for random
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
     R: rand::Rng + 'static,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
-        let random(rng_state) = self;
-
-        let fn_body = crate::ffi::math::random(rng_state);
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, rng_state: &mut RootCell<R>) {
+        let fn_body = crate::ffi::math::random(rng_state.clone());
         let key = core.gc.intern("random".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
 
@@ -706,26 +727,47 @@ where
 }
 
 #[expect(non_camel_case_types)]
-pub struct randomseed<R>(RootCell<R>);
+pub struct randomseed;
 
-impl<R> randomseed<R> {
+impl randomseed {
     /// Use provided RNG state.
     ///
     /// The state is expected to be shared with [`random`].
-    pub fn with_state(rng_state: RootCell<R>) -> Self {
-        Self(rng_state)
+    pub fn with_state<R, Ty>(rng_state: RootCell<R>) -> impl TableEntry<Ty>
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        R: rand::SeedableRng + 'static,
+    {
+        struct RandomseedWith<R>(RootCell<R>);
+
+        impl<Ty, R> TableEntry<Ty> for RandomseedWith<R>
+        where
+            Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+            R: rand::SeedableRng + 'static,
+        {
+            fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+                let fn_body = crate::ffi::math::randomseed(self.0);
+                let key = core.gc.intern("randomseed".into());
+                let callback = core.gc.alloc_cell(boxed(fn_body));
+
+                core.gc[table].set(
+                    KeyValue::String(LuaPtr(key.downgrade())),
+                    Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+                );
+            }
+        }
+
+        RandomseedWith(rng_state)
     }
 }
 
-impl<Ty, R> TableEntry<Ty> for randomseed<R>
+impl<Ty, R> TableEntryEx<Ty, RootCell<R>> for randomseed
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
     R: rand::SeedableRng + 'static,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
-        let randomseed(rng_state) = self;
-
-        let fn_body = crate::ffi::math::randomseed(rng_state);
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, rng_state: &mut RootCell<R>) {
+        let fn_body = crate::ffi::math::randomseed(rng_state.clone());
         let key = core.gc.intern("randomseed".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
 
@@ -756,7 +798,7 @@ impl<Ty> TableEntry<Ty> for sin
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::sin();
         let key = core.gc.intern("sin".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -789,7 +831,7 @@ impl<Ty> TableEntry<Ty> for sqrt
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::sqrt();
         let key = core.gc.intern("sqrt".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -821,7 +863,7 @@ impl<Ty> TableEntry<Ty> for tan
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::tan();
         let key = core.gc.intern("tan".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -854,7 +896,7 @@ impl<Ty> TableEntry<Ty> for tointeger
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::tointeger();
         let key = core.gc.intern("tointeger".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -881,7 +923,7 @@ impl<Ty> TableEntry<Ty> for type_
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::type_();
         let key = core.gc.intern("type_".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
@@ -917,7 +959,7 @@ impl<Ty> TableEntry<Ty> for ult
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut ()) {
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::math::ult();
         let key = core.gc.intern("ult".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
