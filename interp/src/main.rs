@@ -56,8 +56,8 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
-            use lua_std::std;
             use lua_std::Std;
+            use lua_std::{lib, std};
             use rt::builtins::coerce::CustomPolicy;
             use rt::chunk_cache::VecCache;
             use rt::gc::{Heap, LuaPtr};
@@ -95,7 +95,8 @@ fn main() -> Result<()> {
                 .include(std::select)
                 .include(std::tonumber)
                 .include(std::type_)
-                .include(std::warn);
+                .include(std::warn)
+                .include(lib::Math::full());
 
             runtime.include(env);
 
