@@ -1,3 +1,5 @@
+pub mod math;
+
 use std::fmt::Display;
 use std::path::PathBuf;
 
@@ -26,9 +28,9 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_assert = crate::ffi::assert();
+        let fn_body = crate::ffi::assert();
         let key = core.alloc_string("assert".into());
-        let callback = core.gc.alloc_cell(boxed(fn_assert));
+        let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[value].set(
             KeyValue::String(LuaPtr(key.downgrade())),

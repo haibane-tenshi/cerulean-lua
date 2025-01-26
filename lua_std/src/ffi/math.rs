@@ -35,6 +35,10 @@ use rt::value::Types;
 /// * `(x: float) -> float`
 ///
 /// Returns the maximum value between `x` and `-x`. (integer/float)
+///
+/// # Implementation-specific behavior
+///
+/// * See [`i64::abs`] for details on behavior on overflow.
 pub fn abs<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,
