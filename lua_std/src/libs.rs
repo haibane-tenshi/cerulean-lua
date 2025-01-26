@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 use gc::{RootCell, Trace};
-use rt::ffi::DLuaFfi;
 use rt::plugin::Plugin;
 use rt::runtime::{Core, Runtime};
 use rt::value::Types;
@@ -51,7 +50,7 @@ where
 /// This library module will use table under `math` key in parent table or construct a new one otherwise.
 /// All included items will be put into the table, potentially overriding existing entries.
 ///
-/// [`Math::full`] will construct a table including all functions from [Lua std's `math` library][lua#6.7]
+/// [`Math::full`] will construct module introducing all math APIs included into [Lua std's math library][lua#6.7]
 /// except `random` and `randomseed` which exist in a dedicated [`MathRand`] module.
 /// Read below for full list of provided APIs.
 ///
@@ -121,8 +120,10 @@ impl Math<()> {
     /// All included items will be put into the table, potentially overriding existing entries.
     ///
     /// Table entries can included using [`include`](Math::include) method.
-    pub fn empty() -> Self {
-        Math(())
+    pub fn empty() -> Math<empty::Empty> {
+        use empty::Empty;
+
+        Math(Empty(()))
     }
 
     /// Construct module introducing all math APIs included into [Lua std's math library][lua#6.7] excluding random number generation.
@@ -133,38 +134,10 @@ impl Math<()> {
     /// See [provided APIs](Math#provided-apis) for full list.
     ///
     /// [lua#6.7]: https://www.lua.org/manual/5.4/manual.html#6.7
-    pub fn full<Ty>() -> Math<impl TableEntry<Ty>>
-    where
-        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
-    {
-        use crate::std::math;
+    pub fn full() -> Math<math::Full> {
+        use math::Full;
 
-        Math::empty()
-            .include(math::abs)
-            .include(math::acos)
-            .include(math::asin)
-            .include(math::atan)
-            .include(math::cos)
-            .include(math::sin)
-            .include(math::tan)
-            .include(math::ceil)
-            .include(math::floor)
-            .include(math::deg)
-            .include(math::rad)
-            .include(math::exp)
-            .include(math::log)
-            .include(math::sqrt)
-            .include(math::fmod)
-            .include(math::modf)
-            .include(math::ult)
-            .include(math::tointeger)
-            .include(math::type_)
-            .include(math::max)
-            .include(math::min)
-            .include(math::huge)
-            .include(math::maxinteger)
-            .include(math::mininteger)
-            .include(math::pi)
+        Math(Full(()))
     }
 }
 
@@ -690,6 +663,54 @@ mod empty {
             _core: &mut rt::runtime::Core<Ty>,
             _: &mut Ex,
         ) {
+        }
+    }
+}
+
+mod math {
+    use crate::traits::TableEntry;
+    use rt::ffi::DLuaFfi;
+    use rt::value::Types;
+
+    #[doc(hidden)]
+    pub struct Full(pub(crate) ());
+
+    impl<Ty> TableEntry<Ty> for Full
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    {
+        fn build(self, table: &crate::traits::RootTable<Ty>, core: &mut rt::runtime::Core<Ty>) {
+            use crate::std::math;
+
+            math::mininteger.build(table, core);
+            math::maxinteger.build(table, core);
+            math::huge.build(table, core);
+            math::pi.build(table, core);
+
+            math::floor.build(table, core);
+            math::ceil.build(table, core);
+            math::modf.build(table, core);
+            math::tointeger.build(table, core);
+
+            math::type_.build(table, core);
+            math::min.build(table, core);
+            math::max.build(table, core);
+            math::fmod.build(table, core);
+            math::ult.build(table, core);
+
+            math::sin.build(table, core);
+            math::cos.build(table, core);
+            math::tan.build(table, core);
+            math::asin.build(table, core);
+            math::acos.build(table, core);
+            math::atan.build(table, core);
+            math::deg.build(table, core);
+            math::rad.build(table, core);
+
+            math::abs.build(table, core);
+            math::sqrt.build(table, core);
+            math::exp.build(table, core);
+            math::log.build(table, core);
         }
     }
 }
