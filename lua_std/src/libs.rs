@@ -68,6 +68,13 @@ where
 ///     );
 /// ```
 ///
+/// # From Lua documentation
+///
+/// This library provides basic mathematical functions.
+/// It provides all its functions and constants inside the table `math`.
+/// Functions with the annotation "integer/float" give integer results for integer arguments and float results for non-integer arguments.
+/// The rounding functions `math.ceil`, `math.floor`, and `math.modf` return an integer when the result fits in the range of an integer, or a float otherwise.
+///
 /// # Provided APIs
 ///
 /// **Constants:**
