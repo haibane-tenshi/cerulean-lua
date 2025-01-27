@@ -1,4 +1,5 @@
 pub mod math;
+pub mod table;
 
 use std::error::Error;
 use std::fmt::{Debug, Display};
