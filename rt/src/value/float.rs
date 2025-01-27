@@ -32,7 +32,7 @@ impl Display for Float {
 }
 
 impl From<Int> for Float {
-    /// Convert integer to float in Lua sense.
+    /// Coerce integer to float as Lua understands it.
     ///
     /// [Lua specifies][lua#3.4.3] that conversion results in
     /// * exact float representation if possible
@@ -44,10 +44,12 @@ impl From<Int> for Float {
     /// We take liberty in implementation and give it the same semantics
     /// as Rust's [int-to-float casts][rust_ref#numeric-cast].
     ///
+    /// See also [`coerce::int_to_flt`](crate::builtins::coerce::int_to_flt).
+    ///
     /// [lua#3.4.3]: https://www.lua.org/manual/5.4/manual.html#3.4.3
     /// [rust_ref#numeric-cast]: https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#numeric-cast
     fn from(value: Int) -> Self {
-        Float(value.0 as f64)
+        crate::builtins::coerce::int_to_flt(value)
     }
 }
 

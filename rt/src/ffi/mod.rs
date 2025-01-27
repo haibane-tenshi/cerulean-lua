@@ -406,9 +406,7 @@ where
     <F as LuaFfi<Ty>>::Delegate: 'static,
     <F as LuaFfi<Ty>>::UnpinDelegate: 'static,
 {
-    let inner = BoxedLuaFfiFn { value: f };
-
-    Box::new(inner)
+    Box::new(dyn_ffi(f))
 }
 
 #[derive(Trace)]
@@ -439,7 +437,7 @@ where
     }
 }
 
-pub fn dyn_ffi<F, Ty>(f: F) -> impl DLuaFfi<Ty>
+pub fn dyn_ffi<F, Ty>(f: F) -> impl DLuaFfi<Ty> + 'static
 where
     Ty: Types,
     F: LuaFfi<Ty> + 'static,

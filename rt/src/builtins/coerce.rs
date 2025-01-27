@@ -659,3 +659,41 @@ mod sealed {
 
     impl Sealed for super::CustomPolicy {}
 }
+
+use crate::value::{Float, Int};
+
+/// Coerce integer to float as Lua understands it.
+///
+/// [Lua specifies][lua#3.4.3] that conversion results in
+/// * exact float representation if possible
+/// * otherwise nearest lower *or* nearest higher representable value
+///
+/// # Note
+/// Specification seems to be ambiguous in this case,
+/// it doesn't specify *the nearest* but *either of*.
+/// We take liberty in implementation and give it the same semantics
+/// as Rust's [int-to-float casts][rust_ref#numeric-cast].
+///
+/// This method also provided as [`From<Int>`](Float#impl-From<Int>-for-Float) impl for `Float`.
+///
+/// [lua#3.4.3]: https://www.lua.org/manual/5.4/manual.html#3.4.3
+/// [rust_ref#numeric-cast]: https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#numeric-cast
+pub fn int_to_flt(value: Int) -> Float {
+    Float(value.0 as f64)
+}
+
+/// Coerce integer to string.
+///
+/// Not particular properties about output are promised except it being human-readable.
+/// Use other formatting facilities to have better control over output.
+pub fn int_to_str(value: Int) -> String {
+    value.0.to_string()
+}
+
+/// Coerce float to string.
+///
+/// Not particular properties about output are promised except it being human-readable.
+/// Use other formatting facilities to have better control over output.
+pub fn flt_to_str(value: Float) -> String {
+    value.0.to_string()
+}
