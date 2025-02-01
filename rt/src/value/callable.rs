@@ -4,6 +4,7 @@ use std::hash::Hash;
 use gc::Trace;
 
 use super::{Refs, Strong, Types, Value, Weak};
+use crate::error::AlreadyDroppedError;
 use crate::ffi::arg_parser::TypeMismatchError;
 use crate::gc::Heap;
 
@@ -28,13 +29,19 @@ where
     pub fn upgrade(self, heap: &Heap<Ty>) -> Option<StrongCallable<Ty>> {
         let r = match self {
             Callable::Rust(t) => Callable::Rust(t.upgrade(heap)?),
-            Callable::Lua(t) => {
-                let t = t.upgrade(heap)?;
-                Callable::Lua(t)
-            }
+            Callable::Lua(t) => Callable::Lua(t.upgrade(heap)?),
         };
 
         Some(r)
+    }
+
+    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<StrongCallable<Ty>, AlreadyDroppedError> {
+        let r = match self {
+            Callable::Rust(t) => Callable::Rust(t.try_upgrade(heap)?),
+            Callable::Lua(t) => Callable::Lua(t.try_upgrade(heap)?),
+        };
+
+        Ok(r)
     }
 }
 
