@@ -6,15 +6,16 @@ use std::path::PathBuf;
 
 use gc::Trace;
 
-use super::{Concat, Len};
+use super::{Concat, Int, Len};
 use crate::ffi::arg_parser::ParseFrom;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Trace)]
 pub struct PossiblyUtf8Vec(pub Vec<u8>);
 
 impl Len for PossiblyUtf8Vec {
-    fn len(&self) -> usize {
-        self.0.len()
+    fn len(&self) -> Int {
+        let len = self.0.len();
+        Int(len.try_into().unwrap())
     }
 }
 

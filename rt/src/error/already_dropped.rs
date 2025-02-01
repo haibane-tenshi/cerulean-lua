@@ -20,7 +20,7 @@ impl Display for AlreadyDroppedError {
 
 impl Error for AlreadyDroppedError {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum AlreadyDroppedOr<E> {
     Dropped(AlreadyDroppedError),
     Other(E),

@@ -18,8 +18,8 @@
 //! When metamethod fails Lua raises an error.
 //!
 //! Methods inside this module cover the first two steps:
-//! * [`raw`](self::raw) module provides raw operations disregarding possible coercions.
-//! * [`coerce`](self::coerce) module provides methods for controlling and performing type coercions in various situations.
+//! * [`raw`] module provides raw operations disregarding possible coercions.
+//! * [`coerce`] module provides methods for controlling and performing type coercions in various situations.
 //!
 //! The last step requires access to runtime (for obvious reasons), but there are a few helper methods to assist you in the task.
 //!
@@ -111,7 +111,7 @@ where
 pub fn prepare_invoke<Ty>(
     callable: Value<Weak, Ty>,
     stack: TransientStackGuard<'_, Ty>,
-    heap: &mut Heap<Ty>,
+    heap: &Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
 ) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError<Ty>>>
 where
@@ -120,10 +120,9 @@ where
     use crate::gc::LuaPtr;
     use crate::runtime::thread::frame::BuiltinMetamethod;
 
-    let s = heap
-        .intern(BuiltinMetamethod::Call.to_str().into())
-        .downgrade();
-    let key = KeyValue::String(LuaPtr(s));
+    let key = heap
+        .find_interned(&BuiltinMetamethod::Call.to_str().into())
+        .map(|s| KeyValue::String(LuaPtr(s.downgrade())));
 
     inner_prepare_invoke(callable, stack, heap, registry, key).map_err(|err| match err {
         AlreadyDroppedOr::Dropped(err) => AlreadyDroppedOr::Dropped(err),
@@ -139,43 +138,57 @@ pub(crate) fn inner_prepare_invoke<Ty>(
     mut stack: TransientStackGuard<'_, Ty>,
     heap: &Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
-    key: KeyValue<Weak, Ty>,
+    key: Option<KeyValue<Weak, Ty>>,
 ) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<InnerNotCallableError>>
 where
     Ty: Types,
 {
+    use crate::gc::TryGet;
     use crate::value::TableIndex;
     use repr::index::StackSlot;
 
     let starting_len = stack.len();
 
-    let err = loop {
-        callable = match callable {
-            Value::Function(callable) => {
-                return callable.upgrade(heap).ok_or(AlreadyDroppedError.into())
-            }
-            t => t,
-        };
-
-        let Some(metatable) = callable.metatable(heap, registry)? else {
-            continue;
-        };
-        let metavalue = heap.get(metatable).ok_or(AlreadyDroppedError)?.get(&key);
-
-        // Keys associated with nil are not considered part of the table.
-        if metavalue == Value::Nil {
-            break InnerNotCallableError;
+    let mut inner = || {
+        if let Value::Function(callable) = callable {
+            return Ok(callable.try_upgrade(heap)?);
         }
 
-        stack.insert(StackSlot(0), callable);
-        callable = metavalue;
+        let not_callable = AlreadyDroppedOr::Other(InnerNotCallableError);
+
+        let Some(key) = key else {
+            return Err(not_callable);
+        };
+
+        loop {
+            callable = match callable {
+                Value::Function(callable) => break Ok(callable.try_upgrade(heap)?),
+                t => t,
+            };
+
+            let metatable = callable.metatable(heap, registry)?.ok_or(not_callable)?;
+            let metavalue = heap.try_get(metatable)?.get(&key);
+
+            // Keys associated with nil are not considered part of the table.
+            if metavalue == Value::Nil {
+                break Err(not_callable);
+            }
+
+            stack.insert(StackSlot(0), callable);
+            callable = metavalue;
+        }
     };
 
-    // We failed to find callable, remove everything that was put on the stack.
-    let end = StackSlot(stack.len() - starting_len);
-    stack.drain(..end);
+    let r = inner();
 
-    Err(AlreadyDroppedOr::Other(err))
+    if r.is_err() {
+        // We failed to find callable, remove everything that was put on the stack.
+        let end = StackSlot(stack.len() - starting_len);
+        stack.drain(..end);
+    }
+
+    r
 }
 
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct InnerNotCallableError;

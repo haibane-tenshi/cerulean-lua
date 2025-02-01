@@ -1,3 +1,32 @@
+//! Raw operations on Lua [`Value`]s.
+//!
+//! Lua behavior when evaluating basic ops can be separated into three steps:
+//!
+//! 1. coercion
+//! 2. **raw builtins** *<- you are here*
+//! 3. metamethod call
+//!
+//! Methods within this module correspond to the second step.
+//!
+//! Generally speaking there are only two reasons for you to reach to this module.
+//!
+//! First, you may want to implement Lua ops behavior from basic bits.
+//! Actually, APIs provided here is exactly what backs runtime behavior.
+//!
+//! Second, you may want to *test whether op can be performed without calling a metamethod*.
+//! Using metamethods is an involved process:
+//! you need to inspect relevant metatables of involved inputs,
+//! resolve entry using correct metamethod name, arrange call stack,
+//! perform actual request to runtime,
+//! and when it is evaluated clean up return values according to op semantics.
+//! Normally it is recommended that you delegate all this work to methods from [`builtins::full`](crate::builtins::full) module.
+//!
+//! However, those methods themselves need to be invoked inside runtime.
+//! Sometimes this behavior can be superfluous, especially if you know that op is unlikely to require metamethod.
+//! This is when functions inside this module can become handy.
+//! Their return type contains `ControlFlow<MetamethodRequired, _>`,
+//! so when you receive `Continue(_)` you can be assured that it is exactly what the op is supposed to evaluate to.
+
 use std::cmp::Ordering;
 use std::hash::Hash;
 use std::ops::ControlFlow;
@@ -8,8 +37,9 @@ use repr::opcode::{BinOp as BinaryOp, UnaOp as UnaryOp};
 
 use crate::error::AlreadyDroppedError;
 use crate::gc::Heap;
-use crate::value::{Refs, Types, Value, WeakValue};
+use crate::value::{Int, Refs, Types, Value, WeakValue};
 
+/// Operation cannot be resolved using raw builtin behavior and require a metamethod call.
 #[derive(Debug)]
 pub struct MetamethodRequired;
 
@@ -550,17 +580,42 @@ where
 pub fn len<Ty>(
     args: [WeakValue<Ty>; 1],
     heap: &Heap<Ty>,
-) -> Result<ControlFlow<MetamethodRequired, usize>, AlreadyDroppedError>
+) -> Result<ControlFlow<MetamethodRequired, Int>, AlreadyDroppedError>
 where
     Ty: Types,
 {
-    use crate::error::AlreadyDroppedError;
-    use crate::value::Len;
+    use crate::gc::{LuaPtr, TryGet};
+    use crate::value::{KeyValue, Len, Metatable, TableIndex};
 
     match args {
-        [Value::String(val)] => {
-            let val = heap.get(val.0).ok_or(AlreadyDroppedError)?;
-            Ok(Continue(val.len()))
+        [Value::String(LuaPtr(ptr))] => {
+            let res = heap.try_get(ptr)?;
+            Ok(Continue(res.len()))
+        }
+        [Value::Table(LuaPtr(ptr))] => {
+            use crate::runtime::thread::frame::BuiltinMetamethod;
+
+            // Check if table has __len metamethod.
+
+            let table = heap.try_get(ptr)?;
+            let has_len = if let Some(meta) = table.metatable() {
+                let meta = heap.try_get(*meta)?;
+                let key: Ty::String = BuiltinMetamethod::Len.to_str().into();
+                if let Some(key) = heap.find_interned(&key) {
+                    let key = KeyValue::String(LuaPtr(key.downgrade()));
+                    meta.contains_key(&key)
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if has_len {
+                Ok(Break(MetamethodRequired))
+            } else {
+                Ok(Continue(table.len()))
+            }
         }
         _ => Ok(Break(MetamethodRequired)),
     }
@@ -587,12 +642,7 @@ where
     match op {
         AriNeg => Ok(neg(args)),
         BitNot => Ok(bit_not(args)),
-        StrLen => len(args, heap).map(|ctrl| {
-            ctrl.map_continue(|value| {
-                let r = value.try_into().unwrap();
-                Value::Int(r)
-            })
-        }),
+        StrLen => len(args, heap).map(|ctrl| ctrl.map_continue(Into::into)),
         LogNot => Ok(Continue(Value::Bool(log_not(args)))),
     }
 }

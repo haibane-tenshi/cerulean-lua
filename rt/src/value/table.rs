@@ -6,7 +6,8 @@ use gc::Trace;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::{Meta, Metatable, Refs, TableIndex, Type, Types, Value};
+use super::traits::Len;
+use super::{Int, Meta, Metatable, Refs, TableIndex, Type, Types, Value};
 use crate::error::InvalidKeyError;
 
 pub struct Table<Rf, Ty>
@@ -78,6 +79,17 @@ where
         (0..)
             .find(|&i| !self.data.contains_key(&KeyValue::Int(i + 1)))
             .unwrap_or(i64::MAX)
+    }
+}
+
+impl<Rf, Ty> Len for Table<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+    KeyValue<Rf, Ty>: Ord,
+{
+    fn len(&self) -> Int {
+        Int(self.border())
     }
 }
 

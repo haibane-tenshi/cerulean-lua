@@ -1039,7 +1039,7 @@ where
             stack,
             &self.core.gc,
             &self.core.metatable_registry,
-            key,
+            Some(key),
         )
     }
 

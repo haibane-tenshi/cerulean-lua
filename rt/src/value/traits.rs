@@ -80,7 +80,7 @@ use gc::{Gc, GcCell, Interned, Root, RootCell, Trace};
 
 use super::string::{FromEncoding, IntoEncoding, PossiblyUtf8Vec};
 use super::userdata::{DefaultParams, FullUserdata};
-use super::{KeyValue, Value};
+use super::{Int, KeyValue, Value};
 use crate::ffi::DLuaFfi;
 use crate::gc::{Heap, LuaPtr};
 use crate::runtime::Closure;
@@ -124,7 +124,7 @@ pub trait Types: Sized + 'static {
     type String: Trace + Concat + Len + Clone + Ord + Hash + IntoEncoding + FromEncoding;
     type LuaClosure: Trace;
     type RustClosure: Trace;
-    type Table: Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
+    type Table: Len + Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
     type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
         + Allocated<Heap<Self>>
         + ?Sized;
@@ -174,21 +174,23 @@ pub trait Pow<Rhs = Self>: Sized {
 }
 
 pub trait Len {
-    fn len(&self) -> usize;
+    fn len(&self) -> Int;
     fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.len() == Int(0)
     }
 }
 
 impl Len for String {
-    fn len(&self) -> usize {
-        String::len(self)
+    fn len(&self) -> Int {
+        let len = String::len(self);
+        Int(len.try_into().unwrap())
     }
 }
 
 impl Len for Vec<u8> {
-    fn len(&self) -> usize {
-        Vec::len(self)
+    fn len(&self) -> Int {
+        let len = Vec::len(self);
+        Int(len.try_into().unwrap())
     }
 }
 
