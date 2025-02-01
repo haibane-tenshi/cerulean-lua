@@ -119,7 +119,7 @@ impl<T> InternedStore<T> {
 }
 
 impl<T> InternedStore<T> {
-    fn find<U>(&self, value: &U) -> Option<(Addr, Counter)>
+    pub(crate) fn find<U>(&self, value: &U) -> Option<(Addr, Counter)>
     where
         U: Hash + Eq + ?Sized,
         T: Borrow<U>,

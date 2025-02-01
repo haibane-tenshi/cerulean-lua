@@ -606,6 +606,20 @@ where
         Ok(Root::new(addr, ty, counter))
     }
 
+    pub fn find_interned<U, T>(&self, value: &U) -> Option<Root<Interned<T>>>
+    where
+        U: Hash + Eq + ?Sized,
+        T: Borrow<U> + 'static,
+    {
+        let type_id = TypeId::of::<Interned<T>>();
+        let ty = *self.type_map.get(&type_id)?;
+        let arena = self.arena(ty)?;
+        let arena: &InternedStore<T> = arena.downcast_ref().unwrap();
+        let (addr, counter) = arena.find(value)?;
+
+        Some(Root::new(addr, ty, counter))
+    }
+
     /// Get `&T` out of weak reference such as [`GcCell`] or [`Gc`].
     ///
     /// This function will also accept [`RootCell`] and [`Root`],
