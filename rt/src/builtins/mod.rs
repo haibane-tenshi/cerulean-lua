@@ -64,49 +64,16 @@
 pub mod coerce;
 pub mod full;
 pub mod raw;
+pub mod table;
 
 use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, NotCallableError};
 use crate::gc::Heap;
 use crate::runtime::thread::TransientStackGuard;
 use crate::runtime::MetatableRegistry;
-use crate::value::{Callable, KeyValue, Strong, Types, Value, Weak, WeakValue};
+use crate::value::{Callable, KeyValue, Strong, Types, Value, Weak};
 
-/// Resolve metavalue out of a list of values.
-///
-/// This method will seek metavalue with specified key inside metatables for provided values.
-/// Values will be checked in order, concluding with the first non-`nil` metavalue produced.
-/// `nil` will be returned if no suitable metavalue is resolved.
-///
-/// This method will error-out if any value or metatable is already garbage-collected.
-pub fn find_metavalue<Ty>(
-    values: impl IntoIterator<Item = WeakValue<Ty>>,
-    key: KeyValue<Weak, Ty>,
-    heap: &Heap<Ty>,
-    registry: &MetatableRegistry<Ty::Table>,
-) -> Result<WeakValue<Ty>, AlreadyDroppedError>
-where
-    Ty: Types,
-{
-    values
-        .into_iter()
-        .find_map(|value| {
-            use crate::value::{TableIndex, Value};
-
-            let metatable = match value.metatable(heap, registry) {
-                Err(err) => return Some(Err(err)),
-                Ok(None) => return None,
-                Ok(Some(mt)) => mt,
-            };
-            let metatable = heap.get(metatable)?;
-
-            match metatable.get(&key) {
-                Value::Nil => None,
-                value => Some(Ok(value)),
-            }
-        })
-        .transpose()
-        .map(Option::unwrap_or_default)
-}
+// Temporary reexport.
+pub use table::find_metavalue;
 
 pub fn prepare_invoke<Ty>(
     callable: Value<Weak, Ty>,

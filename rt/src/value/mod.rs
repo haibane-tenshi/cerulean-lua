@@ -188,6 +188,9 @@ impl Display for SolitaryType {
 pub type StrongValue<Ty> = Value<Strong, Ty>;
 pub type WeakValue<Ty> = Value<Weak, Ty>;
 
+pub type WeakKey<Ty> = KeyValue<Weak, Ty>;
+pub type StrongKey<Ty> = KeyValue<Strong, Ty>;
+
 /// Enum representing all possible Lua values.
 ///
 /// Value supports normal and alternate rendering for `Display` impl:
