@@ -627,13 +627,13 @@ where
             }
             TabGet => {
                 let args = self.stack.lua_guard().take2()?;
-                self.exec_tab_get(args)
+                self.exec_get_index(args)
                     .map_err(|err| err.map_other(Cause::TabGet))?
                     .map_br(Into::into)
             }
             TabSet => {
                 let args = self.stack.lua_guard().take3()?;
-                self.exec_tab_set(args)
+                self.exec_set_index(args)
                     .map_err(|err| err.map_other(Cause::TabSet))?
                     .map_br(Into::into)
             }
@@ -814,7 +814,7 @@ where
     }
 
     #[allow(clippy::type_complexity)]
-    fn exec_tab_get(
+    fn exec_get_index(
         &mut self,
         args: [WeakValue<Ty>; 2],
     ) -> Result<ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::TabCause>> {
@@ -863,7 +863,7 @@ where
     }
 
     #[allow(clippy::type_complexity)]
-    fn exec_tab_set(
+    fn exec_set_index(
         &mut self,
         args: [WeakValue<Ty>; 3],
     ) -> Result<ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::TabCause>> {
