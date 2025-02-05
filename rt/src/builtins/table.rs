@@ -65,9 +65,9 @@ where
 
 fn lookup_chain<'h, 'r, Ty>(
     target: WeakValue<Ty>,
-    mut key: Option<WeakKey<Ty>>,
     heap: &'h Heap<Ty>,
     registry: &'r MetatableRegistry<Ty::Table>,
+    mut key: Option<WeakKey<Ty>>,
 ) -> impl Iterator<Item = Result<LookupEntry<Ty>, AlreadyDroppedOr<LookupError<Ty>>>> + use<'h, 'r, Ty>
 where
     Ty: Types,
@@ -283,7 +283,7 @@ where
         .find_interned(&Ty::String::from(BuiltinMetamethod::Index.to_str()))
         .map(|name| Key::String(LuaPtr(name.downgrade())));
 
-    lookup_chain(target, key, heap, registry)
+    lookup_chain(target, heap, registry, key)
 }
 
 /// Produce iterator over *lookup chain* for the purpose of indexing assignment.
@@ -353,7 +353,7 @@ where
         .find_interned(&Ty::String::from(BuiltinMetamethod::NewIndex.to_str()))
         .map(|name| Key::String(LuaPtr(name.downgrade())));
 
-    lookup_chain(target, key, heap, registry)
+    lookup_chain(target, heap, registry, key)
 }
 
 /// Perform indexing retrieval on a value.
@@ -391,10 +391,31 @@ pub fn get_index<Ty>(
 where
     Ty: Types,
 {
+    use crate::gc::LuaPtr;
+    use crate::runtime::thread::frame::BuiltinMetamethod;
+
+    let index_key = heap
+        .find_interned(&Ty::String::from(BuiltinMetamethod::Index.to_str()))
+        .map(|name| Key::String(LuaPtr(name.downgrade())));
+
+    get_index_inner(target, key, heap, registry, index_key)
+}
+
+#[allow(clippy::type_complexity)]
+pub(crate) fn get_index_inner<Ty>(
+    target: WeakValue<Ty>,
+    key: WeakKey<Ty>,
+    heap: &Heap<Ty>,
+    registry: &MetatableRegistry<Ty::Table>,
+    index_key: Option<WeakKey<Ty>>,
+) -> Result<ControlFlow<WeakValue<Ty>, CallRequired<Ty>>, AlreadyDroppedOr<LookupError<Ty>>>
+where
+    Ty: Types,
+{
     use crate::gc::TryGet;
     use crate::value::{TableIndex, Value};
 
-    for entry in get_index_chain(target, heap, registry) {
+    for entry in lookup_chain(target, heap, registry, index_key) {
         match entry? {
             LookupEntry::Table(ptr) => {
                 let table = heap.try_get(ptr)?;
@@ -447,11 +468,32 @@ pub fn set_index<Ty>(
 where
     Ty: Types,
 {
+    use crate::gc::LuaPtr;
+    use crate::runtime::thread::frame::BuiltinMetamethod;
+
+    let newindex_key = heap
+        .find_interned(&Ty::String::from(BuiltinMetamethod::NewIndex.to_str()))
+        .map(|name| Key::String(LuaPtr(name.downgrade())));
+
+    set_index_inner(target, key, value, heap, registry, newindex_key)
+}
+
+pub(crate) fn set_index_inner<Ty>(
+    target: WeakValue<Ty>,
+    key: WeakKey<Ty>,
+    value: WeakValue<Ty>,
+    heap: &mut Heap<Ty>,
+    registry: &MetatableRegistry<Ty::Table>,
+    newindex_key: Option<WeakKey<Ty>>,
+) -> Result<ControlFlow<(), CallRequired<Ty>>, AlreadyDroppedOr<LookupError<Ty>>>
+where
+    Ty: Types,
+{
     use crate::gc::TryGet;
     use crate::value::{TableIndex, Value};
 
     let mut found = None;
-    for entry in set_index_chain(target, heap, registry) {
+    for entry in lookup_chain(target, heap, registry, newindex_key) {
         match entry? {
             LookupEntry::Table(ptr) => {
                 found = Some(ptr);

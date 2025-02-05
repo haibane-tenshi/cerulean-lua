@@ -18,10 +18,7 @@ use crate::chunk_cache::ChunkCache;
 use crate::error::opcode::{
     self as opcode_err, IpOutOfBounds, MissingConstId, MissingStackSlot, MissingUpvalue,
 };
-use crate::error::{
-    AlreadyDroppedError, AlreadyDroppedOr, BorrowError, MalformedClosureError, RefAccessError,
-    RuntimeError,
-};
+use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, MalformedClosureError};
 use crate::gc::{Heap, LuaPtr};
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadManagerGuard;
@@ -458,7 +455,7 @@ impl<Ty> ActiveFrame<'_, Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
 {
-    pub(crate) fn eval(&mut self) -> Result<ChangeFrame<Ty>, RefAccessOrError<opcode_err::Error>> {
+    pub(crate) fn eval(&mut self) -> Result<ChangeFrame<Ty>, AlreadyDroppedOr<opcode_err::Error>> {
         let r = loop {
             match self.step() {
                 Ok(ControlFlow::Continue(())) => (),
@@ -474,7 +471,7 @@ where
 
     pub(super) fn step(
         &mut self,
-    ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Error>> {
+    ) -> Result<ControlFlow<ChangeFrame<Ty>>, AlreadyDroppedOr<opcode_err::Error>> {
         let Some(opcode) = self.next_opcode() else {
             return Ok(ControlFlow::Break(ChangeFrame::Return(
                 self.stack.lua_guard().next_slot(),
@@ -493,7 +490,7 @@ where
     fn exec(
         &mut self,
         opcode: OpCode,
-    ) -> Result<ControlFlow<ChangeFrame<Ty>>, RefAccessOrError<opcode_err::Cause>> {
+    ) -> Result<ControlFlow<ChangeFrame<Ty>>, AlreadyDroppedOr<opcode_err::Cause>> {
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 
@@ -515,12 +512,9 @@ where
                     .ok_or(MissingStackSlot(slot))?;
                 let type_ = value.type_();
 
-                let callable = self.prepare_invoke(value, slot).map_err(|err| match err {
-                    AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
-                    AlreadyDroppedOr::Other(_) => {
-                        RefAccessOrError::Other(opcode_err::Invoke(type_).into())
-                    }
-                })?;
+                let callable = self
+                    .prepare_invoke(value, slot)
+                    .map_err(|err| err.map_other(|_| opcode_err::Invoke(type_).into()))?;
 
                 let start = slot;
 
@@ -593,20 +587,13 @@ where
             UnaOp(op) => {
                 let args = self.stack.lua_guard().take1()?;
                 self.exec_una_op(args, op)
-                    // TODO: Temporary patch, investigate necessity of RefAccessOr
-                    .map_err(|err| match err {
-                        AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
-                        AlreadyDroppedOr::Other(err) => RefAccessOrError::Other(err.into()),
-                    })?
+                    .map_err(|err| err.map_other(Into::into))?
                     .map_br(Into::into)
             }
             BinOp(op) => {
                 let args = self.stack.lua_guard().take2()?;
                 self.exec_bin_op(args, op)
-                    .map_err(|err| match err {
-                        AlreadyDroppedOr::Dropped(err) => RefAccessOrError::Dropped(err),
-                        AlreadyDroppedOr::Other(err) => RefAccessOrError::Other(err.into()),
-                    })?
+                    .map_err(|err| err.map_other(Into::into))?
                     .map_br(Into::into)
             }
             Jump { offset } => {
@@ -642,17 +629,13 @@ where
                 let args = self.stack.lua_guard().take2()?;
                 self.exec_tab_get(args)
                     .map_err(|err| err.map_other(Cause::TabGet))?
-                    .map_br(|(callable, start)| {
-                        ChangeFrame::Invoke(Some(Event::Index), callable, start)
-                    })
+                    .map_br(Into::into)
             }
             TabSet => {
                 let args = self.stack.lua_guard().take3()?;
                 self.exec_tab_set(args)
                     .map_err(|err| err.map_other(Cause::TabSet))?
-                    .map_br(|(callable, start)| {
-                        ChangeFrame::Invoke(Some(Event::NewIndex), callable, start)
-                    })
+                    .map_br(Into::into)
             }
         };
 
@@ -834,93 +817,48 @@ where
     fn exec_tab_get(
         &mut self,
         args: [WeakValue<Ty>; 2],
-    ) -> Result<
-        ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
-        RefAccessOrError<opcode_err::TabCause>,
-    > {
+    ) -> Result<ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::TabCause>> {
         use crate::builtins::coerce::CoerceArgs;
+        use crate::builtins::table::{get_index_inner, CallRequired};
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 
-        let [mut table, index] = args;
+        let [table, index] = args;
+        let coerced_index = self
+            .core
+            .dialect
+            .tab_get(index)
+            .try_into()
+            .map_err(InvalidKey)?;
+        let index_key = self.internal_cache.lookup_event(Event::Index);
 
-        'outer: loop {
-            // First: try raw table access.
-            if let Value::Table(LuaPtr(table)) = &table {
-                let index = self.core.dialect.tab_get(index);
+        match get_index_inner(
+            table,
+            coerced_index,
+            &self.core.gc,
+            &self.core.metatable_registry,
+            Some(index_key),
+        ) {
+            Ok(Break(value)) => {
+                let mut stack = self.stack.lua_guard();
+                stack.push(value);
 
-                let key = index.try_into().map_err(InvalidKey)?;
-                let table = *table;
-                let value = self
-                    .core
-                    .gc
-                    .get(table)
-                    .ok_or(AlreadyDroppedError)?
-                    .get(&key);
-
-                // It succeeds if any non-nil value is produced.
-                if value != Value::Nil {
-                    // We know that the value originated from the table in this slot.
-                    let mut stack = self.stack.lua_guard();
-                    stack.push(value);
-                    return Ok(Continue(()));
-                }
-            };
-
-            // Second: try detecting compatible metavalue
-            let key = self.internal_cache.lookup_event(Event::Index);
-
-            loop {
-                let metavalue = self
-                    .core
-                    .metatable_of(&table)?
-                    .map(|mt| {
-                        self.core
-                            .gc
-                            .get(mt)
-                            .ok_or(AlreadyDroppedError)
-                            .map(|table| table.get(&key))
-                    })
-                    .transpose()?
-                    .unwrap_or_default();
-
-                match metavalue {
-                    // Keyes associated with nil are considered to be absent from table.
-                    Value::Nil => {
-                        if matches!(table, Value::Table(_)) {
-                            // Third: Fallback to producing nil.
-                            // This can only be reached if raw table access returned nil and there is no metamethod.
-
-                            self.stack.lua_guard().push(Value::Nil);
-                            return Ok(Continue(()));
-                        } else {
-                            return Err(TableTypeMismatch(table.type_()).into());
-                        }
-                    }
-                    // Table simply goes on another spin of recursive table lookup.
-                    tab @ Value::Table(_) => {
-                        table = tab;
-                        continue 'outer;
-                    }
-                    // Function is invoked with table and *original* (before coercions!) index.
-                    // It only picks up the latest "table" value which metamethod we tried to look up.
-                    Value::Function(callable) => {
-                        let callable =
-                            callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
-                        let start = self.stack.top();
-                        let mut stack = self.stack.lua_guard();
-                        stack.push(table);
-                        stack.push(index);
-
-                        return Ok(Break((callable, start)));
-                    }
-                    // If everything fails, try to recursively lookup metamethod in the new value.
-                    // Lua affirms to ignore function-like (e.g. with __call metamethod) objects in table indexing.
-                    value => {
-                        table = value;
-                    }
-                }
+                Ok(Continue(()))
             }
+            Ok(Continue(call)) => {
+                let CallRequired { func, target } = call;
+
+                let mut stack = self.stack.lua_guard();
+                let start = stack.len();
+
+                stack.push(target);
+                stack.push(index);
+
+                let res = Invoke(Event::Index, func, StackSlot(start));
+                Ok(Break(res))
+            }
+            Err(AlreadyDroppedOr::Dropped(err)) => Err(err.into()),
+            Err(AlreadyDroppedOr::Other(err)) => Err(TableTypeMismatch(err.0.type_()).into()),
         }
     }
 
@@ -928,98 +866,45 @@ where
     fn exec_tab_set(
         &mut self,
         args: [WeakValue<Ty>; 3],
-    ) -> Result<
-        ControlFlow<(Callable<Strong, Ty>, StackSlot)>,
-        RefAccessOrError<opcode_err::TabCause>,
-    > {
+    ) -> Result<ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::TabCause>> {
         use crate::builtins::coerce::CoerceArgs;
+        use crate::builtins::table::{set_index_inner, CallRequired};
         use opcode_err::TabCause::*;
         use ControlFlow::*;
 
-        let [mut table, index, value] = args;
+        let [table, index, value] = args;
+        let coerced_index = self
+            .core
+            .dialect
+            .tab_set(index)
+            .try_into()
+            .map_err(InvalidKey)?;
+        let newindex_key = self.internal_cache.lookup_event(Event::NewIndex);
 
-        'outer: loop {
-            // First: try raw table access.
-            if let Value::Table(LuaPtr(table)) = &table {
-                let index = self.core.dialect.tab_set(index);
-                let key = index.try_into().map_err(InvalidKey)?;
-                let table = self.core.gc.get_mut(*table).ok_or(AlreadyDroppedError)?;
+        match set_index_inner(
+            table,
+            coerced_index,
+            value,
+            &mut self.core.gc,
+            &self.core.metatable_registry,
+            Some(newindex_key),
+        ) {
+            Ok(Break(())) => Ok(Continue(())),
+            Ok(Continue(call)) => {
+                let CallRequired { func, target } = call;
 
-                // It succeeds if key is already populated.
-                let r = if table.contains_key(&key) {
-                    Break(())
-                } else {
-                    Continue(())
-                };
+                let mut stack = self.stack.lua_guard();
+                let start = stack.len();
 
-                if matches!(r, Break(())) {
-                    table.set(key, value);
-                    return Ok(Continue(()));
-                }
-            };
+                stack.push(target);
+                stack.push(index);
+                stack.push(value);
 
-            // Second: try detecting compatible metavalue
-            let key = self.internal_cache.lookup_event(Event::NewIndex);
-            loop {
-                let metavalue = self
-                    .core
-                    .metatable_of(&table)?
-                    .map(|mt| {
-                        self.core
-                            .gc
-                            .get(mt)
-                            .ok_or(AlreadyDroppedError)
-                            .map(|table| table.get(&key))
-                    })
-                    .transpose()?
-                    .unwrap_or_default();
-
-                match metavalue {
-                    // Keyes associated with nil are considered to be absent from table.
-                    Value::Nil => {
-                        if let Value::Table(LuaPtr(table)) = table {
-                            // Third: Fallback to raw assignment.
-                            // This can only be reached if raw table access returned nil and there is no metamethod.
-
-                            let index = self.core.dialect.tab_set(index);
-                            let key = index.try_into().map_err(InvalidKey)?;
-
-                            self.core
-                                .gc
-                                .get_mut(table)
-                                .ok_or(AlreadyDroppedError)?
-                                .set(key, value);
-
-                            return Ok(Continue(()));
-                        } else {
-                            return Err(TableTypeMismatch(table.type_()).into());
-                        }
-                    }
-                    // Table simply goes on another spin of recursive table assignment.
-                    tab @ Value::Table(_) => {
-                        table = tab;
-                        continue 'outer;
-                    }
-                    // Function is invoked with table, *original* (before coercions!) index and value.
-                    // It only picks up the latest "table" value which metamethod we tried to look up.
-                    Value::Function(callable) => {
-                        let callable =
-                            callable.upgrade(&self.core.gc).ok_or(AlreadyDroppedError)?;
-                        let start = self.stack.top();
-                        let mut stack = self.stack.lua_guard();
-                        stack.push(table);
-                        stack.push(index);
-                        stack.push(value);
-
-                        return Ok(Break((callable, start)));
-                    }
-                    // If everything fails, try to recursively lookup metamethod in the new value.
-                    // Lua affirms to ignore function-like (e.g. with __call metamethod) objects in table indexing.
-                    value => {
-                        table = value;
-                    }
-                }
+                let res = Invoke(Event::NewIndex, func, StackSlot(start));
+                Ok(Break(res))
             }
+            Err(AlreadyDroppedOr::Dropped(err)) => Err(err.into()),
+            Err(AlreadyDroppedOr::Other(err)) => Err(TableTypeMismatch(err.0.type_()).into()),
         }
     }
 
@@ -1142,92 +1027,38 @@ where
     }
 }
 
-#[derive(Debug)]
-pub(super) enum RefAccessOrError<E> {
-    Dropped(AlreadyDroppedError),
-    Borrowed(BorrowError),
-    Other(E),
-}
-
-impl<E> RefAccessOrError<E> {
-    fn map_other<T>(self, f: impl FnOnce(E) -> T) -> RefAccessOrError<T> {
-        use RefAccessOrError::*;
-
-        match self {
-            Borrowed(err) => Borrowed(err),
-            Dropped(err) => Dropped(err),
-            Other(err) => Other(f(err)),
-        }
-    }
-}
-
-impl<E> From<RefAccessError> for RefAccessOrError<E> {
-    fn from(value: RefAccessError) -> Self {
-        match value {
-            RefAccessError::Dropped(err) => RefAccessOrError::Dropped(err),
-            RefAccessError::Borrowed(err) => RefAccessOrError::Borrowed(err),
-        }
-    }
-}
-
-impl<E> From<AlreadyDroppedError> for RefAccessOrError<E> {
-    fn from(value: AlreadyDroppedError) -> Self {
-        RefAccessOrError::Dropped(value)
-    }
-}
-
-impl<E> From<BorrowError> for RefAccessOrError<E> {
-    fn from(value: BorrowError) -> Self {
-        RefAccessOrError::Borrowed(value)
-    }
-}
-
-impl<T> From<T> for RefAccessOrError<opcode_err::Cause>
+impl<T> From<T> for AlreadyDroppedOr<opcode_err::Cause>
 where
     T: Into<opcode_err::Cause>,
 {
     fn from(value: T) -> Self {
-        RefAccessOrError::Other(value.into())
+        AlreadyDroppedOr::Other(value.into())
     }
 }
 
-impl<T> From<T> for RefAccessOrError<opcode_err::UnaOpCause>
+impl<T> From<T> for AlreadyDroppedOr<opcode_err::UnaOpCause>
 where
     T: Into<opcode_err::UnaOpCause>,
 {
     fn from(value: T) -> Self {
-        RefAccessOrError::Other(value.into())
+        AlreadyDroppedOr::Other(value.into())
     }
 }
 
-impl<T> From<T> for RefAccessOrError<opcode_err::BinOpCause>
+impl<T> From<T> for AlreadyDroppedOr<opcode_err::BinOpCause>
 where
     T: Into<opcode_err::BinOpCause>,
 {
     fn from(value: T) -> Self {
-        RefAccessOrError::Other(value.into())
+        AlreadyDroppedOr::Other(value.into())
     }
 }
 
-impl<T> From<T> for RefAccessOrError<opcode_err::TabCause>
+impl<T> From<T> for AlreadyDroppedOr<opcode_err::TabCause>
 where
     T: Into<opcode_err::TabCause>,
 {
     fn from(value: T) -> Self {
-        RefAccessOrError::Other(value.into())
-    }
-}
-
-impl<E, Ty> From<RefAccessOrError<E>> for RuntimeError<Ty>
-where
-    Ty: Types,
-    E: Into<RuntimeError<Ty>>,
-{
-    fn from(value: RefAccessOrError<E>) -> Self {
-        match value {
-            RefAccessOrError::Dropped(err) => err.into(),
-            RefAccessOrError::Borrowed(err) => err.into(),
-            RefAccessOrError::Other(err) => err.into(),
-        }
+        AlreadyDroppedOr::Other(value.into())
     }
 }
