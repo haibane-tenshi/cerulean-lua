@@ -1670,7 +1670,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct LuaTable<T>(pub T);
 
 impl<Rf, Ty, T> From<LuaTable<T>> for Value<Rf, Ty>
