@@ -135,7 +135,7 @@ where
 /// *  Note that all operations performed by this function are *regular* that is it may invoke metamethods.
 ///    This includes both getting and setting values on the table.
 ///    
-///    This replicates vanilla Lua behavior.
+///    This replicates vanilla Lua behavior of `table.insert`.
 ///
 /// *  In essence this function will perform assignments of the form `list[n+1] = list[n]` in order to shift values.
 ///    However no particular promises are made about order of operations (including between getters and setters).
