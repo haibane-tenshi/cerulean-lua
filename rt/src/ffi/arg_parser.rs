@@ -1442,7 +1442,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct LuaString<T>(pub T);
 
 impl<T> LuaString<Gc<Interned<T>>>
