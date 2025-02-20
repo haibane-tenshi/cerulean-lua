@@ -1205,3 +1205,43 @@ where
 
     ffi::from_fn(|| Coro::Started, "lua_std::table::move", ())
 }
+
+/// Pack all arguments into a new table.
+///
+/// # From Lua documentation
+///
+/// Returns a new table with all arguments stored into keys 1, 2, etc. and with a field **"n"** with the total number of arguments.
+/// Note that the resulting table may not be a sequence, if some arguments are `nil`.
+pub fn pack<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        ffi::delegate::from_mut(|mut rt| {
+            use rt::gc::LuaPtr;
+            use rt::value::{KeyValue as Key, TableIndex, Value};
+
+            let mut table = Ty::Table::default();
+
+            let len = rt.stack.len();
+            for (i, value) in (1..).zip(rt.stack.drain(..)) {
+                table.set(Key::Int(i), value);
+            }
+
+            let n = rt.core.gc.intern("n".into());
+            let n = Key::String(LuaPtr(n.downgrade()));
+
+            let count = Value::Int(len.try_into().unwrap());
+
+            table.set(n, count);
+
+            let table = rt.core.gc.alloc_cell(table);
+            let table = Value::Table(LuaPtr(table.downgrade()));
+
+            rt.stack.synchronized(&mut rt.core.gc).push(table);
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::table::pack", ())
+}
