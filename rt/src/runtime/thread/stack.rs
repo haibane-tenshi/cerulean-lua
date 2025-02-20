@@ -698,6 +698,10 @@ where
         let range = map_range(range, self.boundary..self.stack.main.next_key());
         self.stack.evict_upvalues(range)
     }
+
+    pub fn sync(&mut self, heap: &mut Heap<Ty>) {
+        self.stack.sync(heap);
+    }
 }
 
 impl<Ty> StackGuard<'_, Ty>
