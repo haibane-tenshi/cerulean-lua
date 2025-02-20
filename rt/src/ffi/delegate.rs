@@ -663,7 +663,12 @@ where
 pub fn try_complete<Y, T, E>(
     mut f: impl FnMut() -> Result<State<Y, T>, E>,
 ) -> impl FnMut() -> State<Y, Result<T, E>> {
-    move || match f() {
+    move || rearrange(f())
+}
+
+/// Rearrange `Result<State<_, _>, _>` into `State<_, Result<_, _>>`.
+pub fn rearrange<Y, T, E>(result: Result<State<Y, T>, E>) -> State<Y, Result<T, E>> {
+    match result {
         Ok(State::Yielded(t)) => State::Yielded(t),
         Ok(State::Complete(t)) => State::Complete(Ok(t)),
         Err(t) => State::Complete(Err(t)),
