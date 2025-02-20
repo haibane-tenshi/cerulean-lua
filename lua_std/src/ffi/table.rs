@@ -11,7 +11,7 @@
 use rt::ffi::{self, LuaFfi};
 use rt::value::Types;
 
-/// Stringify and concatenate arguments.
+/// Stringify and concatenate table elements.
 ///
 /// # From Lua documentation
 ///
