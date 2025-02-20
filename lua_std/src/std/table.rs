@@ -96,3 +96,44 @@ where
         );
     }
 }
+
+/// Copy range of values from one table into another.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(a1: table, f: int, e: int, t: int, [a2: table]) -> table`
+///
+/// Moves elements from the table `a1` to the table `a2`, performing the equivalent to the following multiple assignment: `a2[t],··· = a1[f],···,a1[e]`.
+/// The default for `a2` is `a1`.
+/// The destination range can overlap with the source range.
+/// The number of elements to be moved must fit in a Lua integer.
+///
+/// Returns the destination table `a2`.
+///
+/// # Implementation-specific behavior
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes both getting and setting values on tables.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Order of operations is undefined.
+#[expect(non_camel_case_types)]
+pub struct move_;
+
+impl<Ty> TableEntry<Ty> for move_
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::table::move_();
+        let key = core.gc.intern("move".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
