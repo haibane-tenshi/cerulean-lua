@@ -1076,9 +1076,18 @@ where
                     match co.resume(rt.reborrow(), Response::Resume) {
                         State::Complete(_) => unreachable!(),
                         State::Yielded(request) => {
+                            #[expect(
+                                clippy::reversed_empty_ranges,
+                                reason = "we deliberately construct empty inclusive range on arithmetic overflow"
+                            )]
+                            let source_range = i
+                                .checked_add(1)
+                                .map(|start| start..=source_end)
+                                .unwrap_or(1..=0);
+
                             *self = Coro::CalledGetIndex {
                                 co,
-                                source_range: i..=source_end,
+                                source_range,
                                 target_range: target_start..=target_end,
                             };
                             Ok(State::Yielded(request))
@@ -1091,10 +1100,16 @@ where
                     match co.resume(rt.reborrow(), Response::Resume) {
                         State::Complete(_) => unreachable!(),
                         State::Yielded(request) => {
-                            *self = Coro::CalledSetIndex {
-                                co,
-                                target_range: i..=target_end,
-                            };
+                            #[expect(
+                                clippy::reversed_empty_ranges,
+                                reason = "we deliberately construct empty inclusive range on arithmetic overflow"
+                            )]
+                            let target_range = i
+                                .checked_sub(1)
+                                .map(|end| target_start..=end)
+                                .unwrap_or(1..=0);
+
+                            *self = Coro::CalledSetIndex { co, target_range };
                             Ok(State::Yielded(request))
                         }
                     }
@@ -1125,9 +1140,18 @@ where
                 let value = match co.resume(rt.reborrow(), Response::Resume) {
                     State::Complete(res) => res?,
                     State::Yielded(request) => {
+                        #[expect(
+                            clippy::reversed_empty_ranges,
+                            reason = "we deliberately construct empty inclusive range on arithmetic overflow"
+                        )]
+                        let source_range = i
+                            .checked_add(1)
+                            .map(|start| start..=*source_range.end())
+                            .unwrap_or(1..=0);
+
                         *self = Coro::CalledGetIndex {
                             co,
-                            source_range: i..=*source_range.end(),
+                            source_range,
                             target_range,
                         };
                         rt.stack.sync(&mut rt.core.gc);
@@ -1150,7 +1174,7 @@ where
             use rt::ffi::delegate::StackSlot;
             use rt::value::KeyValue as Key;
 
-            for i in target_range.clone() {
+            for i in target_range.clone().rev() {
                 let value = rt.stack.pop().unwrap();
 
                 let mut co = set_index(target, Key::Int(i), value);
@@ -1158,10 +1182,16 @@ where
                 match co.resume(rt.reborrow(), Response::Resume) {
                     State::Complete(res) => res?,
                     State::Yielded(request) => {
-                        *self = Coro::CalledSetIndex {
-                            co,
-                            target_range: i..=*target_range.end(),
-                        };
+                        #[expect(
+                            clippy::reversed_empty_ranges,
+                            reason = "we deliberately construct empty inclusive range on arithmetic overflow"
+                        )]
+                        let target_range = i
+                            .checked_sub(1)
+                            .map(|end| *target_range.start()..=end)
+                            .unwrap_or(1..=0);
+
+                        *self = Coro::CalledSetIndex { co, target_range };
                         return Ok(State::Yielded(request));
                     }
                 }
