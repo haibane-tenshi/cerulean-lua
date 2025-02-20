@@ -1,3 +1,4 @@
+mod builtins;
 pub mod math;
 pub mod table;
 
@@ -1163,7 +1164,7 @@ where
                             let callable = rt::builtins::prepare_invoke(
                                 metamethod,
                                 rt.stack.transient(),
-                                &mut rt.core.gc,
+                                &rt.core.gc,
                                 &rt.core.metatable_registry,
                             )?;
 
@@ -1734,7 +1735,7 @@ where
 
     let body = || {
         delegate::from_mut(|mut rt| {
-            use rt::value::traits::{Len, TableIndex};
+            use rt::value::traits::Len;
 
             let value: StringOrTable<Ty> = rt.stack.parse(&mut rt.core.gc)?;
             rt.stack.clear();
@@ -1742,15 +1743,15 @@ where
             let r = match value {
                 StringOrTable::String(value) => {
                     let s = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
-                    s.len().try_into().unwrap()
+                    s.len()
                 }
                 StringOrTable::Table(value) => {
                     let t = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
-                    t.border()
+                    t.len()
                 }
             };
 
-            rt.stack.transient().push(Value::Int(r));
+            rt.stack.transient().push(r.into());
 
             Ok(())
         })
