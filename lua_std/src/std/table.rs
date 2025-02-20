@@ -137,3 +137,28 @@ where
         );
     }
 }
+
+/// Pack all arguments into a new table.
+///
+/// # From Lua documentation
+///
+/// Returns a new table with all arguments stored into keys 1, 2, etc. and with a field **"n"** with the total number of arguments.
+/// Note that the resulting table may not be a sequence, if some arguments are `nil`.
+#[expect(non_camel_case_types)]
+pub struct pack;
+
+impl<Ty> TableEntry<Ty> for pack
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::table::pack();
+        let key = core.gc.intern("pack".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
