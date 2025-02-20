@@ -207,7 +207,6 @@ where
                         .stack
                         .parse(&mut rt.core.gc)
                         .expect("internal stack state is invalid");
-                    rt.stack.clear();
                     rearrange(this.after_len(rt, list, pos, len, value))
                 }
                 (
@@ -268,7 +267,7 @@ where
                     rearrange(this.iter_indices(rt, pos, current))
                 }
                 (State::CalledSetPos { mut co }, response) => {
-                    match co.resume(rt, response) {
+                    match co.resume(rt.reborrow(), response) {
                         delegate::State::Complete(Ok(())) => (),
                         delegate::State::Complete(Err(err)) => {
                             return delegate::State::Complete(Err(err))
@@ -279,6 +278,7 @@ where
                         }
                     };
 
+                    rt.stack.clear();
                     delegate::State::Complete(Ok(()))
                 }
                 (State::Finished, _) => unreachable!("resumed completed coroutine"),
@@ -342,21 +342,22 @@ where
                 }
             };
             rt.stack.clear();
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                stack.push(list.into());
+                stack.push(value);
+            });
 
             let mut co = len(list.into());
 
-            match co.resume(rt.reborrow(), Response::Resume) {
-                delegate::State::Complete(res) => self.after_len(rt, list.into(), pos, res?, value),
+            let len = match co.resume(rt.reborrow(), Response::Resume) {
+                delegate::State::Complete(res) => res?,
                 delegate::State::Yielded(request) => {
-                    rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
-                        stack.push(list.into());
-                        stack.push(value);
-                    });
-
                     *self = State::CalledLen { co, pos };
-                    Ok(delegate::State::Yielded(request))
+                    return Ok(delegate::State::Yielded(request));
                 }
-            }
+            };
+
+            self.after_len(rt, list.into(), pos, len, value)
         }
 
         fn after_len(
@@ -399,11 +400,6 @@ where
                         match co.resume(rt.reborrow(), Response::Resume) {
                             delegate::State::Complete(res) => res?,
                             delegate::State::Yielded(request) => {
-                                rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
-                                    stack.push(list);
-                                    stack.push(pos_value);
-                                });
-
                                 *self = State::CalledGetIndex { co, pos, current };
                                 return Ok(delegate::State::Yielded(request));
                             }
@@ -425,11 +421,6 @@ where
                         match co.resume(rt.reborrow(), Response::Resume) {
                             delegate::State::Complete(res) => res?,
                             delegate::State::Yielded(request) => {
-                                rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
-                                    stack.push(list);
-                                    stack.push(pos_value);
-                                });
-
                                 *self = State::CalledSetIndex { co, pos, current };
                                 return Ok(delegate::State::Yielded(request));
                             }
@@ -463,6 +454,7 @@ where
                 }
             }
 
+            rt.stack.clear();
             Ok(delegate::State::Complete(()))
         }
 
@@ -505,7 +497,6 @@ where
                 .stack
                 .parse(&mut rt.core.gc)
                 .expect("internal stack state is invalid");
-            rt.stack.clear();
 
             let mut co = set_index(list, Key::Int(pos), value);
 
@@ -517,6 +508,7 @@ where
                 }
             }
 
+            rt.stack.clear();
             Ok(delegate::State::Complete(()))
         }
     }
