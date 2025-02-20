@@ -8,7 +8,6 @@
 //! Remember that, whenever an operation needs the length of a table, all caveats about the length operator apply (see §3.4.7).
 //! All functions ignore non-numeric keys in the tables given as arguments.
 
-use rt::ffi::delegate::{self};
 use rt::ffi::{self, LuaFfi};
 use rt::value::Types;
 
@@ -28,21 +27,160 @@ use rt::value::Types;
 ///
 /// # Implementation-specific behavior
 ///
-/// *   Numeric arguments will always get coerced to strings, irrespective of runtime configuration.
-///     Usual caveats about int/float string representation apply:
-///     no particular format is promised besides it being human-readable.
-///     Render numbers manually to have control over output.
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes getting length and values out of the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Numeric entries will always get coerced to strings, irrespective of runtime configuration.
+///    This is due to that fact that method documentation explicitly states that it can process integer and float elements.
+///
+///    Usual caveats about int/float-to-string conversion apply:
+///    exact representation details are implementation-specific and are subject to change, however result is promised to be human-readable.
+///    In particular it is not guaranteed that numbers can be round-tripped.
+///    Render numbers manually to have better control over output.
+///
+///    Note that raw concatenation between strings always takes priority over metamethod even if one is configured.
 pub fn concat<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,
+    Ty::String: Unpin,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use rt::builtins::coerce;
-            use rt::ffi::arg_parser::{Float, Int, LuaString, LuaTable, Opts, ParseArgs, Split};
-            use rt::gc::{LuaPtr, TryGet};
-            use rt::value::traits::Concat;
-            use rt::value::{KeyValue, TableIndex, Value};
+    use super::builtins::{get_index, len, GetIndex, Len};
+    use gc::{Gc, Interned};
+    use rt::error::RuntimeError;
+    use rt::ffi::delegate::{self, rearrange, Delegate, Request, Response, RuntimeView};
+    use rt::value::WeakValue;
+    use std::pin::Pin;
+
+    enum State<Ty>
+    where
+        Ty: Types,
+    {
+        Started,
+        CalledLen {
+            co: Len<Ty>,
+            i: i64,
+        },
+        CalledFirstGetIndex {
+            co: GetIndex<Ty>,
+            i: i64,
+            j: i64,
+        },
+        CalledGetIndex {
+            co: GetIndex<Ty>,
+            current: i64,
+            j: i64,
+            res: Ty::String,
+        },
+        Finished,
+    }
+
+    impl<Ty> Delegate<Ty> for State<Ty>
+    where
+        Ty: Types,
+        Ty::String: Unpin,
+    {
+        fn resume(
+            self: Pin<&mut Self>,
+            mut rt: RuntimeView<'_, Ty>,
+            response: Response<Ty>,
+        ) -> delegate::State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
+            use rt::ffi::arg_parser::{LuaString, NilOr, ParseArgs};
+
+            let this = self.get_mut();
+            let current = std::mem::replace(this, State::Finished);
+            match (current, response) {
+                (State::Started, Response::Resume) => rearrange(this.started(rt)),
+                (State::CalledLen { mut co, i }, response) => {
+                    let len = match co.resume(rt.reborrow(), response) {
+                        delegate::State::Complete(Ok(len)) => len,
+                        delegate::State::Complete(Err(err)) => {
+                            return delegate::State::Complete(Err(err))
+                        }
+                        delegate::State::Yielded(request) => {
+                            *this = State::CalledLen { co, i };
+                            return delegate::State::Yielded(request);
+                        }
+                    };
+
+                    let (list, sep): (WeakValue<Ty>, NilOr<LuaString<_>>) = rt
+                        .stack
+                        .parse(&mut rt.core.gc)
+                        .expect("internal stack is invalid");
+                    let sep = sep.into_option().map(|t| t.0 .0);
+
+                    rearrange(this.after_len(rt, list, sep, i, len))
+                }
+                (State::CalledFirstGetIndex { mut co, i, j }, response) => {
+                    let first = match co.resume(rt.reborrow(), response) {
+                        delegate::State::Complete(Ok(t)) => t,
+                        delegate::State::Complete(Err(err)) => {
+                            return delegate::State::Complete(Err(err))
+                        }
+                        delegate::State::Yielded(request) => {
+                            *this = State::CalledFirstGetIndex { co, i, j };
+                            return delegate::State::Yielded(request);
+                        }
+                    };
+
+                    let (list, sep): (WeakValue<Ty>, NilOr<LuaString<_>>) = rt
+                        .stack
+                        .parse(&mut rt.core.gc)
+                        .expect("internal stack is invalid");
+                    let sep = sep.into_option().map(|t| t.0 .0);
+
+                    rearrange(this.after_first(rt, list, sep, i, j, first))
+                }
+                (
+                    State::CalledGetIndex {
+                        mut co,
+                        current,
+                        j,
+                        res,
+                    },
+                    response,
+                ) => {
+                    let value = match co.resume(rt.reborrow(), response) {
+                        delegate::State::Complete(Ok(t)) => t,
+                        delegate::State::Complete(Err(err)) => {
+                            return delegate::State::Complete(Err(err))
+                        }
+                        delegate::State::Yielded(request) => {
+                            *this = State::CalledGetIndex {
+                                co,
+                                current,
+                                j,
+                                res,
+                            };
+                            return delegate::State::Yielded(request);
+                        }
+                    };
+
+                    let (list, sep): (WeakValue<Ty>, NilOr<LuaString<_>>) = rt
+                        .stack
+                        .parse(&mut rt.core.gc)
+                        .expect("internal stack is invalid");
+                    let sep = sep.into_option().map(|t| t.0 .0);
+
+                    rearrange(this.iter_after_get_index(rt, list, sep, current, j, res, value))
+                }
+                (State::Finished, _) => unreachable!("resumed completed coroutine"),
+                _ => unreachable!("invalid runtime response"),
+            }
+        }
+    }
+
+    impl<Ty> State<Ty>
+    where
+        Ty: Types,
+    {
+        fn started(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::ffi::arg_parser::{Int, LuaString, LuaTable, NilOr, Opts, ParseArgs, Split};
+            use rt::value::Value;
 
             let (list, args): (LuaTable<_>, Opts<(LuaString<_>, Int, Int)>) =
                 rt.stack.parse(&mut rt.core.gc)?;
@@ -50,25 +188,100 @@ where
 
             let (sep, i, j) = args.split();
 
-            let sep = sep.map(|sep| rt.core.gc.try_get(sep.0 .0)).transpose()?;
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                stack.push(list.into());
+                stack.push(sep.map(NilOr::Some).unwrap_or_default().into());
+            });
 
-            let table: &Ty::Table = rt.core.gc.try_get(list.0 .0)?;
+            let sep = sep.map(|t| t.0 .0);
+
             let i = i.map(|t| t.0).unwrap_or(1);
-            let j = j.map(|t| t.0).unwrap_or_else(|| table.border());
+            let len = match j.map(|t| t.0) {
+                Some(j) => Value::Int(j),
+                None => {
+                    let mut co = len(list.into());
+
+                    match co.resume(rt.reborrow(), Response::Resume) {
+                        delegate::State::Complete(res) => res?,
+                        delegate::State::Yielded(request) => {
+                            *self = State::CalledLen { co, i };
+                            return Ok(delegate::State::Yielded(request));
+                        }
+                    }
+                }
+            };
+
+            self.after_len(rt, list.into(), sep, i, len)
+        }
+
+        fn after_len(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            sep: Option<Gc<Interned<Ty::String>>>,
+            i: i64,
+            len: WeakValue<Ty>,
+        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::gc::LuaPtr;
+            use rt::value::{KeyValue as Key, Value};
+
+            let j = match len {
+                Value::Int(j) => j,
+                value => {
+                    let err = rt.core.alloc_error_msg(format!(
+                        "table length must be an integer (metamethod produced {})",
+                        value.type_()
+                    ));
+                    return Err(err);
+                }
+            };
 
             if i > j {
                 rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                    stack.clear();
+
                     let r = Value::String(LuaPtr(heap.intern("".into()).downgrade()));
                     stack.push(r);
                 });
 
-                return Ok(());
+                return Ok(delegate::State::Complete(()));
             }
 
-            let mut res = match table.get(&KeyValue::Int(i)) {
+            let mut co = get_index(list, Key::Int(i));
+
+            let first = match co.resume(rt.reborrow(), Response::Resume) {
+                delegate::State::Complete(res) => res?,
+                delegate::State::Yielded(request) => {
+                    *self = State::CalledFirstGetIndex { co, i, j };
+                    return Ok(delegate::State::Yielded(request));
+                }
+            };
+
+            self.after_first(rt, list, sep, i, j, first)
+        }
+
+        fn after_first(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            sep: Option<Gc<Interned<Ty::String>>>,
+            i: i64,
+            j: i64,
+            first: WeakValue<Ty>,
+        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::coerce;
+            use rt::builtins::table::GetIndexCache;
+            use rt::ffi::arg_parser::{Float, Int};
+            use rt::gc::{LuaPtr, TryGet};
+            use rt::value::traits::Concat;
+            use rt::value::{KeyValue as Key, Value};
+            use std::borrow::Cow;
+            use std::ops::ControlFlow;
+
+            let mut res = match first {
                 Value::String(LuaPtr(ptr)) => {
-                    let value = rt.core.gc.try_get(ptr)?.as_inner();
-                    value.clone()
+                    let s = rt.core.gc.try_get(ptr)?;
+                    s.as_inner().clone()
                 }
                 Value::Int(n) => coerce::int_to_str(Int(n)).into(),
                 Value::Float(n) => coerce::flt_to_str(Float(n)).into(),
@@ -77,44 +290,152 @@ where
                     return Err(err);
                 }
             };
+            let sep = sep
+                .map(|ptr| rt.core.gc.try_get(ptr))
+                .transpose()?
+                .map(AsRef::as_ref);
 
-            if let Some(k) = i.checked_add(1) {
-                for key in k..=j {
-                    if let Some(sep) = sep {
-                        res.concat(sep);
-                    }
+            let getter = GetIndexCache::new(list, &rt.core.gc, &rt.core.metatable_registry)?;
 
-                    match table.get(&KeyValue::Int(key)) {
-                        Value::String(LuaPtr(ptr)) => {
-                            let value = rt.core.gc.try_get(ptr)?.as_inner();
-                            res.concat(value);
-                        }
-                        Value::Int(n) => {
-                            let value = coerce::int_to_str(Int(n)).into();
-                            res.concat(&value);
-                        }
-                        Value::Float(n) => {
-                            let value = coerce::flt_to_str(Float(n)).into();
-                            res.concat(&value);
-                        }
-                        value => {
-                            let err = rt.core.alloc_error_msg(format!("value under index {key} has type {}; only strings, integers or floats permitted", value.type_()));
-                            return Err(err);
-                        }
-                    }
+            for current in (i..=j).skip(1) {
+                if let Some(sep) = sep {
+                    res.concat(sep);
                 }
+
+                let value = match getter.get(Key::Int(current), &rt.core.gc) {
+                    Ok(ControlFlow::Break(value)) => value,
+                    Ok(ControlFlow::Continue(_)) => {
+                        let mut co = get_index(list, Key::Int(current));
+
+                        match co.resume(rt.reborrow(), Response::Resume) {
+                            delegate::State::Complete(_) => {
+                                unreachable!("get_index should not immediately resolve")
+                            }
+                            delegate::State::Yielded(request) => {
+                                *self = State::CalledGetIndex {
+                                    co,
+                                    current,
+                                    j,
+                                    res,
+                                };
+                                return Ok(delegate::State::Yielded(request));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        let err = rt.core.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                };
+
+                let value = match value {
+                    Value::String(LuaPtr(ptr)) => {
+                        let s = rt.core.gc.try_get(ptr)?;
+                        Cow::Borrowed(s.as_inner())
+                    }
+                    Value::Int(n) => Cow::Owned(coerce::int_to_str(Int(n)).into()),
+                    Value::Float(n) => Cow::Owned(coerce::flt_to_str(Float(n)).into()),
+                    value => {
+                        let err = rt.core.alloc_error_msg(format!("value under index {current} has type {}; only strings, integers or floats permitted", value.type_()));
+                        return Err(err);
+                    }
+                };
+
+                res.concat(value.as_ref());
             }
 
             rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                stack.clear();
+
                 let r = Value::String(LuaPtr(heap.intern(res).downgrade()));
                 stack.push(r);
             });
 
-            Ok(())
-        })
-    };
+            Ok(delegate::State::Complete(()))
+        }
 
-    ffi::from_fn(body, "lua_std::table::concat", ())
+        #[expect(clippy::too_many_arguments)]
+        fn iter_after_get_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            sep: Option<Gc<Interned<Ty::String>>>,
+            current: i64,
+            j: i64,
+            mut res: Ty::String,
+            value: WeakValue<Ty>,
+        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::coerce;
+            use rt::ffi::arg_parser::{Float, Int};
+            use rt::gc::{LuaPtr, TryGet};
+            use rt::value::traits::Concat;
+            use rt::value::{KeyValue as Key, Value};
+            use std::borrow::Cow;
+
+            let value = match value {
+                Value::String(LuaPtr(ptr)) => {
+                    let s = rt.core.gc.try_get(ptr)?;
+                    Cow::Borrowed(s.as_inner())
+                }
+                Value::Int(n) => Cow::Owned(coerce::int_to_str(Int(n)).into()),
+                Value::Float(n) => Cow::Owned(coerce::flt_to_str(Float(n)).into()),
+                value => {
+                    let err = rt.core.alloc_error_msg(format!("value under index {current} has type {}; only strings, integers or floats permitted", value.type_()));
+                    return Err(err);
+                }
+            };
+
+            res.concat(value.as_ref());
+
+            for current in (current..=j).skip(1) {
+                if let Some(sep) = sep {
+                    let sep = rt.core.gc.try_get(sep)?;
+                    res.concat(sep);
+                }
+
+                let mut co = get_index(list, Key::Int(current));
+
+                let value = match co.resume(rt.reborrow(), Response::Resume) {
+                    delegate::State::Complete(res) => res?,
+                    delegate::State::Yielded(request) => {
+                        *self = State::CalledGetIndex {
+                            co,
+                            current,
+                            j,
+                            res,
+                        };
+                        return Ok(delegate::State::Yielded(request));
+                    }
+                };
+
+                let value = match value {
+                    Value::String(LuaPtr(ptr)) => {
+                        let s = rt.core.gc.try_get(ptr)?;
+                        Cow::Borrowed(s.as_inner())
+                    }
+                    Value::Int(n) => Cow::Owned(coerce::int_to_str(Int(n)).into()),
+                    Value::Float(n) => Cow::Owned(coerce::flt_to_str(Float(n)).into()),
+                    value => {
+                        let err = rt.core.alloc_error_msg(format!("value under index {current} has type {}; only strings, integers or floats permitted", value.type_()));
+                        return Err(err);
+                    }
+                };
+
+                res.concat(value.as_ref());
+            }
+
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                stack.clear();
+
+                let r = Value::String(LuaPtr(heap.intern(res).downgrade()));
+                stack.push(r);
+            });
+
+            Ok(delegate::State::Complete(()))
+        }
+    }
+
+    ffi::from_fn(|| State::Started, "lua_std::table::concat", ())
 }
 
 /// Insert value into table under integer key.
@@ -132,13 +453,14 @@ where
 ///
 /// # Implementation-specific behavior
 ///
-/// *  Note that all operations performed by this function are *regular* that is it may invoke metamethods.
-///    This includes both getting and setting values on the table.
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes calculating length as well as getting and setting values on the table.
 ///    
-///    This replicates vanilla Lua behavior of `table.insert`.
+///    This replicates behavior of vanilla implementation.
 ///
 /// *  In essence this function will perform assignments of the form `list[n+1] = list[n]` in order to shift values.
-///    However no particular promises are made about order of operations (including between getters and setters).
+///
+///    Order of operations is implementation-specific (including between getters and setters).
 pub fn insert<Ty>() -> impl LuaFfi<Ty>
 where
     Ty: Types,

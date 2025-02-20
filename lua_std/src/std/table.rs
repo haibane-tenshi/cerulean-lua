@@ -20,13 +20,14 @@ use crate::traits::{RootTable, TableEntry};
 ///
 /// # Implementation-specific behavior
 ///
-/// *  Note that all operations performed by this function are *regular* that is it may invoke metamethods.
-///    This includes both getting and setting values on the table.
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes calculating length as well as getting and setting values on the table.
 ///    
-///    This replicates vanilla Lua behavior of `table.insert`.
+///    This replicates behavior of vanilla implementation.
 ///
 /// *  In essence this function will perform assignments of the form `list[n+1] = list[n]` in order to shift values.
-///    However no particular promises are made about order of operations (including between getters and setters).
+///
+///    Order of operations is implementation-specific (including between getters and setters).
 #[expect(non_camel_case_types)]
 pub struct insert;
 
