@@ -684,16 +684,18 @@ pub fn int_to_flt(value: Int) -> Float {
 
 /// Coerce integer to string.
 ///
-/// Not particular properties about output are promised except it being human-readable.
-/// Use other formatting facilities to have better control over output.
+/// Exact representation details are implementation-specific and are subject to change, however result is promised to be human-readable.
+/// In particular it is not guaranteed that number can be round-tripped.
+/// Render numbers manually to have better control over output.
 pub fn int_to_str(value: Int) -> String {
     value.0.to_string()
 }
 
 /// Coerce float to string.
 ///
-/// Not particular properties about output are promised except it being human-readable.
-/// Use other formatting facilities to have better control over output.
+/// Exact representation details are implementation-specific and are subject to change, however result is promised to be human-readable.
+/// In particular it is not guaranteed that number can be round-tripped.
+/// Render numbers manually to have better control over output.
 pub fn flt_to_str(value: Float) -> String {
     value.0.to_string()
 }
