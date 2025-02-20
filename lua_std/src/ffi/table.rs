@@ -837,3 +837,341 @@ where
 
     ffi::from_fn(|| State::Started, "lua_std::table::insert", ())
 }
+
+/// Copy range of values from one table into another.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(a1: table, f: int, e: int, t: int, [a2: table]) -> table`
+///
+/// Moves elements from the table `a1` to the table `a2`, performing the equivalent to the following multiple assignment: `a2[t],··· = a1[f],···,a1[e]`.
+/// The default for `a2` is `a1`.
+/// The destination range can overlap with the source range.
+/// The number of elements to be moved must fit in a Lua integer.
+///
+/// Returns the destination table `a2`.
+///
+/// # Implementation-specific behavior
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes both getting and setting values on tables.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Order of operations is undefined.
+pub fn move_<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    use super::builtins::{get_index, set_index, GetIndex, SetIndex};
+    use rt::error::RuntimeError;
+    use rt::ffi::delegate::{Delegate, Request, Response, RuntimeView, State};
+    use rt::value::WeakValue;
+    use std::ops::RangeInclusive;
+    use std::pin::Pin;
+
+    enum Coro<Ty>
+    where
+        Ty: Types,
+    {
+        Started,
+        CalledGetIndex {
+            co: GetIndex<Ty>,
+            source_range: RangeInclusive<i64>,
+            target_range: RangeInclusive<i64>,
+        },
+        CalledSetIndex {
+            co: SetIndex<Ty>,
+            target_range: RangeInclusive<i64>,
+        },
+        Finished,
+    }
+
+    impl<Ty> Delegate<Ty> for Coro<Ty>
+    where
+        Ty: Types,
+    {
+        fn resume(
+            self: Pin<&mut Self>,
+            mut rt: RuntimeView<'_, Ty>,
+            response: Response<Ty>,
+        ) -> State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
+            use rt::ffi::delegate::rearrange;
+
+            let this = self.get_mut();
+            let current = std::mem::replace(this, Coro::Finished);
+            match (current, response) {
+                (Coro::Started, Response::Resume) => rearrange(this.started(rt)),
+                (
+                    Coro::CalledGetIndex {
+                        mut co,
+                        source_range,
+                        target_range,
+                    },
+                    response,
+                ) => {
+                    let value = match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(value)) => value,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledGetIndex {
+                                co,
+                                source_range,
+                                target_range,
+                            };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let target = rt.stack[0];
+                    let source = rt.stack[1];
+
+                    rearrange(this.iter_get_index(
+                        rt,
+                        source,
+                        target,
+                        source_range,
+                        target_range,
+                        value,
+                    ))
+                }
+                (
+                    Coro::CalledSetIndex {
+                        mut co,
+                        target_range,
+                    },
+                    response,
+                ) => {
+                    match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(())) => (),
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledSetIndex { co, target_range };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let target = rt.stack[0];
+
+                    rearrange(this.iter_set_index(rt, target, target_range))
+                }
+                (Coro::Finished, _) => unreachable!("resumed finished coroutine"),
+                _ => unreachable!("invalid runtime response"),
+            }
+        }
+    }
+
+    impl<Ty> Coro<Ty>
+    where
+        Ty: Types,
+    {
+        fn started(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::table::{GetIndexCache, SetIndexCache};
+            use rt::ffi::arg_parser::{Int, LuaTable, Opts, ParseArgs, Split};
+            use rt::ffi::delegate::StackSlot;
+            use rt::value::{KeyValue as Key, WeakValue};
+            use std::ops::ControlFlow;
+
+            let (a1, f, e, t, a2): (LuaTable<_>, Int, Int, Int, Opts<(LuaTable<_>,)>) =
+                rt.stack.parse(&mut rt.core.gc)?;
+            let (a2,) = a2.split();
+            let target = a2.unwrap_or(a1);
+            let source = a1;
+            let source_start = f.0;
+            let source_end = e.0;
+            let target_start = t.0;
+
+            rt.stack.clear();
+
+            // If the source range is empty simply exit.
+            // Original Lua implementation doesn't error on this case.
+            if (source_start..=source_end).is_empty() {
+                rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                    stack.push(target.into());
+                });
+
+                return Ok(State::Complete(()));
+            }
+
+            let len = match source_end.checked_sub(source_start) {
+                Some(t) => t,
+                None => {
+                    let err = rt
+                        .core
+                        .alloc_error_msg("range length does not fit into integer");
+                    return Err(err);
+                }
+            };
+
+            debug_assert!(len >= 0);
+
+            let target_end = match target_start.checked_add(len) {
+                Some(t) => t,
+                None => {
+                    let err = rt
+                        .core
+                        .alloc_error_msg("end of target range does not fit into integer");
+                    return Err(err);
+                }
+            };
+
+            enum SuspendPoint<Ty>
+            where
+                Ty: Types,
+            {
+                GetIndex(i64),
+                SetIndex(i64, WeakValue<Ty>),
+                Complete,
+            }
+
+            let point = rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                // Ensure that target is placed into first slot.
+                // It is expected to be the return value of this function.
+                stack.push(target.into());
+                stack.push(source.into());
+
+                let getter = GetIndexCache::new(source.into(), heap, &rt.core.metatable_registry)?;
+
+                for i in source_start..=source_end {
+                    let value = match getter.get(Key::Int(i), heap) {
+                        Ok(ControlFlow::Break(value)) => value,
+                        Ok(ControlFlow::Continue(_)) => return Ok(SuspendPoint::GetIndex(i)),
+                        Err(err) => {
+                            let msg = heap.intern(err.to_string().into());
+                            return Err(RuntimeError::from_msg(msg));
+                        }
+                    };
+
+                    stack.push(value)
+                }
+
+                let setter = SetIndexCache::new(target.into(), heap, &rt.core.metatable_registry)?;
+
+                for i in (target_start..=target_end).rev() {
+                    let value = stack.pop().unwrap();
+
+                    match setter.set(Key::Int(i), value, heap) {
+                        Ok(ControlFlow::Break(())) => (),
+                        Ok(ControlFlow::Continue(_)) => {
+                            return Ok(SuspendPoint::SetIndex(i, value))
+                        }
+                        Err(err) => {
+                            let msg = heap.intern(err.to_string().into());
+                            return Err(RuntimeError::from_msg(msg));
+                        }
+                    }
+                }
+
+                Ok(SuspendPoint::Complete)
+            })?;
+
+            match point {
+                SuspendPoint::GetIndex(i) => {
+                    let mut co = get_index(source.into(), Key::Int(i));
+
+                    match co.resume(rt.reborrow(), Response::Resume) {
+                        State::Complete(_) => unreachable!(),
+                        State::Yielded(request) => {
+                            *self = Coro::CalledGetIndex {
+                                co,
+                                source_range: i..=source_end,
+                                target_range: target_start..=target_end,
+                            };
+                            Ok(State::Yielded(request))
+                        }
+                    }
+                }
+                SuspendPoint::SetIndex(i, value) => {
+                    let mut co = set_index(target.into(), Key::Int(i), value);
+
+                    match co.resume(rt.reborrow(), Response::Resume) {
+                        State::Complete(_) => unreachable!(),
+                        State::Yielded(request) => {
+                            *self = Coro::CalledSetIndex {
+                                co,
+                                target_range: i..=target_end,
+                            };
+                            Ok(State::Yielded(request))
+                        }
+                    }
+                }
+                SuspendPoint::Complete => {
+                    rt.stack.adjust_height(StackSlot(1));
+                    Ok(State::Complete(()))
+                }
+            }
+        }
+
+        fn iter_get_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            source: WeakValue<Ty>,
+            target: WeakValue<Ty>,
+            source_range: RangeInclusive<i64>,
+            target_range: RangeInclusive<i64>,
+            value: WeakValue<Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::value::KeyValue as Key;
+
+            rt.stack.transient().push(value);
+
+            for i in source_range.clone() {
+                let mut co = get_index(source, Key::Int(i));
+
+                let value = match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::CalledGetIndex {
+                            co,
+                            source_range: i..=*source_range.end(),
+                            target_range,
+                        };
+                        rt.stack.sync(&mut rt.core.gc);
+                        return Ok(State::Yielded(request));
+                    }
+                };
+
+                rt.stack.transient().push(value);
+            }
+
+            self.iter_set_index(rt, target, target_range)
+        }
+
+        fn iter_set_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            target: WeakValue<Ty>,
+            target_range: RangeInclusive<i64>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::ffi::delegate::StackSlot;
+            use rt::value::KeyValue as Key;
+
+            for i in target_range.clone() {
+                let value = rt.stack.pop().unwrap();
+
+                let mut co = set_index(target, Key::Int(i), value);
+
+                match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::CalledSetIndex {
+                            co,
+                            target_range: i..=*target_range.end(),
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                }
+            }
+
+            rt.stack.adjust_height(StackSlot(1));
+            rt.stack.sync(&mut rt.core.gc);
+            Ok(State::Complete(()))
+        }
+    }
+
+    ffi::from_fn(|| Coro::Started, "lua_std::table::move", ())
+}
