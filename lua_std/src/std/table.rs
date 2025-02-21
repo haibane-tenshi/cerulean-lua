@@ -203,3 +203,46 @@ where
         );
     }
 }
+
+/// Place table elements on the stack.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(list: table, [i: int, [j: int]]) -> (...: any)`
+///
+/// Returns the elements from the given list.
+/// This function is equivalent to
+///
+/// ```lua
+/// return list[i], list[i+1], ···, list[j]
+/// ```
+///
+/// By default, `i` is 1 and `j` is `#list`.
+///
+/// # Implementation-specific behavior
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes acquiring length and getting values out of the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Order of operations is undefined.
+#[expect(non_camel_case_types)]
+pub struct unpack;
+
+impl<Ty> TableEntry<Ty> for unpack
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::table::unpack();
+        let key = core.gc.intern("unpack".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
