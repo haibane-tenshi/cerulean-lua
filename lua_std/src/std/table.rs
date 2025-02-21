@@ -246,3 +246,53 @@ where
         );
     }
 }
+
+/// Sort table elements under integer keys.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(list: table, [comp: function])`
+///  
+/// Sorts the list elements in a given order, *in-place*, from `list[1]` to `list[#list]`.
+/// If `comp` is given, then it must be a function that receives two list elements and
+/// returns `true` when the first element must come before the second in the final order,
+/// so that, after the sort, `i` <= `j` implies `not comp(list[j],list[i])`.
+/// If `comp` is not given, then the standard Lua operator `<` is used instead.
+///
+/// The `comp` function must define a consistent order; more formally, the function must define a strict weak order.
+/// (A weak order is similar to a total order, but it can equate different elements for comparison purposes.)
+///
+/// The sort algorithm is not stable: Different elements considered equal by the given order may have their relative positions changed by the sort.
+///
+/// # Implementation-specific behavior
+///
+/// *  Current sorting algorithm is standard-issue [heapsort](https://en.wikipedia.org/wiki/Heapsort).
+///
+///    It was chosen mostly for simplicity of implementation and compact state -
+///    both are valuable advantages when interweaving it with hand-written coroutine.
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes acquiring length and getting values out of the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Order of operations is undefined.
+#[expect(non_camel_case_types)]
+pub struct sort;
+
+impl<Ty> TableEntry<Ty> for sort
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::table::sort();
+        let key = core.gc.intern("sort".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
