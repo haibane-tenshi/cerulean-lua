@@ -162,3 +162,44 @@ where
         );
     }
 }
+
+/// Remove element from a table.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(list: table, [pos: int]) -> any`
+///
+/// Removes from list the element at position `pos`, returning the value of the removed element.
+/// When `pos` is an integer between 1 and `#list`,
+/// it shifts down the elements `list[pos+1]`, `list[pos+2]`, ···, `list[#list]` and erases element `list[#list]`;
+/// The index `pos` can also be 0 when `#list` is 0, or `#list + 1`.
+///
+/// The default value for `pos` is `#list`, so that a call `table.remove(l)` removes the last element of the list `l`.
+///
+/// # Implementation-specific behavior
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes both getting and setting values on the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Order of operations is undefined.
+#[expect(non_camel_case_types)]
+pub struct remove;
+
+impl<Ty> TableEntry<Ty> for remove
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::table::remove();
+        let key = core.gc.intern("remove".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
