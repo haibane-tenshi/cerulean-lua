@@ -8,7 +8,7 @@
 //! Remember that, whenever an operation needs the length of a table, all caveats about the length operator apply (see §3.4.7).
 //! All functions ignore non-numeric keys in the tables given as arguments.
 
-use rt::ffi::{self, LuaFfi};
+use rt::ffi::{self, DLuaFfi, LuaFfi};
 use rt::value::Types;
 
 /// Stringify and concatenate table elements.
@@ -2010,4 +2010,657 @@ where
     }
 
     ffi::from_fn(|| Coro::Started, "lua_std::table::unpack", ())
+}
+
+/// Sort table elements under integer keys.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(list: table, [comp: function])`
+///  
+/// Sorts the list elements in a given order, *in-place*, from `list[1]` to `list[#list]`.
+/// If `comp` is given, then it must be a function that receives two list elements and
+/// returns `true` when the first element must come before the second in the final order,
+/// so that, after the sort, `i` <= `j` implies `not comp(list[j],list[i])`.
+/// If `comp` is not given, then the standard Lua operator `<` is used instead.
+///
+/// The `comp` function must define a consistent order; more formally, the function must define a strict weak order.
+/// (A weak order is similar to a total order, but it can equate different elements for comparison purposes.)
+///
+/// The sort algorithm is not stable: Different elements considered equal by the given order may have their relative positions changed by the sort.
+///
+/// # Implementation-specific behavior
+///
+/// *  Current sorting algorithm is standard-issue [heapsort](https://en.wikipedia.org/wiki/Heapsort).
+///
+///    It was chosen mostly for simplicity of implementation and compact state -
+///    both are valuable advantages when interweaving it with hand-written coroutine.
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes acquiring length and getting values out of the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Order of operations is undefined.
+pub fn sort<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    // This function works in 4 phases:
+    //
+    // 1. Read all elements into a vec.
+    // 2. Construct heap in-place inside that vec.
+    // 3. Sort vec using heapsort.
+    // 4. Write elements back into table.
+    //
+    // External cache is used to avoid extraneous metamethod calls (which is a pain to write) on element swaps.
+
+    use super::builtins::{GetIndex, Len, SetIndex};
+    use gc::RootCell;
+    use rt::error::RuntimeError;
+    use rt::ffi::delegate::{Delegate, Request, Response, RuntimeView, StackSlot, State};
+    use rt::value::{Callable, Strong, WeakValue};
+    use std::ops::RangeInclusive;
+    use std::pin::Pin;
+
+    // Binary heap index mapping:
+    // n => 2*n+1; 2*n+2
+    // n => (n-1)/2
+    #[derive(Debug, Clone, Copy)]
+    struct HeapIndex(usize);
+
+    impl HeapIndex {
+        fn children(self) -> (HeapIndex, HeapIndex) {
+            (HeapIndex(self.0 * 2 + 1), HeapIndex(self.0 * 2 + 2))
+        }
+
+        fn parent(self) -> Option<HeapIndex> {
+            self.0.checked_sub(1).map(|n| HeapIndex(n / 2))
+        }
+
+        fn prev(self) -> Option<HeapIndex> {
+            self.0.checked_sub(1).map(HeapIndex)
+        }
+    }
+
+    enum Coro<Ty>
+    where
+        Ty: Types,
+    {
+        Started,
+        CalledLen {
+            co: Len<Ty>,
+            cmp: Callable<Strong, Ty>,
+        },
+        ToSlowGetIndex {
+            boundary: StackSlot,
+            cmp: Callable<Strong, Ty>,
+            range: RangeInclusive<i64>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+        },
+        IterGetIndex {
+            co: GetIndex<Ty>,
+            cmp: Callable<Strong, Ty>,
+            range: RangeInclusive<i64>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+        },
+        ConstructHeap {
+            boundary: StackSlot,
+            cmp: Callable<Strong, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cursor: HeapIndex,
+        },
+        HeapSort {
+            boundary: StackSlot,
+            cmp: Callable<Strong, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cursor: HeapIndex,
+            is_left_child: bool,
+            sorted: usize,
+        },
+        ToSlowSetIndex {
+            boundary: StackSlot,
+            current: i64,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+        },
+        IterSetIndex {
+            co: SetIndex<Ty>,
+            current: i64,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+        },
+        Finished,
+    }
+
+    impl<Ty> Delegate<Ty> for Coro<Ty>
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    {
+        fn resume(
+            self: Pin<&mut Self>,
+            mut rt: RuntimeView<'_, Ty>,
+            response: Response<Ty>,
+        ) -> State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
+            use rt::ffi::delegate::rearrange;
+
+            let this = self.get_mut();
+            let current = std::mem::replace(this, Coro::Finished);
+            match (current, response) {
+                (Coro::Started, Response::Resume) => rearrange(this.started(rt)),
+                (Coro::CalledLen { mut co, cmp }, response) => {
+                    let len = match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(t)) => t,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledLen { co, cmp };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let list = rt.stack[0];
+
+                    rearrange(this.after_len(rt, list, cmp, len))
+                }
+                (
+                    Coro::ToSlowGetIndex {
+                        boundary,
+                        cmp,
+                        range,
+                        cache,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary + 1);
+                    let value = rt.stack.pop().unwrap();
+                    let list = rt.stack[0];
+
+                    rearrange(this.iter_get_index(rt, list, cmp, range, cache, value))
+                }
+                (
+                    Coro::IterGetIndex {
+                        mut co,
+                        cmp,
+                        range,
+                        cache,
+                    },
+                    response,
+                ) => {
+                    let value = match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(t)) => t,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::IterGetIndex {
+                                co,
+                                cmp,
+                                range,
+                                cache,
+                            };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let list = rt.stack[0];
+
+                    rearrange(this.iter_get_index(rt, list, cmp, range, cache, value))
+                }
+                (
+                    Coro::ConstructHeap {
+                        boundary,
+                        cmp,
+                        cache,
+                        cursor,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary + 1);
+                    let res = rt.stack.pop().unwrap().to_bool();
+
+                    rearrange(this.construct_heap_tail(rt, cmp, cache, cursor, res))
+                }
+                (
+                    Coro::HeapSort {
+                        boundary,
+                        cmp,
+                        cache,
+                        cursor,
+                        is_left_child,
+                        sorted,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary + 1);
+                    let res = rt.stack.pop().unwrap().to_bool();
+
+                    rearrange(this.heapsort_tail(
+                        rt,
+                        cmp,
+                        cache,
+                        cursor,
+                        is_left_child,
+                        sorted,
+                        res,
+                    ))
+                }
+                (
+                    Coro::ToSlowSetIndex {
+                        boundary,
+                        current,
+                        cache,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary);
+                    let list = rt.stack[0];
+
+                    rearrange(this.iter_set_index(rt, list, cache, current))
+                }
+                (
+                    Coro::IterSetIndex {
+                        mut co,
+                        current,
+                        cache,
+                    },
+                    response,
+                ) => {
+                    match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(())) => (),
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::IterSetIndex { co, current, cache };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let list = rt.stack[0];
+
+                    rearrange(this.iter_set_index(rt, list, cache, current))
+                }
+                (
+                    Coro::ToSlowGetIndex { .. }
+                    | Coro::ConstructHeap { .. }
+                    | Coro::HeapSort { .. }
+                    | Coro::ToSlowSetIndex { .. },
+                    Response::Evaluated(Err(err)),
+                ) => State::Complete(Err(err)),
+                (Coro::Finished, _) => unreachable!("resumed completed coroutine"),
+                _ => unreachable!("invalid runtime response"),
+            }
+        }
+    }
+
+    impl<Ty> Coro<Ty>
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    {
+        fn started(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use super::builtins::len;
+            use rt::builtins::full::lt;
+            use rt::ffi::arg_parser::{Callable, LuaTable, Opts, ParseArgs, Split};
+            use rt::gc::LuaPtr;
+
+            let (list, rest): (LuaTable<_>, Opts<(Callable<_, _>,)>) =
+                rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let (cmp,) = rest.split();
+            let cmp = match cmp {
+                Some(cmp) => cmp.try_upgrade(&rt.core.gc)?,
+                None => {
+                    let f = ffi::from_fn(lt, "rt::builtins::lt", ());
+                    let f = rt.core.gc.alloc_cell(ffi::boxed(f));
+                    Callable::Rust(LuaPtr(f))
+                }
+            };
+
+            // Preserve table in slot 0.
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                stack.push(list.into());
+            });
+
+            let mut co = len(list.into());
+            let len = match co.resume(rt.reborrow(), Response::Resume) {
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::CalledLen { co, cmp };
+                    return Ok(State::Yielded(request));
+                }
+            };
+
+            self.after_len(rt, list.into(), cmp, len)
+        }
+
+        fn after_len(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            cmp: Callable<Strong, Ty>,
+            len: WeakValue<Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::table::GetIndexCache;
+            use rt::value::{KeyValue as Key, Value};
+            use std::ops::ControlFlow;
+
+            let Value::Int(len) = len else {
+                let err = rt.core.alloc_error_msg(format!(
+                    "table length must be an integer (metamethod produced {})",
+                    len.type_()
+                ));
+                return Err(err);
+            };
+
+            // No need to sort 0 or 1 length tables.
+            if len < 2 {
+                return Ok(State::Complete(()));
+            }
+
+            let mut cache = Vec::with_capacity(len.try_into().unwrap());
+            let getter = GetIndexCache::new(list, &rt.core.gc, &rt.core.metatable_registry)?;
+
+            for current in 1..=len {
+                let value = match getter.get(Key::Int(current), &rt.core.gc) {
+                    Ok(ControlFlow::Break(t)) => t,
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(Value::Int(current));
+                        });
+
+                        let cache = rt.core.gc.alloc_cell(cache);
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::ToSlowGetIndex {
+                            boundary,
+                            cmp,
+                            range: current..=len,
+                            cache,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                    Err(err) => {
+                        let err = rt.core.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                };
+
+                cache.push(value)
+            }
+
+            let cursor = HeapIndex(cache.len() - 1);
+            let cache = rt.core.gc.alloc_cell(cache);
+            self.contruct_heap_head(rt, cmp, cache, cursor)
+        }
+
+        fn iter_get_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            cmp: Callable<Strong, Ty>,
+            range: RangeInclusive<i64>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            value: WeakValue<Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use super::builtins::get_index;
+            use rt::value::KeyValue as Key;
+
+            rt.core.gc[&cache].push(value);
+
+            let len = *range.end();
+            for current in range.skip(1) {
+                let mut co = get_index(list, Key::Int(current));
+                let value = match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::IterGetIndex {
+                            co,
+                            cmp,
+                            range: current..=len,
+                            cache,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                };
+
+                rt.core.gc[&cache].push(value);
+            }
+
+            let cursor = HeapIndex(rt.core.gc[&cache].len() - 1);
+            self.contruct_heap_head(rt, cmp, cache, cursor)
+        }
+
+        fn contruct_heap_head(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            cmp: Callable<Strong, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cursor: HeapIndex,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            let Some(parent) = cursor.parent() else {
+                let sorted = rt.core.gc[&cache].len();
+                return self.heapsort_next(rt, cmp, cache, sorted);
+            };
+
+            let boundary = rt.stack.top();
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let cache = &heap[&cache];
+                stack.push(cache[cursor.0]);
+                stack.push(cache[parent.0]);
+            });
+            let request = Request::Invoke {
+                callable: cmp.clone(),
+                start: boundary,
+            };
+            *self = Coro::ConstructHeap {
+                boundary,
+                cmp,
+                cache,
+                cursor,
+            };
+            Ok(State::Yielded(request))
+        }
+
+        fn construct_heap_tail(
+            &mut self,
+            rt: RuntimeView<'_, Ty>,
+            cmp: Callable<Strong, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cursor: HeapIndex,
+            res: bool,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            // Values are compared in order child-parent,
+            // so we need to swap on `true`.
+            if res {
+                let parent = cursor.parent().unwrap();
+                rt.core.gc[&cache].swap(cursor.0, parent.0);
+            }
+
+            let cursor = cursor
+                .prev()
+                .expect("cursor should never point to top of heap");
+
+            self.contruct_heap_head(rt, cmp, cache, cursor)
+        }
+
+        fn heapsort_next(
+            &mut self,
+            rt: RuntimeView<'_, Ty>,
+            cmp: Callable<Strong, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            sorted: usize,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            let sorted = sorted - 1;
+
+            if sorted == 0 {
+                return self.after_heapsort(rt, cache);
+            }
+
+            rt.core.gc[&cache].swap(0, sorted);
+
+            self.heapsort_head(rt, cmp, cache, HeapIndex(0), true, sorted)
+        }
+
+        fn heapsort_head(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            cmp: Callable<Strong, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cursor: HeapIndex,
+            is_left_child: bool,
+            sorted: usize,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            let children = cursor.children();
+            let child = if is_left_child {
+                children.0
+            } else {
+                children.1
+            };
+
+            if !(0..sorted).contains(&child.0) {
+                return self.heapsort_next(rt, cmp, cache, sorted);
+            }
+
+            let boundary = rt.stack.top();
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let cache = &heap[&cache];
+                stack.push(cache[child.0]);
+                stack.push(cache[cursor.0]);
+            });
+
+            let request = Request::Invoke {
+                callable: cmp.clone(),
+                start: boundary,
+            };
+            *self = Coro::HeapSort {
+                boundary,
+                cmp,
+                cache,
+                cursor,
+                is_left_child,
+                sorted,
+            };
+            Ok(State::Yielded(request))
+        }
+
+        #[expect(clippy::too_many_arguments)]
+        fn heapsort_tail(
+            &mut self,
+            rt: RuntimeView<'_, Ty>,
+            cmp: Callable<Strong, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cursor: HeapIndex,
+            is_left_child: bool,
+            sorted: usize,
+            res: bool,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            // Values are compared in order child-parent,
+            // so we need to swap on `true`.
+
+            let (cursor, is_left_child) = if res {
+                let children = cursor.children();
+                let child = if is_left_child {
+                    children.0
+                } else {
+                    children.1
+                };
+                rt.core.gc[&cache].swap(cursor.0, child.0);
+
+                (child, true)
+            } else if is_left_child {
+                (cursor, false)
+            } else {
+                return self.heapsort_next(rt, cmp, cache, sorted);
+            };
+
+            self.heapsort_head(rt, cmp, cache, cursor, is_left_child, sorted)
+        }
+
+        fn after_heapsort(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::table::SetIndexCache;
+            use rt::value::{KeyValue as Key, Value};
+            use std::ops::ControlFlow;
+
+            let list = rt.stack[0];
+            let setter = SetIndexCache::new(list, &rt.core.gc, &rt.core.metatable_registry)?;
+            for current in 1.. {
+                let Some(value) = rt.core.gc[&cache].pop() else {
+                    break;
+                };
+
+                match setter.set(Key::Int(current), value, &mut rt.core.gc) {
+                    Ok(ControlFlow::Break(())) => (),
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(Value::Int(current));
+                            stack.push(value);
+                        });
+
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::ToSlowSetIndex {
+                            boundary,
+                            current,
+                            cache,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                    Err(err) => {
+                        let err = rt.core.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                }
+            }
+
+            self.cleanup(rt)
+        }
+
+        fn iter_set_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            cache: RootCell<Vec<WeakValue<Ty>>>,
+            current: i64,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use super::builtins::set_index;
+            use rt::value::KeyValue as Key;
+
+            for current in (current..).skip(1) {
+                let Some(value) = rt.core.gc[&cache].pop() else {
+                    break;
+                };
+
+                let mut co = set_index(list, Key::Int(current), value);
+                match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::IterSetIndex { co, current, cache };
+                        return Ok(State::Yielded(request));
+                    }
+                }
+            }
+
+            self.cleanup(rt)
+        }
+
+        fn cleanup(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            rt.stack.clear();
+            Ok(State::Complete(()))
+        }
+    }
+
+    ffi::from_fn(|| Coro::Started, "lua_std::table::sort", ())
 }
