@@ -1245,3 +1245,477 @@ where
 
     ffi::from_fn(body, "lua_std::table::pack", ())
 }
+
+/// Remove element from a table.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(list: table, [pos: int]) -> any`
+///
+/// Removes from list the element at position `pos`, returning the value of the removed element.
+/// When `pos` is an integer between 1 and `#list`,
+/// it shifts down the elements `list[pos+1]`, `list[pos+2]`, ···, `list[#list]` and erases element `list[#list]`;
+/// The index `pos` can also be 0 when `#list` is 0, or `#list + 1`.
+///
+/// The default value for `pos` is `#list`, so that a call `table.remove(l)` removes the last element of the list `l`.
+///
+/// # Implementation-specific behavior
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes both getting and setting values on the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  Order of operations is undefined.
+pub fn remove<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    use super::builtins::{GetIndex, Len, SetIndex};
+    use rt::error::RuntimeError;
+    use rt::ffi::delegate::{Delegate, Request, Response, RuntimeView, StackSlot, State};
+    use rt::value::WeakValue;
+    use std::pin::Pin;
+
+    enum Coro<Ty>
+    where
+        Ty: Types,
+    {
+        Started,
+        CalledLen {
+            co: Len<Ty>,
+            pos: Option<i64>,
+        },
+        CalledGetPos {
+            co: GetIndex<Ty>,
+            pos: i64,
+            len: i64,
+        },
+        ToSlowGetIndex {
+            boundary: StackSlot,
+            current: i64,
+            len: i64,
+        },
+        ToSlowSetIndex {
+            boundary: StackSlot,
+            current: i64,
+            len: i64,
+        },
+        MainEraseLen,
+        IterGetIndex {
+            co: GetIndex<Ty>,
+            current: i64,
+            len: i64,
+        },
+        IterSetIndex {
+            co: SetIndex<Ty>,
+            current: i64,
+            len: i64,
+        },
+        SlowEraseLen {
+            co: SetIndex<Ty>,
+        },
+        Finished,
+    }
+
+    impl<Ty> Delegate<Ty> for Coro<Ty>
+    where
+        Ty: Types,
+    {
+        fn resume(
+            self: Pin<&mut Self>,
+            mut rt: RuntimeView<'_, Ty>,
+            response: Response<Ty>,
+        ) -> State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
+            use rt::ffi::delegate::rearrange;
+
+            let this = self.get_mut();
+            let current = std::mem::replace(this, Coro::Finished);
+            match (current, response) {
+                (Coro::Started, Response::Resume) => rearrange(this.started(rt)),
+                (Coro::CalledLen { mut co, pos }, response) => {
+                    let len = match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(t)) => t,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledLen { co, pos };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let list = rt.stack[1];
+
+                    rearrange(this.after_len(rt, list, pos, len))
+                }
+                (Coro::CalledGetPos { mut co, pos, len }, response) => {
+                    let result = match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(t)) => t,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledGetPos { co, pos, len };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let list = rt.stack[1];
+
+                    rearrange(this.after_get_pos(rt, list, pos, len, result))
+                }
+                (
+                    Coro::ToSlowGetIndex {
+                        boundary,
+                        current,
+                        len,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary + 1);
+                    let value = rt.stack.pop().unwrap();
+                    let list = rt.stack[1];
+
+                    rearrange(this.iter_get_index(rt, list, current, len, value))
+                }
+                (
+                    Coro::ToSlowSetIndex {
+                        boundary,
+                        current,
+                        len,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary);
+                    let list = rt.stack[1];
+
+                    rearrange(this.iter_set_index(rt, list, current, len))
+                }
+                (Coro::MainEraseLen, Response::Evaluated(Ok(()))) => rearrange(this.cleanup(rt)),
+                (
+                    Coro::IterGetIndex {
+                        mut co,
+                        current,
+                        len,
+                    },
+                    response,
+                ) => {
+                    let value = match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(t)) => t,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::IterGetIndex { co, current, len };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let list = rt.stack[1];
+
+                    rearrange(this.iter_get_index(rt, list, current, len, value))
+                }
+                (
+                    Coro::IterSetIndex {
+                        mut co,
+                        current,
+                        len,
+                    },
+                    response,
+                ) => {
+                    match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(())) => (),
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::IterSetIndex { co, current, len };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let list = rt.stack[1];
+
+                    rearrange(this.iter_set_index(rt, list, current, len))
+                }
+                (Coro::SlowEraseLen { mut co }, response) => {
+                    match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(())) => (),
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::SlowEraseLen { co };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    rearrange(this.cleanup(rt))
+                }
+                (
+                    Coro::ToSlowGetIndex { .. } | Coro::ToSlowSetIndex { .. } | Coro::MainEraseLen,
+                    Response::Evaluated(Err(err)),
+                ) => State::Complete(Err(err)),
+                (Coro::Finished, _) => unreachable!("resumed completed coroutine"),
+                _ => unreachable!("invalid runtime response"),
+            }
+        }
+    }
+
+    impl<Ty> Coro<Ty>
+    where
+        Ty: Types,
+    {
+        fn started(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use super::builtins::len;
+            use rt::ffi::arg_parser::{Int, LuaTable, Opts, ParseArgs, Split};
+            use rt::value::Value;
+
+            let (list, rest): (LuaTable<_>, Opts<(Int,)>) = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let (pos,) = rest.split();
+            let pos = pos.map(|t| t.0);
+
+            // Keep 0 reserved for output value.
+            // Keep table in 1.
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                stack.push(Value::Nil);
+                stack.push(list.into());
+            });
+
+            let mut co = len(list.into());
+            let len = match co.resume(rt.reborrow(), Response::Resume) {
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::CalledLen { co, pos };
+                    return Ok(State::Yielded(request));
+                }
+            };
+
+            self.after_len(rt, list.into(), pos, len)
+        }
+
+        fn after_len(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            pos: Option<i64>,
+            len: WeakValue<Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use super::builtins::get_index;
+            use rt::value::{KeyValue as Key, Value};
+
+            let Value::Int(len) = len else {
+                let err = rt.core.alloc_error_msg(format!(
+                    "table length must be an integer (metamethod produced {})",
+                    len.type_()
+                ));
+                return Err(err);
+            };
+
+            let pos = pos.unwrap_or(len);
+
+            let in_bounds = (1..=len).contains(&pos)
+                || (len == 0 && pos == 0)
+                || len
+                    .checked_add(1)
+                    .map(|next| pos == next)
+                    .unwrap_or_default();
+
+            if !in_bounds {
+                let err = rt
+                    .core
+                    .alloc_error_msg(format!("index {pos} is out of bounds"));
+                return Err(err);
+            }
+
+            let mut co = get_index(list, Key::Int(pos));
+            let result = match co.resume(rt.reborrow(), Response::Resume) {
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::CalledGetPos { co, pos, len };
+                    return Ok(State::Yielded(request));
+                }
+            };
+
+            self.after_get_pos(rt, list, pos, len, result)
+        }
+
+        fn after_get_pos(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            pos: i64,
+            len: i64,
+            result: WeakValue<Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::table::{GetIndexCache, SetIndexCache};
+            use rt::ffi::delegate::StackSlot;
+            use rt::value::{KeyValue as Key, Value};
+            use std::ops::ControlFlow;
+
+            *rt.stack
+                .synchronized(&mut rt.core.gc)
+                .get_mut(StackSlot(0))
+                .unwrap() = result;
+
+            let getter = GetIndexCache::new(list, &rt.core.gc, &rt.core.metatable_registry)?;
+            let setter = SetIndexCache::new(list, &rt.core.gc, &rt.core.metatable_registry)?;
+
+            for current in (pos..=len).skip(1) {
+                let value = match getter.get(Key::Int(current), &rt.core.gc) {
+                    Ok(ControlFlow::Break(t)) => t,
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(Value::Int(current));
+                        });
+
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::ToSlowGetIndex {
+                            boundary,
+                            current,
+                            len,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                    Err(err) => {
+                        let err = rt.core.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                };
+
+                match setter.set(Key::Int(current - 1), value, &mut rt.core.gc) {
+                    Ok(ControlFlow::Break(())) => (),
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(Value::Int(current));
+                            stack.push(value);
+                        });
+
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::ToSlowSetIndex {
+                            boundary,
+                            current,
+                            len,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                    Err(err) => {
+                        let err = rt.core.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                }
+            }
+
+            // Remove `len` element only when `pos` is in range
+            if pos <= len {
+                match setter.set(Key::Int(len), Value::Nil, &mut rt.core.gc) {
+                    Ok(ControlFlow::Break(())) => (),
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(Value::Int(len));
+                            stack.push(Value::Nil);
+                        });
+
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::MainEraseLen;
+                        return Ok(State::Yielded(request));
+                    }
+                    Err(err) => {
+                        let err = rt.core.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                }
+            }
+
+            self.cleanup(rt)
+        }
+
+        fn iter_get_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            current: i64,
+            len: i64,
+            value: WeakValue<Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use super::builtins::set_index;
+            use rt::value::KeyValue as Key;
+
+            let mut co = set_index(list, Key::Int(current - 1), value);
+            match co.resume(rt.reborrow(), Response::Resume) {
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::IterSetIndex { co, current, len };
+                    return Ok(State::Yielded(request));
+                }
+            }
+
+            self.iter_set_index(rt, list, current, len)
+        }
+
+        fn iter_set_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            list: WeakValue<Ty>,
+            current: i64,
+            len: i64,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use super::builtins::{get_index, set_index};
+            use rt::value::{KeyValue as Key, Value};
+
+            for current in (current..=len).skip(1) {
+                let mut co = get_index(list, Key::Int(current));
+                let value = match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::IterGetIndex { co, current, len };
+                        return Ok(State::Yielded(request));
+                    }
+                };
+
+                let mut co = set_index(list, Key::Int(current - 1), value);
+                match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::IterSetIndex { co, current, len };
+                        return Ok(State::Yielded(request));
+                    }
+                }
+            }
+
+            // If we reached this branch it means `pos` was in `1..=len` range, so `len` needs to be erased.
+            let mut co = set_index(list, Key::Int(len), Value::Nil);
+            match co.resume(rt.reborrow(), Response::Resume) {
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::SlowEraseLen { co };
+                    return Ok(State::Yielded(request));
+                }
+            }
+
+            self.cleanup(rt)
+        }
+
+        fn cleanup(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            // Result is already placed into slot 0.
+            rt.stack.adjust_height(StackSlot(1));
+            Ok(State::Complete(()))
+        }
+    }
+
+    ffi::from_fn(|| Coro::Started, "lua_std::table::remove", ())
+}
