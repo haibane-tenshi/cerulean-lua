@@ -88,3 +88,37 @@ where
         );
     }
 }
+
+/// Calculate difference between two timestamps.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(t2: int, t1: int) -> int`
+///
+/// Returns the difference, in seconds, from time `t1` to time `t2` (where the times are values returned by `os.time`).
+/// In POSIX, Windows, and some other systems, this value is exactly `t2-t1`.
+///
+/// # Implementation-specific behavior
+///
+/// *  `os.time` always returns number of seconds since Unix epoch, so this function simply returns difference between two values.
+///    
+///    You will get an error on underflow.
+#[expect(non_camel_case_types)]
+pub struct difftime;
+
+impl<Ty> TableEntry<Ty> for difftime
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::os::difftime();
+        let key = core.alloc_string("difftime".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[value].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
