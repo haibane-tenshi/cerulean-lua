@@ -573,6 +573,125 @@ impl<R> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
     }
 }
 
+/// Sequence manipulation library residing in `table` table.
+///
+/// This library module will use table under `table` key in parent table or construct a new one otherwise.
+/// All included items will be put into the table, potentially overriding existing entries.
+///
+/// [`Table::full`] will construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
+/// Read below for full list of provided APIs.
+///
+/// Alternatively, you can start with [`Table::empty`] and manually fill in functions from [`std::table`](crate::std::table) or elsewhere:
+///
+/// ```
+/// # use lua_std::lib::{Table, Std};
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(
+///         Table::empty()
+///             .include(std::table::insert)
+///             .include(std::table::sort)
+///     );
+/// ```
+///
+/// # From Lua documentation
+///
+/// This library provides generic functions for table manipulation.
+/// It provides all its functions inside the table `table`.
+///
+/// Remember that, whenever an operation needs the length of a table, all caveats about the length operator apply (see §3.4.7).
+/// All functions ignore non-numeric keys in the tables given as arguments.
+///
+/// # Provided APIs
+///
+/// Stringification:
+///
+/// * [`concat`](crate::std::table::concat)
+///
+/// Element manipulation:
+///
+/// * [`insert`](crate::std::table::insert)
+/// * [`remove`](crate::std::table::remove)
+/// * [`move`](crate::std::table::move_)
+///
+/// Packing/unpacking:
+///
+/// * [`pack`](crate::std::table::pack)
+/// * [`unpack`](crate::std::table::unpack)
+///
+/// Sorting:
+///
+/// * [`sort`](crate::std::table::sort)
+///
+/// [lua#6.6]: https://www.lua.org/manual/5.4/manual.html#6.6
+pub struct Table<P>(P);
+
+impl Table<()> {
+    /// Construct empty module.
+    ///
+    /// This library module will use table under `math` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// Table entries can included using [`include`](Math::include) method.
+    pub fn empty() -> Table<empty::Empty> {
+        use empty::Empty;
+
+        Table(Empty(()))
+    }
+
+    /// Construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
+    ///
+    /// This library module will use table under `table` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// See [provided APIs](Table#provided-apis) for full list.
+    ///
+    /// [lua#6.6]: https://www.lua.org/manual/5.4/manual.html#6.6
+    pub fn full() -> Table<table::Full> {
+        use table::Full;
+
+        Table(Full(()))
+    }
+}
+
+impl<P> Table<P> {
+    /// Include API in the module.
+    ///
+    /// Requires [`T: TableEntry<Ty>`](TableEntry) bound.
+    /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
+    pub fn include<T>(self, part: T) -> Table<(P, T)> {
+        let Table(p) = self;
+        Table((p, part))
+    }
+}
+
+impl<Ty, P> TableEntry<Ty> for Table<P>
+where
+    Ty: Types,
+    P: TableEntry<Ty>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        use rt::gc::LuaPtr;
+        use rt::value::{KeyValue, TableIndex, Value};
+
+        let key = core.gc.intern("table".into());
+        let key = KeyValue::String(LuaPtr(key.downgrade()));
+        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
+            core.gc.upgrade(ptr).unwrap()
+        } else {
+            core.gc.alloc_cell(Default::default())
+        };
+
+        let Table(builder) = self;
+
+        builder.build(&local_table, core);
+
+        let value = Value::Table(LuaPtr(local_table.downgrade()));
+        core.gc[table].set(key, value);
+    }
+}
+
 /// The untrace newtype for random number generators.
 ///
 /// Objects are required to implement [`Trace`] trait in order to be put into our gc heap.
@@ -746,6 +865,36 @@ mod math_rand {
 
             math::random.build(table, core, rng_state);
             math::randomseed.build(table, core, rng_state);
+        }
+    }
+}
+
+mod table {
+    use crate::traits::TableEntry;
+    use rt::ffi::DLuaFfi;
+    use rt::value::Types;
+
+    #[doc(hidden)]
+    pub struct Full(pub(crate) ());
+
+    impl<Ty> TableEntry<Ty> for Full
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        Ty::String: Unpin,
+    {
+        fn build(self, table: &crate::traits::RootTable<Ty>, core: &mut rt::runtime::Core<Ty>) {
+            use crate::std::table;
+
+            table::concat.build(table, core);
+
+            table::insert.build(table, core);
+            table::remove.build(table, core);
+            table::move_.build(table, core);
+
+            table::pack.build(table, core);
+            table::unpack.build(table, core);
+
+            table::sort.build(table, core);
         }
     }
 }
