@@ -223,3 +223,43 @@ where
         );
     }
 }
+
+/// Terminate host program
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `([code: bool | int, [close: bool]]) -> !`
+///
+/// Calls the ISO C function `exit` to terminate the host program.
+/// If code is `true`, the returned status is `EXIT_SUCCESS`; if code is `false`, the returned status is `EXIT_FAILURE`;
+/// if code is a number, the returned status is this number.
+/// The default value for code is `true`.
+///
+/// If the optional second argument close is `true`, the function closes the Lua state before exiting (see `lua_close`).
+///
+/// # Implementation-specific details
+///
+/// *   This function will invoke Rust's [`exit`](std::process::exit) function, see documentation for caveats.
+/// *   When `code` is boolean, process will terminate with canonical error codes for success/failure respectively.
+///     On Rust side those are provided by [`ExitCode::SUCCESS`](std::process::ExitCode::SUCCESS) and [`ExitCode::FAILURE`](std::process::ExitCode::FAILURE).
+/// *   Rust uses `i32` to represent exit codes.
+///     Unrepresentable integers will be replaced with `ExitCode::FAILURE`.
+#[expect(non_camel_case_types)]
+pub struct exit;
+
+impl<Ty> TableEntry<Ty> for exit
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::os::exit();
+        let key = core.alloc_string("exit".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
