@@ -1,5 +1,6 @@
 mod builtins;
 pub mod math;
+pub mod os;
 pub mod table;
 
 use std::error::Error;
