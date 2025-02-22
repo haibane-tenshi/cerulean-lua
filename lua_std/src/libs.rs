@@ -578,18 +578,18 @@ impl<R> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
 /// This library module will use table under `table` key in parent table or construct a new one otherwise.
 /// All included items will be put into the table, potentially overriding existing entries.
 ///
-/// [`Table::full`] will construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
+/// [`TableManip::full`] will construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
 /// Read below for full list of provided APIs.
 ///
-/// Alternatively, you can start with [`Table::empty`] and manually fill in functions from [`std::table`](crate::std::table) or elsewhere:
+/// Alternatively, you can start with [`TableManip::empty`] and manually fill in functions from [`std::table`](crate::std::table) or elsewhere:
 ///
 /// ```
-/// # use lua_std::lib::{Table, Std};
+/// # use lua_std::lib::{TableManip, Std};
 /// use lua_std::std;
 ///
 /// let global_env = Std::empty()
 ///     .include(
-///         Table::empty()
+///         TableManip::empty()
 ///             .include(std::table::insert)
 ///             .include(std::table::sort)
 ///     );
@@ -625,19 +625,19 @@ impl<R> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
 /// * [`sort`](crate::std::table::sort)
 ///
 /// [lua#6.6]: https://www.lua.org/manual/5.4/manual.html#6.6
-pub struct Table<P>(P);
+pub struct TableManip<P>(P);
 
-impl Table<()> {
+impl TableManip<()> {
     /// Construct empty module.
     ///
     /// This library module will use table under `math` key in parent table or construct a new one otherwise.
     /// All included items will be put into the table, potentially overriding existing entries.
     ///
     /// Table entries can included using [`include`](Math::include) method.
-    pub fn empty() -> Table<empty::Empty> {
+    pub fn empty() -> TableManip<empty::Empty> {
         use empty::Empty;
 
-        Table(Empty(()))
+        TableManip(Empty(()))
     }
 
     /// Construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
@@ -645,28 +645,28 @@ impl Table<()> {
     /// This library module will use table under `table` key in parent table or construct a new one otherwise.
     /// All included items will be put into the table, potentially overriding existing entries.
     ///
-    /// See [provided APIs](Table#provided-apis) for full list.
+    /// See [provided APIs](TableManip#provided-apis) for full list.
     ///
     /// [lua#6.6]: https://www.lua.org/manual/5.4/manual.html#6.6
-    pub fn full() -> Table<table::Full> {
+    pub fn full() -> TableManip<table::Full> {
         use table::Full;
 
-        Table(Full(()))
+        TableManip(Full(()))
     }
 }
 
-impl<P> Table<P> {
+impl<P> TableManip<P> {
     /// Include API in the module.
     ///
     /// Requires [`T: TableEntry<Ty>`](TableEntry) bound.
     /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
-    pub fn include<T>(self, part: T) -> Table<(P, T)> {
-        let Table(p) = self;
-        Table((p, part))
+    pub fn include<T>(self, part: T) -> TableManip<(P, T)> {
+        let TableManip(p) = self;
+        TableManip((p, part))
     }
 }
 
-impl<Ty, P> TableEntry<Ty> for Table<P>
+impl<Ty, P> TableEntry<Ty> for TableManip<P>
 where
     Ty: Types,
     P: TableEntry<Ty>,
@@ -683,7 +683,7 @@ where
             core.gc.alloc_cell(Default::default())
         };
 
-        let Table(builder) = self;
+        let TableManip(builder) = self;
 
         builder.build(&local_table, core);
 
