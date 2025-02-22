@@ -49,11 +49,14 @@ where
     use super::builtins::{get_index, len, GetIndex, Len};
     use gc::{Gc, Interned};
     use rt::error::RuntimeError;
-    use rt::ffi::delegate::{self, rearrange, Delegate, Request, Response, RuntimeView};
+    use rt::ffi::delegate::{
+        rearrange, Delegate, Request, Response, RuntimeView, StackSlot, State,
+    };
     use rt::value::WeakValue;
+    use std::ops::RangeInclusive;
     use std::pin::Pin;
 
-    enum State<Ty>
+    enum Coro<Ty>
     where
         Ty: Types,
     {
@@ -64,19 +67,22 @@ where
         },
         CalledFirstGetIndex {
             co: GetIndex<Ty>,
-            i: i64,
-            j: i64,
+            range: RangeInclusive<i64>,
+        },
+        ToSlowGetIndex {
+            boundary: StackSlot,
+            range: RangeInclusive<i64>,
+            res: Ty::String,
         },
         CalledGetIndex {
             co: GetIndex<Ty>,
-            current: i64,
-            j: i64,
+            range: RangeInclusive<i64>,
             res: Ty::String,
         },
         Finished,
     }
 
-    impl<Ty> Delegate<Ty> for State<Ty>
+    impl<Ty> Delegate<Ty> for Coro<Ty>
     where
         Ty: Types,
         Ty::String: Unpin,
@@ -85,22 +91,20 @@ where
             self: Pin<&mut Self>,
             mut rt: RuntimeView<'_, Ty>,
             response: Response<Ty>,
-        ) -> delegate::State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
+        ) -> State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
             use rt::ffi::arg_parser::{LuaString, NilOr, ParseArgs};
 
             let this = self.get_mut();
-            let current = std::mem::replace(this, State::Finished);
+            let current = std::mem::replace(this, Coro::Finished);
             match (current, response) {
-                (State::Started, Response::Resume) => rearrange(this.started(rt)),
-                (State::CalledLen { mut co, i }, response) => {
+                (Coro::Started, Response::Resume) => rearrange(this.started(rt)),
+                (Coro::CalledLen { mut co, i }, response) => {
                     let len = match co.resume(rt.reborrow(), response) {
-                        delegate::State::Complete(Ok(len)) => len,
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
-                        }
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledLen { co, i };
-                            return delegate::State::Yielded(request);
+                        State::Complete(Ok(len)) => len,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledLen { co, i };
+                            return State::Yielded(request);
                         }
                     };
 
@@ -112,15 +116,13 @@ where
 
                     rearrange(this.after_len(rt, list, sep, i, len))
                 }
-                (State::CalledFirstGetIndex { mut co, i, j }, response) => {
+                (Coro::CalledFirstGetIndex { mut co, range }, response) => {
                     let first = match co.resume(rt.reborrow(), response) {
-                        delegate::State::Complete(Ok(t)) => t,
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
-                        }
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledFirstGetIndex { co, i, j };
-                            return delegate::State::Yielded(request);
+                        State::Complete(Ok(t)) => t,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledFirstGetIndex { co, range };
+                            return State::Yielded(request);
                         }
                     };
 
@@ -130,30 +132,34 @@ where
                         .expect("internal stack is invalid");
                     let sep = sep.into_option().map(|t| t.0 .0);
 
-                    rearrange(this.after_first(rt, list, sep, i, j, first))
+                    rearrange(this.after_first(rt, list, sep, range, first))
                 }
                 (
-                    State::CalledGetIndex {
-                        mut co,
-                        current,
-                        j,
+                    Coro::ToSlowGetIndex {
+                        boundary,
+                        range,
                         res,
                     },
-                    response,
+                    Response::Evaluated(Ok(())),
                 ) => {
+                    rt.stack.adjust_height(boundary + 1);
+                    let value = rt.stack.pop().unwrap();
+
+                    let (list, sep): (WeakValue<Ty>, NilOr<LuaString<_>>) = rt
+                        .stack
+                        .parse(&mut rt.core.gc)
+                        .expect("internal stack is invalid");
+                    let sep = sep.into_option().map(|t| t.0 .0);
+
+                    rearrange(this.iter_after_get_index(rt, list, sep, range, res, value))
+                }
+                (Coro::CalledGetIndex { mut co, range, res }, response) => {
                     let value = match co.resume(rt.reborrow(), response) {
-                        delegate::State::Complete(Ok(t)) => t,
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
-                        }
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledGetIndex {
-                                co,
-                                current,
-                                j,
-                                res,
-                            };
-                            return delegate::State::Yielded(request);
+                        State::Complete(Ok(t)) => t,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledGetIndex { co, range, res };
+                            return State::Yielded(request);
                         }
                     };
 
@@ -163,22 +169,25 @@ where
                         .expect("internal stack is invalid");
                     let sep = sep.into_option().map(|t| t.0 .0);
 
-                    rearrange(this.iter_after_get_index(rt, list, sep, current, j, res, value))
+                    rearrange(this.iter_after_get_index(rt, list, sep, range, res, value))
                 }
-                (State::Finished, _) => unreachable!("resumed completed coroutine"),
+                (Coro::ToSlowGetIndex { .. }, Response::Evaluated(Err(err))) => {
+                    State::Complete(Err(err))
+                }
+                (Coro::Finished, _) => unreachable!("resumed completed coroutine"),
                 _ => unreachable!("invalid runtime response"),
             }
         }
     }
 
-    impl<Ty> State<Ty>
+    impl<Ty> Coro<Ty>
     where
         Ty: Types,
     {
         fn started(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
-        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::ffi::arg_parser::{Int, LuaString, LuaTable, NilOr, Opts, ParseArgs, Split};
             use rt::value::Value;
 
@@ -202,10 +211,10 @@ where
                     let mut co = len(list.into());
 
                     match co.resume(rt.reborrow(), Response::Resume) {
-                        delegate::State::Complete(res) => res?,
-                        delegate::State::Yielded(request) => {
-                            *self = State::CalledLen { co, i };
-                            return Ok(delegate::State::Yielded(request));
+                        State::Complete(res) => res?,
+                        State::Yielded(request) => {
+                            *self = Coro::CalledLen { co, i };
+                            return Ok(State::Yielded(request));
                         }
                     }
                 }
@@ -221,7 +230,7 @@ where
             sep: Option<Gc<Interned<Ty::String>>>,
             i: i64,
             len: WeakValue<Ty>,
-        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::gc::LuaPtr;
             use rt::value::{KeyValue as Key, Value};
 
@@ -244,20 +253,21 @@ where
                     stack.push(r);
                 });
 
-                return Ok(delegate::State::Complete(()));
+                return Ok(State::Complete(()));
             }
+            let range = i..=j;
 
             let mut co = get_index(list, Key::Int(i));
 
             let first = match co.resume(rt.reborrow(), Response::Resume) {
-                delegate::State::Complete(res) => res?,
-                delegate::State::Yielded(request) => {
-                    *self = State::CalledFirstGetIndex { co, i, j };
-                    return Ok(delegate::State::Yielded(request));
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::CalledFirstGetIndex { co, range };
+                    return Ok(State::Yielded(request));
                 }
             };
 
-            self.after_first(rt, list, sep, i, j, first)
+            self.after_first(rt, list, sep, range, first)
         }
 
         fn after_first(
@@ -265,10 +275,9 @@ where
             mut rt: RuntimeView<'_, Ty>,
             list: WeakValue<Ty>,
             sep: Option<Gc<Interned<Ty::String>>>,
-            i: i64,
-            j: i64,
+            range: RangeInclusive<i64>,
             first: WeakValue<Ty>,
-        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::coerce;
             use rt::builtins::table::GetIndexCache;
             use rt::ffi::arg_parser::{Float, Int};
@@ -286,6 +295,7 @@ where
                 Value::Int(n) => coerce::int_to_str(Int(n)).into(),
                 Value::Float(n) => coerce::flt_to_str(Float(n)).into(),
                 value => {
+                    let i = *range.start();
                     let err = rt.core.alloc_error_msg(format!("value under index {i} has type {}; only strings, integers or floats permitted", value.type_()));
                     return Err(err);
                 }
@@ -297,30 +307,31 @@ where
 
             let getter = GetIndexCache::new(list, &rt.core.gc, &rt.core.metatable_registry)?;
 
-            for current in (i..=j).skip(1) {
+            let end = *range.end();
+            for current in range.skip(1) {
                 if let Some(sep) = sep {
                     res.concat(sep);
                 }
 
                 let value = match getter.get(Key::Int(current), &rt.core.gc) {
                     Ok(ControlFlow::Break(value)) => value,
-                    Ok(ControlFlow::Continue(_)) => {
-                        let mut co = get_index(list, Key::Int(current));
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(Value::Int(current));
+                        });
 
-                        match co.resume(rt.reborrow(), Response::Resume) {
-                            delegate::State::Complete(_) => {
-                                unreachable!("get_index should not immediately resolve")
-                            }
-                            delegate::State::Yielded(request) => {
-                                *self = State::CalledGetIndex {
-                                    co,
-                                    current,
-                                    j,
-                                    res,
-                                };
-                                return Ok(delegate::State::Yielded(request));
-                            }
-                        }
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::ToSlowGetIndex {
+                            boundary,
+                            range: current..=end,
+                            res,
+                        };
+                        return Ok(State::Yielded(request));
                     }
                     Err(err) => {
                         let err = rt.core.alloc_error_msg(err.to_string());
@@ -351,20 +362,18 @@ where
                 stack.push(r);
             });
 
-            Ok(delegate::State::Complete(()))
+            Ok(State::Complete(()))
         }
 
-        #[expect(clippy::too_many_arguments)]
         fn iter_after_get_index(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
             list: WeakValue<Ty>,
             sep: Option<Gc<Interned<Ty::String>>>,
-            current: i64,
-            j: i64,
+            range: RangeInclusive<i64>,
             mut res: Ty::String,
             value: WeakValue<Ty>,
-        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::coerce;
             use rt::ffi::arg_parser::{Float, Int};
             use rt::gc::{LuaPtr, TryGet};
@@ -380,6 +389,7 @@ where
                 Value::Int(n) => Cow::Owned(coerce::int_to_str(Int(n)).into()),
                 Value::Float(n) => Cow::Owned(coerce::flt_to_str(Float(n)).into()),
                 value => {
+                    let current = *range.start();
                     let err = rt.core.alloc_error_msg(format!("value under index {current} has type {}; only strings, integers or floats permitted", value.type_()));
                     return Err(err);
                 }
@@ -387,7 +397,8 @@ where
 
             res.concat(value.as_ref());
 
-            for current in (current..=j).skip(1) {
+            let end = *range.end();
+            for current in range.skip(1) {
                 if let Some(sep) = sep {
                     let sep = rt.core.gc.try_get(sep)?;
                     res.concat(sep);
@@ -396,15 +407,14 @@ where
                 let mut co = get_index(list, Key::Int(current));
 
                 let value = match co.resume(rt.reborrow(), Response::Resume) {
-                    delegate::State::Complete(res) => res?,
-                    delegate::State::Yielded(request) => {
-                        *self = State::CalledGetIndex {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::CalledGetIndex {
                             co,
-                            current,
-                            j,
+                            range: current..=end,
                             res,
                         };
-                        return Ok(delegate::State::Yielded(request));
+                        return Ok(State::Yielded(request));
                     }
                 };
 
@@ -431,11 +441,11 @@ where
                 stack.push(r);
             });
 
-            Ok(delegate::State::Complete(()))
+            Ok(State::Complete(()))
         }
     }
 
-    ffi::from_fn(|| State::Started, "lua_std::table::concat", ())
+    ffi::from_fn(|| Coro::Started, "lua_std::table::concat", ())
 }
 
 /// Insert value into table under integer key.
