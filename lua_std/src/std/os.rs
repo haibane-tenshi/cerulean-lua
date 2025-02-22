@@ -263,3 +263,35 @@ where
         );
     }
 }
+
+/// Read value of environment variable.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * (varname: string) -> string | fail
+///
+/// Returns the value of the process environment variable `varname` or **fail** if the variable is not defined.
+///
+/// # Implementation-specific behavior
+///
+/// *   Environment variable is expected to contain valid utf8.
+///     This function will return **fail** if that doesn't hold.
+#[expect(non_camel_case_types)]
+pub struct getenv;
+
+impl<Ty> TableEntry<Ty> for getenv
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::os::getenv();
+        let key = core.alloc_string("getenv".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
