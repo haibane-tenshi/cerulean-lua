@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::process::Command;
 
 use gc::{RootCell, Trace};
 use rt::plugin::Plugin;
@@ -784,6 +785,53 @@ where
             .include(builder)
             .build(table, core);
     }
+}
+
+/// Attempt to find a command invocation for default OS shell.
+///
+/// The purpose of this function is to produce *some* shell to execute commands passed to [`os.execute`](crate::std::os::execute) function.
+/// It is provided on best-effort basis and may not work as you intend.
+///
+/// It is best if you avoid both this function and `os.execute`.
+///
+/// # Implementation details
+///
+/// Currently, it will construct the following command:
+///
+/// * `sh` on Linux which should invoke bash
+/// * `cmd` on Windows which should invoke command prompt
+/// * `sh` on MacOS which should invoke bash
+/// * not configured on other platforms
+///
+/// It will also inherit host process' working directory.
+///
+/// However, **it is by no means guaranteed that intended shell will be invoked!**
+///
+/// Rust's [`Command`] attempts to find an executable file with specified name in platform-specific way.
+/// It is entirely possible for it to get resolved to some arbitrary file
+/// which have nothing to do with actual shell due to misconfigured system or malicious setup.
+///
+/// You should not rely on this behavior on untrusted systems.
+pub fn default_os_shell() -> Option<Command> {
+    #[allow(unused_mut, unused_assignments)]
+    let mut result = None;
+
+    #[cfg(target_os = "linux")]
+    {
+        result = Some(Command::new("sh"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        result = Some(Command::new("cmd"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        result = Some(Command::new("sh"));
+    }
+
+    result
 }
 
 /// The untrace newtype for random number generators.
