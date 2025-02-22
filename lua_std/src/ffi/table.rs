@@ -477,11 +477,11 @@ where
 {
     use super::builtins::{get_index, len, set_index, GetIndex, Len, SetIndex};
     use rt::error::RuntimeError;
-    use rt::ffi::delegate::{self, Delegate, Request, Response, RuntimeView};
+    use rt::ffi::delegate::{Delegate, Request, Response, RuntimeView, State};
     use rt::value::WeakValue;
     use std::pin::Pin;
 
-    enum State<Ty>
+    enum Coro<Ty>
     where
         Ty: Types,
     {
@@ -506,7 +506,7 @@ where
         Finished,
     }
 
-    impl<Ty> Delegate<Ty> for State<Ty>
+    impl<Ty> Delegate<Ty> for Coro<Ty>
     where
         Ty: Types,
     {
@@ -514,23 +514,21 @@ where
             self: Pin<&mut Self>,
             mut rt: RuntimeView<'_, Ty>,
             response: Response<Ty>,
-        ) -> delegate::State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
+        ) -> State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
             use rt::ffi::delegate::rearrange;
 
             let this = self.get_mut();
-            let current = std::mem::replace(this, State::Finished);
+            let current = std::mem::replace(this, Coro::Finished);
             match (current, response) {
-                (State::Started, Response::Resume) => rearrange(this.started(rt)),
-                (State::CalledLen { mut co, pos }, response) => {
+                (Coro::Started, Response::Resume) => rearrange(this.started(rt)),
+                (Coro::CalledLen { mut co, pos }, response) => {
                     let len = match co.resume(rt.reborrow(), response) {
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledLen { co, pos };
+                            return State::Yielded(request);
                         }
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledLen { co, pos };
-                            return delegate::State::Yielded(request);
-                        }
-                        delegate::State::Complete(Ok(len)) => len,
+                        State::Complete(Ok(len)) => len,
                     };
 
                     use rt::ffi::arg_parser::ParseArgs;
@@ -542,7 +540,7 @@ where
                     rearrange(this.after_len(rt, list, pos, len, value))
                 }
                 (
-                    State::CalledGetIndex {
+                    Coro::CalledGetIndex {
                         mut co,
                         pos,
                         current,
@@ -550,14 +548,12 @@ where
                     response,
                 ) => {
                     let value = match co.resume(rt.reborrow(), response) {
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledGetIndex { co, pos, current };
+                            return State::Yielded(request);
                         }
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledGetIndex { co, pos, current };
-                            return delegate::State::Yielded(request);
-                        }
-                        delegate::State::Complete(Ok(value)) => value,
+                        State::Complete(Ok(value)) => value,
                     };
 
                     use rt::value::KeyValue as Key;
@@ -565,20 +561,18 @@ where
                     let mut co = set_index(rt.stack[0], Key::Int(current + 1), value);
 
                     match co.resume(rt.reborrow(), Response::Resume) {
-                        delegate::State::Complete(Ok(())) => (),
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
-                        }
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledSetIndex { co, pos, current };
-                            return delegate::State::Yielded(request);
+                        State::Complete(Ok(())) => (),
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledSetIndex { co, pos, current };
+                            return State::Yielded(request);
                         }
                     }
 
                     rearrange(this.iter_indices(rt, pos, current))
                 }
                 (
-                    State::CalledSetIndex {
+                    Coro::CalledSetIndex {
                         mut co,
                         pos,
                         current,
@@ -586,50 +580,45 @@ where
                     response,
                 ) => {
                     match co.resume(rt.reborrow(), response) {
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
-                        }
-                        delegate::State::Complete(Ok(())) => (),
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledSetIndex { co, pos, current };
-                            return delegate::State::Yielded(request);
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Complete(Ok(())) => (),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledSetIndex { co, pos, current };
+                            return State::Yielded(request);
                         }
                     }
 
                     rearrange(this.iter_indices(rt, pos, current))
                 }
-                (State::CalledSetPos { mut co }, response) => {
+                (Coro::CalledSetPos { mut co }, response) => {
                     match co.resume(rt.reborrow(), response) {
-                        delegate::State::Complete(Ok(())) => (),
-                        delegate::State::Complete(Err(err)) => {
-                            return delegate::State::Complete(Err(err))
-                        }
-                        delegate::State::Yielded(request) => {
-                            *this = State::CalledSetPos { co };
-                            return delegate::State::Yielded(request);
+                        State::Complete(Ok(())) => (),
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::CalledSetPos { co };
+                            return State::Yielded(request);
                         }
                     };
 
                     rt.stack.clear();
-                    delegate::State::Complete(Ok(()))
+                    State::Complete(Ok(()))
                 }
-                (State::Finished, _) => unreachable!("resumed completed coroutine"),
+                (Coro::Finished, _) => unreachable!("resumed completed coroutine"),
                 _ => unreachable!("invalid runtime response"),
             }
         }
     }
 
-    impl<Ty> State<Ty>
+    impl<Ty> Coro<Ty>
     where
         Ty: Types,
     {
         fn started(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
-        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::error::SignatureError;
             use rt::ffi::arg_parser::{LuaTable, TypeMismatchError};
-            use rt::ffi::delegate::{self};
             use rt::value::{Type, Value};
 
             let (list, pos, value) = match rt.stack.as_slice() {
@@ -682,10 +671,10 @@ where
             let mut co = len(list.into());
 
             let len = match co.resume(rt.reborrow(), Response::Resume) {
-                delegate::State::Complete(res) => res?,
-                delegate::State::Yielded(request) => {
-                    *self = State::CalledLen { co, pos };
-                    return Ok(delegate::State::Yielded(request));
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::CalledLen { co, pos };
+                    return Ok(State::Yielded(request));
                 }
             };
 
@@ -699,10 +688,9 @@ where
             pos: Option<i64>,
             len: WeakValue<Ty>,
             pos_value: WeakValue<Ty>,
-        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::{GetIndexCache, SetIndexCache};
             use rt::error::RuntimeError;
-            use rt::ffi::delegate::{self};
             use rt::value::{KeyValue as Key, Value};
             use std::ops::ControlFlow;
 
@@ -730,10 +718,10 @@ where
                         let mut co = get_index(list, Key::Int(current));
 
                         match co.resume(rt.reborrow(), Response::Resume) {
-                            delegate::State::Complete(res) => res?,
-                            delegate::State::Yielded(request) => {
-                                *self = State::CalledGetIndex { co, pos, current };
-                                return Ok(delegate::State::Yielded(request));
+                            State::Complete(res) => res?,
+                            State::Yielded(request) => {
+                                *self = Coro::CalledGetIndex { co, pos, current };
+                                return Ok(State::Yielded(request));
                             }
                         }
                     }
@@ -751,10 +739,10 @@ where
                         let mut co = set_index(list, Key::Int(next), value);
 
                         match co.resume(rt.reborrow(), Response::Resume) {
-                            delegate::State::Complete(res) => res?,
-                            delegate::State::Yielded(request) => {
-                                *self = State::CalledSetIndex { co, pos, current };
-                                return Ok(delegate::State::Yielded(request));
+                            State::Complete(res) => res?,
+                            State::Yielded(request) => {
+                                *self = Coro::CalledSetIndex { co, pos, current };
+                                return Ok(State::Yielded(request));
                             }
                         }
                     }
@@ -772,10 +760,10 @@ where
                     let mut co = set_index(list, Key::Int(pos), pos_value);
 
                     match co.resume(rt.reborrow(), Response::Resume) {
-                        delegate::State::Complete(res) => res?,
-                        delegate::State::Yielded(request) => {
-                            *self = State::CalledSetPos { co };
-                            return Ok(delegate::State::Yielded(request));
+                        State::Complete(res) => res?,
+                        State::Yielded(request) => {
+                            *self = Coro::CalledSetPos { co };
+                            return Ok(State::Yielded(request));
                         }
                     }
                 }
@@ -787,7 +775,7 @@ where
             }
 
             rt.stack.clear();
-            Ok(delegate::State::Complete(()))
+            Ok(State::Complete(()))
         }
 
         fn iter_indices(
@@ -795,9 +783,8 @@ where
             mut rt: RuntimeView<'_, Ty>,
             pos: i64,
             current: i64,
-        ) -> Result<delegate::State<Request<Ty>, ()>, RuntimeError<Ty>> {
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::ffi::arg_parser::ParseArgs;
-            use rt::ffi::delegate;
             use rt::value::KeyValue as Key;
 
             let list = rt.stack[0];
@@ -806,10 +793,10 @@ where
                 let mut co = get_index(list, Key::Int(current));
 
                 let value = match co.resume(rt.reborrow(), Response::Resume) {
-                    delegate::State::Complete(res) => res?,
-                    delegate::State::Yielded(request) => {
-                        *self = State::CalledGetIndex { co, pos, current };
-                        return Ok(delegate::State::Yielded(request));
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::CalledGetIndex { co, pos, current };
+                        return Ok(State::Yielded(request));
                     }
                 };
 
@@ -817,10 +804,10 @@ where
                 let mut co = set_index(list, Key::Int(next), value);
 
                 match co.resume(rt.reborrow(), Response::Resume) {
-                    delegate::State::Complete(res) => res?,
-                    delegate::State::Yielded(request) => {
-                        *self = State::CalledSetIndex { co, pos, current };
-                        return Ok(delegate::State::Yielded(request));
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::CalledSetIndex { co, pos, current };
+                        return Ok(State::Yielded(request));
                     }
                 }
             }
@@ -833,19 +820,19 @@ where
             let mut co = set_index(list, Key::Int(pos), value);
 
             match co.resume(rt.reborrow(), Response::Resume) {
-                delegate::State::Complete(res) => res?,
-                delegate::State::Yielded(request) => {
-                    *self = State::CalledSetPos { co };
-                    return Ok(delegate::State::Yielded(request));
+                State::Complete(res) => res?,
+                State::Yielded(request) => {
+                    *self = Coro::CalledSetPos { co };
+                    return Ok(State::Yielded(request));
                 }
             }
 
             rt.stack.clear();
-            Ok(delegate::State::Complete(()))
+            Ok(State::Complete(()))
         }
     }
 
-    ffi::from_fn(|| State::Started, "lua_std::table::insert", ())
+    ffi::from_fn(|| Coro::Started, "lua_std::table::insert", ())
 }
 
 /// Copy range of values from one table into another.
