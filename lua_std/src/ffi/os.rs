@@ -182,3 +182,45 @@ where
 
     ffi::from_fn(body, "lua_std::os::date", ())
 }
+
+/// Calculate difference between two timestamps.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(t2: int, t1: int) -> int`
+///
+/// Returns the difference, in seconds, from time `t1` to time `t2` (where the times are values returned by `os.time`).
+/// In POSIX, Windows, and some other systems, this value is exactly `t2-t1`.
+///
+/// # Implementation-specific behavior
+///
+/// *  `os.time` always returns number of seconds since Unix epoch, so this function simply returns difference between two values.
+///    
+///    You will get an error on underflow.
+pub fn difftime<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        ffi::delegate::from_mut(|mut rt| {
+            use rt::ffi::arg_parser::{Int, ParseArgs};
+            use rt::value::Value;
+
+            let [t2, t1]: [Int; 2] = rt.stack.parse(&mut rt.core.gc)?;
+
+            if let Some(output) = t2.0.checked_sub(t1.0) {
+                rt.stack.transient().push(Value::Int(output));
+
+                Ok(())
+            } else {
+                let err = rt
+                    .core
+                    .alloc_error_msg("difference between timestamps does not fit into integer");
+                Err(err)
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::os::difftime", ())
+}
