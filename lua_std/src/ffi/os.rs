@@ -69,6 +69,9 @@ where
 ///
 ///    Output is locale-independent as is the case with all functions provided by this library.
 ///
+/// *  `time` when provided is expected to be number of seconds since Unix epoch (regardless of platform).
+///    This is exactly what is returned by [`time`] API.
+///
 /// *  String formatting is done through [`chrono::format::strftime`] facility.
 ///    Technically, its template format is a superset of C's `strftime`.
 ///

@@ -1,6 +1,6 @@
 pub mod math;
-pub mod table;
 pub mod os;
+pub mod table;
 
 use std::fmt::Display;
 use std::path::PathBuf;
