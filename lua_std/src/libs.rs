@@ -9,9 +9,9 @@ use crate::traits::{RootTable, TableEntry, TableEntryEx};
 
 pub struct Std<P>(P);
 
-impl Std<()> {
+impl Std<empty::Empty> {
     pub fn empty() -> Self {
-        Std(())
+        Std(empty::Empty(()))
     }
 }
 
@@ -268,7 +268,7 @@ where
 /// [lua#6.7]: https://www.lua.org/manual/5.4/manual.html#6.7
 pub struct Math<P>(P);
 
-impl Math<()> {
+impl Math<empty::Empty> {
     /// Construct empty module.
     ///
     /// This library module will use table under `math` key in parent table or construct a new one otherwise.
@@ -468,7 +468,7 @@ pub struct MathRand<R, P> {
     builder: P,
 }
 
-impl MathRand<(), ()> {
+impl MathRand<(), empty::Empty> {
     /// Construct a builder to configure this module.
     ///
     /// See [`MathRand` documentation](MathRand#custom-configuration) for usage examples.
@@ -734,7 +734,7 @@ impl<R> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
 /// [lua#6.6]: https://www.lua.org/manual/5.4/manual.html#6.6
 pub struct TableManip<P>(P);
 
-impl TableManip<()> {
+impl TableManip<empty::Empty> {
     /// Construct empty module.
     ///
     /// This library module will use table under `math` key in parent table or construct a new one otherwise.
