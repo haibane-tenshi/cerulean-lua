@@ -379,3 +379,89 @@ where
 
     ffi::from_fn_mut(body, "lua_std::os::execute", ())
 }
+
+/// Terminate host program
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `([code: bool | int, [close: bool]]) -> !`
+///
+/// Calls the ISO C function `exit` to terminate the host program.
+/// If code is `true`, the returned status is `EXIT_SUCCESS`; if code is `false`, the returned status is `EXIT_FAILURE`;
+/// if code is a number, the returned status is this number.
+/// The default value for code is `true`.
+///
+/// If the optional second argument close is `true`, the function closes the Lua state before exiting (see `lua_close`).
+///
+/// # Implementation-specific details
+///
+/// *   This function will invoke Rust's [`exit`](std::process::exit) function, see documentation for caveats.
+/// *   When `code` is boolean, process will terminate with canonical error codes for success/failure respectively.
+///     On Rust side those are provided by [`ExitCode::SUCCESS`](std::process::ExitCode::SUCCESS) and [`ExitCode::FAILURE`](std::process::ExitCode::FAILURE).
+/// *   Rust uses `i32` to represent exit codes.
+///     Unrepresentable integers will be replaced with `ExitCode::FAILURE`.
+pub fn exit<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    use rt::ffi::arg_parser::ParseAtom;
+    use rt::gc::Heap;
+    use rt::value::{Type, WeakValue};
+    use std::fmt::Display;
+
+    enum BoolOrInt {
+        Bool(bool),
+        Int(i64),
+    }
+
+    #[derive(Debug)]
+    struct Error(Type);
+
+    impl Display for Error {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "expected bool or int, found {}", self.0)
+        }
+    }
+
+    impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for BoolOrInt
+    where
+        Ty: Types,
+    {
+        type Error = Error;
+
+        fn parse_atom(value: WeakValue<Ty>, _: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+            match value {
+                WeakValue::Bool(t) => Ok(BoolOrInt::Bool(t)),
+                WeakValue::Int(t) => Ok(BoolOrInt::Int(t)),
+                value => Err(Error(value.type_())),
+            }
+        }
+    }
+
+    let body = || {
+        ffi::delegate::from_mut(|mut rt| {
+            use rt::ffi::arg_parser::{Boolean, Opts, ParseArgs, Split};
+            use std::process::ExitCode;
+
+            let rest: Opts<(BoolOrInt, Boolean)> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let (code, close) = rest.split();
+            let code = code.unwrap_or(BoolOrInt::Bool(true));
+            let _close = close.map(|t| t.0).unwrap_or(false);
+
+            debug_assert_eq!(ExitCode::SUCCESS, ExitCode::from(0));
+            debug_assert_eq!(ExitCode::FAILURE, ExitCode::from(1));
+
+            let code = match code {
+                BoolOrInt::Bool(true) => 0,
+                BoolOrInt::Bool(false) => 1,
+                BoolOrInt::Int(n) => n.try_into().unwrap_or(1),
+            };
+
+            std::process::exit(code)
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::os::exit", ())
+}
