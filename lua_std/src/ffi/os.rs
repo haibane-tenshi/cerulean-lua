@@ -465,3 +465,48 @@ where
 
     ffi::from_fn(body, "lua_std::os::exit", ())
 }
+
+/// Read value of environment variable.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * (varname: string) -> string | fail
+///
+/// Returns the value of the process environment variable `varname` or **fail** if the variable is not defined.
+///
+/// # Implementation-specific behavior
+///
+/// *   Environment variable is expected to contain valid utf8.
+///     This function will return **fail** if that doesn't hold.
+pub fn getenv<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = || {
+        ffi::delegate::from_mut(|mut rt| {
+            use rt::ffi::arg_parser::{LuaString, ParseArgs};
+            use rt::gc::LuaPtr;
+            use rt::value::string::try_gc_to_str;
+            use rt::value::Value;
+
+            let name: LuaString<_> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+
+            let name = try_gc_to_str(name.0 .0, &rt.core.gc)?;
+
+            let Ok(value) = std::env::var(name.as_ref()) else {
+                rt.stack.transient().push(Value::Nil);
+                return Ok(());
+            };
+
+            let value = rt.core.gc.intern(value.into());
+            let value = Value::String(LuaPtr(value.downgrade()));
+
+            rt.stack.synchronized(&mut rt.core.gc).push(value);
+            Ok(())
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::os::getenv", ())
+}
