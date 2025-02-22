@@ -2057,10 +2057,10 @@ where
     // External cache is used to avoid extraneous metamethod calls (which is a pain to write) on element swaps.
 
     use super::builtins::{GetIndex, Len, SetIndex};
-    use gc::RootCell;
+    use bitvec::vec::BitVec;
     use rt::error::RuntimeError;
     use rt::ffi::delegate::{Delegate, Request, Response, RuntimeView, StackSlot, State};
-    use rt::value::{Callable, Strong, WeakValue};
+    use rt::value::{Callable, Strong, StrongValue, WeakValue};
     use std::ops::RangeInclusive;
     use std::pin::Pin;
 
@@ -2078,9 +2078,100 @@ where
         fn parent(self) -> Option<HeapIndex> {
             self.0.checked_sub(1).map(|n| HeapIndex(n / 2))
         }
+    }
 
-        fn prev(self) -> Option<HeapIndex> {
-            self.0.checked_sub(1).map(HeapIndex)
+    struct Heap<Ty>
+    where
+        Ty: Types,
+    {
+        cache: Vec<StrongValue<Ty>>,
+        // Marks positions which need to be compared to their parent.
+        dirty: BitVec,
+        // First index of already sorted portion.
+        sorted: usize,
+    }
+
+    impl<Ty> Heap<Ty>
+    where
+        Ty: Types,
+    {
+        fn new(cache: Vec<StrongValue<Ty>>) -> Self {
+            let sorted = cache.len();
+            let mut dirty = BitVec::repeat(true, cache.len());
+            // Make sure that head is not marked.
+            if let Some(mut place) = dirty.get_mut(0) {
+                *place = false;
+            }
+
+            Heap {
+                cache,
+                dirty,
+                sorted,
+            }
+        }
+
+        fn get(&self, index: HeapIndex) -> &StrongValue<Ty> {
+            &self.cache[index.0]
+        }
+
+        // Queue children of `index` for comparison.
+        fn mark_dirty(&mut self, index: HeapIndex) {
+            let (lhs, rhs) = index.children();
+
+            if (0..self.sorted).contains(&rhs.0) {
+                self.dirty.set(rhs.0, true);
+                self.dirty.set(lhs.0, true);
+            } else if (0..self.sorted).contains(&lhs.0) {
+                self.dirty.set(lhs.0, true);
+            }
+        }
+
+        fn construct_next_cmp(&mut self) -> Option<HeapIndex> {
+            self.dirty.last_one().map(HeapIndex)
+        }
+
+        fn sort_next_cmp(&mut self) -> Option<HeapIndex> {
+            if let Some(index) = self.dirty.first_one() {
+                if (0..self.sorted).contains(&index) {
+                    return Some(HeapIndex(index));
+                }
+            }
+
+            match self.sorted {
+                0 => None,
+                1 => {
+                    self.sorted = 0;
+                    None
+                }
+                2 => {
+                    self.cache.swap(0, 1);
+                    self.sorted = 0;
+                    None
+                }
+                _ => {
+                    self.sorted -= 1;
+                    self.cache.swap(0, self.sorted);
+                    self.mark_dirty(HeapIndex(0));
+                    Some(HeapIndex(1))
+                }
+            }
+        }
+
+        fn resolve_cmp(&mut self, index: HeapIndex, should_swap: bool) {
+            debug_assert!(self.dirty[index.0]);
+
+            self.dirty.set(index.0, false);
+
+            if should_swap {
+                let parent = index.parent().unwrap();
+                self.cache.swap(index.0, parent.0);
+
+                self.mark_dirty(index);
+            }
+        }
+
+        fn consume(self) -> Vec<StrongValue<Ty>> {
+            self.cache
         }
     }
 
@@ -2097,37 +2188,35 @@ where
             boundary: StackSlot,
             cmp: Callable<Strong, Ty>,
             range: RangeInclusive<i64>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cache: Vec<StrongValue<Ty>>,
         },
         IterGetIndex {
             co: GetIndex<Ty>,
             cmp: Callable<Strong, Ty>,
             range: RangeInclusive<i64>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cache: Vec<StrongValue<Ty>>,
         },
         ConstructHeap {
             boundary: StackSlot,
             cmp: Callable<Strong, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
-            cursor: HeapIndex,
+            heap: Heap<Ty>,
+            index: HeapIndex,
         },
         HeapSort {
             boundary: StackSlot,
             cmp: Callable<Strong, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
-            cursor: HeapIndex,
-            is_left_child: bool,
-            sorted: usize,
+            heap: Heap<Ty>,
+            index: HeapIndex,
         },
         ToSlowSetIndex {
             boundary: StackSlot,
             current: i64,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cache: Vec<StrongValue<Ty>>,
         },
         IterSetIndex {
             co: SetIndex<Ty>,
             current: i64,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
+            cache: Vec<StrongValue<Ty>>,
         },
         Finished,
     }
@@ -2207,39 +2296,29 @@ where
                     Coro::ConstructHeap {
                         boundary,
                         cmp,
-                        cache,
-                        cursor,
+                        heap,
+                        index,
                     },
                     Response::Evaluated(Ok(())),
                 ) => {
                     rt.stack.adjust_height(boundary + 1);
-                    let res = rt.stack.pop().unwrap().to_bool();
+                    let should_swap = rt.stack.pop().unwrap().to_bool();
 
-                    rearrange(this.construct_heap_tail(rt, cmp, cache, cursor, res))
+                    rearrange(this.construct_heap_tail(rt, cmp, heap, index, should_swap))
                 }
                 (
                     Coro::HeapSort {
                         boundary,
                         cmp,
-                        cache,
-                        cursor,
-                        is_left_child,
-                        sorted,
+                        heap,
+                        index,
                     },
                     Response::Evaluated(Ok(())),
                 ) => {
                     rt.stack.adjust_height(boundary + 1);
-                    let res = rt.stack.pop().unwrap().to_bool();
+                    let should_swap = rt.stack.pop().unwrap().to_bool();
 
-                    rearrange(this.heapsort_tail(
-                        rt,
-                        cmp,
-                        cache,
-                        cursor,
-                        is_left_child,
-                        sorted,
-                        res,
-                    ))
+                    rearrange(this.heapsort_tail(rt, cmp, heap, index, should_swap))
                 }
                 (
                     Coro::ToSlowSetIndex {
@@ -2368,7 +2447,6 @@ where
                             stack.push(Value::Int(current));
                         });
 
-                        let cache = rt.core.gc.alloc_cell(cache);
                         let request = Request::Invoke {
                             callable: call.func,
                             start: boundary,
@@ -2386,13 +2464,13 @@ where
                         return Err(err);
                     }
                 };
+                let value = value.try_upgrade(&rt.core.gc)?;
 
                 cache.push(value)
             }
 
-            let cursor = HeapIndex(cache.len() - 1);
-            let cache = rt.core.gc.alloc_cell(cache);
-            self.contruct_heap_head(rt, cmp, cache, cursor)
+            let heap = Heap::new(cache);
+            self.contruct_heap_head(rt, cmp, heap)
         }
 
         fn iter_get_index(
@@ -2401,13 +2479,14 @@ where
             list: WeakValue<Ty>,
             cmp: Callable<Strong, Ty>,
             range: RangeInclusive<i64>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
+            mut cache: Vec<StrongValue<Ty>>,
             value: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::get_index;
             use rt::value::KeyValue as Key;
 
-            rt.core.gc[&cache].push(value);
+            let value = value.try_upgrade(&rt.core.gc)?;
+            cache.push(value);
 
             let len = *range.end();
             for current in range.skip(1) {
@@ -2425,30 +2504,29 @@ where
                     }
                 };
 
-                rt.core.gc[&cache].push(value);
+                let value = value.try_upgrade(&rt.core.gc)?;
+                cache.push(value);
             }
 
-            let cursor = HeapIndex(rt.core.gc[&cache].len() - 1);
-            self.contruct_heap_head(rt, cmp, cache, cursor)
+            let heap = Heap::new(cache);
+            self.contruct_heap_head(rt, cmp, heap)
         }
 
         fn contruct_heap_head(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
             cmp: Callable<Strong, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
-            cursor: HeapIndex,
+            mut heap: Heap<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
-            let Some(parent) = cursor.parent() else {
-                let sorted = rt.core.gc[&cache].len();
-                return self.heapsort_next(rt, cmp, cache, sorted);
+            let Some(index) = heap.construct_next_cmp() else {
+                return self.heapsort_head(rt, cmp, heap);
             };
 
+            let parent = index.parent().unwrap();
             let boundary = rt.stack.top();
-            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                let cache = &heap[&cache];
-                stack.push(cache[cursor.0]);
-                stack.push(cache[parent.0]);
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                stack.push(heap.get(index).downgrade());
+                stack.push(heap.get(parent).downgrade());
             });
             let request = Request::Invoke {
                 callable: cmp.clone(),
@@ -2457,8 +2535,8 @@ where
             *self = Coro::ConstructHeap {
                 boundary,
                 cmp,
-                cache,
-                cursor,
+                heap,
+                index,
             };
             Ok(State::Yielded(request))
         }
@@ -2467,67 +2545,29 @@ where
             &mut self,
             rt: RuntimeView<'_, Ty>,
             cmp: Callable<Strong, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
-            cursor: HeapIndex,
-            res: bool,
+            mut heap: Heap<Ty>,
+            index: HeapIndex,
+            should_swap: bool,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
-            // Values are compared in order child-parent,
-            // so we need to swap on `true`.
-            if res {
-                let parent = cursor.parent().unwrap();
-                rt.core.gc[&cache].swap(cursor.0, parent.0);
-            }
-
-            let cursor = cursor
-                .prev()
-                .expect("cursor should never point to top of heap");
-
-            self.contruct_heap_head(rt, cmp, cache, cursor)
-        }
-
-        fn heapsort_next(
-            &mut self,
-            rt: RuntimeView<'_, Ty>,
-            cmp: Callable<Strong, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
-            sorted: usize,
-        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
-            let sorted = sorted - 1;
-
-            if sorted == 0 {
-                return self.after_heapsort(rt, cache);
-            }
-
-            rt.core.gc[&cache].swap(0, sorted);
-
-            self.heapsort_head(rt, cmp, cache, HeapIndex(0), true, sorted)
+            heap.resolve_cmp(index, should_swap);
+            self.contruct_heap_head(rt, cmp, heap)
         }
 
         fn heapsort_head(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
             cmp: Callable<Strong, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
-            cursor: HeapIndex,
-            is_left_child: bool,
-            sorted: usize,
+            mut heap: Heap<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
-            let children = cursor.children();
-            let child = if is_left_child {
-                children.0
-            } else {
-                children.1
+            let Some(index) = heap.sort_next_cmp() else {
+                return self.after_heapsort(rt, heap.consume());
             };
-
-            if !(0..sorted).contains(&child.0) {
-                return self.heapsort_next(rt, cmp, cache, sorted);
-            }
+            let parent = index.parent().unwrap();
 
             let boundary = rt.stack.top();
-            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                let cache = &heap[&cache];
-                stack.push(cache[child.0]);
-                stack.push(cache[cursor.0]);
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                stack.push(heap.get(index).downgrade());
+                stack.push(heap.get(parent).downgrade());
             });
 
             let request = Request::Invoke {
@@ -2537,51 +2577,28 @@ where
             *self = Coro::HeapSort {
                 boundary,
                 cmp,
-                cache,
-                cursor,
-                is_left_child,
-                sorted,
+                heap,
+                index,
             };
             Ok(State::Yielded(request))
         }
 
-        #[expect(clippy::too_many_arguments)]
         fn heapsort_tail(
             &mut self,
             rt: RuntimeView<'_, Ty>,
             cmp: Callable<Strong, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
-            cursor: HeapIndex,
-            is_left_child: bool,
-            sorted: usize,
-            res: bool,
+            mut heap: Heap<Ty>,
+            index: HeapIndex,
+            should_swap: bool,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
-            // Values are compared in order child-parent,
-            // so we need to swap on `true`.
-
-            let (cursor, is_left_child) = if res {
-                let children = cursor.children();
-                let child = if is_left_child {
-                    children.0
-                } else {
-                    children.1
-                };
-                rt.core.gc[&cache].swap(cursor.0, child.0);
-
-                (child, true)
-            } else if is_left_child {
-                (cursor, false)
-            } else {
-                return self.heapsort_next(rt, cmp, cache, sorted);
-            };
-
-            self.heapsort_head(rt, cmp, cache, cursor, is_left_child, sorted)
+            heap.resolve_cmp(index, should_swap);
+            self.heapsort_head(rt, cmp, heap)
         }
 
         fn after_heapsort(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
+            mut cache: Vec<StrongValue<Ty>>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::SetIndexCache;
             use rt::value::{KeyValue as Key, Value};
@@ -2590,9 +2607,10 @@ where
             let list = rt.stack[0];
             let setter = SetIndexCache::new(list, &rt.core.gc, &rt.core.metatable_registry)?;
             for current in 1.. {
-                let Some(value) = rt.core.gc[&cache].pop() else {
+                let Some(value) = cache.pop() else {
                     break;
                 };
+                let value = value.downgrade();
 
                 match setter.set(Key::Int(current), value, &mut rt.core.gc) {
                     Ok(ControlFlow::Break(())) => (),
@@ -2629,16 +2647,17 @@ where
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
             list: WeakValue<Ty>,
-            cache: RootCell<Vec<WeakValue<Ty>>>,
+            mut cache: Vec<StrongValue<Ty>>,
             current: i64,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::set_index;
             use rt::value::KeyValue as Key;
 
             for current in (current..).skip(1) {
-                let Some(value) = rt.core.gc[&cache].pop() else {
+                let Some(value) = cache.pop() else {
                     break;
                 };
+                let value = value.downgrade();
 
                 let mut co = set_index(list, Key::Int(current), value);
                 match co.resume(rt.reborrow(), Response::Resume) {
