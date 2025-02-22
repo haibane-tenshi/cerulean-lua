@@ -45,6 +45,154 @@ where
     }
 }
 
+/// Place APIs into a custom table.
+///
+/// This library module will use table under specified name in parent table or construct a new one otherwise.
+/// All included items will be put into the table, potentially overriding existing entries.
+///
+/// This module allows you to introduce customized structures:
+///
+/// ```
+/// # use lua_std::lib::{Std, Table};
+/// use lua_std::std;
+///
+/// let std = Std::empty()
+///     .include(Table::with_name("math")
+///         .include(std::math::type_)
+///         .include(Table::with_name("float")
+///             .include(std::math::pi)
+///             .include(std::math::sin)
+///         )
+///     );
+/// ```
+pub struct Table<S, P> {
+    name: S,
+    builder: P,
+}
+
+impl<S> Table<S, empty::Empty>
+where
+    S: AsRef<str>,
+{
+    /// Construct new module and place under specified name into parent table.
+    pub fn with_name(name: S) -> Self {
+        Table {
+            name,
+            builder: empty::Empty(()),
+        }
+    }
+}
+
+impl<S, P> Table<S, P> {
+    /// Include API in the module.
+    pub fn include<T>(self, part: T) -> Table<S, (P, T)> {
+        let Table { name, builder } = self;
+
+        Table {
+            name,
+            builder: (builder, part),
+        }
+    }
+}
+
+impl<Ty, S, P> TableEntry<Ty> for Table<S, P>
+where
+    Ty: Types,
+    S: AsRef<str>,
+    P: TableEntry<Ty>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        use rt::gc::LuaPtr;
+        use rt::value::{KeyValue, TableIndex, Value};
+
+        let Table { name, builder } = self;
+
+        let key = core.gc.intern(name.as_ref().into());
+        let key = KeyValue::String(LuaPtr(key.downgrade()));
+        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
+            core.gc.upgrade(ptr).unwrap()
+        } else {
+            core.gc.alloc_cell(Default::default())
+        };
+
+        builder.build(&local_table, core);
+
+        let value = Value::Table(LuaPtr(local_table.downgrade()));
+        core.gc[table].set(key, value);
+    }
+}
+
+impl<Ty, Ex, S, P> TableEntryEx<Ty, Ex> for Table<S, P>
+where
+    Ty: Types,
+    S: AsRef<str>,
+    P: TableEntryEx<Ty, Ex>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, extra: &mut Ex) {
+        use rt::gc::LuaPtr;
+        use rt::value::{KeyValue, TableIndex, Value};
+
+        let Table { name, builder } = self;
+
+        let key = core.gc.intern(name.as_ref().into());
+        let key = KeyValue::String(LuaPtr(key.downgrade()));
+        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
+            core.gc.upgrade(ptr).unwrap()
+        } else {
+            core.gc.alloc_cell(Default::default())
+        };
+
+        builder.build(&local_table, core, extra);
+
+        let value = Value::Table(LuaPtr(local_table.downgrade()));
+        core.gc[table].set(key, value);
+    }
+}
+
+/// Inline a group of APIs directly into parent table.
+///
+/// Unlike [`Table`], using it will not introduce an intermediate table and place all APIs directly into parent.
+/// This can be useful for organizational purposes.
+pub struct Inline<P>(P);
+
+impl Inline<empty::Empty> {
+    /// Construct new inlined module.
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Inline(empty::Empty(()))
+    }
+}
+
+impl<P> Inline<P> {
+    /// Include API in the module.
+    pub fn inlcude<T>(self, part: T) -> Inline<(P, T)> {
+        let Inline(builder) = self;
+        Inline((builder, part))
+    }
+}
+
+impl<Ty, P> TableEntry<Ty> for Inline<P>
+where
+    Ty: Types,
+    P: TableEntry<Ty>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let Inline(builder) = self;
+        builder.build(table, core);
+    }
+}
+
+impl<Ty, Ex, P> TableEntryEx<Ty, Ex> for Inline<P>
+where
+    Ty: Types,
+    P: TableEntryEx<Ty, Ex>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, extra: &mut Ex) {
+        let Inline(builder) = self;
+        builder.build(table, core, extra);
+    }
+}
+
 /// Math utilities library residing in `math` table.
 ///
 /// This library module will use table under `math` key in parent table or construct a new one otherwise.
@@ -165,23 +313,8 @@ where
     P: TableEntry<Ty>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        use rt::gc::LuaPtr;
-        use rt::value::{KeyValue, TableIndex, Value};
-
-        let key = core.gc.intern("math".into());
-        let key = KeyValue::String(LuaPtr(key.downgrade()));
-        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
-            core.gc.upgrade(ptr).unwrap()
-        } else {
-            core.gc.alloc_cell(Default::default())
-        };
-
         let Math(builder) = self;
-
-        builder.build(&local_table, core);
-
-        let value = Value::Table(LuaPtr(local_table.downgrade()));
-        core.gc[table].set(key, value);
+        Table::with_name("math").include(builder).build(table, core);
     }
 }
 
@@ -395,26 +528,13 @@ where
     P: TableEntryEx<Ty, RootCell<R>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        use rt::gc::LuaPtr;
-        use rt::value::{KeyValue, TableIndex, Value};
-
-        let key = core.gc.intern("math".into());
-        let key = KeyValue::String(LuaPtr(key.downgrade()));
-        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
-            core.gc.upgrade(ptr).unwrap()
-        } else {
-            core.gc.alloc_cell(Default::default())
-        };
-
         let MathRand {
             mut rng_state,
             builder,
         } = self;
-
-        builder.build(&local_table, core, &mut rng_state);
-
-        let value = Value::Table(LuaPtr(local_table.downgrade()));
-        core.gc[table].set(key, value);
+        Table::with_name("math")
+            .include(builder)
+            .build(table, core, &mut rng_state);
     }
 }
 
@@ -425,27 +545,14 @@ where
     R: Trace + rand::SeedableRng,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        use rt::gc::LuaPtr;
-        use rt::value::{KeyValue, TableIndex, Value};
-
-        let key = core.gc.intern("math".into());
-        let key = KeyValue::String(LuaPtr(key.downgrade()));
-        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
-            core.gc.upgrade(ptr).unwrap()
-        } else {
-            core.gc.alloc_cell(Default::default())
-        };
-
         let MathRand {
             rng_state: _,
             builder,
         } = self;
         let mut rng_state = core.gc.alloc_cell(R::from_entropy());
-
-        builder.build(&local_table, core, &mut rng_state);
-
-        let value = Value::Table(LuaPtr(local_table.downgrade()));
-        core.gc[table].set(key, value);
+        Table::with_name("math")
+            .include(builder)
+            .build(table, core, &mut rng_state);
     }
 }
 
@@ -672,23 +779,10 @@ where
     P: TableEntry<Ty>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        use rt::gc::LuaPtr;
-        use rt::value::{KeyValue, TableIndex, Value};
-
-        let key = core.gc.intern("table".into());
-        let key = KeyValue::String(LuaPtr(key.downgrade()));
-        let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
-            core.gc.upgrade(ptr).unwrap()
-        } else {
-            core.gc.alloc_cell(Default::default())
-        };
-
         let TableManip(builder) = self;
-
-        builder.build(&local_table, core);
-
-        let value = Value::Table(LuaPtr(local_table.downgrade()));
-        core.gc[table].set(key, value);
+        Table::with_name("table")
+            .include(builder)
+            .build(table, core);
     }
 }
 
