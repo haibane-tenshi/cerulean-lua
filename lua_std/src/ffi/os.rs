@@ -1,10 +1,12 @@
+use gc::RootCell;
+use rt::ffi::{self, LuaFfi};
+use rt::value::Types;
 /// Operating system facilities
 ///
 /// # From Lua documentation
 ///
 /// This library is implemented through table `os`.
-use rt::ffi::{self, LuaFfi};
-use rt::value::Types;
+use std::process::Command;
 
 /// Return CPU time consumed by the entire process.
 ///
@@ -223,4 +225,157 @@ where
     };
 
     ffi::from_fn(body, "lua_std::os::difftime", ())
+}
+
+/// Execute command in a shell.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `() -> bool`
+/// * `(command: string) -> (bool | fail, string, int)`
+///
+/// This function is equivalent to the ISO C function `system`.
+/// It passes `command` to be executed by an operating system shell.
+/// Its first result is `true` if the command terminated successfully, or **fail** otherwise.
+/// After this first result the function returns a string plus a number, as follows:
+///
+/// * **"exit"**: the command terminated normally; the following number is the exit status of the command.
+/// * **"signal"**: the command was terminated by a signal; the following number is the signal that terminated the command.
+///
+/// When called without a command, `os.execute` returns a boolean that is true if a shell is available.
+///
+/// # Implementation-specific behavior
+///
+/// *   This function will attempt to spawn a new shell in child process and pipe the command as utf8-encoded string to the shell.
+///     Afterwards it **will block entire host process** while waiting for the process to finish.
+///     Any errors during this will be converted into Lua panics.
+///
+/// *   As its appearance suggests, this function **permits executing arbitrary commands** on your machine.
+///     You *should not* expose it to untrusted scripts.
+///
+/// *   The `shell` parameter will be used to construct child process.
+///     It is your responsibility to correctly configure it.
+///
+///     This function will override all stdio configuration associated with it before invocation.
+///
+/// *   When shell constructor is not set, attempting to execute any command will result in Lua panic.
+///     You can call `execute` without parameters to test whether configuration was provided.
+///
+///     Note that it is impossible to verify beforehand whether constructing the shell is going to succeed or not,
+///     so as long as shell constructor is configured `execute` will claim that shell is available.
+///
+/// *   See [`OsExecute`] for ways to configure shell constructor.
+pub fn execute<Ty>(shell: Option<RootCell<Command>>) -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+{
+    let body = move || {
+        let shell = shell.clone();
+        ffi::delegate::from_mut(move |mut rt| {
+            use rt::ffi::arg_parser::{LuaString, Opts, ParseArgs, Split};
+            use rt::gc::LuaPtr;
+            use rt::value::string::try_gc_to_str;
+            use rt::value::Value;
+            use std::io::Write;
+            use std::process::Stdio;
+
+            let rest: Opts<(LuaString<_>,)> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let (command,) = rest.split();
+
+            let Some(command) = command else {
+                rt.stack.transient().push(Value::Bool(shell.is_some()));
+                return Ok(());
+            };
+
+            let Some(shell) = &shell else {
+                let err = rt.core.alloc_error_msg("shell is not available");
+                return Err(err);
+            };
+
+            let command = try_gc_to_str(command.0 .0, &rt.core.gc)?.into_owned();
+
+            let shell = rt.core.gc.get_root_mut(shell);
+
+            shell
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+
+            let mut child = match shell.spawn() {
+                Ok(t) => t,
+                Err(err) => {
+                    let err = rt.core.alloc_error_msg(err.to_string());
+                    return Err(err);
+                }
+            };
+
+            let mut stdin = child.stdin.take().unwrap();
+            if let Err(err) = write!(&mut stdin, "{}", command) {
+                let msg = if let Err(kill_err) = child.kill() {
+                    format!("{err}; {kill_err}")
+                } else {
+                    format!("{err}")
+                };
+
+                let err = rt.core.alloc_error_msg(msg);
+                return Err(err);
+            }
+
+            let exit_status = match child.wait() {
+                Ok(t) => t,
+                Err(err) => {
+                    let err = rt.core.alloc_error_msg(err.to_string());
+                    return Err(err);
+                }
+            };
+
+            let status = if exit_status.success() {
+                Value::Bool(true)
+            } else {
+                Value::Nil
+            };
+            let (tag, code) = match exit_status.code() {
+                Some(code) => {
+                    let tag = rt.core.gc.intern("exit".into());
+                    let tag = Value::String(LuaPtr(tag.downgrade()));
+
+                    let code = Value::Int(code.into());
+
+                    (tag, code)
+                }
+                None => {
+                    #[allow(unused_mut)]
+                    let mut signal: Option<i32> = None;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::process::ExitStatusExt;
+                        signal = exit_status.signal();
+                    }
+
+                    // This panic *should* be unreachable.
+                    // According to docs only Unix targets may return None as exit code and only when child was signaled.
+                    let signal = signal.expect("failed to extract signal code");
+
+                    let tag = rt.core.gc.intern("signal".into());
+                    let tag = Value::String(LuaPtr(tag.downgrade()));
+
+                    let code = Value::Int(signal.into());
+
+                    (tag, code)
+                }
+            };
+
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                stack.push(status);
+                stack.push(tag);
+                stack.push(code);
+            });
+
+            Ok(())
+        })
+    };
+
+    ffi::from_fn_mut(body, "lua_std::os::execute", ())
 }
