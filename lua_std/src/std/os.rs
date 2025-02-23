@@ -438,3 +438,48 @@ where
         set_func("time", fn_body).build(table, core);
     }
 }
+
+/// Generate a named temporary file.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `() -> string`
+///
+/// Returns a string with a file name that can be used for a temporary file.
+/// The file must be explicitly opened before its use and explicitly removed when no longer needed.
+///
+/// In POSIX systems, this function also creates a file with that name, to avoid security risks.
+/// (Someone else might create the file with wrong permissions in the time between getting the name and creating the file.)
+/// You still have to open the file to use it and to remove it (even if you do not use it).
+///
+/// When possible, you may prefer to use `io.tmpfile`, which automatically removes the file when the program ends.
+///
+/// # Implementation-specific behavior
+///
+/// *   This function will always create a new empty file.
+///
+/// *   The file will be created in default temp directory.
+///
+/// *   The file will not be marked as temporary in filesystem.
+///     You are responsible for removing it afterwards.
+///
+/// *   You should consider accessing the file as **insecure**.
+///     As is common when working with filesystem it is a subject to TOCTOU and DoS attacks.
+///
+///     There are some mitigations in place (randomized file name, file is marked as private),
+///     but none of those are perfect.
+///     If security is of concern use `io.tmpfile` instead (which should generally be secure) or
+///     manually manage files in location private to your program.
+#[expect(non_camel_case_types)]
+pub struct tmpname;
+
+impl<Ty> TableEntry<Ty> for tmpname
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::os::tmpname, "lua_std::std::os::tmpname", ());
+        set_func("tmpname", fn_body).build(table, core);
+    }
+}
