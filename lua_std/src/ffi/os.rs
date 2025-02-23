@@ -1290,3 +1290,69 @@ where
 
     Coro::Started
 }
+
+/// Generate a named temporary file.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `() -> string`
+///
+/// Returns a string with a file name that can be used for a temporary file.
+/// The file must be explicitly opened before its use and explicitly removed when no longer needed.
+///
+/// In POSIX systems, this function also creates a file with that name, to avoid security risks.
+/// (Someone else might create the file with wrong permissions in the time between getting the name and creating the file.)
+/// You still have to open the file to use it and to remove it (even if you do not use it).
+///
+/// When possible, you may prefer to use `io.tmpfile`, which automatically removes the file when the program ends.
+///
+/// # Implementation-specific behavior
+///
+/// *   This function will always create a new empty file.
+///
+/// *   The file will be created in default temp directory.
+///
+/// *   The file will not be marked as temporary in filesystem.
+///     You are responsible for removing it afterwards.
+///
+/// *   You should consider accessing the file as **insecure**.
+///     As is common when working with filesystem it is a subject to TOCTOU and DoS attacks.
+///
+///     There are some mitigations in place (randomized file name, file is marked as private),
+///     but none of those are perfect.
+///     If security is of concern use `io.tmpfile` instead (which should generally be secure) or
+///     manually manage files in location private to your program.
+pub fn tmpname<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use tempfile::Builder;
+
+        use rt::ffi::arg_parser::ParseArgs;
+        use rt::gc::AllocExt;
+
+        let () = rt.stack.parse(&mut rt.core.gc)?;
+
+        let file = Builder::new()
+            .suffix(".tmp")
+            .rand_bytes(10)
+            .keep(true)
+            .tempfile()
+            .map_err(|err| rt.core.gc.alloc_error_msg(err.to_string()))?;
+
+        let path = file.into_temp_path();
+        let name = path
+            .to_str()
+            .expect("temporary file name is not valid utf8");
+
+        let file_name = rt.core.gc.alloc_str(name);
+
+        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+            stack.push(file_name.downgrade());
+        });
+
+        Ok(())
+    })
+}

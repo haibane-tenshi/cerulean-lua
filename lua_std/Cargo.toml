@@ -18,3 +18,4 @@ rand_hc = "0.3.2"
 rand_xoshiro = "0.6.0"
 repr = { version = "0.1.0", path = "../repr" }
 rt = { version = "0.1.0", path = "../rt" }
+tempfile = "3.17.1"
