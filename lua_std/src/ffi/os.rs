@@ -585,3 +585,60 @@ where
 
     ffi::from_fn(body, "lua_std::os::remove", ())
 }
+
+/// Rename file or directory.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(oldname: string, newname: string) -> bool`
+/// * `(oldname: string, newname: string) -> (fail, string, nil | int)`
+///
+/// # Implementation-specific behavior
+///
+/// *   On failure this will attempt to recover OS-specific error code to provide in last return.
+///     This may fail and produce no value.
+pub fn rename<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+    PathBuf: ParseFrom<Ty::String>,
+    <PathBuf as ParseFrom<Ty::String>>::Error: Display,
+{
+    let body = || {
+        ffi::delegate::from_mut(|mut rt| {
+            use rt::ffi::arg_parser::{FromLuaString, ParseArgs};
+            use rt::gc::LuaPtr;
+            use rt::value::Value;
+            use std::path::PathBuf;
+
+            let [old, new]: [FromLuaString<PathBuf>; 2] = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let old = old.0;
+            let new = new.0;
+
+            match std::fs::rename(&old, &new) {
+                Ok(()) => {
+                    rt.stack.transient().push(Value::Bool(true));
+                    Ok(())
+                }
+                Err(err) => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                    let code = err
+                        .raw_os_error()
+                        .map(|n| Value::Int(n.into()))
+                        .unwrap_or_default();
+
+                    let msg = heap.intern(err.to_string().into());
+                    let msg = Value::String(LuaPtr(msg.downgrade()));
+
+                    stack.push(Value::Nil);
+                    stack.push(msg);
+                    stack.push(code);
+
+                    Ok(())
+                }),
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::os::rename", ())
+}
