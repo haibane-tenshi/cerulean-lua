@@ -337,3 +337,36 @@ where
         );
     }
 }
+
+/// Rename file or directory.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(oldname: string, newname: string) -> bool`
+/// * `(oldname: string, newname: string) -> (fail, string, nil | int)`
+///
+/// # Implementation-specific behavior
+///
+/// *   On failure this will attempt to recover OS-specific error code to provide in last return.
+///     This may fail and produce no value.
+#[expect(non_camel_case_types)]
+pub struct rename;
+
+impl<Ty> TableEntry<Ty> for rename
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    PathBuf: ParseFrom<Ty::String>,
+    <PathBuf as ParseFrom<Ty::String>>::Error: Display,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::os::rename();
+        let key = core.alloc_string("rename".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
