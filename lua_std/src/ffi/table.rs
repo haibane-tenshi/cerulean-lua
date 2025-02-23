@@ -8,7 +8,8 @@
 //! Remember that, whenever an operation needs the length of a table, all caveats about the length operator apply (see §3.4.7).
 //! All functions ignore non-numeric keys in the tables given as arguments.
 
-use rt::ffi::{self, DLuaFfi, LuaFfi};
+use rt::ffi::delegate::{self, Delegate};
+use rt::ffi::{self, DLuaFfi};
 use rt::value::Types;
 
 /// Stringify and concatenate table elements.
@@ -41,7 +42,7 @@ use rt::value::Types;
 ///    Render numbers manually to have better control over output.
 ///
 ///    Note that raw concatenation between strings always takes priority over metamethod even if one is configured.
-pub fn concat<Ty>() -> impl LuaFfi<Ty>
+pub fn concat<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
     Ty::String: Unpin,
@@ -445,7 +446,7 @@ where
         }
     }
 
-    ffi::from_fn(|| Coro::Started, "lua_std::table::concat", ())
+    Coro::Started
 }
 
 /// Insert value into table under integer key.
@@ -471,7 +472,7 @@ where
 /// *  In essence this function will perform assignments of the form `list[n+1] = list[n]` in order to shift values.
 ///
 ///    Order of operations is implementation-specific (including between getters and setters).
-pub fn insert<Ty>() -> impl LuaFfi<Ty>
+pub fn insert<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -832,7 +833,7 @@ where
         }
     }
 
-    ffi::from_fn(|| Coro::Started, "lua_std::table::insert", ())
+    Coro::Started
 }
 
 /// Copy range of values from one table into another.
@@ -857,7 +858,7 @@ where
 ///    This replicates behavior of vanilla implementation.
 ///
 /// *  Order of operations is undefined.
-pub fn move_<Ty>() -> impl LuaFfi<Ty>
+pub fn move_<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -1200,7 +1201,7 @@ where
         }
     }
 
-    ffi::from_fn(|| Coro::Started, "lua_std::table::move", ())
+    Coro::Started
 }
 
 /// Pack all arguments into a new table.
@@ -1212,38 +1213,34 @@ where
 ///
 /// Returns a new table with all arguments stored into keys 1, 2, etc. and with a field **"n"** with the total number of arguments.
 /// Note that the resulting table may not be a sequence, if some arguments are `nil`.
-pub fn pack<Ty>() -> impl LuaFfi<Ty>
+pub fn pack<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use rt::gc::LuaPtr;
-            use rt::value::{KeyValue as Key, TableIndex, Value};
+    delegate::from_mut(|mut rt| {
+        use rt::gc::LuaPtr;
+        use rt::value::{KeyValue as Key, TableIndex, Value};
 
-            let mut table = Ty::Table::default();
+        let mut table = Ty::Table::default();
 
-            let len = rt.stack.len();
-            for (i, value) in (1..).zip(rt.stack.drain(..)) {
-                table.set(Key::Int(i), value);
-            }
+        let len = rt.stack.len();
+        for (i, value) in (1..).zip(rt.stack.drain(..)) {
+            table.set(Key::Int(i), value);
+        }
 
-            let n = rt.core.gc.intern("n".into());
-            let n = Key::String(LuaPtr(n.downgrade()));
+        let n = rt.core.gc.intern("n".into());
+        let n = Key::String(LuaPtr(n.downgrade()));
 
-            let count = Value::Int(len.try_into().unwrap());
+        let count = Value::Int(len.try_into().unwrap());
 
-            table.set(n, count);
+        table.set(n, count);
 
-            let table = rt.core.gc.alloc_cell(table);
-            let table = Value::Table(LuaPtr(table.downgrade()));
+        let table = rt.core.gc.alloc_cell(table);
+        let table = Value::Table(LuaPtr(table.downgrade()));
 
-            rt.stack.synchronized(&mut rt.core.gc).push(table);
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::table::pack", ())
+        rt.stack.synchronized(&mut rt.core.gc).push(table);
+        Ok(())
+    })
 }
 
 /// Remove element from a table.
@@ -1268,7 +1265,7 @@ where
 ///    This replicates behavior of vanilla implementation.
 ///
 /// *  Order of operations is undefined.
-pub fn remove<Ty>() -> impl LuaFfi<Ty>
+pub fn remove<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -1717,7 +1714,7 @@ where
         }
     }
 
-    ffi::from_fn(|| Coro::Started, "lua_std::table::remove", ())
+    Coro::Started
 }
 
 /// Place table elements on the stack.
@@ -1744,7 +1741,7 @@ where
 ///    This replicates behavior of vanilla implementation.
 ///
 /// *  Order of operations is undefined.
-pub fn unpack<Ty>() -> impl LuaFfi<Ty>
+pub fn unpack<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -2009,7 +2006,7 @@ where
         }
     }
 
-    ffi::from_fn(|| Coro::Started, "lua_std::table::unpack", ())
+    Coro::Started
 }
 
 /// Sort table elements under integer keys.
@@ -2043,7 +2040,7 @@ where
 ///    This replicates behavior of vanilla implementation.
 ///
 /// *  Order of operations is undefined.
-pub fn sort<Ty>() -> impl LuaFfi<Ty>
+pub fn sort<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -2681,5 +2678,5 @@ where
         }
     }
 
-    ffi::from_fn(|| Coro::Started, "lua_std::table::sort", ())
+    Coro::Started
 }

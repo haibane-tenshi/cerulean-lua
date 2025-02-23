@@ -1,8 +1,8 @@
-use rt::ffi::{boxed, DLuaFfi};
-use rt::gc::LuaPtr;
+use rt::ffi::{self, DLuaFfi};
 use rt::runtime::Core;
-use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
+use rt::value::Types;
 
+use crate::lib::set_func;
 use crate::traits::{RootTable, TableEntry};
 
 /// Stringify and concatenate table elements.
@@ -44,14 +44,8 @@ where
     Ty::String: Unpin,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::table::concat();
-        let key = core.gc.intern("concat".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::table::concat, "lua_std::std::table::concat", ());
+        set_func("concat", fn_body).build(table, core);
     }
 }
 
@@ -86,14 +80,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::table::insert();
-        let key = core.gc.intern("insert".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::table::insert, "lua_std::std::table::insert", ());
+        set_func("insert", fn_body).build(table, core);
     }
 }
 
@@ -127,14 +115,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::table::move_();
-        let key = core.gc.intern("move".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::table::move_, "lua_std::std::table::move", ());
+        set_func("move", fn_body).build(table, core);
     }
 }
 
@@ -155,14 +137,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::table::pack();
-        let key = core.gc.intern("pack".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::table::pack, "lua_std::std::table::pack", ());
+        set_func("pack", fn_body).build(table, core);
     }
 }
 
@@ -196,14 +172,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::table::remove();
-        let key = core.gc.intern("remove".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::table::remove, "lua_std::std::table::remove", ());
+        set_func("remove", fn_body).build(table, core);
     }
 }
 
@@ -239,14 +209,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::table::unpack();
-        let key = core.gc.intern("unpack".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::table::unpack, "lua_std::std::table::unpack", ());
+        set_func("unpack", fn_body).build(table, core);
     }
 }
 
@@ -289,13 +253,7 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::table::sort();
-        let key = core.gc.intern("sort".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::table::sort, "lua_std::std::table::sort", ());
+        set_func("sort", fn_body).build(table, core);
     }
 }
