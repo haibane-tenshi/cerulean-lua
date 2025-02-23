@@ -1,12 +1,17 @@
+//! Operating system facilities
+//!
+//! # From Lua documentation
+//!
+//! This library is implemented through table `os`.
+
+use std::fmt::Display;
+use std::path::PathBuf;
+use std::process::Command;
+
 use gc::RootCell;
+use rt::ffi::arg_parser::ParseFrom;
 use rt::ffi::{self, LuaFfi};
 use rt::value::Types;
-/// Operating system facilities
-///
-/// # From Lua documentation
-///
-/// This library is implemented through table `os`.
-use std::process::Command;
 
 /// Return CPU time consumed by the entire process.
 ///
@@ -509,4 +514,74 @@ where
     };
 
     ffi::from_fn(body, "lua_std::os::getenv", ())
+}
+
+/// Delete file or directory.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(filename: string) -> bool`
+/// * `(filename: string) -> (fail, string, nil | int)`
+///
+/// Deletes the file (or empty directory, on POSIX systems) with the given name.
+/// If this function fails, it returns **fail** plus a string describing the error and the error code.
+/// Otherwise, it returns `true`.
+///
+/// # Implementation-specific behavior
+///
+/// *   It is valid to target empty directories on all platforms.
+/// *   On failure this will attempt to recover OS-specific error code to provide in last return.
+///     This may fail and produce no value.
+pub fn remove<Ty>() -> impl LuaFfi<Ty>
+where
+    Ty: Types,
+    PathBuf: ParseFrom<Ty::String>,
+    <PathBuf as ParseFrom<Ty::String>>::Error: Display,
+{
+    let body = || {
+        ffi::delegate::from_mut(|mut rt| {
+            use rt::ffi::arg_parser::{FromLuaString, ParseArgs};
+            use rt::gc::LuaPtr;
+            use rt::value::Value;
+            use std::path::PathBuf;
+
+            let file_name: FromLuaString<PathBuf> = rt.stack.parse(&mut rt.core.gc)?;
+            rt.stack.clear();
+            let file_name = file_name.0;
+
+            let inner = || {
+                let metadata = std::fs::metadata(&file_name)?;
+                if metadata.is_dir() {
+                    std::fs::remove_dir(&file_name)
+                } else {
+                    std::fs::remove_file(&file_name)
+                }
+            };
+
+            match inner() {
+                Ok(()) => {
+                    rt.stack.transient().push(Value::Bool(true));
+                    Ok(())
+                }
+                Err(err) => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                    let code = err
+                        .raw_os_error()
+                        .map(|n| Value::Int(n.into()))
+                        .unwrap_or_default();
+
+                    let msg = heap.intern(err.to_string().into());
+                    let msg = Value::String(LuaPtr(msg.downgrade()));
+
+                    stack.push(Value::Nil);
+                    stack.push(msg);
+                    stack.push(code);
+
+                    Ok(())
+                }),
+            }
+        })
+    };
+
+    ffi::from_fn(body, "lua_std::os::remove", ())
 }
