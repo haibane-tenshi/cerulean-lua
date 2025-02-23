@@ -19,6 +19,26 @@ where
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, _: &mut Ex);
 }
 
+impl<F, Ty> TableEntry<Ty> for F
+where
+    Ty: Types,
+    F: FnOnce(&RootTable<Ty>, &mut Core<Ty>),
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        (self)(table, core)
+    }
+}
+
+impl<F, Ty, Ex> TableEntryEx<Ty, Ex> for F
+where
+    Ty: Types,
+    F: FnOnce(&RootTable<Ty>, &mut Core<Ty>, &mut Ex),
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, extra: &mut Ex) {
+        (self)(table, core, extra)
+    }
+}
+
 impl<Ty> TableEntry<Ty> for ()
 where
     Ty: Types,
