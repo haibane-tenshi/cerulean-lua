@@ -6,8 +6,9 @@ use gc::index::{Access, Allocated, GcPtr, MutAccess, RefAccess, RootPtr};
 use gc::userdata::Params;
 use gc::{Heap as TrueHeap, Trace};
 
+use crate::error::RuntimeError;
 use crate::value::userdata::DefaultParams;
-use crate::value::Meta;
+use crate::value::{Meta, StrongKey, StrongValue, Types};
 
 pub use crate::error::AlreadyDroppedError;
 
@@ -200,5 +201,33 @@ where
         A: Access,
     {
         self.upgrade(ptr).ok_or(AlreadyDroppedError)
+    }
+}
+
+pub trait AllocExt<Ty>
+where
+    Ty: Types,
+{
+    fn alloc_str(&mut self, s: impl Into<Ty::String>) -> StrongValue<Ty>;
+
+    fn alloc_str_key(&mut self, s: impl Into<Ty::String>) -> StrongKey<Ty>;
+
+    fn alloc_error_msg(&mut self, s: impl Into<Ty::String>) -> RuntimeError<Ty>;
+}
+
+impl<Ty> AllocExt<Ty> for Heap<Ty>
+where
+    Ty: Types,
+{
+    fn alloc_str(&mut self, s: impl Into<<Ty as Types>::String>) -> StrongValue<Ty> {
+        StrongValue::String(LuaPtr(self.intern(s.into())))
+    }
+
+    fn alloc_str_key(&mut self, s: impl Into<<Ty as Types>::String>) -> StrongKey<Ty> {
+        StrongKey::String(LuaPtr(self.intern(s.into())))
+    }
+
+    fn alloc_error_msg(&mut self, msg: impl Into<Ty::String>) -> RuntimeError<Ty> {
+        RuntimeError::from_value(self.alloc_str(msg))
     }
 }
