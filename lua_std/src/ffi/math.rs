@@ -23,7 +23,8 @@
 //! [rust_ref#numeric-cast]: https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast
 
 use gc::RootCell;
-use rt::ffi::{self, delegate, DLuaFfi, LuaFfi};
+use rt::ffi::delegate::{self, Delegate};
+use rt::ffi::DLuaFfi;
 use rt::value::Types;
 
 /// Compute absolute value of a number.
@@ -39,28 +40,24 @@ use rt::value::Types;
 /// # Implementation-specific behavior
 ///
 /// * See [`i64::abs`] for details on behavior on overflow.
-pub fn abs<Ty>() -> impl LuaFfi<Ty>
+pub fn abs<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let n: Number = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let n: Number = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let res = match n {
-                Number::Int(v) => Number::Int(v.abs()),
-                Number::Float(v) => Number::Float(v.abs()),
-            };
+        let res = match n {
+            Number::Int(v) => Number::Int(v.abs()),
+            Number::Float(v) => Number::Float(v.abs()),
+        };
 
-            rt.stack.transient().push(res.into());
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::abs", ())
+        rt.stack.transient().push(res.into());
+        Ok(())
+    })
 }
 
 /// Compute arccosine of a number.
@@ -78,28 +75,24 @@ where
 /// *   Implementation is delegated to [`f64::acos`].
 ///     
 ///     Return value is in radians in the range [0, pi] or NaN if the number is outside the range [-1, 1].
-pub fn acos<Ty>() -> impl LuaFfi<Ty>
+pub fn acos<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Float, Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let n: Number = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let n: Number = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let Float(n) = n.to_float();
+        let Float(n) = n.to_float();
 
-            let res = n.acos();
+        let res = n.acos();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::acos", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Compute arcsine of a number.
@@ -117,28 +110,24 @@ where
 /// *   Implementation is delegated to [`f64::asin`].
 ///     
 ///     Return value is in radians in the range [-pi/2, pi/2] or NaN if the number is outside the range [-1, 1].
-pub fn asin<Ty>() -> impl LuaFfi<Ty>
+pub fn asin<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Float, Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let n: Number = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let n: Number = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let Float(n) = n.to_float();
+        let Float(n) = n.to_float();
 
-            let res = n.asin();
+        let res = n.asin();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::asin", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Compute arctangent of two numbers.
@@ -159,29 +148,25 @@ where
 /// *   Implementation is delegated to [`f64::atan2`].
 ///     
 ///     Return value is in radians in the range (-pi, pi].
-pub fn atan<Ty>() -> impl LuaFfi<Ty>
+pub fn atan<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, Opts, ParseArgs, Split};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let (y, x): (Number, Opts<(Number,)>) = rt.stack.parse(&mut rt.core.gc)?;
-            let (x,) = x.split();
-            let y = y.to_float().0;
-            let x = x.map(|t| t.to_float().0).unwrap_or(1.0);
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let (y, x): (Number, Opts<(Number,)>) = rt.stack.parse(&mut rt.core.gc)?;
+        let (x,) = x.split();
+        let y = y.to_float().0;
+        let x = x.map(|t| t.to_float().0).unwrap_or(1.0);
+        rt.stack.clear();
 
-            let res = y.atan2(x);
+        let res = y.atan2(x);
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::atan", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Returns the smallest integral value greater than or equal to a number.
@@ -199,34 +184,30 @@ where
 /// # Implementation-specific behavior
 ///
 /// * Implementation is delegated to [`f64::ceil`].
-pub fn ceil<Ty>() -> impl LuaFfi<Ty>
+pub fn ceil<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Float, Int, Number, ParseArgs};
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let res = match x {
-                Number::Int(x) => Number::Int(x),
-                Number::Float(x) => {
-                    let x = x.ceil();
-                    match Float(x).try_into() {
-                        Ok(Int(x)) => Number::Int(x),
-                        Err(_) => Number::Float(x),
-                    }
+        let res = match x {
+            Number::Int(x) => Number::Int(x),
+            Number::Float(x) => {
+                let x = x.ceil();
+                match Float(x).try_into() {
+                    Ok(Int(x)) => Number::Int(x),
+                    Err(_) => Number::Float(x),
                 }
-            };
+            }
+        };
 
-            rt.stack.transient().push(res.into());
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::ceil", ())
+        rt.stack.transient().push(res.into());
+        Ok(())
+    })
 }
 
 /// Compute cosine of a number (in radians).
@@ -242,27 +223,23 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::cos`].
-pub fn cos<Ty>() -> impl LuaFfi<Ty>
+pub fn cos<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        rt.stack.clear();
 
-            let res = x.cos();
+        let res = x.cos();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::cos", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Convert radians to degrees.
@@ -278,27 +255,23 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::to_degrees`].
-pub fn deg<Ty>() -> impl LuaFfi<Ty>
+pub fn deg<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        rt.stack.clear();
 
-            let res = x.to_degrees();
+        let res = x.to_degrees();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::deg", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Compute exponential function.
@@ -314,27 +287,23 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::exp`].
-pub fn exp<Ty>() -> impl LuaFfi<Ty>
+pub fn exp<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        rt.stack.clear();
 
-            let res = x.exp();
+        let res = x.exp();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::exp", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Calculate the largest integral value less than or equal to a number.
@@ -352,34 +321,30 @@ where
 /// # Implementation-specific behavior
 ///
 /// * Implementation is delegated to [`f64::floor`].
-pub fn floor<Ty>() -> impl LuaFfi<Ty>
+pub fn floor<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Float, Int, Number, ParseArgs};
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let res = match x {
-                Number::Int(x) => Number::Int(x),
-                Number::Float(x) => {
-                    let x = x.floor();
-                    match Float(x).try_into() {
-                        Ok(Int(x)) => Number::Int(x),
-                        Err(_) => Number::Float(x),
-                    }
+        let res = match x {
+            Number::Int(x) => Number::Int(x),
+            Number::Float(x) => {
+                let x = x.floor();
+                match Float(x).try_into() {
+                    Ok(Int(x)) => Number::Int(x),
+                    Err(_) => Number::Float(x),
                 }
-            };
+            }
+        };
 
-            rt.stack.transient().push(res.into());
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::floor", ())
+        rt.stack.transient().push(res.into());
+        Ok(())
+    })
 }
 
 /// Calculate remainder of division between two numbers rounding quotient towards zero.
@@ -400,7 +365,7 @@ where
 /// # Notes
 ///
 /// * Rounding quotient towards zero is default behavior of integer division in Rust.
-pub fn fmod<Ty>() -> impl LuaFfi<Ty>
+pub fn fmod<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -408,63 +373,59 @@ where
     use rt::ffi::arg_parser::NotNumberError;
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let slice = rt.stack.as_slice();
-            match slice {
-                &[Value::Int(x), Value::Int(y)] => {
-                    rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let slice = rt.stack.as_slice();
+        match slice {
+            &[Value::Int(x), Value::Int(y)] => {
+                rt.stack.clear();
 
-                    let res = x % y;
+                let res = x % y;
 
-                    rt.stack.transient().push(Value::Int(res));
-                    Ok(())
-                }
-                &[Value::Float(x), Value::Float(y)] => {
-                    rt.stack.clear();
-
-                    let res = x - (x / y).trunc() * y;
-
-                    rt.stack.transient().push(Value::Float(res));
-                    Ok(())
-                }
-                [Value::Int(_), y] => {
-                    let err = SignatureError::ConversionFailure {
-                        index: 1,
-                        msg: format!("expected integer, found {}", y.type_()),
-                    };
-                    Err(err.into())
-                }
-                [Value::Float(_), y] => {
-                    let err = SignatureError::ConversionFailure {
-                        index: 1,
-                        msg: format!("expected float, found {}", y.type_()),
-                    };
-                    Err(err.into())
-                }
-                [x, _] => {
-                    let err = SignatureError::ConversionFailure {
-                        index: 0,
-                        msg: NotNumberError(x.type_()).to_string(),
-                    };
-                    Err(err.into())
-                }
-                [] | [_] => {
-                    let err = SignatureError::TooFewArgs { found: slice.len() };
-                    Err(err.into())
-                }
-                _ => {
-                    let err = SignatureError::TooManyArgs {
-                        found: slice.len(),
-                        expected: 2,
-                    };
-                    Err(err.into())
-                }
+                rt.stack.transient().push(Value::Int(res));
+                Ok(())
             }
-        })
-    };
+            &[Value::Float(x), Value::Float(y)] => {
+                rt.stack.clear();
 
-    ffi::from_fn(body, "lua_std::math::fmod", ())
+                let res = x - (x / y).trunc() * y;
+
+                rt.stack.transient().push(Value::Float(res));
+                Ok(())
+            }
+            [Value::Int(_), y] => {
+                let err = SignatureError::ConversionFailure {
+                    index: 1,
+                    msg: format!("expected integer, found {}", y.type_()),
+                };
+                Err(err.into())
+            }
+            [Value::Float(_), y] => {
+                let err = SignatureError::ConversionFailure {
+                    index: 1,
+                    msg: format!("expected float, found {}", y.type_()),
+                };
+                Err(err.into())
+            }
+            [x, _] => {
+                let err = SignatureError::ConversionFailure {
+                    index: 0,
+                    msg: NotNumberError(x.type_()).to_string(),
+                };
+                Err(err.into())
+            }
+            [] | [_] => {
+                let err = SignatureError::TooFewArgs { found: slice.len() };
+                Err(err.into())
+            }
+            _ => {
+                let err = SignatureError::TooManyArgs {
+                    found: slice.len(),
+                    expected: 2,
+                };
+                Err(err.into())
+            }
+        }
+    })
 }
 
 /// Compute logarithm of a number with respect to an arbitrary base.
@@ -481,33 +442,29 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::ln`] or [`f64::log`] respectively.
-pub fn log<Ty>() -> impl LuaFfi<Ty>
+pub fn log<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, Opts, ParseArgs, Split};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let (x, base): (Number, Opts<(Number,)>) = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            let (base,) = base.split();
-            let base = base.map(|x| x.to_float().0);
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let (x, base): (Number, Opts<(Number,)>) = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        let (base,) = base.split();
+        let base = base.map(|x| x.to_float().0);
+        rt.stack.clear();
 
-            let res = if let Some(base) = base {
-                x.log(base)
-            } else {
-                x.ln()
-            };
+        let res = if let Some(base) = base {
+            x.log(base)
+        } else {
+            x.ln()
+        };
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::log", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Return integral and fractional part of a number.
@@ -526,37 +483,33 @@ where
 /// # Notes
 ///
 /// * Fractional part is a number in range `[0; 1)`.
-pub fn modf<Ty>() -> impl LuaFfi<Ty>
+pub fn modf<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Float, FormatReturns, Int, Number, ParseArgs};
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let res = match x {
-                Number::Int(n) => (Number::Int(n), Float(0.0)),
-                Number::Float(x) => {
-                    let integral = x.floor();
-                    let fract = (x - integral).clamp(0.0, 1.0);
-                    let integral = match Float(integral).try_into() {
-                        Ok(Int(x)) => Number::Int(x),
-                        Err(_) => Number::Float(x),
-                    };
+        let res = match x {
+            Number::Int(n) => (Number::Int(n), Float(0.0)),
+            Number::Float(x) => {
+                let integral = x.floor();
+                let fract = (x - integral).clamp(0.0, 1.0);
+                let integral = match Float(integral).try_into() {
+                    Ok(Int(x)) => Number::Int(x),
+                    Err(_) => Number::Float(x),
+                };
 
-                    (integral, Float(fract))
-                }
-            };
+                (integral, Float(fract))
+            }
+        };
 
-            rt.stack.transient().format(res);
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::modf", ())
+        rt.stack.transient().format(res);
+        Ok(())
+    })
 }
 
 /// Convert number from degrees to radians.
@@ -572,27 +525,23 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::to_radians`].
-pub fn rad<Ty>() -> impl LuaFfi<Ty>
+pub fn rad<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        rt.stack.clear();
 
-            let res = x.to_radians();
+        let res = x.to_radians();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::rad", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Compute sine of a number (in radians).
@@ -608,27 +557,23 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::sin`].
-pub fn sin<Ty>() -> impl LuaFfi<Ty>
+pub fn sin<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        rt.stack.clear();
 
-            let res = x.sin();
+        let res = x.sin();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::sin", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Compute square root of a number.
@@ -645,27 +590,23 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::sqrt`].
-pub fn sqrt<Ty>() -> impl LuaFfi<Ty>
+pub fn sqrt<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        rt.stack.clear();
 
-            let res = x.sqrt();
+        let res = x.sqrt();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::sqrt", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Compute tangent of a number (in radians).
@@ -681,27 +622,23 @@ where
 ///
 /// * Integer inputs will be [coerced to floats](self#integer-to-float-coercions).
 /// * Implementation is delegated to [`f64::tan`].
-pub fn tan<Ty>() -> impl LuaFfi<Ty>
+pub fn tan<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Number, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            let x = x.to_float().0;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        let x = x.to_float().0;
+        rt.stack.clear();
 
-            let res = x.tan();
+        let res = x.tan();
 
-            rt.stack.transient().push(Value::Float(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::tan", ())
+        rt.stack.transient().push(Value::Float(res));
+        Ok(())
+    })
 }
 
 /// Convert a number to integer.
@@ -718,31 +655,27 @@ where
 ///
 /// *   This function will not attempt to coerce strings.
 ///     Use `tonumber` as appropriate if such behavior is desired.
-pub fn tointeger<Ty>() -> impl LuaFfi<Ty>
+pub fn tointeger<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Float, FormatReturns, Int, NilOr, Number, ParseArgs};
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Number = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let x: Number = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let res = match x {
-                Number::Int(n) => NilOr::Some(Int(n)),
-                Number::Float(x) => match Float(x).try_into() {
-                    Ok(n) => NilOr::Some(n),
-                    Err(_) => NilOr::Nil,
-                },
-            };
+        let res = match x {
+            Number::Int(n) => NilOr::Some(Int(n)),
+            Number::Float(x) => match Float(x).try_into() {
+                Ok(n) => NilOr::Some(n),
+                Err(_) => NilOr::Nil,
+            },
+        };
 
-            rt.stack.transient().format(res);
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::tointeger", ())
+        rt.stack.transient().format(res);
+        Ok(())
+    })
 }
 
 /// Discriminate between integers and floats.
@@ -753,7 +686,7 @@ where
 /// * `(x: int | float) -> string | fail`
 ///
 /// Returns "integer" if `x` is an integer, "float" if it is a float, or **fail** if `x` is not a number.
-pub fn type_<Ty>() -> impl LuaFfi<Ty>
+pub fn type_<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -761,32 +694,28 @@ where
     use rt::gc::LuaPtr;
     use rt::value::{Type, Value};
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let x: Value<_, _> = rt.stack.as_slice().parse(&mut rt.core.gc)?;
+    delegate::from_mut(|mut rt| {
+        let x: Value<_, _> = rt.stack.as_slice().parse(&mut rt.core.gc)?;
 
-            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                stack.clear();
+        rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+            stack.clear();
 
-                let res = match x.type_() {
-                    Type::Int => {
-                        let s = heap.intern("integer".into());
-                        NilOr::Some(LuaString(LuaPtr(s.downgrade())))
-                    }
-                    Type::Float => {
-                        let s = heap.intern("float".into());
-                        NilOr::Some(LuaString(LuaPtr(s.downgrade())))
-                    }
-                    _ => NilOr::Nil,
-                };
+            let res = match x.type_() {
+                Type::Int => {
+                    let s = heap.intern("integer".into());
+                    NilOr::Some(LuaString(LuaPtr(s.downgrade())))
+                }
+                Type::Float => {
+                    let s = heap.intern("float".into());
+                    NilOr::Some(LuaString(LuaPtr(s.downgrade())))
+                }
+                _ => NilOr::Nil,
+            };
 
-                stack.format(res);
-                Ok(())
-            })
+            stack.format(res);
+            Ok(())
         })
-    };
-
-    ffi::from_fn(body, "lua_std::math::type", ())
+    })
 }
 
 /// Compare two integers as unsigned integers.
@@ -806,26 +735,22 @@ where
 /// * This function will panic if inputs are not integers.
 ///
 /// [rust_ref#numeric-cast]: https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast
-pub fn ult<Ty>() -> impl LuaFfi<Ty>
+pub fn ult<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
     use rt::ffi::arg_parser::{Int, ParseArgs};
     use rt::value::Value;
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let (Int(x), Int(y)) = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let (Int(x), Int(y)) = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let res = (x as u64) < (y as u64);
+        let res = (x as u64) < (y as u64);
 
-            rt.stack.transient().push(Value::Bool(res));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::ult", ())
+        rt.stack.transient().push(Value::Bool(res));
+        Ok(())
+    })
 }
 
 /// Find minimum in a list of values.
@@ -840,159 +765,154 @@ where
 /// # Implementation-specific behavior
 ///
 /// * This function will respect coercion policy set in [`Core`](rt::runtime::Core).
-pub fn min<Ty>() -> impl LuaFfi<Ty>
+pub fn min<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    let body = || {
-        use rt::builtins::coerce::CoerceArgs;
-        use rt::builtins::raw::{lt, MetamethodRequired};
-        use rt::ffi::arg_parser::FormatReturns;
-        use rt::ffi::delegate::{Request, StackSlot};
-        use rt::value::{Callable, Strong, Value};
-        use std::ops::ControlFlow;
+    use rt::builtins::coerce::CoerceArgs;
+    use rt::builtins::raw::{lt, MetamethodRequired};
+    use rt::ffi::arg_parser::FormatReturns;
+    use rt::ffi::delegate::{Request, StackSlot};
+    use rt::value::{Callable, Strong, Value};
+    use std::ops::ControlFlow;
 
-        enum State<Ty>
-        where
-            Ty: Types,
-        {
-            Started,
-            CalledLt {
-                current: Value<Strong, Ty>,
-                lt_callable: Callable<Strong, Ty>,
-                count: StackSlot,
-            },
-            Finished,
+    enum State<Ty>
+    where
+        Ty: Types,
+    {
+        Started,
+        CalledLt {
+            current: Value<Strong, Ty>,
+            lt_callable: Callable<Strong, Ty>,
+            count: StackSlot,
+        },
+        Finished,
+    }
+
+    let mut state = State::Started;
+    delegate::try_repeat(move |mut rt| {
+        let current = std::mem::replace(&mut state, State::Finished);
+        match current {
+            State::Started => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                match stack.as_slice() {
+                    [] => {
+                        use rt::error::SignatureError;
+
+                        let err = SignatureError::TooFewArgs { found: 0 };
+                        Err(err.into())
+                    }
+                    [_] => Ok(delegate::State::Complete(())),
+                    [arg0, rest @ ..] => {
+                        let mut current = *arg0;
+                        let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                        for (i, next) in rest.iter().copied().enumerate() {
+                            let cmp = match lt([next, current], heap, cmp_int_flt)? {
+                                ControlFlow::Break(MetamethodRequired) => {
+                                    // +1 to account for first arg which is not part of `rest`.
+                                    // This leaves rhs in first stack slot.
+                                    let _ = stack.drain(..StackSlot(i + 1));
+                                    let count = stack.top();
+
+                                    stack.format([next, current]);
+
+                                    let current = current.try_upgrade(heap)?;
+                                    let lt_callable = {
+                                        use rt::builtins::full::lt as lt_ffi;
+                                        use rt::ffi::{self, boxed};
+                                        use rt::gc::LuaPtr;
+                                        use rt::value::Callable;
+
+                                        let f = ffi::from_fn(lt_ffi::<Ty>, "rt::builtins::lt", ());
+                                        let f = heap.alloc_cell(boxed(f));
+                                        Callable::Rust(LuaPtr(f))
+                                    };
+
+                                    let request = Request::Invoke {
+                                        callable: lt_callable.clone(),
+                                        start: count,
+                                    };
+
+                                    state = State::CalledLt {
+                                        current,
+                                        lt_callable,
+                                        count,
+                                    };
+                                    return Ok(delegate::State::Yielded(request));
+                                }
+                                ControlFlow::Continue(cmp) => cmp,
+                            };
+
+                            current = if cmp { next } else { current };
+                        }
+
+                        stack.clear();
+                        stack.push(current);
+
+                        Ok(delegate::State::Complete(()))
+                    }
+                }
+            }),
+            State::CalledLt {
+                current,
+                lt_callable,
+                count,
+            } => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                assert_eq!(
+                    stack.len(),
+                    count.0 + 1,
+                    "lt should produce a single boolean"
+                );
+
+                let Some(Value::Bool(cmp)) = stack.pop() else {
+                    unreachable!("lt should produce a single boolean");
+                };
+
+                let mut current = if cmp {
+                    *stack.first().unwrap()
+                } else {
+                    current.downgrade()
+                };
+
+                let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                for (i, next) in stack[1..].iter().copied().enumerate() {
+                    let cmp = match lt([next, current], heap, cmp_int_flt)? {
+                        ControlFlow::Break(MetamethodRequired) => {
+                            // +1 to account for first arg which is not part of `rest`.
+                            // This leaves rhs in first stack slot.
+                            let _ = stack.drain(..StackSlot(i + 1));
+                            let count = stack.top();
+
+                            stack.format([next, current]);
+
+                            let current = current.try_upgrade(heap)?;
+                            let request = Request::Invoke {
+                                callable: lt_callable.clone(),
+                                start: count,
+                            };
+
+                            state = State::CalledLt {
+                                current,
+                                lt_callable,
+                                count,
+                            };
+                            return Ok(delegate::State::Yielded(request));
+                        }
+                        ControlFlow::Continue(cmp) => cmp,
+                    };
+
+                    current = if cmp { next } else { current };
+                }
+
+                stack.clear();
+                stack.push(current);
+
+                Ok(delegate::State::Complete(()))
+            }),
+            State::Finished => Ok(delegate::State::Complete(())),
         }
-
-        let mut state = State::Started;
-        delegate::try_repeat(move |mut rt| {
-            let current = std::mem::replace(&mut state, State::Finished);
-            match current {
-                State::Started => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    match stack.as_slice() {
-                        [] => {
-                            use rt::error::SignatureError;
-
-                            let err = SignatureError::TooFewArgs { found: 0 };
-                            Err(err.into())
-                        }
-                        [_] => Ok(delegate::State::Complete(())),
-                        [arg0, rest @ ..] => {
-                            let mut current = *arg0;
-                            let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
-
-                            for (i, next) in rest.iter().copied().enumerate() {
-                                let cmp = match lt([next, current], heap, cmp_int_flt)? {
-                                    ControlFlow::Break(MetamethodRequired) => {
-                                        // +1 to account for first arg which is not part of `rest`.
-                                        // This leaves rhs in first stack slot.
-                                        let _ = stack.drain(..StackSlot(i + 1));
-                                        let count = stack.top();
-
-                                        stack.format([next, current]);
-
-                                        let current = current.try_upgrade(heap)?;
-                                        let lt_callable = {
-                                            use rt::builtins::full::lt as lt_ffi;
-                                            use rt::ffi::boxed;
-                                            use rt::gc::LuaPtr;
-                                            use rt::value::Callable;
-
-                                            let f =
-                                                ffi::from_fn(lt_ffi::<Ty>, "rt::builtins::lt", ());
-                                            let f = heap.alloc_cell(boxed(f));
-                                            Callable::Rust(LuaPtr(f))
-                                        };
-
-                                        let request = Request::Invoke {
-                                            callable: lt_callable.clone(),
-                                            start: count,
-                                        };
-
-                                        state = State::CalledLt {
-                                            current,
-                                            lt_callable,
-                                            count,
-                                        };
-                                        return Ok(delegate::State::Yielded(request));
-                                    }
-                                    ControlFlow::Continue(cmp) => cmp,
-                                };
-
-                                current = if cmp { next } else { current };
-                            }
-
-                            stack.clear();
-                            stack.push(current);
-
-                            Ok(delegate::State::Complete(()))
-                        }
-                    }
-                }),
-                State::CalledLt {
-                    current,
-                    lt_callable,
-                    count,
-                } => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    assert_eq!(
-                        stack.len(),
-                        count.0 + 1,
-                        "lt should produce a single boolean"
-                    );
-
-                    let Some(Value::Bool(cmp)) = stack.pop() else {
-                        unreachable!("lt should produce a single boolean");
-                    };
-
-                    let mut current = if cmp {
-                        *stack.first().unwrap()
-                    } else {
-                        current.downgrade()
-                    };
-
-                    let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
-
-                    for (i, next) in stack[1..].iter().copied().enumerate() {
-                        let cmp = match lt([next, current], heap, cmp_int_flt)? {
-                            ControlFlow::Break(MetamethodRequired) => {
-                                // +1 to account for first arg which is not part of `rest`.
-                                // This leaves rhs in first stack slot.
-                                let _ = stack.drain(..StackSlot(i + 1));
-                                let count = stack.top();
-
-                                stack.format([next, current]);
-
-                                let current = current.try_upgrade(heap)?;
-                                let request = Request::Invoke {
-                                    callable: lt_callable.clone(),
-                                    start: count,
-                                };
-
-                                state = State::CalledLt {
-                                    current,
-                                    lt_callable,
-                                    count,
-                                };
-                                return Ok(delegate::State::Yielded(request));
-                            }
-                            ControlFlow::Continue(cmp) => cmp,
-                        };
-
-                        current = if cmp { next } else { current };
-                    }
-
-                    stack.clear();
-                    stack.push(current);
-
-                    Ok(delegate::State::Complete(()))
-                }),
-                State::Finished => Ok(delegate::State::Complete(())),
-            }
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::min", ())
+    })
 }
 
 /// Find maximum in a list of values.
@@ -1007,159 +927,154 @@ where
 /// # Implementation-specific behavior
 ///
 /// * This function will respect coercion policy set in [`Core`](rt::runtime::Core).
-pub fn max<Ty>() -> impl LuaFfi<Ty>
+pub fn max<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    let body = || {
-        use rt::builtins::coerce::CoerceArgs;
-        use rt::builtins::raw::{gt, MetamethodRequired};
-        use rt::ffi::arg_parser::FormatReturns;
-        use rt::ffi::delegate::{Request, StackSlot};
-        use rt::value::{Callable, Strong, Value};
-        use std::ops::ControlFlow;
+    use rt::builtins::coerce::CoerceArgs;
+    use rt::builtins::raw::{gt, MetamethodRequired};
+    use rt::ffi::arg_parser::FormatReturns;
+    use rt::ffi::delegate::{Request, StackSlot};
+    use rt::value::{Callable, Strong, Value};
+    use std::ops::ControlFlow;
 
-        enum State<Ty>
-        where
-            Ty: Types,
-        {
-            Started,
-            CalledGt {
-                current: Value<Strong, Ty>,
-                gt_callable: Callable<Strong, Ty>,
-                count: StackSlot,
-            },
-            Finished,
+    enum State<Ty>
+    where
+        Ty: Types,
+    {
+        Started,
+        CalledGt {
+            current: Value<Strong, Ty>,
+            gt_callable: Callable<Strong, Ty>,
+            count: StackSlot,
+        },
+        Finished,
+    }
+
+    let mut state = State::Started;
+    delegate::try_repeat(move |mut rt| {
+        let current = std::mem::replace(&mut state, State::Finished);
+        match current {
+            State::Started => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                match stack.as_slice() {
+                    [] => {
+                        use rt::error::SignatureError;
+
+                        let err = SignatureError::TooFewArgs { found: 0 };
+                        Err(err.into())
+                    }
+                    [_] => Ok(delegate::State::Complete(())),
+                    [arg0, rest @ ..] => {
+                        let mut current = *arg0;
+                        let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                        for (i, next) in rest.iter().copied().enumerate() {
+                            let cmp = match gt([next, current], heap, cmp_int_flt)? {
+                                ControlFlow::Break(MetamethodRequired) => {
+                                    // +1 to account for first arg which is not part of `rest`.
+                                    // This leaves rhs in first stack slot.
+                                    let _ = stack.drain(..StackSlot(i + 1));
+                                    let count = stack.top();
+
+                                    stack.format([next, current]);
+
+                                    let current = current.try_upgrade(heap)?;
+                                    let gt_callable = {
+                                        use rt::builtins::full::gt as gt_ffi;
+                                        use rt::ffi::{self, boxed};
+                                        use rt::gc::LuaPtr;
+                                        use rt::value::Callable;
+
+                                        let f = ffi::from_fn(gt_ffi::<Ty>, "rt::builtins::gt", ());
+                                        let f = heap.alloc_cell(boxed(f));
+                                        Callable::Rust(LuaPtr(f))
+                                    };
+
+                                    let request = Request::Invoke {
+                                        callable: gt_callable.clone(),
+                                        start: count,
+                                    };
+
+                                    state = State::CalledGt {
+                                        current,
+                                        gt_callable,
+                                        count,
+                                    };
+                                    return Ok(delegate::State::Yielded(request));
+                                }
+                                ControlFlow::Continue(cmp) => cmp,
+                            };
+
+                            current = if cmp { next } else { current };
+                        }
+
+                        stack.clear();
+                        stack.push(current);
+
+                        Ok(delegate::State::Complete(()))
+                    }
+                }
+            }),
+            State::CalledGt {
+                current,
+                gt_callable,
+                count,
+            } => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                assert_eq!(
+                    stack.len(),
+                    count.0 + 1,
+                    "lt should produce a single boolean"
+                );
+
+                let Some(Value::Bool(cmp)) = stack.pop() else {
+                    unreachable!("lt should produce a single boolean");
+                };
+
+                let mut current = if cmp {
+                    *stack.first().unwrap()
+                } else {
+                    current.downgrade()
+                };
+
+                let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
+
+                for (i, next) in stack[1..].iter().copied().enumerate() {
+                    let cmp = match gt([next, current], heap, cmp_int_flt)? {
+                        ControlFlow::Break(MetamethodRequired) => {
+                            // +1 to account for first arg which is not part of `rest`.
+                            // This leaves rhs in first stack slot.
+                            let _ = stack.drain(..StackSlot(i + 1));
+                            let count = stack.top();
+
+                            stack.format([next, current]);
+
+                            let current = current.try_upgrade(heap)?;
+                            let request = Request::Invoke {
+                                callable: gt_callable.clone(),
+                                start: count,
+                            };
+
+                            state = State::CalledGt {
+                                current,
+                                gt_callable,
+                                count,
+                            };
+                            return Ok(delegate::State::Yielded(request));
+                        }
+                        ControlFlow::Continue(cmp) => cmp,
+                    };
+
+                    current = if cmp { next } else { current };
+                }
+
+                stack.clear();
+                stack.push(current);
+
+                Ok(delegate::State::Complete(()))
+            }),
+            State::Finished => Ok(delegate::State::Complete(())),
         }
-
-        let mut state = State::Started;
-        delegate::try_repeat(move |mut rt| {
-            let current = std::mem::replace(&mut state, State::Finished);
-            match current {
-                State::Started => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    match stack.as_slice() {
-                        [] => {
-                            use rt::error::SignatureError;
-
-                            let err = SignatureError::TooFewArgs { found: 0 };
-                            Err(err.into())
-                        }
-                        [_] => Ok(delegate::State::Complete(())),
-                        [arg0, rest @ ..] => {
-                            let mut current = *arg0;
-                            let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
-
-                            for (i, next) in rest.iter().copied().enumerate() {
-                                let cmp = match gt([next, current], heap, cmp_int_flt)? {
-                                    ControlFlow::Break(MetamethodRequired) => {
-                                        // +1 to account for first arg which is not part of `rest`.
-                                        // This leaves rhs in first stack slot.
-                                        let _ = stack.drain(..StackSlot(i + 1));
-                                        let count = stack.top();
-
-                                        stack.format([next, current]);
-
-                                        let current = current.try_upgrade(heap)?;
-                                        let gt_callable = {
-                                            use rt::builtins::full::gt as gt_ffi;
-                                            use rt::ffi::boxed;
-                                            use rt::gc::LuaPtr;
-                                            use rt::value::Callable;
-
-                                            let f =
-                                                ffi::from_fn(gt_ffi::<Ty>, "rt::builtins::gt", ());
-                                            let f = heap.alloc_cell(boxed(f));
-                                            Callable::Rust(LuaPtr(f))
-                                        };
-
-                                        let request = Request::Invoke {
-                                            callable: gt_callable.clone(),
-                                            start: count,
-                                        };
-
-                                        state = State::CalledGt {
-                                            current,
-                                            gt_callable,
-                                            count,
-                                        };
-                                        return Ok(delegate::State::Yielded(request));
-                                    }
-                                    ControlFlow::Continue(cmp) => cmp,
-                                };
-
-                                current = if cmp { next } else { current };
-                            }
-
-                            stack.clear();
-                            stack.push(current);
-
-                            Ok(delegate::State::Complete(()))
-                        }
-                    }
-                }),
-                State::CalledGt {
-                    current,
-                    gt_callable,
-                    count,
-                } => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    assert_eq!(
-                        stack.len(),
-                        count.0 + 1,
-                        "lt should produce a single boolean"
-                    );
-
-                    let Some(Value::Bool(cmp)) = stack.pop() else {
-                        unreachable!("lt should produce a single boolean");
-                    };
-
-                    let mut current = if cmp {
-                        *stack.first().unwrap()
-                    } else {
-                        current.downgrade()
-                    };
-
-                    let cmp_int_flt = CoerceArgs::<Ty>::cmp_float_and_int(&rt.core.dialect);
-
-                    for (i, next) in stack[1..].iter().copied().enumerate() {
-                        let cmp = match gt([next, current], heap, cmp_int_flt)? {
-                            ControlFlow::Break(MetamethodRequired) => {
-                                // +1 to account for first arg which is not part of `rest`.
-                                // This leaves rhs in first stack slot.
-                                let _ = stack.drain(..StackSlot(i + 1));
-                                let count = stack.top();
-
-                                stack.format([next, current]);
-
-                                let current = current.try_upgrade(heap)?;
-                                let request = Request::Invoke {
-                                    callable: gt_callable.clone(),
-                                    start: count,
-                                };
-
-                                state = State::CalledGt {
-                                    current,
-                                    gt_callable,
-                                    count,
-                                };
-                                return Ok(delegate::State::Yielded(request));
-                            }
-                            ControlFlow::Continue(cmp) => cmp,
-                        };
-
-                        current = if cmp { next } else { current };
-                    }
-
-                    stack.clear();
-                    stack.push(current);
-
-                    Ok(delegate::State::Complete(()))
-                }),
-                State::Finished => Ok(delegate::State::Complete(())),
-            }
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::max", ())
+    })
 }
 
 /// Generate a pseudo-random number.
@@ -1203,47 +1118,42 @@ where
 ///     Default state will be seeded using [system entropy](rand::SeedableRng::from_entropy).
 ///
 ///     See [`MathRand`](crate::lib::MathRand) documentation for more information about defaults and pointers for custom configuration.
-pub fn random<Ty, R>(rng_state: RootCell<R>) -> impl LuaFfi<Ty>
+pub fn random<Ty, R>(rng_state: RootCell<R>) -> impl Delegate<Ty>
 where
     Ty: Types,
     R: rand::Rng + 'static,
 {
     use rt::ffi::arg_parser::{Int, Number, Opts, ParseArgs, Split};
 
-    let body = move || {
-        let rng_state = rng_state.clone();
-        delegate::from_mut(move |mut rt| {
-            let args: Opts<(Int, Int)> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(move |mut rt| {
+        let args: Opts<(Int, Int)> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let rng = rt.core.gc.get_root_mut(&rng_state);
+        let rng = rt.core.gc.get_root_mut(&rng_state);
 
-            let res = match args.split() {
-                (None, None) => Number::Float(rng.gen()),
-                (Some(Int(m)), Some(Int(n))) => Number::Int(rng.gen_range(m..=n)),
-                (Some(Int(0)), None) => Number::Int(rng.gen()),
-                (Some(Int(n)), None) if n > 0 => Number::Int(rng.gen_range(1..=n)),
-                (Some(_), None) => {
-                    use rt::error::SignatureError;
+        let res = match args.split() {
+            (None, None) => Number::Float(rng.gen()),
+            (Some(Int(m)), Some(Int(n))) => Number::Int(rng.gen_range(m..=n)),
+            (Some(Int(0)), None) => Number::Int(rng.gen()),
+            (Some(Int(n)), None) if n > 0 => Number::Int(rng.gen_range(1..=n)),
+            (Some(_), None) => {
+                use rt::error::SignatureError;
 
-                    let err = SignatureError::ConversionFailure {
-                        index: 0,
-                        msg: String::from(
-                            "random expects an non-zero integer when invoked with single argument",
-                        ),
-                    };
+                let err = SignatureError::ConversionFailure {
+                    index: 0,
+                    msg: String::from(
+                        "random expects an non-zero integer when invoked with single argument",
+                    ),
+                };
 
-                    return Err(err.into());
-                }
-                (None, Some(_)) => unreachable!(),
-            };
+                return Err(err.into());
+            }
+            (None, Some(_)) => unreachable!(),
+        };
 
-            rt.stack.transient().push(res.into());
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::random", ())
+        rt.stack.transient().push(res.into());
+        Ok(())
+    })
 }
 
 /// Seed pseudo-random generator used by `random`.
@@ -1302,7 +1212,7 @@ where
 ///     Note that many non-cryptographic PRNGs will show poor quality output if this is not adhered to.*
 ///
 ///     This also applies to `xoshiro256**` algorithm which is used in the default configuration of [`MathRand`](crate::lib::MathRand).
-pub fn randomseed<Ty, R>(rng_state: RootCell<R>) -> impl LuaFfi<Ty>
+pub fn randomseed<Ty, R>(rng_state: RootCell<R>) -> impl Delegate<Ty>
 where
     Ty: Types,
     R: rand::SeedableRng + 'static,
@@ -1310,38 +1220,33 @@ where
     use rand::SeedableRng;
     use rt::ffi::arg_parser::{Int, Opts, ParseArgs, Split};
 
-    let body = move || {
-        let rng_state = rng_state.clone();
-        delegate::from_mut(move |mut rt| {
-            let args: Opts<(Int, Int)> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(move |mut rt| {
+        let args: Opts<(Int, Int)> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let new_rng = match args.split() {
-                (None, None) => R::from_entropy(),
-                (Some(Int(x)), None) => R::seed_from_u64(x as u64),
-                (Some(Int(x)), Some(Int(y))) => {
-                    use rand_hc::Hc128Rng;
+        let new_rng = match args.split() {
+            (None, None) => R::from_entropy(),
+            (Some(Int(x)), None) => R::seed_from_u64(x as u64),
+            (Some(Int(x)), Some(Int(y))) => {
+                use rand_hc::Hc128Rng;
 
-                    let seed = {
-                        let mut r = [0; 32];
-                        r[0..16].copy_from_slice(&x.to_be_bytes());
-                        r[16..32].copy_from_slice(&y.to_be_bytes());
+                let seed = {
+                    let mut r = [0; 32];
+                    r[0..16].copy_from_slice(&x.to_be_bytes());
+                    r[16..32].copy_from_slice(&y.to_be_bytes());
 
-                        r
-                    };
+                    r
+                };
 
-                    let seeder = Hc128Rng::from_seed(seed);
-                    R::from_rng(seeder).map_err(|err| rt.core.alloc_error_msg(err.to_string()))?
-                }
-                (None, Some(_)) => unreachable!(),
-            };
+                let seeder = Hc128Rng::from_seed(seed);
+                R::from_rng(seeder).map_err(|err| rt.core.alloc_error_msg(err.to_string()))?
+            }
+            (None, Some(_)) => unreachable!(),
+        };
 
-            let rng = rt.core.gc.get_root_mut(&rng_state);
-            *rng = new_rng;
+        let rng = rt.core.gc.get_root_mut(&rng_state);
+        *rng = new_rng;
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::math::randomseed", ())
+        Ok(())
+    })
 }

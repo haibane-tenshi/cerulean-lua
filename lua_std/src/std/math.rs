@@ -23,11 +23,12 @@
 //! [lua#6.7]: https://www.lua.org/manual/5.4/manual.html#6.7
 
 use gc::RootCell;
-use rt::ffi::{boxed, DLuaFfi};
+use rt::ffi::{self, DLuaFfi};
 use rt::gc::LuaPtr;
 use rt::runtime::Core;
-use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
+use rt::value::{KeyValue, TableIndex, Types, Value};
 
+use crate::lib::set_func;
 use crate::traits::{RootTable, TableEntry, TableEntryEx};
 
 /// Compute absolute value of a number.
@@ -51,14 +52,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::abs();
-        let key = core.gc.intern("abs".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::abs, "lua_std::std::math::abs", ());
+        set_func("abs", fn_body).build(table, core);
     }
 }
 
@@ -86,14 +81,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::acos();
-        let key = core.gc.intern("acos".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::acos, "lua_std::std::math::acos", ());
+        set_func("acos", fn_body).build(table, core);
     }
 }
 
@@ -120,14 +109,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::asin();
-        let key = core.gc.intern("asin".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::asin, "lua_std::std::math::asin", ());
+        set_func("asin", fn_body).build(table, core);
     }
 }
 
@@ -157,14 +140,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::atan();
-        let key = core.gc.intern("atan".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::atan, "lua_std::std::math::atan", ());
+        set_func("atan", fn_body).build(table, core);
     }
 }
 
@@ -191,14 +168,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::ceil();
-        let key = core.gc.intern("ceil".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::ceil, "lua_std::std::math::ceil", ());
+        set_func("ceil", fn_body).build(table, core);
     }
 }
 
@@ -223,14 +194,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::cos();
-        let key = core.gc.intern("cos".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::cos, "lua_std::std::math::cos", ());
+        set_func("cos", fn_body).build(table, core);
     }
 }
 
@@ -255,14 +220,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::deg();
-        let key = core.gc.intern("deg".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::deg, "lua_std::std::math::deg", ());
+        set_func("deg", fn_body).build(table, core);
     }
 }
 
@@ -287,14 +246,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::exp();
-        let key = core.gc.intern("exp".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::exp, "lua_std::std::math::exp", ());
+        set_func("exp", fn_body).build(table, core);
     }
 }
 
@@ -321,14 +274,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::floor();
-        let key = core.gc.intern("floor".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::floor, "lua_std::std::math::floor", ());
+        set_func("floor", fn_body).build(table, core);
     }
 }
 
@@ -358,14 +305,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::fmod();
-        let key = core.gc.intern("fmod".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::fmod, "lua_std::std::math::fmod", ());
+        set_func("fmod", fn_body).build(table, core);
     }
 }
 
@@ -418,14 +359,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::log();
-        let key = core.gc.intern("log".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::log, "lua_std::std::math::log", ());
+        set_func("log", fn_body).build(table, core);
     }
 }
 
@@ -449,14 +384,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::max();
-        let key = core.gc.intern("max".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::max, "lua_std::std::math::max", ());
+        set_func("max", fn_body).build(table, core);
     }
 }
 
@@ -504,14 +433,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::min();
-        let key = core.gc.intern("min".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::min, "lua_std::std::math::min", ());
+        set_func("min", fn_body).build(table, core);
     }
 }
 
@@ -563,14 +486,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::modf();
-        let key = core.gc.intern("modf".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::modf, "lua_std::std::math::modf", ());
+        set_func("modf", fn_body).build(table, core);
     }
 }
 
@@ -622,14 +539,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::rad();
-        let key = core.gc.intern("rad".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::rad, "lua_std::std::math::rad", ());
+        set_func("rad", fn_body).build(table, core);
     }
 }
 
@@ -700,14 +611,13 @@ impl random {
             R: rand::Rng + 'static,
         {
             fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-                let fn_body = crate::ffi::math::random(self.0);
-                let key = core.gc.intern("random".into());
-                let callback = core.gc.alloc_cell(boxed(fn_body));
-
-                core.gc[table].set(
-                    KeyValue::String(LuaPtr(key.downgrade())),
-                    Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+                let RandomWith(state) = self;
+                let fn_body = ffi::from_fn(
+                    move || crate::ffi::math::random(state.clone()),
+                    "lua_std::std::math::random",
+                    (),
                 );
+                set_func("random", fn_body).build(table, core);
             }
         }
 
@@ -721,14 +631,13 @@ where
     R: rand::Rng + 'static,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, rng_state: &mut RootCell<R>) {
-        let fn_body = crate::ffi::math::random(rng_state.clone());
-        let key = core.gc.intern("random".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        let state = rng_state.clone();
+        let fn_body = ffi::from_fn(
+            move || crate::ffi::math::random(state.clone()),
+            "lua_std::std::math::random",
+            (),
         );
+        set_func("random", fn_body).build(table, core);
     }
 }
 
@@ -814,14 +723,13 @@ impl randomseed {
             R: rand::SeedableRng + 'static,
         {
             fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-                let fn_body = crate::ffi::math::randomseed(self.0);
-                let key = core.gc.intern("randomseed".into());
-                let callback = core.gc.alloc_cell(boxed(fn_body));
-
-                core.gc[table].set(
-                    KeyValue::String(LuaPtr(key.downgrade())),
-                    Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+                let RandomseedWith(state) = self;
+                let fn_body = ffi::from_fn(
+                    move || crate::ffi::math::randomseed(state.clone()),
+                    "lua_std::std::math::randomseed",
+                    (),
                 );
+                set_func("randomseed", fn_body).build(table, core);
             }
         }
 
@@ -835,14 +743,13 @@ where
     R: rand::SeedableRng + 'static,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, rng_state: &mut RootCell<R>) {
-        let fn_body = crate::ffi::math::randomseed(rng_state.clone());
-        let key = core.gc.intern("randomseed".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        let state = rng_state.clone();
+        let fn_body = ffi::from_fn(
+            move || crate::ffi::math::randomseed(state.clone()),
+            "lua_std::std::math::randomseed",
+            (),
         );
+        set_func("randomseed", fn_body).build(table, core);
     }
 }
 
@@ -867,14 +774,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::sin();
-        let key = core.gc.intern("sin".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::sin, "lua_std::std::math::sin", ());
+        set_func("sin", fn_body).build(table, core);
     }
 }
 
@@ -900,14 +801,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::sqrt();
-        let key = core.gc.intern("sqrt".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::sqrt, "lua_std::std::math::sqrt", ());
+        set_func("sqrt", fn_body).build(table, core);
     }
 }
 
@@ -932,14 +827,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::tan();
-        let key = core.gc.intern("tan".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::tan, "lua_std::std::math::tan", ());
+        set_func("tan", fn_body).build(table, core);
     }
 }
 
@@ -965,14 +854,12 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::tointeger();
-        let key = core.gc.intern("tointeger".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        let fn_body = ffi::from_fn(
+            crate::ffi::math::tointeger,
+            "lua_std::std::math::tointeger",
+            (),
         );
+        set_func("tointeger", fn_body).build(table, core);
     }
 }
 
@@ -992,14 +879,8 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::type_();
-        let key = core.gc.intern("type_".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::type_, "lua_std::std::math::type", ());
+        set_func("type", fn_body).build(table, core);
     }
 }
 
@@ -1028,13 +909,7 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::math::ult();
-        let key = core.gc.intern("ult".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+        let fn_body = ffi::from_fn(crate::ffi::math::ult, "lua_std::std::math::ult", ());
+        set_func("ult", fn_body).build(table, core);
     }
 }
