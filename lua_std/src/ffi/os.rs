@@ -666,3 +666,627 @@ where
         Ok(())
     })
 }
+
+/// Return current time or convert time to local.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `() -> int`
+/// * `(table: table) -> nil | int`
+///
+/// Returns the current time when called without arguments, or a time representing the local date and time specified by the given table.
+/// This table must have fields `year`, `month`, and `day`,
+/// and may have fields `hour` (default is 12), `min` (default is 0), `sec` (default is 0), and `isdst` (default is `nil`).
+/// Other fields are ignored. For a description of these fields, see the `os.date` function.
+///
+/// When the function is called, the values in these fields do not need to be inside their valid ranges.
+/// For instance, if `sec` is -10, it means 10 seconds before the time specified by the other fields;
+/// if `hour` is 1000, it means 1000 hours after the time specified by the other fields.
+///
+/// The returned value is a number, whose meaning depends on your system.
+/// In POSIX, Windows, and some other systems, this number counts the number of seconds since some given start time (the "epoch").
+/// In other systems, the meaning is not specified, and the number returned by time can be used only as an argument to `os.date` and `os.difftime`.
+///
+/// When called with a table, `os.time` also normalizes all the fields documented in the `os.date` function,
+/// so that they represent the same time as before the call but with values inside their valid ranges.
+///
+/// # Implementation-specific behavior
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes getting and setting values on the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  The function returns number of seconds since Unix epoch on all supported targets.
+///
+/// *  Datetimes are expected to be in [proleptic Gregorian calendar](https://en.wikipedia.org/wiki/Proleptic_Gregorian_calendar).
+///    This functions is capable of processing all possible calendar dates from Jan 1, 262145 BCE to Dec 31, 262143 CE.
+///
+///    However, you need to be careful of offsetting pitfalls.
+///    Because Lua permits arbitrary offsets in *all* fields intermediate values do not necessarily fall into this range.
+///    This function may invoke Lua panic if the year or any intermediate result become unrepresentable.
+///    
+///    Additionally, there are limitations on hour/minute/second offsets as well.
+///    Implementation permits at most `i64::MAX` *milliseconds* total (including hours, minutes and seconds) time offset,
+///    which can be either positive or negative.
+///    This should be more than enough for regular use, however exceeding the limit will cause Lua panic.
+///
+/// *  Implementation will first attempt to construct suitable datetime and then convert it to local timezone.
+///    You should note that the last operation is *fallible*.
+///
+///    This is because local time is not guaranteed to be contiguous.
+///    If the time is shifted backwards there will be a *fold* in time, during which the local time is ambiguous,
+///    and if the time is shifted forwards there will be a *gap* in time, where the local time doesn't exist.
+///    Commonly this happens due to daylight saving time (DST), but it may happen for other reasons as well.
+///
+///    If the specified datetime cannot be resolved to a single local datetime this function will produce a `nil`.
+///    There is no correct result to be produced in this case, so this function will refuse to produce any.
+///
+///    Fixing APIs to correctly handle time quirks is outside of purview for this implementation.
+///
+/// *  This function behaves as if leap seconds don't exist.
+///    
+///    See documentation in `chrono` library for [brief explanation](chrono::NaiveTime#leap-second-handling).
+pub fn time<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    use chrono::{DateTime, Local};
+    use std::pin::Pin;
+
+    use rt::error::RuntimeError;
+    use rt::ffi::delegate::{Request, Response, RuntimeView, StackSlot, State};
+    use rt::value::WeakValue;
+
+    use super::builtins::{GetIndex, SetIndex};
+
+    enum Coro<Ty>
+    where
+        Ty: Types,
+    {
+        Started,
+        ToSlowGetIndex {
+            boundary: StackSlot,
+            time: TimeTable,
+            comp: ReadComp,
+        },
+        IterGetIndex {
+            co: GetIndex<Ty>,
+            time: TimeTable,
+            comp: ReadComp,
+        },
+        ToSlowSetIndex {
+            boundary: StackSlot,
+            date_time: DateTime<Local>,
+            comp: WriteComp,
+        },
+        IterSetIndex {
+            co: SetIndex<Ty>,
+            date_time: DateTime<Local>,
+            comp: WriteComp,
+        },
+        Finished,
+    }
+
+    #[derive(Debug, Default)]
+    struct TimeTable {
+        year: i64,
+        month: i64,
+        day: i64,
+        hour: i64,
+        min: i64,
+        sec: i64,
+    }
+
+    impl TimeTable {
+        fn set<Ty>(&mut self, comp: ReadComp, value: WeakValue<Ty>) -> Result<(), String>
+        where
+            Ty: Types,
+        {
+            use rt::value::Value;
+            use ReadComp::*;
+
+            let value = match (comp, value) {
+                (_, Value::Int(t)) => t,
+                (ReadComp::Hour, Value::Nil) => 12,
+                (ReadComp::Min | ReadComp::Sec, Value::Nil) => 0,
+                (ReadComp::Year | ReadComp::Month | ReadComp::Day, Value::Nil) => {
+                    let err = format!("table must have field \"{}\"", comp.name());
+                    return Err(err);
+                }
+                (_, value) => {
+                    let err = format!(
+                        "field {} is expected to contain int, found {}",
+                        comp.name(),
+                        value.type_()
+                    );
+                    return Err(err);
+                }
+            };
+
+            let place = match comp {
+                Year => &mut self.year,
+                Month => &mut self.month,
+                Day => &mut self.day,
+                Hour => &mut self.hour,
+                Min => &mut self.min,
+                Sec => &mut self.sec,
+            };
+
+            *place = value;
+            Ok(())
+        }
+
+        fn into_datetime(self) -> Result<DateTime<Local>, Error> {
+            use chrono::{Days, LocalResult, Months, NaiveDate, TimeDelta};
+
+            let TimeTable {
+                year,
+                month,
+                day,
+                hour,
+                min,
+                sec,
+            } = self;
+
+            // So, much to our headache, Lua effectively permits to have *any* number in any position.
+            // We have to build result piecewise using checked ops.
+            let year = year.try_into().map_err(|_| Error::OutOfBounds)?;
+
+            // First, we build naive (tz-unaware) date using ymd.
+            // This can fail only due to numeric overflows.
+            let build_date = || {
+                let date = NaiveDate::from_ymd_opt(year, 0, 0)?;
+
+                let date = if let Ok(months) = month.try_into() {
+                    date.checked_add_months(Months::new(months))?
+                } else if let Ok(months) = month.checked_neg()?.try_into() {
+                    date.checked_sub_months(Months::new(months))?
+                } else {
+                    return None;
+                };
+
+                if let Ok(days) = day.try_into() {
+                    date.checked_add_days(Days::new(days))
+                } else if let Ok(days) = day.checked_neg()?.try_into() {
+                    date.checked_sub_days(Days::new(days))
+                } else {
+                    None
+                }
+            };
+            let date = build_date().ok_or(Error::OutOfBounds)?;
+
+            // Next, build a time delta from hms.
+            // This also can fail only due to numeric overflows.
+            let build_delta = || {
+                let hours = TimeDelta::try_hours(hour)?;
+                let minutes = TimeDelta::try_minutes(min)?;
+                let seconds = TimeDelta::try_seconds(sec)?;
+
+                hours.checked_add(&minutes)?.checked_add(&seconds)
+            };
+            let delta = build_delta().ok_or(Error::OutOfBounds)?;
+
+            // Then, try to offset naive date by calculated delta.
+            let date_time = date.and_time(Default::default());
+            let date_time = date_time
+                .checked_add_signed(delta)
+                .ok_or(Error::OutOfBounds)?;
+
+            // Finally, attempt to convert it to local tz.
+            // This may fail if this time falls into discontinuity.
+            match date_time.and_local_timezone(Local) {
+                LocalResult::Single(t) => Ok(t),
+                LocalResult::None => Err(Error::None),
+                LocalResult::Ambiguous(..) => Err(Error::Ambiguous),
+            }
+        }
+    }
+
+    enum Error {
+        OutOfBounds,
+        Ambiguous,
+        None,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ReadComp {
+        Year,
+        Month,
+        Day,
+        Hour,
+        Min,
+        Sec,
+    }
+
+    impl ReadComp {
+        fn name(&self) -> &'static str {
+            use ReadComp::*;
+
+            match self {
+                Year => "year",
+                Month => "month",
+                Day => "day",
+                Hour => "hour",
+                Min => "min",
+                Sec => "sec",
+            }
+        }
+
+        fn iter_all() -> impl Iterator<Item = ReadComp> {
+            use ReadComp::*;
+
+            [Year, Month, Day, Hour, Min, Sec].into_iter()
+        }
+
+        fn iter_after(self) -> impl Iterator<Item = ReadComp> {
+            Self::iter_all().skip_while(move |c| *c != self).skip(1)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum WriteComp {
+        Year,
+        Month,
+        Day,
+        Hour,
+        Min,
+        Sec,
+        Wday,
+        Yday,
+    }
+
+    impl WriteComp {
+        fn name(&self) -> &'static str {
+            use WriteComp::*;
+
+            match self {
+                Year => "year",
+                Month => "month",
+                Day => "day",
+                Hour => "hour",
+                Min => "min",
+                Sec => "sec",
+                Yday => "yday",
+                Wday => "wday",
+            }
+        }
+
+        fn get(&self, date_time: &DateTime<Local>) -> i64 {
+            use chrono::{Datelike, Timelike};
+
+            match self {
+                WriteComp::Year => date_time.year().into(),
+                WriteComp::Month => date_time.month().into(),
+                WriteComp::Day => date_time.day().into(),
+                WriteComp::Hour => date_time.hour().into(),
+                WriteComp::Min => date_time.minute().into(),
+                WriteComp::Sec => date_time.second().into(),
+                WriteComp::Wday => date_time.weekday().number_from_monday().into(),
+                WriteComp::Yday => date_time.ordinal().into(),
+            }
+        }
+
+        fn iter_all() -> impl Iterator<Item = WriteComp> {
+            use WriteComp::*;
+
+            [Year, Month, Day, Hour, Min, Sec, Wday, Yday].into_iter()
+        }
+
+        fn iter_after(self) -> impl Iterator<Item = WriteComp> {
+            Self::iter_all().skip_while(move |c| *c != self).skip(1)
+        }
+    }
+
+    impl<Ty> Delegate<Ty> for Coro<Ty>
+    where
+        Ty: Types,
+    {
+        fn resume(
+            self: Pin<&mut Self>,
+            mut rt: RuntimeView<'_, Ty>,
+            response: Response<Ty>,
+        ) -> State<Request<Ty>, Result<(), RuntimeError<Ty>>> {
+            use rt::ffi::delegate::rearrange;
+
+            let this = self.get_mut();
+            let current = std::mem::replace(this, Coro::Finished);
+            match (current, response) {
+                (Coro::Started, Response::Resume) => rearrange(this.started(rt)),
+                (
+                    Coro::ToSlowGetIndex {
+                        boundary,
+                        time,
+                        comp,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary + 1);
+                    let value = rt.stack.pop().unwrap();
+
+                    let table = rt.stack[0];
+
+                    rearrange(this.iter_get_index(rt, table, time, comp, value))
+                }
+                (Coro::IterGetIndex { mut co, time, comp }, response) => {
+                    let value = match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(value)) => value,
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::IterGetIndex { co, time, comp };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let table = rt.stack[0];
+
+                    rearrange(this.iter_get_index(rt, table, time, comp, value))
+                }
+                (
+                    Coro::ToSlowSetIndex {
+                        boundary,
+                        date_time,
+                        comp,
+                    },
+                    Response::Evaluated(Ok(())),
+                ) => {
+                    rt.stack.adjust_height(boundary);
+
+                    let table = rt.stack[0];
+
+                    rearrange(this.iter_set_index(rt, table, date_time, comp))
+                }
+                (
+                    Coro::IterSetIndex {
+                        mut co,
+                        date_time,
+                        comp,
+                    },
+                    response,
+                ) => {
+                    match co.resume(rt.reborrow(), response) {
+                        State::Complete(Ok(())) => (),
+                        State::Complete(Err(err)) => return State::Complete(Err(err)),
+                        State::Yielded(request) => {
+                            *this = Coro::IterSetIndex {
+                                co,
+                                date_time,
+                                comp,
+                            };
+                            return State::Yielded(request);
+                        }
+                    };
+
+                    let table = rt.stack[0];
+
+                    rearrange(this.iter_set_index(rt, table, date_time, comp))
+                }
+                (
+                    Coro::ToSlowGetIndex { .. } | Coro::ToSlowSetIndex { .. },
+                    Response::Evaluated(Err(err)),
+                ) => State::Complete(Err(err)),
+                (Coro::Finished, _) => unreachable!("resumed completed coroutine"),
+                _ => unreachable!("invalid runtime response"),
+            }
+        }
+    }
+
+    impl<Ty> Coro<Ty>
+    where
+        Ty: Types,
+    {
+        fn started(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::table::GetIndexCache;
+            use rt::ffi::arg_parser::{LuaTable, Opts, ParseArgs, Split};
+            use rt::gc::AllocExt;
+            use rt::value::Value;
+            use std::ops::ControlFlow;
+
+            let rest: Opts<(LuaTable<_>,)> = rt.stack.parse(&mut rt.core.gc)?;
+            let (table,) = rest.split();
+
+            let Some(table) = table else {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+                let secs = time.as_secs();
+
+                let secs = secs.try_into().map_err(|_| {
+                    rt.core
+                        .gc
+                        .alloc_error_msg("timestamp does not fit into integer")
+                })?;
+
+                rt.stack.transient().push(Value::Int(secs));
+                return Ok(State::Complete(()));
+            };
+
+            // Keep table in 0-th slot.
+
+            let mut time = TimeTable::default();
+            let getter =
+                GetIndexCache::new(table.into(), &rt.core.gc, &rt.core.metatable_registry)?;
+            for comp in ReadComp::iter_all() {
+                let key = rt.core.gc.alloc_str_key(comp.name());
+                let value = match getter.get(key.downgrade(), &rt.core.gc) {
+                    Ok(ControlFlow::Break(t)) => t,
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(key.downgrade().into());
+                        });
+
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::ToSlowGetIndex {
+                            boundary,
+                            time,
+                            comp,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                    Err(err) => {
+                        let err = rt.core.gc.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                };
+
+                time.set(comp, value)
+                    .map_err(|msg| rt.core.gc.alloc_error_msg(msg))?;
+            }
+
+            self.after_extract(rt, table.into(), time)
+        }
+
+        fn iter_get_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            table: WeakValue<Ty>,
+            mut time: TimeTable,
+            comp: ReadComp,
+            value: WeakValue<Ty>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::gc::AllocExt;
+
+            use super::builtins::get_index;
+
+            time.set(comp, value)
+                .map_err(|msg| rt.core.gc.alloc_error_msg(msg))?;
+
+            for comp in comp.iter_after() {
+                let key = rt.core.gc.alloc_str_key(comp.name());
+                let mut co = get_index(table, key.downgrade());
+                let value = match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::IterGetIndex { co, time, comp };
+                        return Ok(State::Yielded(request));
+                    }
+                };
+
+                time.set(comp, value)
+                    .map_err(|msg| rt.core.gc.alloc_error_msg(msg))?;
+            }
+
+            self.after_extract(rt, table, time)
+        }
+
+        fn after_extract(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            table: WeakValue<Ty>,
+            time: TimeTable,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::builtins::table::SetIndexCache;
+            use rt::gc::AllocExt;
+            use rt::value::Value;
+            use std::ops::ControlFlow;
+
+            let date_time = match time.into_datetime() {
+                Ok(t) => t,
+                Err(Error::OutOfBounds) => {
+                    let err = rt
+                        .core
+                        .gc
+                        .alloc_error_msg("specified datetime is out of bounds");
+                    return Err(err);
+                }
+                Err(Error::None | Error::Ambiguous) => {
+                    rt.stack.clear();
+                    rt.stack.transient().push(Value::Nil);
+                    return Ok(State::Complete(()));
+                }
+            };
+
+            let setter = SetIndexCache::new(table, &rt.core.gc, &rt.core.metatable_registry)?;
+            for comp in WriteComp::iter_all() {
+                let value = Value::Int(comp.get(&date_time));
+
+                let key = rt.core.gc.alloc_str_key(comp.name());
+                match setter.set(key.downgrade(), value, &mut rt.core.gc) {
+                    Ok(ControlFlow::Break(())) => (),
+                    Ok(ControlFlow::Continue(call)) => {
+                        let boundary = rt.stack.top();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+                            stack.push(call.target);
+                            stack.push(key.downgrade().into());
+                            stack.push(value);
+                        });
+
+                        let request = Request::Invoke {
+                            callable: call.func,
+                            start: boundary,
+                        };
+                        *self = Coro::ToSlowSetIndex {
+                            boundary,
+                            date_time,
+                            comp,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                    Err(err) => {
+                        let err = rt.core.gc.alloc_error_msg(err.to_string());
+                        return Err(err);
+                    }
+                }
+            }
+
+            self.cleanup(rt, date_time)
+        }
+
+        fn iter_set_index(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            table: WeakValue<Ty>,
+            date_time: DateTime<Local>,
+            comp: WriteComp,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::gc::AllocExt;
+            use rt::value::Value;
+
+            use super::builtins::set_index;
+
+            for comp in comp.iter_after() {
+                let value = Value::Int(comp.get(&date_time));
+                let key = rt.core.gc.alloc_str_key(comp.name());
+
+                let mut co = set_index(table, key.downgrade(), value);
+                match co.resume(rt.reborrow(), Response::Resume) {
+                    State::Complete(res) => res?,
+                    State::Yielded(request) => {
+                        *self = Coro::IterSetIndex {
+                            co,
+                            date_time,
+                            comp,
+                        };
+                        return Ok(State::Yielded(request));
+                    }
+                }
+            }
+
+            self.cleanup(rt, date_time)
+        }
+
+        fn cleanup(
+            &mut self,
+            mut rt: RuntimeView<'_, Ty>,
+            date_time: DateTime<Local>,
+        ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
+            use rt::value::Value;
+
+            let timestamp = date_time.timestamp();
+
+            rt.stack.clear();
+            rt.stack.transient().push(Value::Int(timestamp));
+            Ok(State::Complete(()))
+        }
+    }
+
+    Coro::Started
+}
