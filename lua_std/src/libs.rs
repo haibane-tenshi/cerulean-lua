@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use std::process::Command;
 
 use gc::{RootCell, Trace};
+use rt::ffi::{DLuaFfi, LuaFfi};
 use rt::plugin::Plugin;
 use rt::runtime::{Core, Runtime};
 use rt::value::Types;
@@ -832,6 +833,52 @@ pub fn default_os_shell() -> Option<Command> {
     }
 
     result
+}
+
+/// Place `LuaFfi` function into table under a name.
+///
+/// This is a convenience function which let you easily put functional entries into tables.
+pub fn set_func<Ty, F>(name: &str, fn_body: F) -> impl TableEntry<Ty> + use<'_, Ty, F>
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    F: LuaFfi<Ty>,
+{
+    use rt::ffi::boxed;
+    use rt::gc::LuaPtr;
+    use rt::runtime::Core;
+    use rt::value::{Callable, KeyValue as Key, TableIndex, Value};
+
+    move |table: &RootTable<Ty>, core: &mut Core<Ty>| {
+        let key = core.alloc_string(name.into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            Key::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
+/// Place string into table under a name.
+///
+/// This is a convenience function which let you easily put string entries into tables.
+pub fn set_str<'k, 'v, Ty>(name: &'k str, value: &'v str) -> impl TableEntry<Ty> + use<'k, 'v, Ty>
+where
+    Ty: Types,
+{
+    use rt::gc::LuaPtr;
+    use rt::runtime::Core;
+    use rt::value::{KeyValue as Key, TableIndex, Value};
+
+    move |table: &RootTable<Ty>, core: &mut Core<Ty>| {
+        let key = core.alloc_string(name.into());
+        let value = core.alloc_string(value.into());
+
+        core.gc[table].set(
+            Key::String(LuaPtr(key.downgrade())),
+            Value::String(LuaPtr(value.downgrade())),
+        );
+    }
 }
 
 /// The untrace newtype for random number generators.
