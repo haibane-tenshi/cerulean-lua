@@ -7,8 +7,9 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::traits::Len;
-use super::{Int, Meta, Metatable, Refs, TableIndex, Type, Types, Value};
-use crate::error::InvalidKeyError;
+use super::{Int, Meta, Metatable, Refs, Strong, TableIndex, Type, Types, Value, Weak};
+use crate::error::{AlreadyDroppedError, InvalidKeyError};
+use crate::gc::Heap;
 
 pub struct Table<Rf, Ty>
 where
@@ -197,6 +198,46 @@ where
             KeyValue::Table(_) => Type::Table,
             KeyValue::Userdata(_) => Type::Userdata,
         }
+    }
+}
+
+impl<Ty> KeyValue<Strong, Ty>
+where
+    Ty: Types,
+{
+    pub fn downgrade(&self) -> KeyValue<Weak, Ty> {
+        match self {
+            KeyValue::Bool(t) => KeyValue::Bool(*t),
+            KeyValue::Int(t) => KeyValue::Int(*t),
+            KeyValue::Float(not_nan) => KeyValue::Float(*not_nan),
+            KeyValue::String(t) => KeyValue::String(t.downgrade()),
+            KeyValue::Function(callable) => KeyValue::Function(callable.downgrade()),
+            KeyValue::Table(t) => KeyValue::Table(t.downgrade()),
+            KeyValue::Userdata(t) => KeyValue::Userdata(t.downgrade()),
+        }
+    }
+}
+
+impl<Ty> KeyValue<Weak, Ty>
+where
+    Ty: Types,
+{
+    pub fn upgrade(self, heap: &Heap<Ty>) -> Option<KeyValue<Strong, Ty>> {
+        self.try_upgrade(heap).ok()
+    }
+
+    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<KeyValue<Strong, Ty>, AlreadyDroppedError> {
+        let r = match self {
+            KeyValue::Bool(t) => KeyValue::Bool(t),
+            KeyValue::Int(t) => KeyValue::Int(t),
+            KeyValue::Float(not_nan) => KeyValue::Float(not_nan),
+            KeyValue::String(t) => KeyValue::String(t.try_upgrade(heap)?),
+            KeyValue::Function(callable) => KeyValue::Function(callable.try_upgrade(heap)?),
+            KeyValue::Table(t) => KeyValue::Table(t.try_upgrade(heap)?),
+            KeyValue::Userdata(t) => KeyValue::Userdata(t.try_upgrade(heap)?),
+        };
+
+        Ok(r)
     }
 }
 
