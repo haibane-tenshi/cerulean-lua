@@ -364,3 +364,77 @@ where
         set_func("setlocale", fn_body).build(table, core);
     }
 }
+
+/// Return current timestamp or convert local time to timestamp.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `() -> int`
+/// * `(table: table) -> nil | int`
+///
+/// Returns the current time when called without arguments, or a time representing the local date and time specified by the given table.
+/// This table must have fields `year`, `month`, and `day`,
+/// and may have fields `hour` (default is 12), `min` (default is 0), `sec` (default is 0), and `isdst` (default is `nil`).
+/// Other fields are ignored. For a description of these fields, see the `os.date` function.
+///
+/// When the function is called, the values in these fields do not need to be inside their valid ranges.
+/// For instance, if `sec` is -10, it means 10 seconds before the time specified by the other fields;
+/// if `hour` is 1000, it means 1000 hours after the time specified by the other fields.
+///
+/// The returned value is a number, whose meaning depends on your system.
+/// In POSIX, Windows, and some other systems, this number counts the number of seconds since some given start time (the "epoch").
+/// In other systems, the meaning is not specified, and the number returned by time can be used only as an argument to `os.date` and `os.difftime`.
+///
+/// When called with a table, `os.time` also normalizes all the fields documented in the `os.date` function,
+/// so that they represent the same time as before the call but with values inside their valid ranges.
+///
+/// # Implementation-specific behavior
+///
+/// *  Operations performed by this function are *regular* that is it may invoke metamethods.
+///    This includes getting and setting values on the table.
+///    
+///    This replicates behavior of vanilla implementation.
+///
+/// *  The function returns number of seconds since Unix epoch on all supported targets.
+///
+/// *  Datetimes are expected to be in [proleptic Gregorian calendar](https://en.wikipedia.org/wiki/Proleptic_Gregorian_calendar).
+///    This functions is capable of processing all possible calendar dates from Jan 1, 262145 BCE to Dec 31, 262143 CE.
+///
+///    However, you need to be careful of offsetting pitfalls.
+///    Because Lua permits arbitrary offsets in *all* fields intermediate values do not necessarily fall into this range.
+///    This function may invoke Lua panic if the year or any intermediate result become unrepresentable.
+///    
+///    Additionally, there are limitations on hour/minute/second offsets as well.
+///    Implementation permits at most `i64::MAX` *milliseconds* total (including hours, minutes and seconds) time offset,
+///    which can be either positive or negative.
+///    This should be more than enough for regular use, however exceeding the limit will cause Lua panic.
+///
+/// *  Implementation will first attempt to construct suitable datetime and then convert it to local timezone.
+///    You should note that the last operation is *fallible*.
+///
+///    This is because local time is not guaranteed to be contiguous.
+///    If the time is shifted backwards there will be a *fold* in time, during which the local time is ambiguous,
+///    and if the time is shifted forwards there will be a *gap* in time, where the local time doesn't exist.
+///    Commonly this happens due to daylight saving time (DST), but it may happen for other reasons as well.
+///
+///    If the specified datetime cannot be resolved to a single local datetime this function will produce a `nil`.
+///    There is no correct result to be produced in this case, so this function will refuse to produce any.
+///
+///    Fixing APIs to correctly handle time quirks is outside of purview for this implementation.
+///
+/// *  This function behaves as if leap seconds don't exist.
+///    
+///    See documentation in `chrono` library for [brief explanation](chrono::NaiveTime#leap-second-handling).
+#[expect(non_camel_case_types)]
+pub struct time;
+
+impl<Ty> TableEntry<Ty> for time
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::os::time, "lua_std::std::os::time", ());
+        set_func("time", fn_body).build(table, core);
+    }
+}

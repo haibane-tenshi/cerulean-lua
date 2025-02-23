@@ -667,7 +667,7 @@ where
     })
 }
 
-/// Return current time or convert time to local.
+/// Return current timestamp or convert local time to timestamp.
 ///
 /// # From Lua documentation
 ///
