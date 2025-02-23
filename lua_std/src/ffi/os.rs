@@ -10,7 +10,7 @@ use std::process::Command;
 
 use gc::RootCell;
 use rt::ffi::arg_parser::ParseFrom;
-use rt::ffi::{self, LuaFfi};
+use rt::ffi::delegate::{self, Delegate};
 use rt::value::Types;
 
 /// Return CPU time consumed by the entire process.
@@ -21,28 +21,24 @@ use rt::value::Types;
 /// * `() -> int`
 ///
 /// Returns an approximation of the amount in seconds of CPU time used by the program, as returned by the underlying ISO C function `clock`.
-pub fn clock<Ty>() -> impl LuaFfi<Ty>
+pub fn clock<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use cpu_time::ProcessTime;
-            use rt::ffi::arg_parser::ParseArgs;
-            use rt::value::Value;
+    delegate::from_mut(|mut rt| {
+        use cpu_time::ProcessTime;
+        use rt::ffi::arg_parser::ParseArgs;
+        use rt::value::Value;
 
-            let () = rt.stack.parse(&mut rt.core.gc)?;
+        let () = rt.stack.parse(&mut rt.core.gc)?;
 
-            let dur = ProcessTime::now().as_duration();
-            let secs = dur.as_secs();
-            let output = secs.try_into().unwrap();
+        let dur = ProcessTime::now().as_duration();
+        let secs = dur.as_secs();
+        let output = secs.try_into().unwrap();
 
-            rt.stack.transient().push(Value::Int(output));
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::os::clock", ())
+        rt.stack.transient().push(Value::Int(output));
+        Ok(())
+    })
 }
 
 /// Return date and time as table or format it to string.
@@ -83,111 +79,107 @@ where
 ///    Technically, its template format is a superset of C's `strftime`.
 ///
 /// *  Currently no information about DST is provided.
-pub fn date<Ty>() -> impl LuaFfi<Ty>
+pub fn date<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use chrono::{DateTime, Datelike, FixedOffset, Local, Timelike};
-            use rt::ffi::arg_parser::{Int, LuaString, Opts, ParseArgs, Split};
-            use rt::gc::LuaPtr;
-            use rt::value::string::try_gc_to_str;
-            use rt::value::{KeyValue as Key, TableIndex, Value};
+    delegate::from_mut(|mut rt| {
+        use chrono::{DateTime, Datelike, FixedOffset, Local, Timelike};
+        use rt::ffi::arg_parser::{Int, LuaString, Opts, ParseArgs, Split};
+        use rt::gc::LuaPtr;
+        use rt::value::string::try_gc_to_str;
+        use rt::value::{KeyValue as Key, TableIndex, Value};
 
-            let rest: Opts<(LuaString<_>, Int)> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
-            let (format, time) = rest.split();
+        let rest: Opts<(LuaString<_>, Int)> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (format, time) = rest.split();
 
-            let time = match time {
-                Some(time) => {
-                    use std::time::Duration;
-                    let secs = time.0.try_into().map_err(|_| rt.core.alloc_error_msg(""))?;
-                    Duration::from_secs(secs)
-                }
-                None => {
-                    use std::time::{SystemTime, UNIX_EPOCH};
-                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
-                }
-            };
+        let time = match time {
+            Some(time) => {
+                use std::time::Duration;
+                let secs = time.0.try_into().map_err(|_| rt.core.alloc_error_msg(""))?;
+                Duration::from_secs(secs)
+            }
+            None => {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+            }
+        };
 
-            let format = format
-                .map(|t| try_gc_to_str(t.0 .0, &rt.core.gc))
-                .transpose()?;
-            let format = format.as_ref().map(AsRef::as_ref).unwrap_or("%c");
+        let format = format
+            .map(|t| try_gc_to_str(t.0 .0, &rt.core.gc))
+            .transpose()?;
+        let format = format.as_ref().map(AsRef::as_ref).unwrap_or("%c");
 
-            let (is_utc, format) = if let Some(format) = format.strip_prefix('!') {
-                (true, format)
-            } else {
-                (false, format)
-            };
+        let (is_utc, format) = if let Some(format) = format.strip_prefix('!') {
+            (true, format)
+        } else {
+            (false, format)
+        };
 
-            let utc_time =
-                DateTime::from_timestamp(time.as_secs().try_into().unwrap(), time.subsec_nanos())
-                    .unwrap();
-            let time: DateTime<FixedOffset> = if is_utc {
-                utc_time.into()
-            } else {
-                utc_time.with_timezone(&Local).into()
-            };
+        let utc_time =
+            DateTime::from_timestamp(time.as_secs().try_into().unwrap(), time.subsec_nanos())
+                .unwrap();
+        let time: DateTime<FixedOffset> = if is_utc {
+            utc_time.into()
+        } else {
+            utc_time.with_timezone(&Local).into()
+        };
 
-            if format == "*t" {
-                rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    let year = time.year().into();
-                    let month = time.month().into();
-                    let day = time.day().into();
+        if format == "*t" {
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let year = time.year().into();
+                let month = time.month().into();
+                let day = time.day().into();
 
-                    let hour = time.hour().into();
-                    let min = time.minute().into();
+                let hour = time.hour().into();
+                let min = time.minute().into();
 
-                    // Chrono folds leap seconds into nanoseconds.
-                    let leap_second = time.nanosecond() >= 1_000_000_000;
-                    let sec = (time.second() + if leap_second { 1 } else { 0 }).into();
+                // Chrono folds leap seconds into nanoseconds.
+                let leap_second = time.nanosecond() >= 1_000_000_000;
+                let sec = (time.second() + if leap_second { 1 } else { 0 }).into();
 
-                    let wday = time.weekday().number_from_monday().into();
-                    let yday = time.ordinal().into();
+                let wday = time.weekday().number_from_monday().into();
+                let yday = time.ordinal().into();
 
-                    let mut alloc_key =
-                        |name: &str| Key::String(LuaPtr(heap.intern(name.into()).downgrade()));
-                    let mut table = Ty::Table::default();
+                let mut alloc_key =
+                    |name: &str| Key::String(LuaPtr(heap.intern(name.into()).downgrade()));
+                let mut table = Ty::Table::default();
 
-                    table.set(alloc_key("year"), Value::Int(year));
-                    table.set(alloc_key("month"), Value::Int(month));
-                    table.set(alloc_key("day"), Value::Int(day));
+                table.set(alloc_key("year"), Value::Int(year));
+                table.set(alloc_key("month"), Value::Int(month));
+                table.set(alloc_key("day"), Value::Int(day));
 
-                    table.set(alloc_key("hour"), Value::Int(hour));
-                    table.set(alloc_key("min"), Value::Int(min));
-                    table.set(alloc_key("sec"), Value::Int(sec));
+                table.set(alloc_key("hour"), Value::Int(hour));
+                table.set(alloc_key("min"), Value::Int(min));
+                table.set(alloc_key("sec"), Value::Int(sec));
 
-                    table.set(alloc_key("wday"), Value::Int(wday));
-                    table.set(alloc_key("yday"), Value::Int(yday));
+                table.set(alloc_key("wday"), Value::Int(wday));
+                table.set(alloc_key("yday"), Value::Int(yday));
 
-                    let result = Value::Table(LuaPtr(heap.alloc_cell(table).downgrade()));
+                let result = Value::Table(LuaPtr(heap.alloc_cell(table).downgrade()));
 
-                    stack.push(result);
-                });
-            } else {
-                use std::fmt::Write;
+                stack.push(result);
+            });
+        } else {
+            use std::fmt::Write;
 
-                let mut output = String::new();
-                if let Err(err) = write!(&mut output, "{}", time.format(format)) {
-                    let err = rt.core.alloc_error_msg(err.to_string());
-                    return Err(err);
-                }
-
-                rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    let s = heap.intern(output.into());
-                    let output = Value::String(LuaPtr(s.downgrade()));
-
-                    stack.push(output);
-                });
+            let mut output = String::new();
+            if let Err(err) = write!(&mut output, "{}", time.format(format)) {
+                let err = rt.core.alloc_error_msg(err.to_string());
+                return Err(err);
             }
 
-            Ok(())
-        })
-    };
+            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let s = heap.intern(output.into());
+                let output = Value::String(LuaPtr(s.downgrade()));
 
-    ffi::from_fn(body, "lua_std::os::date", ())
+                stack.push(output);
+            });
+        }
+
+        Ok(())
+    })
 }
 
 /// Calculate difference between two timestamps.
@@ -205,31 +197,27 @@ where
 /// *  `os.time` always returns number of seconds since Unix epoch, so this function simply returns difference between two values.
 ///    
 ///    You will get an error on underflow.
-pub fn difftime<Ty>() -> impl LuaFfi<Ty>
+pub fn difftime<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use rt::ffi::arg_parser::{Int, ParseArgs};
-            use rt::value::Value;
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{Int, ParseArgs};
+        use rt::value::Value;
 
-            let [t2, t1]: [Int; 2] = rt.stack.parse(&mut rt.core.gc)?;
+        let [t2, t1]: [Int; 2] = rt.stack.parse(&mut rt.core.gc)?;
 
-            if let Some(output) = t2.0.checked_sub(t1.0) {
-                rt.stack.transient().push(Value::Int(output));
+        if let Some(output) = t2.0.checked_sub(t1.0) {
+            rt.stack.transient().push(Value::Int(output));
 
-                Ok(())
-            } else {
-                let err = rt
-                    .core
-                    .alloc_error_msg("difference between timestamps does not fit into integer");
-                Err(err)
-            }
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::os::difftime", ())
+            Ok(())
+        } else {
+            let err = rt
+                .core
+                .alloc_error_msg("difference between timestamps does not fit into integer");
+            Err(err)
+        }
+    })
 }
 
 /// Execute command in a shell.
@@ -271,118 +259,113 @@ where
 ///     so as long as shell constructor is configured `execute` will claim that shell is available.
 ///
 /// *   See [`OsExecute`] for ways to configure shell constructor.
-pub fn execute<Ty>(shell: Option<RootCell<Command>>) -> impl LuaFfi<Ty>
+pub fn execute<Ty>(shell: Option<RootCell<Command>>) -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = move || {
-        let shell = shell.clone();
-        ffi::delegate::from_mut(move |mut rt| {
-            use rt::ffi::arg_parser::{LuaString, Opts, ParseArgs, Split};
-            use rt::gc::LuaPtr;
-            use rt::value::string::try_gc_to_str;
-            use rt::value::Value;
-            use std::io::Write;
-            use std::process::Stdio;
+    delegate::from_mut(move |mut rt| {
+        use rt::ffi::arg_parser::{LuaString, Opts, ParseArgs, Split};
+        use rt::gc::LuaPtr;
+        use rt::value::string::try_gc_to_str;
+        use rt::value::Value;
+        use std::io::Write;
+        use std::process::Stdio;
 
-            let rest: Opts<(LuaString<_>,)> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
-            let (command,) = rest.split();
+        let rest: Opts<(LuaString<_>,)> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (command,) = rest.split();
 
-            let Some(command) = command else {
-                rt.stack.transient().push(Value::Bool(shell.is_some()));
-                return Ok(());
-            };
+        let Some(command) = command else {
+            rt.stack.transient().push(Value::Bool(shell.is_some()));
+            return Ok(());
+        };
 
-            let Some(shell) = &shell else {
-                let err = rt.core.alloc_error_msg("shell is not available");
-                return Err(err);
-            };
+        let Some(shell) = &shell else {
+            let err = rt.core.alloc_error_msg("shell is not available");
+            return Err(err);
+        };
 
-            let command = try_gc_to_str(command.0 .0, &rt.core.gc)?.into_owned();
+        let command = try_gc_to_str(command.0 .0, &rt.core.gc)?.into_owned();
 
-            let shell = rt.core.gc.get_root_mut(shell);
+        let shell = rt.core.gc.get_root_mut(shell);
 
-            shell
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
+        shell
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
 
-            let mut child = match shell.spawn() {
-                Ok(t) => t,
-                Err(err) => {
-                    let err = rt.core.alloc_error_msg(err.to_string());
-                    return Err(err);
-                }
-            };
-
-            let mut stdin = child.stdin.take().unwrap();
-            if let Err(err) = write!(&mut stdin, "{}", command) {
-                let msg = if let Err(kill_err) = child.kill() {
-                    format!("{err}; {kill_err}")
-                } else {
-                    format!("{err}")
-                };
-
-                let err = rt.core.alloc_error_msg(msg);
+        let mut child = match shell.spawn() {
+            Ok(t) => t,
+            Err(err) => {
+                let err = rt.core.alloc_error_msg(err.to_string());
                 return Err(err);
             }
+        };
 
-            let exit_status = match child.wait() {
-                Ok(t) => t,
-                Err(err) => {
-                    let err = rt.core.alloc_error_msg(err.to_string());
-                    return Err(err);
-                }
-            };
-
-            let status = if exit_status.success() {
-                Value::Bool(true)
+        let mut stdin = child.stdin.take().unwrap();
+        if let Err(err) = write!(&mut stdin, "{}", command) {
+            let msg = if let Err(kill_err) = child.kill() {
+                format!("{err}; {kill_err}")
             } else {
-                Value::Nil
-            };
-            let (tag, code) = match exit_status.code() {
-                Some(code) => {
-                    let tag = rt.core.gc.intern("exit".into());
-                    let tag = Value::String(LuaPtr(tag.downgrade()));
-
-                    let code = Value::Int(code.into());
-
-                    (tag, code)
-                }
-                None => {
-                    #[allow(unused_mut)]
-                    let mut signal: Option<i32> = None;
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::process::ExitStatusExt;
-                        signal = exit_status.signal();
-                    }
-
-                    // This panic *should* be unreachable.
-                    // According to docs only Unix targets may return None as exit code and only when child was signaled.
-                    let signal = signal.expect("failed to extract signal code");
-
-                    let tag = rt.core.gc.intern("signal".into());
-                    let tag = Value::String(LuaPtr(tag.downgrade()));
-
-                    let code = Value::Int(signal.into());
-
-                    (tag, code)
-                }
+                format!("{err}")
             };
 
-            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
-                stack.push(status);
-                stack.push(tag);
-                stack.push(code);
-            });
+            let err = rt.core.alloc_error_msg(msg);
+            return Err(err);
+        }
 
-            Ok(())
-        })
-    };
+        let exit_status = match child.wait() {
+            Ok(t) => t,
+            Err(err) => {
+                let err = rt.core.alloc_error_msg(err.to_string());
+                return Err(err);
+            }
+        };
 
-    ffi::from_fn_mut(body, "lua_std::os::execute", ())
+        let status = if exit_status.success() {
+            Value::Bool(true)
+        } else {
+            Value::Nil
+        };
+        let (tag, code) = match exit_status.code() {
+            Some(code) => {
+                let tag = rt.core.gc.intern("exit".into());
+                let tag = Value::String(LuaPtr(tag.downgrade()));
+
+                let code = Value::Int(code.into());
+
+                (tag, code)
+            }
+            None => {
+                #[allow(unused_mut)]
+                let mut signal: Option<i32> = None;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt;
+                    signal = exit_status.signal();
+                }
+
+                // This panic *should* be unreachable.
+                // According to docs only Unix targets may return None as exit code and only when child was signaled.
+                let signal = signal.expect("failed to extract signal code");
+
+                let tag = rt.core.gc.intern("signal".into());
+                let tag = Value::String(LuaPtr(tag.downgrade()));
+
+                let code = Value::Int(signal.into());
+
+                (tag, code)
+            }
+        };
+
+        rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
+            stack.push(status);
+            stack.push(tag);
+            stack.push(code);
+        });
+
+        Ok(())
+    })
 }
 
 /// Terminate host program
@@ -406,7 +389,7 @@ where
 ///     On Rust side those are provided by [`ExitCode::SUCCESS`](std::process::ExitCode::SUCCESS) and [`ExitCode::FAILURE`](std::process::ExitCode::FAILURE).
 /// *   Rust uses `i32` to represent exit codes.
 ///     Unrepresentable integers will be replaced with `ExitCode::FAILURE`.
-pub fn exit<Ty>() -> impl LuaFfi<Ty>
+pub fn exit<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -444,31 +427,27 @@ where
         }
     }
 
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use rt::ffi::arg_parser::{Boolean, Opts, ParseArgs, Split};
-            use std::process::ExitCode;
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{Boolean, Opts, ParseArgs, Split};
+        use std::process::ExitCode;
 
-            let rest: Opts<(BoolOrInt, Boolean)> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
-            let (code, close) = rest.split();
-            let code = code.unwrap_or(BoolOrInt::Bool(true));
-            let _close = close.map(|t| t.0).unwrap_or(false);
+        let rest: Opts<(BoolOrInt, Boolean)> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (code, close) = rest.split();
+        let code = code.unwrap_or(BoolOrInt::Bool(true));
+        let _close = close.map(|t| t.0).unwrap_or(false);
 
-            debug_assert_eq!(ExitCode::SUCCESS, ExitCode::from(0));
-            debug_assert_eq!(ExitCode::FAILURE, ExitCode::from(1));
+        debug_assert_eq!(ExitCode::SUCCESS, ExitCode::from(0));
+        debug_assert_eq!(ExitCode::FAILURE, ExitCode::from(1));
 
-            let code = match code {
-                BoolOrInt::Bool(true) => 0,
-                BoolOrInt::Bool(false) => 1,
-                BoolOrInt::Int(n) => n.try_into().unwrap_or(1),
-            };
+        let code = match code {
+            BoolOrInt::Bool(true) => 0,
+            BoolOrInt::Bool(false) => 1,
+            BoolOrInt::Int(n) => n.try_into().unwrap_or(1),
+        };
 
-            std::process::exit(code)
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::os::exit", ())
+        std::process::exit(code)
+    })
 }
 
 /// Read value of environment variable.
@@ -484,36 +463,32 @@ where
 ///
 /// *   Environment variable is expected to contain valid utf8.
 ///     This function will return **fail** if that doesn't hold.
-pub fn getenv<Ty>() -> impl LuaFfi<Ty>
+pub fn getenv<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use rt::ffi::arg_parser::{LuaString, ParseArgs};
-            use rt::gc::LuaPtr;
-            use rt::value::string::try_gc_to_str;
-            use rt::value::Value;
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{LuaString, ParseArgs};
+        use rt::gc::LuaPtr;
+        use rt::value::string::try_gc_to_str;
+        use rt::value::Value;
 
-            let name: LuaString<_> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+        let name: LuaString<_> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let name = try_gc_to_str(name.0 .0, &rt.core.gc)?;
+        let name = try_gc_to_str(name.0 .0, &rt.core.gc)?;
 
-            let Ok(value) = std::env::var(name.as_ref()) else {
-                rt.stack.transient().push(Value::Nil);
-                return Ok(());
-            };
+        let Ok(value) = std::env::var(name.as_ref()) else {
+            rt.stack.transient().push(Value::Nil);
+            return Ok(());
+        };
 
-            let value = rt.core.gc.intern(value.into());
-            let value = Value::String(LuaPtr(value.downgrade()));
+        let value = rt.core.gc.intern(value.into());
+        let value = Value::String(LuaPtr(value.downgrade()));
 
-            rt.stack.synchronized(&mut rt.core.gc).push(value);
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::os::getenv", ())
+        rt.stack.synchronized(&mut rt.core.gc).push(value);
+        Ok(())
+    })
 }
 
 /// Delete file or directory.
@@ -533,57 +508,53 @@ where
 /// *   It is valid to target empty directories on all platforms.
 /// *   On failure this will attempt to recover OS-specific error code to provide in last return.
 ///     This may fail and produce no value.
-pub fn remove<Ty>() -> impl LuaFfi<Ty>
+pub fn remove<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
     PathBuf: ParseFrom<Ty::String>,
     <PathBuf as ParseFrom<Ty::String>>::Error: Display,
 {
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use rt::ffi::arg_parser::{FromLuaString, ParseArgs};
-            use rt::gc::LuaPtr;
-            use rt::value::Value;
-            use std::path::PathBuf;
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{FromLuaString, ParseArgs};
+        use rt::gc::LuaPtr;
+        use rt::value::Value;
+        use std::path::PathBuf;
 
-            let file_name: FromLuaString<PathBuf> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
-            let file_name = file_name.0;
+        let file_name: FromLuaString<PathBuf> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let file_name = file_name.0;
 
-            let inner = || {
-                let metadata = std::fs::metadata(&file_name)?;
-                if metadata.is_dir() {
-                    std::fs::remove_dir(&file_name)
-                } else {
-                    std::fs::remove_file(&file_name)
-                }
-            };
-
-            match inner() {
-                Ok(()) => {
-                    rt.stack.transient().push(Value::Bool(true));
-                    Ok(())
-                }
-                Err(err) => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    let code = err
-                        .raw_os_error()
-                        .map(|n| Value::Int(n.into()))
-                        .unwrap_or_default();
-
-                    let msg = heap.intern(err.to_string().into());
-                    let msg = Value::String(LuaPtr(msg.downgrade()));
-
-                    stack.push(Value::Nil);
-                    stack.push(msg);
-                    stack.push(code);
-
-                    Ok(())
-                }),
+        let inner = || {
+            let metadata = std::fs::metadata(&file_name)?;
+            if metadata.is_dir() {
+                std::fs::remove_dir(&file_name)
+            } else {
+                std::fs::remove_file(&file_name)
             }
-        })
-    };
+        };
 
-    ffi::from_fn(body, "lua_std::os::remove", ())
+        match inner() {
+            Ok(()) => {
+                rt.stack.transient().push(Value::Bool(true));
+                Ok(())
+            }
+            Err(err) => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let code = err
+                    .raw_os_error()
+                    .map(|n| Value::Int(n.into()))
+                    .unwrap_or_default();
+
+                let msg = heap.intern(err.to_string().into());
+                let msg = Value::String(LuaPtr(msg.downgrade()));
+
+                stack.push(Value::Nil);
+                stack.push(msg);
+                stack.push(code);
+
+                Ok(())
+            }),
+        }
+    })
 }
 
 /// Rename file or directory.
@@ -598,47 +569,43 @@ where
 ///
 /// *   On failure this will attempt to recover OS-specific error code to provide in last return.
 ///     This may fail and produce no value.
-pub fn rename<Ty>() -> impl LuaFfi<Ty>
+pub fn rename<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
     PathBuf: ParseFrom<Ty::String>,
     <PathBuf as ParseFrom<Ty::String>>::Error: Display,
 {
-    let body = || {
-        ffi::delegate::from_mut(|mut rt| {
-            use rt::ffi::arg_parser::{FromLuaString, ParseArgs};
-            use rt::gc::LuaPtr;
-            use rt::value::Value;
-            use std::path::PathBuf;
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{FromLuaString, ParseArgs};
+        use rt::gc::LuaPtr;
+        use rt::value::Value;
+        use std::path::PathBuf;
 
-            let [old, new]: [FromLuaString<PathBuf>; 2] = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
-            let old = old.0;
-            let new = new.0;
+        let [old, new]: [FromLuaString<PathBuf>; 2] = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let old = old.0;
+        let new = new.0;
 
-            match std::fs::rename(&old, &new) {
-                Ok(()) => {
-                    rt.stack.transient().push(Value::Bool(true));
-                    Ok(())
-                }
-                Err(err) => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                    let code = err
-                        .raw_os_error()
-                        .map(|n| Value::Int(n.into()))
-                        .unwrap_or_default();
-
-                    let msg = heap.intern(err.to_string().into());
-                    let msg = Value::String(LuaPtr(msg.downgrade()));
-
-                    stack.push(Value::Nil);
-                    stack.push(msg);
-                    stack.push(code);
-
-                    Ok(())
-                }),
+        match std::fs::rename(&old, &new) {
+            Ok(()) => {
+                rt.stack.transient().push(Value::Bool(true));
+                Ok(())
             }
-        })
-    };
+            Err(err) => rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                let code = err
+                    .raw_os_error()
+                    .map(|n| Value::Int(n.into()))
+                    .unwrap_or_default();
 
-    ffi::from_fn(body, "lua_std::os::rename", ())
+                let msg = heap.intern(err.to_string().into());
+                let msg = Value::String(LuaPtr(msg.downgrade()));
+
+                stack.push(Value::Nil);
+                stack.push(msg);
+                stack.push(code);
+
+                Ok(())
+            }),
+        }
+    })
 }
