@@ -6,11 +6,12 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 use rt::ffi::arg_parser::ParseFrom;
-use rt::ffi::{boxed, DLuaFfi};
+use rt::ffi::{self, DLuaFfi};
 use rt::gc::LuaPtr;
 use rt::runtime::{Closure, Core};
-use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
+use rt::value::{KeyValue, TableIndex, Types, Value};
 
+use crate::lib::set_func;
 use crate::traits::{RootTable, TableEntry};
 
 /// Runtime assertion.
@@ -29,15 +30,9 @@ impl<Ty> TableEntry<Ty> for assert
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::assert();
-        let key = core.alloc_string("assert".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::assert, "lua_std::std::assert", ());
+        set_func("assert", fn_body).build(table, core);
     }
 }
 
@@ -67,15 +62,9 @@ impl<Ty> TableEntry<Ty> for error
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::error();
-        let key = core.alloc_string("error".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::error, "lua_std::std::error", ());
+        set_func("error", fn_body).build(table, core);
     }
 }
 
@@ -139,15 +128,13 @@ impl<Ty> TableEntry<Ty> for collectgarbage
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::collectgarbage();
-        let key = core.alloc_string("collectgarbage".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(
+            crate::ffi::collectgarbage,
+            "lua_std::std::collectgarbage",
+            (),
         );
+        set_func("collectgarbage", fn_body).build(table, core);
     }
 }
 
@@ -186,15 +173,9 @@ where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     PathBuf: ParseFrom<Ty::String>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::dofile();
-        let key = core.alloc_string("dofile".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::dofile, "lua_std::std::dofile", ());
+        set_func("dofile", fn_body).build(table, core);
     }
 }
 
@@ -268,15 +249,9 @@ impl<Ty> TableEntry<Ty> for ipairs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::ipairs();
-        let key = core.alloc_string("ipairs".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::ipairs, "lua_std::std::ipairs", ());
+        set_func("ipairs", fn_body).build(table, core);
     }
 }
 
@@ -307,15 +282,9 @@ impl<Ty> TableEntry<Ty> for pcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::pcall();
-        let key = core.alloc_string("pcall".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::pcall, "lua_std::std::pcall", ());
+        set_func("pcall", fn_body).build(table, core);
     }
 }
 
@@ -338,15 +307,9 @@ impl<Ty> TableEntry<Ty> for xpcall
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::xpcall();
-        let key = core.alloc_string("xpcall".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::xpcall, "lua_std::std::xpcall", ());
+        set_func("xpcall", fn_body).build(table, core);
     }
 }
 
@@ -404,15 +367,9 @@ where
     // Temp bound, remove when we are done with unpin.
     Ty::String: Unpin,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::load();
-        let key = core.alloc_string("load".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::load, "lua_std::std::load", ());
+        set_func("load", fn_body).build(table, core);
     }
 }
 
@@ -447,15 +404,9 @@ where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     PathBuf: ParseFrom<Ty::String>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::loadfile();
-        let key = core.alloc_string("loadfile".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::loadfile, "lua_std::std::loadfile", ());
+        set_func("loadfile", fn_body).build(table, core);
     }
 }
 
@@ -487,15 +438,9 @@ impl<Ty> TableEntry<Ty> for next
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::next();
-        let key = core.alloc_string("next".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::next, "lua_std::std::next", ());
+        set_func("next", fn_body).build(table, core);
     }
 }
 
@@ -529,15 +474,9 @@ impl<Ty> TableEntry<Ty> for pairs
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::pairs();
-        let key = core.alloc_string("pairs".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::pairs, "lua_std::std::pairs", ());
+        set_func("pairs", fn_body).build(table, core);
     }
 }
 
@@ -562,15 +501,9 @@ impl<Ty> TableEntry<Ty> for setmetatable
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::setmetatable();
-        let key = core.alloc_string("setmetatable".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::setmetatable, "lua_std::std::setmetatable", ());
+        set_func("setmetatable", fn_body).build(table, core);
     }
 }
 
@@ -591,15 +524,9 @@ impl<Ty> TableEntry<Ty> for getmetatable
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::getmetatable();
-        let key = core.alloc_string("getmetatable".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::getmetatable, "lua_std::std::getmetatable", ());
+        set_func("getmetatable", fn_body).build(table, core);
     }
 }
 
@@ -625,15 +552,9 @@ impl<Ty> TableEntry<Ty> for print
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::print();
-        let key = core.alloc_string("print".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::print, "lua_std::std::print", ());
+        set_func("print", fn_body).build(table, core);
     }
 }
 
@@ -673,15 +594,9 @@ impl<Ty> TableEntry<Ty> for tostring
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::tostring();
-        let key = core.alloc_string("tostring".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::tostring, "lua_std::std::tostring", ());
+        set_func("tostring", fn_body).build(table, core);
     }
 }
 
@@ -712,15 +627,9 @@ where
     String: ParseFrom<Ty::String>,
     <String as ParseFrom<Ty::String>>::Error: Display,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::tonumber();
-        let key = core.alloc_string("tonumber".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::tonumber, "lua_std::std::tonumber", ());
+        set_func("tonumber", fn_body).build(table, core);
     }
 }
 
@@ -744,15 +653,9 @@ impl<Ty> TableEntry<Ty> for rawequal
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::rawequal();
-        let key = core.alloc_string("rawequal".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::rawequal, "lua_std::std::rawequal", ());
+        set_func("rawequal", fn_body).build(table, core);
     }
 }
 
@@ -772,15 +675,9 @@ impl<Ty> TableEntry<Ty> for rawlen
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::rawlen();
-        let key = core.alloc_string("rawlen".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::rawlen, "lua_std::std::rawlen", ());
+        set_func("rawlen", fn_body).build(table, core);
     }
 }
 
@@ -808,15 +705,9 @@ impl<Ty> TableEntry<Ty> for rawget
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::rawget();
-        let key = core.alloc_string("rawget".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::rawget, "lua_std::std::rawget", ());
+        set_func("rawget", fn_body).build(table, core);
     }
 }
 
@@ -846,15 +737,9 @@ impl<Ty> TableEntry<Ty> for rawset
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::rawset();
-        let key = core.alloc_string("rawset".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::rawset, "lua_std::std::rawset", ());
+        set_func("rawset", fn_body).build(table, core);
     }
 }
 
@@ -885,15 +770,9 @@ impl<Ty> TableEntry<Ty> for select
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::select();
-        let key = core.alloc_string("select".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::select, "lua_std::std::select", ());
+        set_func("select", fn_body).build(table, core);
     }
 }
 
@@ -914,15 +793,9 @@ impl<Ty> TableEntry<Ty> for type_
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::type_();
-        let key = core.alloc_string("type".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::type_, "lua_std::std::type", ());
+        set_func("type", fn_body).build(table, core);
     }
 }
 
@@ -954,14 +827,8 @@ impl<Ty> TableEntry<Ty> for warn
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    fn build(self, value: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let fn_body = crate::ffi::warn();
-        let key = core.alloc_string("warn".into());
-        let callback = core.gc.alloc_cell(boxed(fn_body));
-
-        core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
-        );
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::warn, "lua_std::std::warn", ());
+        set_func("warn", fn_body).build(table, core);
     }
 }

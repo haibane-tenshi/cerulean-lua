@@ -14,8 +14,8 @@ use rt::ffi::arg_parser::{
     Adapt, FormatReturns, FromLuaString, LuaString, LuaTable, Maybe, NilOr, Opts, ParseArgs,
     ParseAtom, ParseFrom, Split, WeakConvertError,
 };
-use rt::ffi::delegate::{Request, RuntimeView};
-use rt::ffi::{self, boxed, delegate, DLuaFfi, LuaFfi};
+use rt::ffi::delegate::{self, Delegate, Request, RuntimeView};
+use rt::ffi::{self, boxed, DLuaFfi, LuaFfi};
 use rt::gc::{Heap, LuaPtr, TryGet};
 use rt::runtime::Closure;
 use rt::value::table::KeyValue;
@@ -30,34 +30,27 @@ use rt::value::{Callable, Int, Nil, StrongValue, Types, Value, WeakValue};
 ///
 /// Raises an error if the value of its argument `v` is false (i.e., `nil` or `false`); otherwise, returns all its arguments.
 /// In case of error, `message` is the error object; when absent, it defaults to "assertion failed!"
-pub fn assert<Ty>() -> impl LuaFfi<Ty>
+pub fn assert<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    ffi::from_fn(
-        || {
-            delegate::from_mut(|rt| {
-                let (cond, msg): (WeakValue<Ty>, Maybe<WeakValue<Ty>>) =
-                    rt.stack.parse(&mut rt.core.gc)?;
+    delegate::from_mut(|rt| {
+        let (cond, msg): (WeakValue<Ty>, Maybe<WeakValue<Ty>>) = rt.stack.parse(&mut rt.core.gc)?;
 
-                if cond.to_bool() {
-                    Ok(())
-                } else {
-                    let err = msg
-                        .into_option()
-                        .map(|t| t.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
-                        .transpose()?
-                        .unwrap_or_else(|| {
-                            let msg = rt.core.alloc_string("assertion failed!".into());
-                            Value::String(LuaPtr(msg))
-                        });
-                    Err(RuntimeError::from_value(err))
-                }
-            })
-        },
-        "lua_std::assert",
-        (),
-    )
+        if cond.to_bool() {
+            Ok(())
+        } else {
+            let err = msg
+                .into_option()
+                .map(|t| t.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
+                .transpose()?
+                .unwrap_or_else(|| {
+                    let msg = rt.core.alloc_string("assertion failed!".into());
+                    Value::String(LuaPtr(msg))
+                });
+            Err(RuntimeError::from_value(err))
+        }
+    })
 }
 
 /// Trigger runtime error.
@@ -79,24 +72,20 @@ where
 /// # Implementation-specific behavior
 ///
 /// Levels are currently unsupported and ignored.
-pub fn error<Ty>() -> impl LuaFfi<Ty>
+pub fn error<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let (msg, level): (WeakValue<_>, Opts<(Int,)>) = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
-            let (level,) = level.split();
-            let _level = level.unwrap_or(Int(1)).0;
+    delegate::from_mut(|mut rt| {
+        let (msg, level): (WeakValue<_>, Opts<(Int,)>) = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (level,) = level.split();
+        let _level = level.unwrap_or(Int(1)).0;
 
-            let msg = msg.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
-            let err = RuntimeError::from_value(msg);
-            Err(err)
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::error", ())
+        let msg = msg.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
+        let err = RuntimeError::from_value(msg);
+        Err(err)
+    })
 }
 
 /// Issue command to garbage collector.
@@ -152,7 +141,7 @@ where
 /// * **"step"** - Unsupported, silently ignored.
 /// * **"incremental"** - Unsupported, silently ignored.
 /// * **"generational"** - Unsupported, silently ignored.
-pub fn collectgarbage<Ty>() -> impl LuaFfi<Ty>
+pub fn collectgarbage<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -246,37 +235,31 @@ where
         }
     }
 
-    ffi::from_fn(
-        || {
-            delegate::from_mut(|mut rt| {
-                let args: Opts<(Command, WeakValue<Ty>)> = rt.stack.parse(&mut rt.core.gc)?;
-                rt.stack.clear();
-                let (command, _) = args.split();
-                let command = command.unwrap_or_default();
+    delegate::from_mut(|mut rt| {
+        let args: Opts<(Command, WeakValue<Ty>)> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (command, _) = args.split();
+        let command = command.unwrap_or_default();
 
-                match command {
-                    Command::Collect => rt.core.gc.gc(),
-                    Command::Restart => rt.core.gc.enable_auto_gc(true),
-                    Command::Stop => rt.core.gc.enable_auto_gc(false),
-                    Command::IsRunnning => {
-                        let value = rt.core.gc.is_auto_gc_enabled();
-                        rt.stack.transient().push(Value::Bool(value));
-                    }
-                    Command::Count => {
-                        let info = rt.core.gc.health_check();
-                        let value = info.occupied_bytes as f64 / 1024.0;
-                        rt.stack.transient().push(Value::Float(value));
-                    }
-                    // Silently ignore incompatible commands.
-                    Command::Step | Command::Generational | Command::Incremental => (),
-                }
+        match command {
+            Command::Collect => rt.core.gc.gc(),
+            Command::Restart => rt.core.gc.enable_auto_gc(true),
+            Command::Stop => rt.core.gc.enable_auto_gc(false),
+            Command::IsRunnning => {
+                let value = rt.core.gc.is_auto_gc_enabled();
+                rt.stack.transient().push(Value::Bool(value));
+            }
+            Command::Count => {
+                let info = rt.core.gc.health_check();
+                let value = info.occupied_bytes as f64 / 1024.0;
+                rt.stack.transient().push(Value::Float(value));
+            }
+            // Silently ignore incompatible commands.
+            Command::Step | Command::Generational | Command::Incremental => (),
+        }
 
-                Ok(())
-            })
-        },
-        "lua_std::collectgarbage",
-        (),
-    )
+        Ok(())
+    })
 }
 
 fn load_chunk<Ty>(
@@ -334,33 +317,29 @@ where
 /// On Linux this can be triggered by typing Ctrl-D in terminal.
 ///
 /// On Windows this can be triggered by typing Ctrl-Z in terminal.
-pub fn dofile<Ty>() -> impl LuaFfi<Ty>
+pub fn dofile<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
     PathBuf: ParseFrom<Ty::String>,
 {
-    let body = || {
-        delegate::yield_1(
-            |mut rt| {
-                let filename: Maybe<FromLuaString<PathBuf>> = rt.stack.parse(&mut rt.core.gc)?;
-                let file_name = filename.into_option().map(|t| t.0);
-                rt.stack.clear();
+    delegate::yield_1(
+        |mut rt| {
+            let filename: Maybe<FromLuaString<PathBuf>> = rt.stack.parse(&mut rt.core.gc)?;
+            let file_name = filename.into_option().map(|t| t.0);
+            rt.stack.clear();
 
-                let chunk_id = load_chunk(&mut rt, file_name)?;
-                let callable = rt.core.gc.alloc_cell(boxed(ffi::call_chunk(chunk_id)));
-                let callable = Callable::Rust(LuaPtr(callable));
-                let request = Request::Invoke {
-                    callable,
-                    start: StackSlot(0),
-                };
+            let chunk_id = load_chunk(&mut rt, file_name)?;
+            let callable = rt.core.gc.alloc_cell(boxed(ffi::call_chunk(chunk_id)));
+            let callable = Callable::Rust(LuaPtr(callable));
+            let request = Request::Invoke {
+                callable,
+                start: StackSlot(0),
+            };
 
-                Ok(request)
-            },
-            |_| Ok(()),
-        )
-    };
-
-    ffi::from_fn(body, "lua_std::dofile", ())
+            Ok(request)
+        },
+        |_| Ok(()),
+    )
 }
 
 /// Iterate over table's integer indices.
@@ -377,7 +356,7 @@ where
 /// ```
 ///
 /// will iterate over the key–value pairs `(1,t[1])`, `(2,t[2])`, ..., up to the first absent index.
-pub fn ipairs<Ty>() -> impl LuaFfi<Ty>
+pub fn ipairs<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -405,24 +384,20 @@ where
             })
         };
 
-        ffi::from_fn(body, "lua_std::ipairs::iter", ())
+        ffi::from_fn(body, "lua_std::std::ipairs::iter", ())
     }
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let table: LuaTable<_> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let table: LuaTable<_> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                let iter = heap.alloc_cell(boxed(iter::<Ty>())).downgrade();
-                stack.format((Callable::Rust(LuaPtr(iter)), table, Int(0)));
-            });
+        rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+            let iter = heap.alloc_cell(boxed(iter::<Ty>())).downgrade();
+            stack.format((Callable::Rust(LuaPtr(iter)), table, Int(0)));
+        });
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::ipairs", ())
+        Ok(())
+    })
 }
 
 /// Call another function in protected mode.
@@ -445,7 +420,7 @@ where
 /// During unwinding every rust-backed frame receives runtime error to process in order,
 /// `pcall` simply doesn't propagate it which indicates that Lua panic was handled.
 /// See [delegate contract](rt::ffi::delegate#error-handling) for more details.
-pub fn pcall<Ty>() -> impl LuaFfi<Ty>
+pub fn pcall<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
 {
@@ -541,7 +516,7 @@ where
         }
     }
 
-    ffi::from_fn(Delegate::default, "lua_std::pcall", ())
+    Delegate::default()
 }
 
 /// Call another function in protected mode, setting a message handler.
@@ -556,48 +531,45 @@ where
 /// # Implementation-specific behavior
 ///
 /// Currently, message handlers are not supported, so this function is equivalent to `pcall`.
-pub fn xpcall<Ty>() -> impl LuaFfi<Ty>
+pub fn xpcall<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    let body = || {
-        enum State {
-            Started,
-            CalledPcall,
-            Finished,
-        }
+    enum State {
+        Started,
+        CalledPcall,
+        Finished,
+    }
 
-        let mut state = State::Started;
-        delegate::try_repeat(move |mut rt| {
-            let current = std::mem::replace(&mut state, State::Finished);
-            match current {
-                State::Started => {
-                    if rt.stack.len() < 2 {
-                        let err = rt::error::SignatureError::TooFewArgs {
-                            found: rt.stack.len(),
-                        };
-                        return Err(err.into());
-                    }
-
-                    // Remove message handler
-                    let _ = rt.stack.drain(StackSlot(1)..StackSlot(2));
-
-                    let callable = Callable::Rust(LuaPtr(rt.core.gc.alloc_cell(boxed(pcall()))));
-                    let request = Request::Invoke {
-                        callable,
-                        start: StackSlot(0),
+    let mut state = State::Started;
+    delegate::try_repeat(move |mut rt| {
+        let current = std::mem::replace(&mut state, State::Finished);
+        match current {
+            State::Started => {
+                if rt.stack.len() < 2 {
+                    let err = rt::error::SignatureError::TooFewArgs {
+                        found: rt.stack.len(),
                     };
-
-                    state = State::CalledPcall;
-                    Ok(delegate::State::Yielded(request))
+                    return Err(err.into());
                 }
-                State::CalledPcall => Ok(delegate::State::Complete(())),
-                State::Finished => Ok(delegate::State::Complete(())),
-            }
-        })
-    };
 
-    ffi::from_fn(body, "lua_std::xpcall", ())
+                // Remove message handler
+                let _ = rt.stack.drain(StackSlot(1)..StackSlot(2));
+
+                let callable = ffi::from_fn(pcall, "lua_std::std::pcall", ());
+                let callable = Callable::Rust(LuaPtr(rt.core.gc.alloc_cell(boxed(callable))));
+                let request = Request::Invoke {
+                    callable,
+                    start: StackSlot(0),
+                };
+
+                state = State::CalledPcall;
+                Ok(delegate::State::Yielded(request))
+            }
+            State::CalledPcall => Ok(delegate::State::Complete(())),
+            State::Finished => Ok(delegate::State::Complete(())),
+        }
+    })
 }
 
 #[derive(Default, Clone, Copy)]
@@ -687,7 +659,7 @@ where
 ///
 /// * Strings produced by `chunk` function are concatenated in the same sense as Lua understands.
 /// * Currently we don't have binary on-disk format, so binary chunks are (yet) unsupported.
-pub fn load<Ty>() -> impl LuaFfi<Ty>
+pub fn load<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
     String: ParseFrom<Ty::String>,
@@ -832,126 +804,121 @@ where
         Ok(())
     }
 
-    let body = || {
-        enum State {
-            Started,
-            CalledChunkSource,
-            Finished,
-        }
+    enum State {
+        Started,
+        CalledChunkSource,
+        Finished,
+    }
 
-        let mut state = State::Started;
-        let mut persist_callable = None;
-        let mut persist_source: Option<Ty::String> = None;
-        let mut persist_name = None;
-        let mut persist_mode = Mode::default();
-        let mut persist_env = None;
-        delegate::try_repeat(move |mut rt| {
-            let current = std::mem::replace(&mut state, State::Finished);
-            match current {
-                State::Started => {
-                    #[expect(clippy::type_complexity)]
-                    let (source, opts): (
-                        ChunkSource<Ty>,
-                        Opts<(FromLuaString<String>, Mode, WeakValue<Ty>)>,
-                    ) = rt.stack.parse(&mut rt.core.gc)?;
-                    rt.stack.clear();
+    let mut state = State::Started;
+    let mut persist_callable = None;
+    let mut persist_source: Option<Ty::String> = None;
+    let mut persist_name = None;
+    let mut persist_mode = Mode::default();
+    let mut persist_env = None;
+    delegate::try_repeat(move |mut rt| {
+        let current = std::mem::replace(&mut state, State::Finished);
+        match current {
+            State::Started => {
+                #[expect(clippy::type_complexity)]
+                let (source, opts): (
+                    ChunkSource<Ty>,
+                    Opts<(FromLuaString<String>, Mode, WeakValue<Ty>)>,
+                ) = rt.stack.parse(&mut rt.core.gc)?;
+                rt.stack.clear();
 
-                    let (name, mode, env) = opts.split();
-                    let name = name.map(|t| t.0);
-                    let mode = mode.unwrap_or_default();
+                let (name, mode, env) = opts.split();
+                let name = name.map(|t| t.0);
+                let mode = mode.unwrap_or_default();
 
-                    let source = match source {
-                        ChunkSource::String(s) => s,
-                        ChunkSource::Function(callable) => {
-                            let callable =
-                                callable.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
+                let source = match source {
+                    ChunkSource::String(s) => s,
+                    ChunkSource::Function(callable) => {
+                        let callable = callable.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
 
-                            persist_callable = Some(callable.clone());
-                            persist_name = name;
-                            persist_mode = mode;
-                            persist_env = env
-                                .map(|value| value.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
-                                .transpose()?;
+                        persist_callable = Some(callable.clone());
+                        persist_name = name;
+                        persist_mode = mode;
+                        persist_env = env
+                            .map(|value| value.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
+                            .transpose()?;
 
-                            let request = Request::Invoke {
-                                callable,
-                                start: StackSlot(0),
-                            };
-
-                            state = State::CalledChunkSource;
-                            return Ok(delegate::State::Yielded(request));
-                        }
-                    };
-
-                    finish(rt, source, name, mode, env)?;
-
-                    Ok(delegate::State::Complete(()))
-                }
-                State::CalledChunkSource => {
-                    let args: Opts<(LuaString<_>,)> = rt.stack.parse(&mut rt.core.gc)?;
-                    rt.stack.clear();
-
-                    let (part,) = args.split();
-
-                    let finalize = match part {
-                        Some(LuaString(LuaPtr(ptr))) => {
-                            use rt::value::traits::{Concat, Len};
-
-                            let part = rt.core.gc.get(ptr).ok_or(AlreadyDroppedError)?.as_inner();
-
-                            if part.is_empty() {
-                                true
-                            } else {
-                                let source = persist_source
-                                    .take()
-                                    .map(|mut source| {
-                                        source.concat(part);
-                                        source
-                                    })
-                                    .unwrap_or_else(|| part.clone());
-
-                                persist_source = Some(source);
-                                false
-                            }
-                        }
-                        None => true,
-                    };
-
-                    if finalize {
-                        use rt::value::string::IntoEncoding;
-
-                        let source = persist_source
-                            .take()
-                            .map(|s| -> Result<_, RuntimeError<_>> {
-                                let source = s.to_str().ok_or_else(|| {
-                                    rt.core
-                                        .alloc_error_msg("binary chunks are not (yet) supported")
-                                })?;
-                                Ok(source.into_owned())
-                            })
-                            .transpose()?
-                            .unwrap_or_default();
-                        let name = persist_name.take();
-                        let env = persist_env.as_ref().map(|value| value.downgrade());
-                        finish(rt, source, name, persist_mode, env)?;
-
-                        Ok(delegate::State::Complete(()))
-                    } else {
                         let request = Request::Invoke {
-                            callable: persist_callable.clone().unwrap(),
+                            callable,
                             start: StackSlot(0),
                         };
 
                         state = State::CalledChunkSource;
-                        Ok(delegate::State::Yielded(request))
+                        return Ok(delegate::State::Yielded(request));
                     }
-                }
-                State::Finished => Ok(delegate::State::Complete(())),
-            }
-        })
-    };
+                };
 
-    ffi::from_fn(body, "lua_std::load", ())
+                finish(rt, source, name, mode, env)?;
+
+                Ok(delegate::State::Complete(()))
+            }
+            State::CalledChunkSource => {
+                let args: Opts<(LuaString<_>,)> = rt.stack.parse(&mut rt.core.gc)?;
+                rt.stack.clear();
+
+                let (part,) = args.split();
+
+                let finalize = match part {
+                    Some(LuaString(LuaPtr(ptr))) => {
+                        use rt::value::traits::{Concat, Len};
+
+                        let part = rt.core.gc.get(ptr).ok_or(AlreadyDroppedError)?.as_inner();
+
+                        if part.is_empty() {
+                            true
+                        } else {
+                            let source = persist_source
+                                .take()
+                                .map(|mut source| {
+                                    source.concat(part);
+                                    source
+                                })
+                                .unwrap_or_else(|| part.clone());
+
+                            persist_source = Some(source);
+                            false
+                        }
+                    }
+                    None => true,
+                };
+
+                if finalize {
+                    use rt::value::string::IntoEncoding;
+
+                    let source = persist_source
+                        .take()
+                        .map(|s| -> Result<_, RuntimeError<_>> {
+                            let source = s.to_str().ok_or_else(|| {
+                                rt.core
+                                    .alloc_error_msg("binary chunks are not (yet) supported")
+                            })?;
+                            Ok(source.into_owned())
+                        })
+                        .transpose()?
+                        .unwrap_or_default();
+                    let name = persist_name.take();
+                    let env = persist_env.as_ref().map(|value| value.downgrade());
+                    finish(rt, source, name, persist_mode, env)?;
+
+                    Ok(delegate::State::Complete(()))
+                } else {
+                    let request = Request::Invoke {
+                        callable: persist_callable.clone().unwrap(),
+                        start: StackSlot(0),
+                    };
+
+                    state = State::CalledChunkSource;
+                    Ok(delegate::State::Yielded(request))
+                }
+            }
+            State::Finished => Ok(delegate::State::Complete(())),
+        }
+    })
 }
 
 /// Load chunk from a file.
@@ -977,63 +944,59 @@ where
 /// On Linux this can be triggered by typing Ctrl-D in terminal.
 ///
 /// On Windows this can be triggered by typing Ctrl-Z in terminal.
-pub fn loadfile<Ty>() -> impl LuaFfi<Ty>
+pub fn loadfile<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<LuaClosure = Closure<Ty>>,
     PathBuf: ParseFrom<Ty::String>,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use repr::index::FunctionId;
-            use rt::ffi::arg_parser::{ParseArgs, Split};
-            use rt::runtime::FunctionPtr;
+    delegate::from_mut(|mut rt| {
+        use repr::index::FunctionId;
+        use rt::ffi::arg_parser::{ParseArgs, Split};
+        use rt::runtime::FunctionPtr;
 
-            let opts: Opts<(FromLuaString<PathBuf>, Mode, WeakValue<Ty>)> =
-                rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+        let opts: Opts<(FromLuaString<PathBuf>, Mode, WeakValue<Ty>)> =
+            rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let (file_name, mode, env) = opts.split();
-            let file_name = file_name.map(|t| t.0);
-            let mode = mode.unwrap_or_default();
+        let (file_name, mode, env) = opts.split();
+        let file_name = file_name.map(|t| t.0);
+        let mode = mode.unwrap_or_default();
 
-            match mode {
-                Mode::Text | Mode::BinaryOrText => (),
-                Mode::Binary => {
-                    let err = rt
-                        .core
-                        .alloc_error_msg("attempt to load text chunk in binary-only mode");
-                    return Err(err);
-                }
+        match mode {
+            Mode::Text | Mode::BinaryOrText => (),
+            Mode::Binary => {
+                let err = rt
+                    .core
+                    .alloc_error_msg("attempt to load text chunk in binary-only mode");
+                return Err(err);
             }
+        }
 
-            let results = match load_chunk(&mut rt, file_name) {
-                Ok(chunk_id) => {
-                    let ptr = FunctionPtr {
-                        chunk_id,
-                        function_id: FunctionId(0),
-                    };
-                    let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
-                    let closure = rt.construct_closure(ptr, [env])?.downgrade();
+        let results = match load_chunk(&mut rt, file_name) {
+            Ok(chunk_id) => {
+                let ptr = FunctionPtr {
+                    chunk_id,
+                    function_id: FunctionId(0),
+                };
+                let env = env.unwrap_or_else(|| rt.core.global_env.downgrade());
+                let closure = rt.construct_closure(ptr, [env])?.downgrade();
 
-                    (NilOr::Some(Callable::Lua(LuaPtr(closure))), Maybe::None)
-                }
-                Err(err) => {
-                    let msg = err
-                        .into_diagnostic(&rt.core.gc, rt.chunk_cache)
-                        .emit_to_string();
-                    let msg = rt.core.alloc_string(msg.into());
+                (NilOr::Some(Callable::Lua(LuaPtr(closure))), Maybe::None)
+            }
+            Err(err) => {
+                let msg = err
+                    .into_diagnostic(&rt.core.gc, rt.chunk_cache)
+                    .emit_to_string();
+                let msg = rt.core.alloc_string(msg.into());
 
-                    (NilOr::Nil, Maybe::Some(StrongValue::String(LuaPtr(msg))))
-                }
-            };
+                (NilOr::Nil, Maybe::Some(StrongValue::String(LuaPtr(msg))))
+            }
+        };
 
-            rt.stack.transient().format(results);
+        rt.stack.transient().format(results);
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::loadfile", ())
+        Ok(())
+    })
 }
 
 /// Query next key/value pair in the table
@@ -1057,47 +1020,43 @@ where
 /// You should not assign any value to a non-existent field in a table during its traversal.
 /// You may however modify existing fields.
 /// In particular, you may set existing fields to `nil`.
-pub fn next<Ty>() -> impl LuaFfi<Ty>
+pub fn next<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use rt::value::traits::TableIndex;
+    delegate::from_mut(|mut rt| {
+        use rt::value::traits::TableIndex;
 
-            let (table, index): (LuaTable<_>, Maybe<WeakValue<Ty>>) =
-                rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+        let (table, index): (LuaTable<_>, Maybe<WeakValue<Ty>>) =
+            rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let table = rt.core.gc.get(table.0 .0).ok_or(AlreadyDroppedError)?;
+        let table = rt.core.gc.get(table.0 .0).ok_or(AlreadyDroppedError)?;
 
-            let index = index.into_option().unwrap_or_default();
-            let next_key = match index {
-                Value::Nil => table.first_key(),
-                value => match value.try_into() {
-                    Ok(key) => table.next_key(&key),
-                    Err(err) => {
-                        let err = rt.core.alloc_error_msg(err.to_string());
-                        return Err(err);
-                    }
-                },
-            };
-
-            let results = match next_key {
-                Some(key) => {
-                    let value = table.get(key);
-                    let key: WeakValue<_> = (*key).into();
-                    (key, Maybe::Some(value))
+        let index = index.into_option().unwrap_or_default();
+        let next_key = match index {
+            Value::Nil => table.first_key(),
+            value => match value.try_into() {
+                Ok(key) => table.next_key(&key),
+                Err(err) => {
+                    let err = rt.core.alloc_error_msg(err.to_string());
+                    return Err(err);
                 }
-                None => (Nil.into(), Maybe::None),
-            };
+            },
+        };
 
-            rt.stack.transient().format(results);
-            Ok(())
-        })
-    };
+        let results = match next_key {
+            Some(key) => {
+                let value = table.get(key);
+                let key: WeakValue<_> = (*key).into();
+                (key, Maybe::Some(value))
+            }
+            None => (Nil.into(), Maybe::None),
+        };
 
-    ffi::from_fn(body, "lua_std::next", ())
+        rt.stack.transient().format(results);
+        Ok(())
+    })
 }
 
 /// Iterate over all key/value pairs of table or object.
@@ -1123,73 +1082,70 @@ where
 /// # Implementation-specific behavior
 ///
 /// After calling `__pairs` metamethod stack will be forcefully adjusted to 3 elements, padding with `nil` if necessary.
-pub fn pairs<Ty>() -> impl LuaFfi<Ty>
+pub fn pairs<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
-    let body = || {
-        enum State {
-            Started,
-            CalledMetamethod,
-            Finished,
-        }
+    enum State {
+        Started,
+        CalledMetamethod,
+        Finished,
+    }
 
-        let mut state = State::Started;
-        delegate::try_repeat(move |mut rt| {
-            let current = std::mem::replace(&mut state, State::Finished);
-            match current {
-                State::Started => {
-                    let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
+    let mut state = State::Started;
+    delegate::try_repeat(move |mut rt| {
+        let current = std::mem::replace(&mut state, State::Finished);
+        match current {
+            State::Started => {
+                let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
 
-                    let key_string = rt.core.alloc_string("__pairs".into());
-                    let key = KeyValue::String(LuaPtr(key_string.downgrade()));
-                    let metavalue = rt::builtins::find_metavalue(
-                        [value],
-                        key,
-                        &rt.core.gc,
-                        &rt.core.metatable_registry,
-                    )?;
+                let key_string = rt.core.alloc_string("__pairs".into());
+                let key = KeyValue::String(LuaPtr(key_string.downgrade()));
+                let metavalue = rt::builtins::find_metavalue(
+                    [value],
+                    key,
+                    &rt.core.gc,
+                    &rt.core.metatable_registry,
+                )?;
 
-                    match metavalue {
-                        Value::Nil => {
-                            rt.stack.clear();
-                            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                                let callback = heap.alloc_cell(boxed(next())).downgrade();
-                                let next = Callable::Rust(LuaPtr(callback));
-                                stack.format((next, value, Nil))
-                            });
+                match metavalue {
+                    Value::Nil => {
+                        rt.stack.clear();
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                            let callable = ffi::from_fn(next, "lua_std::std::next", ());
+                            let callback = heap.alloc_cell(boxed(callable)).downgrade();
+                            let next = Callable::Rust(LuaPtr(callback));
+                            stack.format((next, value, Nil))
+                        });
 
-                            Ok(delegate::State::Complete(()))
-                        }
-                        metamethod => {
-                            let callable = rt::builtins::prepare_invoke(
-                                metamethod,
-                                rt.stack.transient(),
-                                &rt.core.gc,
-                                &rt.core.metatable_registry,
-                            )?;
+                        Ok(delegate::State::Complete(()))
+                    }
+                    metamethod => {
+                        let callable = rt::builtins::prepare_invoke(
+                            metamethod,
+                            rt.stack.transient(),
+                            &rt.core.gc,
+                            &rt.core.metatable_registry,
+                        )?;
 
-                            // Table is still on the stack, but the latter is exactly the state the function should receive.
-                            let request = Request::Invoke {
-                                callable,
-                                start: StackSlot(0),
-                            };
+                        // Table is still on the stack, but the latter is exactly the state the function should receive.
+                        let request = Request::Invoke {
+                            callable,
+                            start: StackSlot(0),
+                        };
 
-                            state = State::CalledMetamethod;
-                            Ok(delegate::State::Yielded(request))
-                        }
+                        state = State::CalledMetamethod;
+                        Ok(delegate::State::Yielded(request))
                     }
                 }
-                State::CalledMetamethod => {
-                    rt.stack.adjust_height(StackSlot(3));
-                    Ok(delegate::State::Complete(()))
-                }
-                State::Finished => Ok(delegate::State::Complete(())),
             }
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::pairs", ())
+            State::CalledMetamethod => {
+                rt.stack.adjust_height(StackSlot(3));
+                Ok(delegate::State::Complete(()))
+            }
+            State::Finished => Ok(delegate::State::Complete(())),
+        }
+    })
 }
 
 /// Query metatable of an object.
@@ -1202,48 +1158,44 @@ where
 /// If object does not have a metatable, returns `nil`.
 /// Otherwise, if the object's metatable has a `__metatable` field, returns the associated value.
 /// Otherwise, returns the metatable of the given object.
-pub fn getmetatable<Ty>() -> impl LuaFfi<Ty>
+pub fn getmetatable<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let value: WeakValue<Ty> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let value: WeakValue<Ty> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let results = rt
-                .core
-                .metatable_of(&value)?
-                .map(|metatable| -> Result<WeakValue<Ty>, AlreadyDroppedError> {
-                    use rt::value::TableIndex;
+        let results = rt
+            .core
+            .metatable_of(&value)?
+            .map(|metatable| -> Result<WeakValue<Ty>, AlreadyDroppedError> {
+                use rt::value::TableIndex;
 
-                    let __metatable = {
-                        let key = rt.core.alloc_string("__metatable".into()).downgrade();
-                        rt.core
-                            .gc
-                            .get(metatable)
-                            .ok_or(AlreadyDroppedError)?
-                            .get(&KeyValue::String(LuaPtr(key)))
-                    };
+                let __metatable = {
+                    let key = rt.core.alloc_string("__metatable".into()).downgrade();
+                    rt.core
+                        .gc
+                        .get(metatable)
+                        .ok_or(AlreadyDroppedError)?
+                        .get(&KeyValue::String(LuaPtr(key)))
+                };
 
-                    let r = if let Value::Nil = __metatable {
-                        Value::Table(LuaPtr(metatable))
-                    } else {
-                        __metatable
-                    };
+                let r = if let Value::Nil = __metatable {
+                    Value::Table(LuaPtr(metatable))
+                } else {
+                    __metatable
+                };
 
-                    Ok(r)
-                })
-                .transpose()?
-                .unwrap_or_default();
+                Ok(r)
+            })
+            .transpose()?
+            .unwrap_or_default();
 
-            rt.stack.transient().format(results);
+        rt.stack.transient().format(results);
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::getmetatable", ())
+        Ok(())
+    })
 }
 
 /// Set metatable on table.
@@ -1260,56 +1212,52 @@ where
 /// This function returns `table`.
 ///
 /// To change the metatable of other types from Lua code, you must use the debug library (§6.10).
-pub fn setmetatable<Ty>() -> impl LuaFfi<Ty>
+pub fn setmetatable<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use gc::GcCell;
-            use rt::ffi::arg_parser::ParseArgs;
-            use rt::value::{Metatable, TableIndex};
+    delegate::from_mut(|mut rt| {
+        use gc::GcCell;
+        use rt::ffi::arg_parser::ParseArgs;
+        use rt::value::{Metatable, TableIndex};
 
-            let (table, metatable): (LuaTable<_>, NilOr<LuaTable<_>>) =
-                rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+        let (table, metatable): (LuaTable<_>, NilOr<LuaTable<_>>) =
+            rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            // Type hint.
-            // rustc gets confused and loses track of table type inside reference for some reason.
-            let table: GcCell<Ty::Table> = table.0 .0;
-            let metatable = metatable.into_option().map(|LuaTable(LuaPtr(t))| t);
+        // Type hint.
+        // rustc gets confused and loses track of table type inside reference for some reason.
+        let table: GcCell<Ty::Table> = table.0 .0;
+        let metatable = metatable.into_option().map(|LuaTable(LuaPtr(t))| t);
 
-            let old_metatable = rt.core.gc.try_get(table)?.metatable().copied();
+        let old_metatable = rt.core.gc.try_get(table)?.metatable().copied();
 
-            let has_meta_field = match old_metatable {
-                Some(metatable) => {
-                    let key = rt.core.alloc_string("__metatable".into()).downgrade();
-                    rt.core
-                        .gc
-                        .try_get(metatable)?
-                        .contains_key(&KeyValue::String(LuaPtr(key)))
-                }
-                None => false,
-            };
-
-            if has_meta_field {
-                let msg = rt
-                    .core
-                    .alloc_string("table already has metatable with '__metatable' field".into());
-                return Err(RuntimeError::from_msg(msg));
+        let has_meta_field = match old_metatable {
+            Some(metatable) => {
+                let key = rt.core.alloc_string("__metatable".into()).downgrade();
+                rt.core
+                    .gc
+                    .try_get(metatable)?
+                    .contains_key(&KeyValue::String(LuaPtr(key)))
             }
+            None => false,
+        };
 
-            rt.core.gc.try_get_mut(table)?.set_metatable(metatable);
+        if has_meta_field {
+            let msg = rt
+                .core
+                .alloc_string("table already has metatable with '__metatable' field".into());
+            return Err(RuntimeError::from_msg(msg));
+        }
 
-            let results = WeakValue::Table(LuaPtr(table));
+        rt.core.gc.try_get_mut(table)?.set_metatable(metatable);
 
-            rt.stack.transient().format(results);
+        let results = WeakValue::Table(LuaPtr(table));
 
-            Ok(())
-        })
-    };
+        rt.stack.transient().format(results);
 
-    ffi::from_fn(body, "lua_std::getmetatable", ())
+        Ok(())
+    })
 }
 
 /// Print all values
@@ -1327,7 +1275,7 @@ where
 /// # Implementation-specific behavior
 ///
 /// If `__tostring` metamethod returns something but a string it will be printed raw, without recursively invoking `tostring` on it.
-pub fn print<Ty>() -> impl LuaFfi<Ty>
+pub fn print<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
@@ -1377,90 +1325,87 @@ where
         r.map_err(|err| core.alloc_error_msg(err.to_string()))
     }
 
-    let body = || {
-        enum State {
-            Started,
-            CalledToString,
-            Finished,
-        }
+    enum State {
+        Started,
+        CalledToString,
+        Finished,
+    }
 
-        let mut state = State::Started;
-        let mut persist_key = None;
-        let mut persist_tostring = None;
-        delegate::try_repeat(move |mut rt| {
-            let current = std::mem::replace(&mut state, State::Finished);
-            match current {
-                State::Started => {
-                    let s = rt.core.alloc_string("__tostring".into());
-                    let key = KeyValue::String(LuaPtr(s.downgrade()));
+    let mut state = State::Started;
+    let mut persist_key = None;
+    let mut persist_tostring = None;
+    delegate::try_repeat(move |mut rt| {
+        let current = std::mem::replace(&mut state, State::Finished);
+        match current {
+            State::Started => {
+                let s = rt.core.alloc_string("__tostring".into());
+                let key = KeyValue::String(LuaPtr(s.downgrade()));
 
-                    // The first value that needs metamethod call for conversion.
-                    // Everything before it can be safely rendered using default Display impl.
-                    // This is much faster compared to repeated `tostring` calls, and also should be very frequent.
-                    let last = find_first(&rt, key)?;
+                // The first value that needs metamethod call for conversion.
+                // Everything before it can be safely rendered using default Display impl.
+                // This is much faster compared to repeated `tostring` calls, and also should be very frequent.
+                let last = find_first(&rt, key)?;
 
-                    let mut stdout = std::io::stdout().lock();
-                    for value in rt.stack.drain(..StackSlot(last)) {
-                        print_value(&mut stdout, value, rt.core)?;
-                    }
-
-                    let Some(value) = rt.stack.remove(StackSlot(0)) else {
-                        return Ok(delegate::State::Complete(()));
-                    };
-
-                    let tostring = rt.core.gc.alloc_cell(boxed(tostring()));
-                    let tostring = Callable::Rust(LuaPtr(tostring));
-
-                    let start = StackSlot(rt.stack.len());
-                    rt.stack.transient().push(value);
-
-                    let request = Request::Invoke {
-                        callable: tostring.clone(),
-                        start,
-                    };
-
-                    persist_key = Some(s);
-                    persist_tostring = Some(tostring);
-                    state = State::CalledToString;
-                    Ok(delegate::State::Yielded(request))
-                }
-                State::CalledToString => {
-                    // Technically, stack after call can be in any state.
-                    // However we call a known trusted function that always produces exactly 1 value or errors.
-                    let value = rt.stack.pop().unwrap();
-
-                    let mut stdout = std::io::stdout().lock();
-
+                let mut stdout = std::io::stdout().lock();
+                for value in rt.stack.drain(..StackSlot(last)) {
                     print_value(&mut stdout, value, rt.core)?;
-
-                    let key = KeyValue::String(LuaPtr(persist_key.as_ref().unwrap().downgrade()));
-                    let last = find_first(&rt, key)?;
-
-                    for value in rt.stack.drain(..StackSlot(last)) {
-                        print_value(&mut stdout, value, rt.core)?;
-                    }
-
-                    let Some(value) = rt.stack.remove(StackSlot(0)) else {
-                        return Ok(delegate::State::Complete(()));
-                    };
-
-                    let start = StackSlot(rt.stack.len());
-                    rt.stack.transient().push(value);
-
-                    let request = Request::Invoke {
-                        callable: persist_tostring.clone().unwrap(),
-                        start,
-                    };
-
-                    state = State::CalledToString;
-                    Ok(delegate::State::Yielded(request))
                 }
-                State::Finished => Ok(delegate::State::Complete(())),
-            }
-        })
-    };
 
-    ffi::from_fn(body, "lua_std::print", ())
+                let Some(value) = rt.stack.remove(StackSlot(0)) else {
+                    return Ok(delegate::State::Complete(()));
+                };
+
+                let callable = ffi::from_fn(tostring, "lua_std::std::tostring", ());
+                let tostring = rt.core.gc.alloc_cell(boxed(callable));
+                let tostring = Callable::Rust(LuaPtr(tostring));
+
+                let start = StackSlot(rt.stack.len());
+                rt.stack.transient().push(value);
+
+                let request = Request::Invoke {
+                    callable: tostring.clone(),
+                    start,
+                };
+
+                persist_key = Some(s);
+                persist_tostring = Some(tostring);
+                state = State::CalledToString;
+                Ok(delegate::State::Yielded(request))
+            }
+            State::CalledToString => {
+                // Technically, stack after call can be in any state.
+                // However we call a known trusted function that always produces exactly 1 value or errors.
+                let value = rt.stack.pop().unwrap();
+
+                let mut stdout = std::io::stdout().lock();
+
+                print_value(&mut stdout, value, rt.core)?;
+
+                let key = KeyValue::String(LuaPtr(persist_key.as_ref().unwrap().downgrade()));
+                let last = find_first(&rt, key)?;
+
+                for value in rt.stack.drain(..StackSlot(last)) {
+                    print_value(&mut stdout, value, rt.core)?;
+                }
+
+                let Some(value) = rt.stack.remove(StackSlot(0)) else {
+                    return Ok(delegate::State::Complete(()));
+                };
+
+                let start = StackSlot(rt.stack.len());
+                rt.stack.transient().push(value);
+
+                let request = Request::Invoke {
+                    callable: persist_tostring.clone().unwrap(),
+                    start,
+                };
+
+                state = State::CalledToString;
+                Ok(delegate::State::Yielded(request))
+            }
+            State::Finished => Ok(delegate::State::Complete(())),
+        }
+    })
 }
 
 /// Convert value to string.
@@ -1492,75 +1437,70 @@ where
 /// * After calling `__tostring` metamethod stack will be adjusted to 1 value.
 ///  
 /// * Currently, `__name` metavalue is unused.
-pub fn tostring<Ty>() -> impl LuaFfi<Ty>
+pub fn tostring<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        enum State {
-            Started,
-            CalledMetamethod,
-            Finished,
-        }
+    enum State {
+        Started,
+        CalledMetamethod,
+        Finished,
+    }
 
-        let mut state = State::Started;
-        delegate::try_repeat(move |mut rt| {
-            let current = std::mem::replace(&mut state, State::Finished);
-            match current {
-                State::Started => {
-                    let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
+    let mut state = State::Started;
+    delegate::try_repeat(move |mut rt| {
+        let current = std::mem::replace(&mut state, State::Finished);
+        match current {
+            State::Started => {
+                let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
 
-                    let s = rt.core.alloc_string("__tostring".into());
-                    let key = KeyValue::String(LuaPtr(s.downgrade()));
-                    let metavalue = rt::builtins::find_metavalue(
-                        [value],
-                        key,
-                        &rt.core.gc,
-                        &rt.core.metatable_registry,
-                    )?;
+                let s = rt.core.alloc_string("__tostring".into());
+                let key = KeyValue::String(LuaPtr(s.downgrade()));
+                let metavalue = rt::builtins::find_metavalue(
+                    [value],
+                    key,
+                    &rt.core.gc,
+                    &rt.core.metatable_registry,
+                )?;
 
-                    match metavalue {
-                        Value::Nil => {
-                            let s = format!("{}", value.fmt_with(&rt.core.gc)?);
+                match metavalue {
+                    Value::Nil => {
+                        let s = format!("{}", value.fmt_with(&rt.core.gc)?);
 
-                            rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-                                let s = heap.intern(s.into());
-                                stack.clear();
-                                stack.push(Value::String(LuaPtr(s.downgrade())));
-                            });
+                        rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
+                            let s = heap.intern(s.into());
+                            stack.clear();
+                            stack.push(Value::String(LuaPtr(s.downgrade())));
+                        });
 
-                            Ok(delegate::State::Complete(()))
-                        }
-                        metamethod => {
-                            let callable =
-                                rt.stack.transient_in(&mut rt.core.gc, |stack, heap| {
-                                    rt::builtins::prepare_invoke(
-                                        metamethod,
-                                        stack,
-                                        heap,
-                                        &rt.core.metatable_registry,
-                                    )
-                                })?;
+                        Ok(delegate::State::Complete(()))
+                    }
+                    metamethod => {
+                        let callable = rt.stack.transient_in(&mut rt.core.gc, |stack, heap| {
+                            rt::builtins::prepare_invoke(
+                                metamethod,
+                                stack,
+                                heap,
+                                &rt.core.metatable_registry,
+                            )
+                        })?;
 
-                            let request = Request::Invoke {
-                                callable,
-                                start: StackSlot(0),
-                            };
-                            state = State::CalledMetamethod;
-                            Ok(delegate::State::Yielded(request))
-                        }
+                        let request = Request::Invoke {
+                            callable,
+                            start: StackSlot(0),
+                        };
+                        state = State::CalledMetamethod;
+                        Ok(delegate::State::Yielded(request))
                     }
                 }
-                State::CalledMetamethod => {
-                    rt.stack.adjust_height(StackSlot(1));
-                    Ok(delegate::State::Complete(()))
-                }
-                State::Finished => Ok(delegate::State::Complete(())),
             }
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::tostring", ())
+            State::CalledMetamethod => {
+                rt.stack.adjust_height(StackSlot(1));
+                Ok(delegate::State::Complete(()))
+            }
+            State::Finished => Ok(delegate::State::Complete(())),
+        }
+    })
 }
 
 /// Convert value to number
@@ -1581,73 +1521,69 @@ where
 /// The base may be any integer between 2 and 36, inclusive.
 /// In bases above 10, the letter 'A' (in either upper or lower case) represents 10, 'B' represents 11, and so forth, with 'Z' representing 35.
 /// If the string `e` is not a valid numeral in the given base, the function returns fail.
-pub fn tonumber<Ty>() -> impl LuaFfi<Ty>
+pub fn tonumber<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
     String: ParseFrom<Ty::String>,
     <String as ParseFrom<Ty::String>>::Error: Display,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use rt::error::SignatureError;
+    delegate::from_mut(|mut rt| {
+        use rt::error::SignatureError;
 
-            match rt.stack.as_slice() {
-                [] => {
-                    let err = SignatureError::TooFewArgs { found: 0 };
-                    Err(err.into())
-                }
-                [value] => {
-                    let r = match *value {
-                        Value::Int(v) => Value::Int(v),
-                        Value::Float(v) => Value::Float(v),
-                        Value::String(LuaPtr(ptr)) => {
-                            use literal::Number;
-
-                            let content = rt::value::string::try_gc_to_str(ptr, &rt.core.gc)?;
-                            let number = literal::parse(content.as_ref().trim())
-                                .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
-                            match number {
-                                Number::Int(n) => Value::Int(n),
-                                Number::Float(n) => Value::Float(n),
-                            }
-                        }
-                        _ => Value::Nil,
-                    };
-
-                    rt.stack.clear();
-                    rt.stack.transient().push(r);
-                    Ok(())
-                }
-                stack @ [_, _] => {
-                    let (s, radix): (FromLuaString<String>, Int) = stack.parse(&mut rt.core.gc)?;
-                    let FromLuaString(s) = s;
-                    let Int(radix) = radix;
-
-                    if !(2..36).contains(&radix) {
-                        let err = rt.core.alloc_error_msg(format!("cannot parse numeral with base {radix}, only bases in range 2..36 are allowed"));
-                        return Err(err);
-                    }
-
-                    let radix = radix.try_into().unwrap();
-                    let r = i64::from_str_radix(s.trim(), radix)
-                        .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
-
-                    rt.stack.clear();
-                    rt.stack.transient().push(Value::Int(r));
-                    Ok(())
-                }
-                _ => {
-                    let err = SignatureError::TooManyArgs {
-                        found: rt.stack.len(),
-                        expected: 2,
-                    };
-                    Err(err.into())
-                }
+        match rt.stack.as_slice() {
+            [] => {
+                let err = SignatureError::TooFewArgs { found: 0 };
+                Err(err.into())
             }
-        })
-    };
+            [value] => {
+                let r = match *value {
+                    Value::Int(v) => Value::Int(v),
+                    Value::Float(v) => Value::Float(v),
+                    Value::String(LuaPtr(ptr)) => {
+                        use literal::Number;
 
-    ffi::from_fn(body, "lua_std::tonumber", ())
+                        let content = rt::value::string::try_gc_to_str(ptr, &rt.core.gc)?;
+                        let number = literal::parse(content.as_ref().trim())
+                            .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+                        match number {
+                            Number::Int(n) => Value::Int(n),
+                            Number::Float(n) => Value::Float(n),
+                        }
+                    }
+                    _ => Value::Nil,
+                };
+
+                rt.stack.clear();
+                rt.stack.transient().push(r);
+                Ok(())
+            }
+            stack @ [_, _] => {
+                let (s, radix): (FromLuaString<String>, Int) = stack.parse(&mut rt.core.gc)?;
+                let FromLuaString(s) = s;
+                let Int(radix) = radix;
+
+                if !(2..36).contains(&radix) {
+                    let err = rt.core.alloc_error_msg(format!("cannot parse numeral with base {radix}, only bases in range 2..36 are allowed"));
+                    return Err(err);
+                }
+
+                let radix = radix.try_into().unwrap();
+                let r = i64::from_str_radix(s.trim(), radix)
+                    .map_err(|err| rt.core.alloc_error_msg(err.to_string()))?;
+
+                rt.stack.clear();
+                rt.stack.transient().push(Value::Int(r));
+                Ok(())
+            }
+            _ => {
+                let err = SignatureError::TooManyArgs {
+                    found: rt.stack.len(),
+                    expected: 2,
+                };
+                Err(err.into())
+            }
+        }
+    })
 }
 
 /// Directly compare two values for equality.
@@ -1663,22 +1599,18 @@ where
 /// # Implementation-specific behavior
 ///
 /// Arguments are compared using [`Value`]'s `Eq` trait impl.
-pub fn rawequal<Ty>() -> impl LuaFfi<Ty>
+pub fn rawequal<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let [lhs, rhs]: [WeakValue<_>; 2] = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+    delegate::from_mut(|mut rt| {
+        let [lhs, rhs]: [WeakValue<_>; 2] = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            rt.stack.transient().push(Value::Bool(lhs == rhs));
+        rt.stack.transient().push(Value::Bool(lhs == rhs));
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::rawequal", ())
+        Ok(())
+    })
 }
 
 /// Return raw length of object.
@@ -1690,7 +1622,7 @@ where
 ///
 /// Returns the length of the object `v`, which must be a table or a string, without invoking the `__len` metamethod.
 /// Returns an integer.
-pub fn rawlen<Ty>() -> impl LuaFfi<Ty>
+pub fn rawlen<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -1734,31 +1666,27 @@ where
         }
     }
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use rt::value::traits::Len;
+    delegate::from_mut(|mut rt| {
+        use rt::value::traits::Len;
 
-            let value: StringOrTable<Ty> = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+        let value: StringOrTable<Ty> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let r = match value {
-                StringOrTable::String(value) => {
-                    let s = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
-                    s.len()
-                }
-                StringOrTable::Table(value) => {
-                    let t = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
-                    t.len()
-                }
-            };
+        let r = match value {
+            StringOrTable::String(value) => {
+                let s = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
+                s.len()
+            }
+            StringOrTable::Table(value) => {
+                let t = rt.core.gc.get(value).ok_or(AlreadyDroppedError)?;
+                t.len()
+            }
+        };
 
-            rt.stack.transient().push(r.into());
+        rt.stack.transient().push(r.into());
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::rawlen", ())
+        Ok(())
+    })
 }
 
 /// Get value directly out of table.
@@ -1778,29 +1706,25 @@ where
 /// * This function will never perform index coercions.
 ///     In particular floats containing exact integer values will not get coerced.
 ///     This is of importance because the runtime (and consequently tables) considers ints and floats to be distinct.
-pub fn rawget<Ty>() -> impl LuaFfi<Ty>
+pub fn rawget<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use rt::value::traits::TableIndex;
+    delegate::from_mut(|mut rt| {
+        use rt::value::traits::TableIndex;
 
-            let (table, index): (LuaTable<_>, WeakValue<_>) = rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.clear();
+        let (table, index): (LuaTable<_>, WeakValue<_>) = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
 
-            let key = index.into_key()?;
-            let table: &Ty::Table = rt.core.gc.try_get(table.0 .0)?;
+        let key = index.into_key()?;
+        let table: &Ty::Table = rt.core.gc.try_get(table.0 .0)?;
 
-            let value = table.get(&key);
-            rt.stack
-                .transient_in(&mut rt.core.gc, |mut stack, _| stack.push(value));
+        let value = table.get(&key);
+        rt.stack
+            .transient_in(&mut rt.core.gc, |mut stack, _| stack.push(value));
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::rawget", ())
+        Ok(())
+    })
 }
 
 /// Get value directly out of table.
@@ -1822,28 +1746,24 @@ where
 /// * This function will never perform index coercions.
 ///     In particular floats containing exact integer values will not get coerced.
 ///     This is of importance because the runtime (and consequently tables) considers ints and floats to be distinct.
-pub fn rawset<Ty>() -> impl LuaFfi<Ty>
+pub fn rawset<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use rt::value::traits::TableIndex;
+    delegate::from_mut(|mut rt| {
+        use rt::value::traits::TableIndex;
 
-            let (table, index, value): (LuaTable<_>, WeakValue<_>, WeakValue<_>) =
-                rt.stack.parse(&mut rt.core.gc)?;
-            rt.stack.truncate(StackSlot(1));
+        let (table, index, value): (LuaTable<_>, WeakValue<_>, WeakValue<_>) =
+            rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.truncate(StackSlot(1));
 
-            let key = index.into_key()?;
-            let table: &mut Ty::Table = rt.core.gc.try_get_mut(table.0 .0)?;
+        let key = index.into_key()?;
+        let table: &mut Ty::Table = rt.core.gc.try_get_mut(table.0 .0)?;
 
-            table.set(key, value);
+        table.set(key, value);
 
-            Ok(())
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::rawset", ())
+        Ok(())
+    })
 }
 
 /// Select argument out of arg list or their total count.
@@ -1866,7 +1786,7 @@ where
 /// For example, Lua considers `index` an argument with index 1,
 /// so `select(1, ...)` will choose all arguments excluding the index itself.
 /// This behavior coincides with notion of Rustic offsets for the purposes of this function.
-pub fn select<Ty>() -> impl LuaFfi<Ty>
+pub fn select<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -1941,46 +1861,42 @@ where
         }
     }
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            let index: Index = rt
-                .stack
-                .as_slice()
-                .get(..1)
-                .unwrap_or_default()
-                .parse(&mut rt.core.gc)?;
+    delegate::from_mut(|mut rt| {
+        let index: Index = rt
+            .stack
+            .as_slice()
+            .get(..1)
+            .unwrap_or_default()
+            .parse(&mut rt.core.gc)?;
 
-            match index {
-                Index::Int(i) => {
-                    let len = rt.stack.len();
-                    let index: Option<usize> = i.try_into().ok().or_else(|| {
-                        let offset: usize = (-i).try_into().ok()?;
-                        len.checked_sub(offset)
-                    });
+        match index {
+            Index::Int(i) => {
+                let len = rt.stack.len();
+                let index: Option<usize> = i.try_into().ok().or_else(|| {
+                    let offset: usize = (-i).try_into().ok()?;
+                    len.checked_sub(offset)
+                });
 
-                    match index {
-                        Some(index) if index <= len => {
-                            let _ = rt.stack.drain(..StackSlot(index));
-                            Ok(())
-                        }
-                        _ => {
-                            let err = rt.core.alloc_error_msg("index out of bounds".to_string());
-                            Err(err)
-                        }
+                match index {
+                    Some(index) if index <= len => {
+                        let _ = rt.stack.drain(..StackSlot(index));
+                        Ok(())
+                    }
+                    _ => {
+                        let err = rt.core.alloc_error_msg("index out of bounds".to_string());
+                        Err(err)
                     }
                 }
-                Index::Len => {
-                    let len = rt.stack[1..].len().try_into().unwrap();
-                    rt.stack.clear();
-                    rt.stack.transient().push(Value::Int(len));
-
-                    Ok(())
-                }
             }
-        })
-    };
+            Index::Len => {
+                let len = rt.stack[1..].len().try_into().unwrap();
+                rt.stack.clear();
+                rt.stack.transient().push(Value::Int(len));
 
-    ffi::from_fn(body, "lua_std::select", ())
+                Ok(())
+            }
+        }
+    })
 }
 
 /// Produce string with name of value's type.
@@ -1993,24 +1909,20 @@ where
 /// Returns the type of its only argument, coded as a string.
 /// The possible results of this function are "nil" (a string, not the value `nil`),
 /// "number", "string", "boolean", "table", "function", "thread", and "userdata".
-pub fn type_<Ty>() -> impl LuaFfi<Ty>
+pub fn type_<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            rt.stack
-                .adapt(&mut rt.core.gc, |heap, value: WeakValue<Ty>| {
-                    let t = value.type_().to_lua_name();
-                    let s = heap.intern(t.into());
-                    let r = LuaString(LuaPtr(s.downgrade()));
+    delegate::from_mut(|mut rt| {
+        rt.stack
+            .adapt(&mut rt.core.gc, |heap, value: WeakValue<Ty>| {
+                let t = value.type_().to_lua_name();
+                let s = heap.intern(t.into());
+                let r = LuaString(LuaPtr(s.downgrade()));
 
-                    Ok(r)
-                })
-        })
-    };
-
-    ffi::from_fn(body, "lua_std::type", ())
+                Ok(r)
+            })
+    })
 }
 
 /// Emit a warning message.
@@ -2033,7 +1945,7 @@ where
 /// * Arguments are required to be text, Lua strings containing binary data will cause runtime error.
 /// *   Currently runtime contains no specific state related to warning system.
 ///     Any control messages (including `@on` and `@off`) will be ignored.
-pub fn warn<Ty>() -> impl LuaFfi<Ty>
+pub fn warn<Ty>() -> impl Delegate<Ty>
 where
     Ty: Types,
 {
@@ -2047,60 +1959,56 @@ where
         |err| core.alloc_error_msg(err.to_string())
     }
 
-    let body = || {
-        delegate::from_mut(|mut rt| {
-            use rt::error::SignatureError;
-            use std::io::Write;
+    delegate::from_mut(|mut rt| {
+        use rt::error::SignatureError;
+        use std::io::Write;
 
-            // It seems that typechk loses track of a *part* of type inside slice.
-            // This causes `Heap::try_get` to fail, because compiler fails to deduce type inside `Interned<_>`?!
-            // It seems to correctly track type of slice returned by `.as_slice`,
-            // the match itself is fine, `Interned` wrapper is recognized, but its inner type is lost.
-            // Just from function signatures, everything should work just fine.
-            // I'm greatly confused by what is happening here.
-            // Possibly a rustc bug, likely related to GATs introduced by Rf?
-            let slice: &[WeakValue<Ty>] = rt.stack.as_slice();
-            match slice {
-                [] => {
-                    let err = SignatureError::TooFewArgs { found: 0 };
-                    Err(err.into())
-                }
-                [WeakValue::String(LuaPtr(ptr))] => {
-                    let s = rt::value::string::try_gc_to_str(*ptr, &rt.core.gc)?;
-                    rt.stack.clear();
+        // It seems that typechk loses track of a *part* of type inside slice.
+        // This causes `Heap::try_get` to fail, because compiler fails to deduce type inside `Interned<_>`?!
+        // It seems to correctly track type of slice returned by `.as_slice`,
+        // the match itself is fine, `Interned` wrapper is recognized, but its inner type is lost.
+        // Just from function signatures, everything should work just fine.
+        // I'm greatly confused by what is happening here.
+        // Possibly a rustc bug, likely related to GATs introduced by Rf?
+        let slice: &[WeakValue<Ty>] = rt.stack.as_slice();
+        match slice {
+            [] => {
+                let err = SignatureError::TooFewArgs { found: 0 };
+                Err(err.into())
+            }
+            [WeakValue::String(LuaPtr(ptr))] => {
+                let s = rt::value::string::try_gc_to_str(*ptr, &rt.core.gc)?;
+                rt.stack.clear();
 
-                    if s.strip_prefix('@').is_some() {
-                        // Ignore control messages.
-                        Ok(())
-                    } else {
-                        writeln!(std::io::stderr(), "{s}").map_err(map_err(rt.core))?;
-                        Ok(())
-                    }
-                }
-                slice @ [_, ..] => {
-                    let mut res = String::new();
-
-                    for (index, value) in slice.iter().enumerate() {
-                        if let Value::String(LuaPtr(ptr)) = value {
-                            let s = rt::value::string::try_gc_to_str(*ptr, &rt.core.gc)?;
-                            res += &s;
-                        } else {
-                            let err = SignatureError::ConversionFailure {
-                                index,
-                                msg: String::from("warn only accepts string arguments"),
-                            };
-                            return Err(err.into());
-                        }
-                    }
-
-                    writeln!(std::io::stderr(), "{res}").map_err(map_err(rt.core))?;
-                    rt.stack.clear();
-
+                if s.strip_prefix('@').is_some() {
+                    // Ignore control messages.
+                    Ok(())
+                } else {
+                    writeln!(std::io::stderr(), "{s}").map_err(map_err(rt.core))?;
                     Ok(())
                 }
             }
-        })
-    };
+            slice @ [_, ..] => {
+                let mut res = String::new();
 
-    ffi::from_fn(body, "lua_std::warn", ())
+                for (index, value) in slice.iter().enumerate() {
+                    if let Value::String(LuaPtr(ptr)) = value {
+                        let s = rt::value::string::try_gc_to_str(*ptr, &rt.core.gc)?;
+                        res += &s;
+                    } else {
+                        let err = SignatureError::ConversionFailure {
+                            index,
+                            msg: String::from("warn only accepts string arguments"),
+                        };
+                        return Err(err.into());
+                    }
+                }
+
+                writeln!(std::io::stderr(), "{res}").map_err(map_err(rt.core))?;
+                rt.stack.clear();
+
+                Ok(())
+            }
+        }
+    })
 }
