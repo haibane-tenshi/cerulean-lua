@@ -1,9 +1,13 @@
+use std::fmt::Display;
+use std::path::PathBuf;
+use std::process::Command;
+
 use gc::RootCell;
+use rt::ffi::arg_parser::ParseFrom;
 use rt::ffi::{boxed, DLuaFfi};
 use rt::gc::LuaPtr;
 use rt::runtime::Core;
 use rt::value::{Callable, KeyValue, TableIndex, Types, Value};
-use std::process::Command;
 
 use crate::traits::{RootTable, TableEntry, TableEntryEx};
 
@@ -287,6 +291,44 @@ where
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = crate::ffi::os::getenv();
         let key = core.alloc_string("getenv".into());
+        let callback = core.gc.alloc_cell(boxed(fn_body));
+
+        core.gc[table].set(
+            KeyValue::String(LuaPtr(key.downgrade())),
+            Value::Function(Callable::Rust(LuaPtr(callback.downgrade()))),
+        );
+    }
+}
+
+/// Delete file or directory.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(filename: string) -> bool`
+/// * `(filename: string) -> (fail, string, nil | int)`
+///
+/// Deletes the file (or empty directory, on POSIX systems) with the given name.
+/// If this function fails, it returns **fail** plus a string describing the error and the error code.
+/// Otherwise, it returns `true`.
+///
+/// # Implementation-specific behavior
+///
+/// *   It is valid to target empty directories on all platforms.
+/// *   On failure this will attempt to recover OS-specific error code to provide in last return.
+///     This may fail and produce no value.
+#[expect(non_camel_case_types)]
+pub struct remove;
+
+impl<Ty> TableEntry<Ty> for remove
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    PathBuf: ParseFrom<Ty::String>,
+    <PathBuf as ParseFrom<Ty::String>>::Error: Display,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = crate::ffi::os::remove();
+        let key = core.alloc_string("remove".into());
         let callback = core.gc.alloc_cell(boxed(fn_body));
 
         core.gc[table].set(
