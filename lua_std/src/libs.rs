@@ -88,7 +88,7 @@
 //! * [`Base`]
 //! * [`Math`]
 //! * [`MathRand`]
-//! * [`TableManip`]
+//! * [`TableSeq`]
 //! * [`Os`]
 //! * [`OsExecute`]
 //!
@@ -924,13 +924,13 @@ impl<R> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
 /// This library module will use table under `table` key in parent table or construct a new one otherwise.
 /// All included items will be put into the table, potentially overriding existing entries.
 ///
-/// [`TableManip::full`] will construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
+/// [`TableSeq::full`] will construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
 /// Read below for full list of provided APIs.
 ///
-/// Alternatively, you can start with [`TableManip::empty`] and manually fill in functions from [`std::table`](crate::std::table) or elsewhere:
+/// Alternatively, you can start with [`TableSeq::empty`] and manually fill in functions from [`std::table`](crate::std::table) or elsewhere:
 ///
 /// ```
-/// # use lua_std::lib::{TableManip, Std};
+/// # use lua_std::lib::{TableSeq, Std};
 /// use lua_std::std;
 ///
 /// let global_env = Std::empty()
@@ -951,39 +951,39 @@ impl<R> MathRandBuilder<math_rand_builder::WithRng<DelayInit<R>>> {
 ///
 /// # Provided APIs
 ///
-/// Stringification:
+/// **Stringification:**
 ///
 /// * [`concat`](crate::std::table::concat)
 ///
-/// Element manipulation:
+/// **Element manipulation:**
 ///
 /// * [`insert`](crate::std::table::insert)
 /// * [`remove`](crate::std::table::remove)
 /// * [`move`](crate::std::table::move_)
 ///
-/// Packing/unpacking:
+/// **Packing/unpacking:**
 ///
 /// * [`pack`](crate::std::table::pack)
 /// * [`unpack`](crate::std::table::unpack)
 ///
-/// Sorting:
+/// **Sorting:**
 ///
 /// * [`sort`](crate::std::table::sort)
 ///
 /// [lua#6.6]: https://www.lua.org/manual/5.4/manual.html#6.6
-pub struct TableManip<P>(P);
+pub struct TableSeq<P>(P);
 
-impl TableManip<empty::Empty> {
+impl TableSeq<empty::Empty> {
     /// Construct empty module.
     ///
     /// This library module will use table under `math` key in parent table or construct a new one otherwise.
     /// All included items will be put into the table, potentially overriding existing entries.
     ///
     /// Table entries can included using [`include`](Math::include) method.
-    pub fn empty() -> TableManip<empty::Empty> {
+    pub fn empty() -> TableSeq<empty::Empty> {
         use empty::Empty;
 
-        TableManip(Empty(()))
+        TableSeq(Empty(()))
     }
 
     /// Construct module introducing all sequence manipulation APIs included into [Lua std's table library][lua#6.6].
@@ -991,34 +991,34 @@ impl TableManip<empty::Empty> {
     /// This library module will use table under `table` key in parent table or construct a new one otherwise.
     /// All included items will be put into the table, potentially overriding existing entries.
     ///
-    /// See [provided APIs](TableManip#provided-apis) for full list.
+    /// See [provided APIs](Self#provided-apis) for full list.
     ///
     /// [lua#6.6]: https://www.lua.org/manual/5.4/manual.html#6.6
-    pub fn full() -> TableManip<table::Full> {
+    pub fn full() -> TableSeq<table::Full> {
         use table::Full;
 
-        TableManip(Full(()))
+        TableSeq(Full(()))
     }
 }
 
-impl<P> TableManip<P> {
+impl<P> TableSeq<P> {
     /// Include API in the module.
     ///
     /// Requires [`T: TableEntry<Ty>`](TableEntry) bound.
     /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
-    pub fn include<T>(self, part: T) -> TableManip<(P, T)> {
-        let TableManip(p) = self;
-        TableManip((p, part))
+    pub fn include<T>(self, part: T) -> TableSeq<(P, T)> {
+        let TableSeq(p) = self;
+        TableSeq((p, part))
     }
 }
 
-impl<Ty, P> TableEntry<Ty> for TableManip<P>
+impl<Ty, P> TableEntry<Ty> for TableSeq<P>
 where
     Ty: Types,
     P: TableEntry<Ty>,
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
-        let TableManip(builder) = self;
+        let TableSeq(builder) = self;
         Table::with_name("table")
             .include(builder)
             .build(table, core);
