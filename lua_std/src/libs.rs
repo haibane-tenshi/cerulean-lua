@@ -1033,7 +1033,7 @@ where
 /// This library submodule will use table under `os` key in parent table or construct a new one otherwise.
 /// All included items will be put into the table, potentially overriding existing entries.
 ///
-/// [`Os::full`] will construct module introducing all sequence manipulation APIs included into [Lua std's os library][lua#6.9]
+/// [`Os::full`] will construct module introducing all APIs included into [Lua std's os library][lua#6.9]
 /// except for `os.execute` which exists in [`OsExecute`] submodule.
 /// Read below for full list of provided APIs.
 ///
@@ -1113,6 +1113,215 @@ impl<P> Os<P> {
         let Os(p) = self;
         Os((p, part))
     }
+}
+
+/// Shell command execution utility residing in `os` table.
+///
+/// This library submodule will use table under `os` key in parent table or construct a new one otherwise.
+/// All included items will be put into the table, potentially overriding existing entries.
+///
+/// [`OsExecute::full`] will construct module introducing `os.execute` API from [Lua std's os library][lua#6.9].
+///
+/// Alternatively, you can start with [`Os::empty`] and manually fill in functions from [`std::os`](crate::std::os) or elsewhere:
+///
+/// ```
+/// # use lua_std::lib::{OsExecute, Std};
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(OsExecute::empty()
+///         .include(std::os::execute)
+///     );
+/// ```
+///
+/// # Custom configuration
+///
+/// This API exist in separate submodule due to the need for additional configuration.
+/// Our version of [`execute`](crate::std::os::execute) is parametrized with shell command
+/// which is then used to run commands passed to Lua function.
+///
+/// You can provide custom configuration by using a simple 2-step builder:
+///
+/// ```
+/// # use lua_std::lib::{OsExecute};
+/// # use rt::gc::Heap;
+/// # use rt::value::DefaultTypes;
+/// # use std::process::Command;
+/// # let heap = Heap::<DefaultTypes>::new();
+/// // Construct command pointing to your shell executable.
+/// let command = heap.alloc_cell(Command::new("zsh"));
+///
+/// let os = OsExecute::builder()
+///     .with(Some(command))
+///     .full();
+/// ```
+///
+/// [lua#6.9]: https://www.lua.org/manual/5.4/manual.html#6.9
+///
+/// # From Lua documentation
+///
+/// This library is implemented through table `os`.
+///
+/// # Provided APIs
+///
+/// **Execute shell command:**
+/// * [`execute`](crate::std::os::execute)
+pub struct OsExecute<S, P> {
+    shell: S,
+    builder: P,
+}
+
+impl OsExecute<(), empty::Empty> {
+    /// Construct a builder to configure this submodule.
+    ///
+    /// See [`OsExecute` documentation](OsExecute#custom-configuration) for usage examples.
+    pub fn builder() -> OsExecuteBuilder<os_execute_builder::Start> {
+        OsExecuteBuilder::new()
+    }
+
+    /// Construct empty submodule with default shell constructor.
+    ///
+    /// Default configuration is provided on best-effort basis.
+    /// See [`default_os_shell`] function for caveats.
+    pub fn empty() -> OsExecute<os_execute_builder::Default, empty::Empty> {
+        Self::builder().with_default().empty()
+    }
+
+    /// Construct submodule introducing all provided APIs.
+    ///
+    /// See [provided APIs](Self#provided-apis) for full list.
+    ///
+    /// Default configuration is provided on best-effort basis.
+    /// See [`default_os_shell`] function for caveats.
+    pub fn full() -> OsExecute<os_execute_builder::Default, os_execute::Full> {
+        Self::builder().with_default().full()
+    }
+}
+
+impl<S, P> OsExecute<S, P> {
+    /// Include API in this module.
+    ///
+    /// This can consume any value that implements [`TableEntryEx<_, Option<RootCell<Command>>>`] bound.
+    pub fn include<T>(self, part: T) -> OsExecute<S, (P, T)> {
+        let OsExecute { shell, builder } = self;
+
+        OsExecute {
+            shell,
+            builder: (builder, part),
+        }
+    }
+}
+
+impl<Ty, P> TableEntry<Ty> for OsExecute<os_execute_builder::Default, P>
+where
+    Ty: Types,
+    P: TableEntryEx<Ty, Option<RootCell<Command>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let OsExecute { shell: _, builder } = self;
+
+        let mut shell = default_os_shell().map(|shell| core.gc.alloc_cell(shell));
+
+        builder.build(table, core, &mut shell);
+    }
+}
+
+impl<Ty, P> TableEntry<Ty> for OsExecute<os_execute_builder::Command, P>
+where
+    Ty: Types,
+    P: TableEntryEx<Ty, Option<RootCell<Command>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let OsExecute { shell, builder } = self;
+        let mut shell = shell.0;
+
+        builder.build(table, core, &mut shell);
+    }
+}
+
+/// Builder for [`OsExecute`] submodule.
+pub struct OsExecuteBuilder<S>(S);
+
+impl OsExecuteBuilder<os_execute_builder::Start> {
+    /// Construct new builder.
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
+        use os_execute_builder::Start;
+        OsExecuteBuilder(Start(()))
+    }
+
+    /// Configure submodule to use the command as shell constructor.
+    ///
+    /// Setting this to `None` will cause `execute` to reject all attempts to execute shell commands.
+    pub fn with_command(
+        self,
+        shell: Option<RootCell<Command>>,
+    ) -> OsExecuteBuilder<os_execute_builder::Command> {
+        use os_execute_builder::Command;
+        OsExecuteBuilder(Command(shell))
+    }
+
+    /// Configure submodule to use default shell constructor.
+    ///
+    /// Default configuration is provided on best-effort basis.
+    /// See [`default_os_shell`] function for caveats.
+    pub fn with_default(self) -> OsExecuteBuilder<os_execute_builder::Default> {
+        use os_execute_builder::Default;
+        OsExecuteBuilder(Default(()))
+    }
+}
+
+impl OsExecuteBuilder<os_execute_builder::Default> {
+    /// Construct empty submodule.
+    pub fn empty(self) -> OsExecute<os_execute_builder::Default, empty::Empty> {
+        let OsExecuteBuilder(shell) = self;
+        OsExecute {
+            shell,
+            builder: empty::Empty(()),
+        }
+    }
+
+    /// Construct submodule introducing all provided APIs.
+    ///
+    /// See [provided APIs](Self#provided-apis) for full list.
+    pub fn full(self) -> OsExecute<os_execute_builder::Default, os_execute::Full> {
+        let OsExecuteBuilder(shell) = self;
+        OsExecute {
+            shell,
+            builder: os_execute::Full(()),
+        }
+    }
+}
+
+impl OsExecuteBuilder<os_execute_builder::Command> {
+    /// Construct empty submodule.
+    pub fn empty(self) -> OsExecute<os_execute_builder::Command, empty::Empty> {
+        let OsExecuteBuilder(shell) = self;
+        OsExecute {
+            shell,
+            builder: empty::Empty(()),
+        }
+    }
+
+    /// Construct submodule introducing all provided APIs.
+    ///
+    /// See [provided APIs](Self#provided-apis) for full list.
+    pub fn full(self) -> OsExecute<os_execute_builder::Command, os_execute::Full> {
+        let OsExecuteBuilder(shell) = self;
+        OsExecute {
+            shell,
+            builder: os_execute::Full(()),
+        }
+    }
+}
+
+mod os_execute_builder {
+    use gc::RootCell;
+    use std::process::Command as PCommand;
+
+    pub struct Start(pub(crate) ());
+    pub struct Default(pub(crate) ());
+    pub struct Command(pub(crate) Option<RootCell<PCommand>>);
 }
 
 /// Attempt to find a command invocation for default OS shell.
@@ -1516,6 +1725,35 @@ mod os {
             os::tmpname.build(table, core);
 
             os::setlocale.build(table, core);
+        }
+    }
+}
+
+mod os_execute {
+    use std::process::Command;
+
+    use gc::RootCell;
+    use rt::ffi::DLuaFfi;
+    use rt::value::Types;
+
+    use crate::traits::TableEntryEx;
+
+    #[doc(hidden)]
+    pub struct Full(pub(crate) ());
+
+    impl<Ty> TableEntryEx<Ty, Option<RootCell<Command>>> for Full
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+    {
+        fn build(
+            self,
+            table: &crate::traits::RootTable<Ty>,
+            core: &mut rt::runtime::Core<Ty>,
+            shell: &mut Option<RootCell<Command>>,
+        ) {
+            use crate::std::os;
+
+            os::execute.build(table, core, shell);
         }
     }
 }
