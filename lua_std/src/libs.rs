@@ -1352,7 +1352,7 @@ mod os_execute_builder {
 /// Currently, it will construct the following command:
 ///
 /// * `sh` on Linux which should invoke bash
-/// * `cmd` on Windows which should invoke command prompt
+/// * `pwsh -NonInteractive` on Windows which should invoke powershell
 /// * `sh` on MacOS which should invoke bash
 /// * not configured on other platforms
 ///
@@ -1376,7 +1376,9 @@ pub fn default_os_shell() -> Option<Command> {
 
     #[cfg(target_os = "windows")]
     {
-        result = Some(Command::new("cmd"));
+        let mut command = Command::new("pwsh");
+        command.arg("-NonInteractive");
+        result = Some(command);
     }
 
     #[cfg(target_os = "macos")]

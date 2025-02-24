@@ -313,6 +313,7 @@ where
             let err = rt.core.alloc_error_msg(msg);
             return Err(err);
         }
+        drop(stdin);
 
         let exit_status = match child.wait() {
             Ok(t) => t,
