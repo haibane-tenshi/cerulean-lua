@@ -15,6 +15,7 @@ use std::num::{
 use std::ops::{ControlFlow, Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::process::Command;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -765,6 +766,10 @@ impl Trace for Instant {
 }
 
 impl Trace for SystemTime {
+    fn trace(&self, _collector: &mut Collector) {}
+}
+
+impl Trace for Command {
     fn trace(&self, _collector: &mut Collector) {}
 }
 
