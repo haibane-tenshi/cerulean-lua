@@ -1,3 +1,121 @@
+//! Lua standard library preset.
+//!
+//! This module contains what is called *Lua library submodules*.
+//! Their purpose is to quickly introduce sets of related APIs.
+//!
+//! # Introduction
+//!
+//! The most important type in this library is [`Std`].
+//! It represents the base of your global environment.
+//! This type is just *constructor*, it allows you to make a template for global environment,
+//! but nothing will actually happen until you include it into the runtime:
+//!
+//! ```
+//! # use rt::runtime::{Core, Runtime, Heap};
+//! # use rt::value::{Value, DefaultTypes};
+//! # use rt::builtins::coerce::CustomPolicy;
+//! # use rt::chunk_cache::VecCache;
+//! # let core = Core {
+//! #     global_env: Value::Nil,
+//! #     metatable_registry: Default::default(),
+//! #     dialect: CustomPolicy::lua_5_4(),
+//! #     gc: Heap::new(),
+//! # };
+//! # let chunk_cache = VecCache::new();
+//! # let mut runtime = Runtime::<DefaultTypes, _>::new(chunk_cache, core);
+//! #
+//! # use lua_std::lib::Std;
+//! // Include standard library into runtime.
+//! // It will construct global environment table
+//! // and place into `runtime.core.global_env`
+//! // (or reuse one if it already exists).
+//! runtime.include(Std::full());
+//! ```
+//!
+//! [`Std::full`] will include all available Lua std APIs.
+//! Alternatively, you can start with [`Std::empty`] and configure those by including *submodules* or APIs from [`crate::std`] directly:
+//!
+//! ```
+//! # use lua_std::lib::{Std, Math, Os};
+//! let std = Std::empty()
+//!     .include(Math::full())
+//!     .include(Os::full())
+//!     .include(lua_std::std::load);
+//! ```
+//!
+//! Each *submodule* allows to easily include a set of related APIs.
+//! It will generally introduce an intermediate table (although exceptions exist) and place all of its APIs inside it.
+//! Most submodules can be directly configured as well:
+//!
+//! ```
+//! # use lua_std::lib::{Std, Math, Os};
+//! let std = Std::empty()
+//!     .include(Math::empty()
+//!         .include(lua_std::std::math::sin)
+//!         .include(lua_std::std::math::cos)
+//!         .include(Os::full()
+//!             .include(lua_std::std::load)
+//!         )
+//!     );
+//! ```
+//!
+//! Additionally there are two special *submodules*, [`Table`] and [`Inline`]
+//! which don't have preconfigured set of APIs associated with them.
+//! Those are provided for easy ad-hoc construction of custom structures.
+//!
+//! All other submodules are designed to be included directly into `Std`, so that you get clean-looking setups.
+//! For example, `Std::full` is equivalent to
+//!
+//! ```
+//! # use lua_std::lib::{Std, Math, Os};
+//! let std = Std::empty()
+//!     .include(Base::full())
+//!     .include(Math::full())
+//!     .include(MathRand::full())
+//!     .include(Os::full())
+//!     .include(OsExecute::full())
+//!     .include(TableManip::full());
+//! ```
+//!
+//! # Preexisting submodules
+//!
+//! There exist two kinds of submodule presets: *structural* and *semantic*.
+//!
+//! ## Structural
+//!
+//! *Structural* submodules obey hierarchy declared by Lua std:
+//!
+//! * [`Base`]
+//! * [`Math`]
+//! * [`MathRand`]
+//! * [`TableManip`]
+//! * [`Os`]
+//! * [`OsExecute`]
+//!
+//! Essentially, each structural submodule introduces similarly named table (with exception of `Base`) into global env.
+//! All structural submodules are extensible, you can `.include` any custom APIs in them if you wish.
+//!
+//! Few additional submodules (such as `MathRand` or `OsExecute`) exist because related APIs require additional configuration
+//! which is performed on submodule level.
+//!
+//! ## Semantic
+//!
+//! *Semantic* submodules are simple groupings of APIs based on their utility.
+//! They mostly exist for the sake of convenience.
+//!
+//! Sematic submodules cannot be extended or modified.
+//! Extensibility is disabled because those often go against Lua std structure.
+//! For example, `TempFile` submodule includes two very similar functions, `io.tmpfile` and `os.tmpname`,
+//! which for *very obvious* reasons are placed into two different tables.
+//!
+//! # Extending std
+//!
+//! Freeform submodules allow you to introduce custom structures into global environment.
+//! There exist two of them:
+//!
+//! * [`Table`] - add a table with specified name, entries will be placed into the table
+//! * [`Inline`] - inline all included APIs into parent table
+
 use std::marker::PhantomData;
 use std::process::Command;
 
