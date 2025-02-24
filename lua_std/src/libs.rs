@@ -1115,6 +1115,18 @@ impl<P> Os<P> {
     }
 }
 
+impl<Ty, P> TableEntry<Ty> for Os<P>
+where
+    Ty: Types,
+    P: TableEntry<Ty>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let Os(builder) = self;
+
+        Table::with_name("os").include(builder).build(table, core);
+    }
+}
+
 /// Shell command execution utility residing in `os` table.
 ///
 /// This library submodule will use table under `os` key in parent table or construct a new one otherwise.
@@ -1222,7 +1234,9 @@ where
 
         let mut shell = default_os_shell().map(|shell| core.gc.alloc_cell(shell));
 
-        builder.build(table, core, &mut shell);
+        Table::with_name("os")
+            .include(builder)
+            .build(table, core, &mut shell);
     }
 }
 
@@ -1235,7 +1249,9 @@ where
         let OsExecute { shell, builder } = self;
         let mut shell = shell.0;
 
-        builder.build(table, core, &mut shell);
+        Table::with_name("os")
+            .include(builder)
+            .build(table, core, &mut shell);
     }
 }
 
