@@ -205,6 +205,8 @@ where
 
 impl<S, P> Table<S, P> {
     /// Include API in the module.
+    ///
+    /// This can consume any value that implements [`TableEntry`] or [`TableEntryEx`] bound.
     pub fn include<T>(self, part: T) -> Table<S, (P, T)> {
         let Table { name, builder } = self;
 
@@ -285,6 +287,8 @@ impl Inline<empty::Empty> {
 
 impl<P> Inline<P> {
     /// Include API in the module.
+    ///
+    /// This can consume any value that implements [`TableEntry`] or [`TableEntryEx`] bound.
     pub fn inlcude<T>(self, part: T) -> Inline<(P, T)> {
         let Inline(builder) = self;
         Inline((builder, part))
@@ -415,6 +419,8 @@ impl Base<empty::Empty> {
 
 impl<P> Base<P> {
     /// Include API in the module.
+    ///
+    /// This can consume any value that implements [`TableEntry`] bound.
     pub fn include<T>(self, part: T) -> Base<(P, T)> {
         let Base(builder) = self;
         Base((builder, part))
@@ -538,8 +544,7 @@ impl Math<empty::Empty> {
 impl<P> Math<P> {
     /// Include API in the module.
     ///
-    /// Requires [`T: TableEntry<Ty>`](TableEntry) bound.
-    /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
+    /// This can consume any value that implements [`TableEntry`] bound.
     pub fn include<T>(self, part: T) -> Math<(P, T)> {
         let Math(p) = self;
         Math((p, part))
@@ -749,8 +754,7 @@ impl MathRand<(), empty::Empty> {
 impl<R, P> MathRand<R, P> {
     /// Include API in this module.
     ///
-    /// Requires [`T: TableEntryEx<Ty, R>`](TableEntryEx) bound.
-    /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
+    /// This can consume any value that implements [`TableEntryEx<_, R>`] bound.
     pub fn include<T>(self, part: T) -> MathRand<R, (P, T)> {
         let MathRand { rng_state, builder } = self;
 
@@ -1004,8 +1008,7 @@ impl TableSeq<empty::Empty> {
 impl<P> TableSeq<P> {
     /// Include API in the module.
     ///
-    /// Requires [`T: TableEntry<Ty>`](TableEntry) bound.
-    /// It is not spelled out because it leaks `Ty` into signature and in some situations compiler requires type hints to figure this type.
+    /// This can consume any value that implements [`TableEntry`] bound.
     pub fn include<T>(self, part: T) -> TableSeq<(P, T)> {
         let TableSeq(p) = self;
         TableSeq((p, part))
@@ -1022,6 +1025,93 @@ where
         Table::with_name("table")
             .include(builder)
             .build(table, core);
+    }
+}
+
+/// OS untilities library residing in `os` table.
+///
+/// This library submodule will use table under `os` key in parent table or construct a new one otherwise.
+/// All included items will be put into the table, potentially overriding existing entries.
+///
+/// [`Os::full`] will construct module introducing all sequence manipulation APIs included into [Lua std's os library][lua#6.9]
+/// except for `os.execute` which exists in [`OsExecute`] submodule.
+/// Read below for full list of provided APIs.
+///
+/// Alternatively, you can start with [`Os::empty`] and manually fill in functions from [`std::os`](crate::std::os) or elsewhere:
+///
+/// ```
+/// # use lua_std::lib::{Os, Std};
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(Os::empty()
+///         .include(std::os::time)
+///         .include(std::os::rename)
+///     );
+/// ```
+///
+/// [lua#6.9]: https://www.lua.org/manual/5.4/manual.html#6.9
+///
+/// # From Lua documentation
+///
+/// This library is implemented through table `os`.
+///
+/// # Provided APIs
+///
+/// **Time:**
+/// * [`clock`](crate::std::os::clock) - CPU time consumed by host program
+/// * [`time`](crate::std::os::time)
+/// * [`date`](crate::std::os::date)
+/// * [`difftime`](crate::std::os::difftime)
+///
+/// **Environment:**
+/// * [`getenv`](crate::std::os::getenv)
+/// * [`setlocale`](crate::std::os::setlocale)
+///
+/// **Filesystem:**
+/// * [`remove`](crate::std::os::remove)
+/// * [`rename`](crate::std::os::rename)
+/// * [`tmpname`](crate::std::os::tmpname) - create named temporary file
+///
+/// **Host process:**
+/// * [`exit`](crate::std::os::exit)
+pub struct Os<P>(P);
+
+impl Os<empty::Empty> {
+    /// Construct empty module.
+    ///
+    /// This library module will use table under `os` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// Table entries can included using [`include`](Self::include) method.
+    pub fn empty() -> Os<empty::Empty> {
+        use empty::Empty;
+
+        Os(Empty(()))
+    }
+
+    /// Construct module introducing all APIs included into [Lua std's os library][lua#6.9].
+    ///
+    /// This library module will use table under `os` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// See [provided APIs](Self#provided-apis) for full list.
+    ///
+    /// [lua#6.9]: https://www.lua.org/manual/5.4/manual.html#6.9
+    pub fn full() -> Os<os::Full> {
+        use os::Full;
+
+        Os(Full(()))
+    }
+}
+
+impl<P> Os<P> {
+    /// Include API in the module.
+    ///
+    /// This can consume any value that implements [`TableEntry`] bound.
+    pub fn include<T>(self, part: T) -> Os<(P, T)> {
+        let Os(p) = self;
+        Os((p, part))
     }
 }
 
@@ -1385,6 +1475,47 @@ mod table {
             table::unpack.build(table, core);
 
             table::sort.build(table, core);
+        }
+    }
+}
+
+mod os {
+    use std::fmt::Display;
+    use std::path::PathBuf;
+
+    use crate::traits::TableEntry;
+    use rt::ffi::arg_parser::ParseFrom;
+    use rt::ffi::DLuaFfi;
+    use rt::value::Types;
+
+    #[doc(hidden)]
+    pub struct Full(pub(crate) ());
+
+    impl<Ty> TableEntry<Ty> for Full
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        PathBuf: ParseFrom<Ty::String>,
+        <PathBuf as ParseFrom<Ty::String>>::Error: Display,
+    {
+        fn build(self, table: &crate::traits::RootTable<Ty>, core: &mut rt::runtime::Core<Ty>) {
+            use crate::std::os;
+
+            os::clock.build(table, core);
+
+            os::date.build(table, core);
+            os::difftime.build(table, core);
+            os::time.build(table, core);
+
+            os::exit.build(table, core);
+
+            os::getenv.build(table, core);
+
+            os::remove.build(table, core);
+            os::rename.build(table, core);
+
+            os::tmpname.build(table, core);
+
+            os::setlocale.build(table, core);
         }
     }
 }
