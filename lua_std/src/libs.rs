@@ -313,6 +313,125 @@ where
     }
 }
 
+/// Basic utilities library residing directly in global environment.
+///
+/// This library submodule will place items directly into its parent table, potentially overriding existing entries.
+///
+/// [`Base::full`] will construct module introducing all basic APIs included into [Lua std's library][lua#6.1].
+/// Read below for full list of provided APIs.
+///
+/// Alternatively, you can start with [`Base::empty`] and manually fill in functions from [`std`](crate::std) or elsewhere:
+///
+/// ```
+/// # use lua_std::lib::{Base, Std};
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(Base::empty()
+///         .include(std::ipairs)
+///         .include(std::load)
+///     );
+/// ```
+///
+/// [lua#6.1]: https://www.lua.org/manual/5.4/manual.html#6.1
+///
+/// # From Lua documentation
+///
+/// The basic library provides core functions to Lua.
+/// If you do not include this library in your application,
+/// you should check carefully whether you need to provide implementations for some of its facilities.
+///
+/// # Provided APIs
+///
+/// Functions in basic library is mostly unsorted collection of various utilities.
+///
+/// **Global constants:**
+/// * [`_G`](crate::std::_G)
+/// * [`_VERSION`](crate::std::_VERSION)
+///
+/// **Assertions and Lua panics:**
+/// * [`assert`](crate::std::assert)
+/// * [`error`](crate::std::error)
+///
+/// **Debug printing:**
+/// * [`print`](crate::std::print)
+/// * [`warn`](crate::std::warn)
+///
+/// **Iterators:**
+/// * [`ipairs`](crate::std::ipairs) - iterate consequent integer keys in ascending order
+/// * [`pairs`](crate::std::pairs) - iterate all keys in undefined order
+/// * [`next`](crate::std::next) - query next key/value pair on table
+///
+/// **Metatable manipulation:**
+/// * [`getmetatable`](crate::std::getmetatable)
+/// * [`setmetatable`](crate::std::setmetatable)
+///
+/// **Raw ops:**
+/// * [`rawequal`](crate::std::rawequal)
+/// * [`rawlen`](crate::std::rawlen)
+/// * [`rawget`](crate::std::rawget)
+/// * [`rawset`](crate::std::rawset)
+///
+/// **Protected calls:**
+/// * [`pcall`](crate::std::pcall)
+/// * [`xpcall`](crate::std::xpcall)
+///
+/// **Accessing garbage collector:**
+/// * [`collectgarbage`](crate::std::collectgarbage)
+///
+/// **Script evaluation:**
+/// * [`load`](crate::std::load)
+/// * [`loadfile`](crate::std::loadfile)
+/// * [`dofile`](crate::std::dofile)
+///
+/// **Miscellaneous:**
+/// * [`tonumber`](crate::std::tonumber)
+/// * [`tostring`](crate::std::tostring)
+/// * [`select`](crate::std::select)
+/// * [`type`](crate::std::type_)
+pub struct Base<P>(P);
+
+impl Base<empty::Empty> {
+    /// Construct empty submodule.
+    ///
+    /// This library submodule will place items directly into its parent table, potentially overriding existing entries.
+    ///
+    /// Table entries can included using [`include`](Base::include) method.
+    pub fn empty() -> Base<empty::Empty> {
+        Base(empty::Empty(()))
+    }
+
+    /// Construct submodule introducing all base APIs included into [Lua std's library][lua#6.1].
+    ///
+    /// This library submodule will place items directly into its parent table, potentially overriding existing entries.
+    ///
+    /// See [provided APIs](Self#provided-apis) for full list.
+    ///
+    /// [lua#6.1]: https://www.lua.org/manual/5.4/manual.html#6.1
+    pub fn full() -> Base<base::Full> {
+        Base(base::Full(()))
+    }
+}
+
+impl<P> Base<P> {
+    /// Include API in the module.
+    pub fn include<T>(self, part: T) -> Base<(P, T)> {
+        let Base(builder) = self;
+        Base((builder, part))
+    }
+}
+
+impl<Ty, P> TableEntry<Ty> for Base<P>
+where
+    Ty: Types,
+    P: TableEntry<Ty>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let Base(builder) = self;
+        builder.build(table, core)
+    }
+}
+
 /// Math utilities library residing in `math` table.
 ///
 /// This library module will use table under `math` key in parent table or construct a new one otherwise.
@@ -1096,6 +1215,70 @@ mod empty {
             _core: &mut rt::runtime::Core<Ty>,
             _: &mut Ex,
         ) {
+        }
+    }
+}
+
+mod base {
+    use std::fmt::Display;
+    use std::path::PathBuf;
+
+    use crate::traits::TableEntry;
+    use rt::ffi::arg_parser::ParseFrom;
+    use rt::ffi::DLuaFfi;
+    use rt::runtime::Closure;
+    use rt::value::Types;
+
+    #[doc(hidden)]
+    pub struct Full(pub(crate) ());
+
+    impl<Ty> TableEntry<Ty> for Full
+    where
+        Ty: Types<LuaClosure = Closure<Ty>, RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        Ty::String: Unpin,
+        PathBuf: ParseFrom<Ty::String>,
+        String: ParseFrom<Ty::String>,
+        <String as ParseFrom<Ty::String>>::Error: Display,
+    {
+        fn build(self, table: &crate::traits::RootTable<Ty>, core: &mut rt::runtime::Core<Ty>) {
+            use crate::std;
+
+            std::_G.build(table, core);
+            std::_VERSION.build(table, core);
+
+            std::assert.build(table, core);
+            std::error.build(table, core);
+
+            std::collectgarbage.build(table, core);
+
+            std::dofile.build(table, core);
+            std::load.build(table, core);
+            std::loadfile.build(table, core);
+
+            std::getmetatable.build(table, core);
+            std::setmetatable.build(table, core);
+
+            std::next.build(table, core);
+            std::pairs.build(table, core);
+            std::ipairs.build(table, core);
+
+            std::pcall.build(table, core);
+            std::xpcall.build(table, core);
+
+            std::print.build(table, core);
+            std::warn.build(table, core);
+
+            std::rawequal.build(table, core);
+            std::rawlen.build(table, core);
+            std::rawset.build(table, core);
+            std::rawget.build(table, core);
+
+            std::select.build(table, core);
+
+            std::tonumber.build(table, core);
+            std::tostring.build(table, core);
+
+            std::type_.build(table, core);
         }
     }
 }
