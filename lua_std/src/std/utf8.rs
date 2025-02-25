@@ -136,3 +136,35 @@ where
         set_func("codes", fn_body).build(table, core);
     }
 }
+
+/// Unpack code points as integers on stack.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, [i: int, [j: int, [lax: bool]]]) -> (...: int)`
+///
+/// Returns the code points (as integers) from all characters in `s` that start between byte position `i` and `j` (both included).
+/// The default for `i` is 1 and for `j` is `i`.
+/// It raises an error if it meets any invalid byte sequence.
+///
+/// # Implementation-specific behavior
+///
+/// *   `lax` mode is ignored.
+///     See module-level notes on [known incompatibilities](self#known-incompatibilities).
+#[expect(non_camel_case_types)]
+pub struct codepoint;
+
+impl<Ty> TableEntry<Ty> for codepoint
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(
+            crate::ffi::utf8::codepoint,
+            "lua_std::std::utf8::codepoint",
+            (),
+        );
+        set_func("codepoint", fn_body).build(table, core);
+    }
+}
