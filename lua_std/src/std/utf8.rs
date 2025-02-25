@@ -95,3 +95,44 @@ where
         set_str("charpattern", r#"[\0-\x7F\xC2-\xFD][\x80-\xBF]*"#).build(table, core);
     }
 }
+
+/// Iterate over Unicode code points in a string.
+///
+/// From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, [lax: bool]) -> (function, string, int)`
+///
+/// Returns values so that the construction
+///
+/// ```lua
+/// for p, c in utf8.codes(s) do body end
+/// ```
+///
+/// will iterate over all UTF-8 characters in string `s`, with `p` being the position (in bytes) and `c` the code point of each character.
+/// It raises an error if it meets any invalid byte sequence.
+///
+/// # Notes
+///
+/// * Remember that Lua indexing starts with 1 and not 0.
+///
+/// # Implementation-specific behavior
+///
+/// *   `lax` mode is ignored.
+///     See module-level notes on [known incompatibilities](self#known-incompatibilities).
+///
+/// *   It is not required for entire string to be valid utf8,
+///     iterator will decode characters one-by-one in order.
+///     However encountering invalid byte sequences will result in Lua panic.
+#[expect(non_camel_case_types)]
+pub struct codes;
+
+impl<Ty> TableEntry<Ty> for codes
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::utf8::codes, "lua_std::std::utf8::codes", ());
+        set_func("codes", fn_body).build(table, core);
+    }
+}
