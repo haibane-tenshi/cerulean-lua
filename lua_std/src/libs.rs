@@ -91,6 +91,7 @@
 //! * [`TableSeq`]
 //! * [`Os`]
 //! * [`OsExecute`]
+//! * [`Utf8`]
 //!
 //! Essentially, each structural submodule introduces similarly named table (with exception of `Base`) into global env.
 //! All structural submodules are extensible, you can `.include` any custom APIs in them if you wish.
@@ -1340,6 +1341,140 @@ mod os_execute_builder {
     pub struct Command(pub(crate) Option<RootCell<PCommand>>);
 }
 
+/// UTF-8 support library residing in `utf8` table.
+///
+/// This library submodule will use table under `utf8` key in parent table or construct a new one otherwise.
+/// All included items will be put into the table, potentially overriding existing entries.
+///
+/// [`Utf8::full`] will construct module introducing all APIs included into [Lua std's utf8 library][lua#6.5].
+/// Read below for full list of provided APIs.
+///
+/// Alternatively, you can start with [`Utf8::empty`] and manually fill in functions from [`std::utf8`](crate::std::utf8) or elsewhere:
+///
+/// ```
+/// # use lua_std::lib::{Utf8, Std};
+/// use lua_std::std;
+///
+/// let global_env = Std::empty()
+///     .include(Utf8::empty()
+///         .include(std::utf8::len)
+///         .include(std::utf8::codepoint)
+///     );
+/// ```
+///
+/// [lua#6.5]: https://www.lua.org/manual/5.4/manual.html#6.5
+///
+/// # From Lua documentation
+///
+/// This library provides basic support for UTF-8 encoding.
+/// It provides all its functions inside the table `utf8`.
+/// This library does not provide any support for Unicode other than the handling of the encoding.
+/// Any operation that needs the meaning of a character, such as character classification, is outside its scope.
+///
+/// Unless stated otherwise, all functions that expect a byte position as a parameter
+/// assume that the given position is either the start of a byte sequence or one plus the length of the subject string.
+/// As in the string library, negative indices count from the end of the string.
+///
+/// Functions that create byte sequences accept all values up to `0x7FFFFFFF`, as defined in the original UTF-8 specification;
+/// that implies byte sequences of up to six bytes.
+///
+/// Functions that interpret byte sequences only accept valid sequences (well formed and not overlong).
+/// By default, they only accept byte sequences that result in valid Unicode code points, rejecting values greater than `10FFFF` and surrogates.
+/// A boolean argument `lax`, when available, lifts these checks, so that all values up to `0x7FFFFFFF` are accepted.
+/// (Not well formed and overlong sequences are still rejected.)
+///
+/// # Known incompatibilities
+///
+/// *   There is no support for encoding/decoding integer values which do not represent valid Unicode code points.
+///
+///     While it is true that original UTF-8 spec permitted encoding values in range`0..=0x7FFFFFFF`,
+///     IETF [RFC 3629][rfc#3629] that restricted range of available code points only to 4 byte sequences
+///     and removed range of surrogate code points was **published in 2003**.
+///
+///     At this point UTF-8 is universally understood and defined as *Unicode encoding form*.
+///     To clarify, this implies two assumptions:
+///
+///     * It defines a mapping between a binary payload (of up to 21 bits) and an octet stream;
+///     * Binary payload represents a valid Unicode code point.
+///
+///     Here, Lua basically considers the last point *optional*, which is meaningless.
+///     According to the standard there is no such thing as valid UTF-8 encoded sequence that does not contain Unicode code points.
+///     We consider this a **legacy behavior** and current implementation opts out of supporting it.
+///
+///     It is obviously still possible to encode/decode arbitrary 31-bit values to/from octets using UTF-8 scheme (resulting in up to 6-byte sequences),
+///     however it should not be labeled as an actual UTF-8 encoding to avoid confusion.
+///     Instead it should be considered a distinct variable-length encoding.
+///     This functionality can be provided by a different library if needed.
+///
+/// [rfc#3629]: https://datatracker.ietf.org/doc/html/rfc3629
+///
+/// # Provided APIs
+///
+/// **Constants:**
+/// * [`charpattern`](crate::std::utf8::charpattern)
+///
+/// **Iteration:**
+/// * [`codes`](crate::std::utf8::codes)
+///
+/// **Indexing:**
+/// * [`len`](crate::std::utf8::len)
+/// * [`offset`](crate::std::utf8::offset)
+///
+/// **Packing/unpacking:**
+/// * [`char`](crate::std::utf8::char)
+/// * [`codepoint`](crate::std::utf8::codepoint)
+pub struct Utf8<P>(P);
+
+impl Utf8<empty::Empty> {
+    /// Construct empty module.
+    ///
+    /// This library module will use table under `os` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// Table entries can included using [`include`](Self::include) method.
+    pub fn empty() -> Utf8<empty::Empty> {
+        use empty::Empty;
+
+        Utf8(Empty(()))
+    }
+
+    /// Construct module introducing all APIs included into [Lua std's os library][lua#6.9].
+    ///
+    /// This library module will use table under `os` key in parent table or construct a new one otherwise.
+    /// All included items will be put into the table, potentially overriding existing entries.
+    ///
+    /// See [provided APIs](Self#provided-apis) for full list.
+    ///
+    /// [lua#6.9]: https://www.lua.org/manual/5.4/manual.html#6.9
+    pub fn full() -> Utf8<utf8::Full> {
+        use utf8::Full;
+
+        Utf8(Full(()))
+    }
+}
+
+impl<P> Utf8<P> {
+    /// Include API in the module.
+    ///
+    /// This can consume any value that implements [`TableEntry`] bound.
+    pub fn include<T>(self, part: T) -> Utf8<(P, T)> {
+        let Utf8(p) = self;
+        Utf8((p, part))
+    }
+}
+
+impl<Ty, P> TableEntry<Ty> for Utf8<P>
+where
+    Ty: Types,
+    P: TableEntry<Ty>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let Utf8(builder) = self;
+
+        Table::with_name("utf8").include(builder).build(table, core);
+    }
+}
+
 /// Attempt to find a command invocation for default OS shell.
 ///
 /// The purpose of this function is to produce *some* shell to execute commands passed to [`os.execute`](crate::std::os::execute) function.
@@ -1772,6 +1907,38 @@ mod os_execute {
             use crate::std::os;
 
             os::execute.build(table, core, shell);
+        }
+    }
+}
+
+mod utf8 {
+    use std::fmt::Display;
+    use std::path::PathBuf;
+
+    use crate::traits::TableEntry;
+    use rt::ffi::arg_parser::ParseFrom;
+    use rt::ffi::DLuaFfi;
+    use rt::value::Types;
+
+    #[doc(hidden)]
+    pub struct Full(pub(crate) ());
+
+    impl<Ty> TableEntry<Ty> for Full
+    where
+        Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+        PathBuf: ParseFrom<Ty::String>,
+        <PathBuf as ParseFrom<Ty::String>>::Error: Display,
+    {
+        fn build(self, table: &crate::traits::RootTable<Ty>, core: &mut rt::runtime::Core<Ty>) {
+            use crate::std::utf8;
+
+            utf8::charpattern.build(table, core);
+
+            utf8::char.build(table, core);
+            utf8::codes.build(table, core);
+            utf8::codepoint.build(table, core);
+            utf8::len.build(table, core);
+            utf8::offset.build(table, core);
         }
     }
 }
