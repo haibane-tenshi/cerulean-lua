@@ -1472,6 +1472,16 @@ where
     {
         crate::value::string::try_gc_to_str(self.0, heap)
     }
+
+    pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Result<Cow<'_, [u8]>, AlreadyDroppedError>
+    where
+        P: Params,
+    {
+        use crate::gc::TryGet;
+
+        let value = heap.try_get(self.0)?;
+        Ok(value.to_bytes())
+    }
 }
 
 impl<T> LuaString<Gc<Interned<T>>> {
@@ -1507,6 +1517,16 @@ where
     {
         crate::value::string::try_gc_to_str(self.0 .0, heap)
     }
+
+    pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Result<Cow<'_, [u8]>, AlreadyDroppedError>
+    where
+        P: Params,
+    {
+        use crate::gc::TryGet;
+
+        let value = heap.try_get(self.0 .0)?;
+        Ok(value.to_bytes())
+    }
 }
 
 impl<T> LuaString<LuaPtr<Gc<Interned<T>>>> {
@@ -1539,6 +1559,13 @@ where
     {
         crate::value::string::try_root_to_str(&self.0, heap)
     }
+
+    pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Cow<'_, [u8]>
+    where
+        P: Params,
+    {
+        heap.get_root(&self.0).to_bytes()
+    }
 }
 
 impl<T> LuaString<Root<Interned<T>>> {
@@ -1570,6 +1597,13 @@ where
         P: Params,
     {
         crate::value::string::try_root_to_str(&self.0 .0, heap)
+    }
+
+    pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Cow<'_, [u8]>
+    where
+        P: Params,
+    {
+        heap.get_root(&self.0 .0).to_bytes()
     }
 }
 
