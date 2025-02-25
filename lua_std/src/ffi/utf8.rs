@@ -235,17 +235,13 @@ where
             let (s, original_pos): (LuaString<_>, Int) = rt.stack.parse(&mut rt.core.gc)?;
             rt.stack.clear();
             let data = s.to_bytes(&rt.core.gc)?;
-            let pos = original_pos.to_index();
 
-            let pos = match pos {
-                Some(pos) if (0..=data.len()).contains(&pos) => pos,
-                _ => {
-                    let err = rt
-                        .core
-                        .gc
-                        .alloc_error_msg(format!("index {original_pos} out of bounds"));
-                    return Err(err);
-                }
+            let Some(pos) = original_pos.to_index(data.len()) else {
+                let err = rt
+                    .core
+                    .gc
+                    .alloc_error_msg(format!("index {original_pos} out of bounds"));
+                return Err(err);
             };
 
             let tail = &data[pos..];
@@ -342,27 +338,25 @@ where
         let i = i.unwrap_or(Int(1));
         let j = j.unwrap_or(i);
 
-        let start = i.to_index().ok_or_else(|| {
-            rt.core
-                .gc
-                .alloc_error_msg(format!("index {i} is out of bounds"))
-        })?;
-        let end = j.to_index().ok_or_else(|| {
-            rt.core
-                .gc
-                .alloc_error_msg(format!("index {j} is out of bounds"))
-        })?;
-
         let bytes = s.to_bytes(&rt.core.gc)?;
-        let Some(bytes) = bytes.get(start..=end) else {
+
+        let Some(start) = i.to_index(bytes.len()) else {
             let err = rt
                 .core
                 .gc
-                .alloc_error_msg(format!("range {start}..={end} is out of bounds"));
+                .alloc_error_msg(format!("index {i} is out of bounds"));
             return Err(err);
         };
 
-        let Ok(s) = std::str::from_utf8(bytes) else {
+        let Some(end) = j.to_index(bytes.len()) else {
+            let err = rt
+                .core
+                .gc
+                .alloc_error_msg(format!("index {j} is out of bounds"));
+            return Err(err);
+        };
+
+        let Ok(s) = std::str::from_utf8(&bytes[start..=end]) else {
             let err = rt.core.gc.alloc_error_msg(format!(
                 "range {start}..={end} does not contain a valid utf-8 sequence"
             ));
@@ -372,6 +366,76 @@ where
         rt.stack
             .transient()
             .extend(s.chars().map(|ch| Value::Int(u32::from(ch).into())));
+
+        Ok(())
+    })
+}
+
+///
+///
+/// From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, [i: int, [j: int, [lax: bool]]]) -> int`
+/// * `(s: string, [i: int, [j: int, [lax: bool]]]) -> (fail, int)`
+///
+/// Returns the number of UTF-8 characters in string `s` that start between positions `i` and `j` (both inclusive).
+/// The default for `i` is 1 and for `j` is -1.
+/// If it finds any invalid byte sequence, returns **fail** plus the position of the first invalid byte.
+///
+/// # Implementation-specific behavior
+///
+/// *   `lax` mode is ignored.
+///     See module-level notes on [known incompatibilities](self#known-incompatibilities).
+pub fn len<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{
+            Boolean, FormatReturns, Int, LuaString, Nil, Opts, ParseArgs, Split,
+        };
+        use rt::gc::AllocExt;
+
+        let (s, rest): (LuaString<_>, Opts<(Int, Int, Boolean)>) =
+            rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (i, j, _lax) = rest.split();
+        let i = i.unwrap_or(Int(1));
+        let j = j.unwrap_or(Int(-1));
+
+        let bytes = s.to_bytes(&rt.core.gc)?;
+
+        let Some(start) = i.to_index(bytes.len()) else {
+            let err = rt
+                .core
+                .gc
+                .alloc_error_msg(format!("index {i} is out of bounds"));
+            return Err(err);
+        };
+
+        let Some(end) = j.to_index(bytes.len()) else {
+            let err = rt
+                .core
+                .gc
+                .alloc_error_msg(format!("index {j} is out of bounds"));
+            return Err(err);
+        };
+
+        match std::str::from_utf8(&bytes[start..=end]) {
+            Ok(s) => {
+                let len = s.chars().count();
+
+                rt.stack.transient().format(Int(len.try_into().unwrap()));
+            }
+            Err(err) => {
+                let valid_len = err.valid_up_to();
+
+                rt.stack
+                    .transient()
+                    .format((Nil, Int(valid_len.try_into().unwrap())));
+            }
+        };
 
         Ok(())
     })
