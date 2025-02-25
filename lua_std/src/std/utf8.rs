@@ -169,6 +169,22 @@ where
     }
 }
 
+/// Calculate number of UTF-8 characters.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, [i: int, [j: int, [lax: bool]]]) -> int`
+/// * `(s: string, [i: int, [j: int, [lax: bool]]]) -> (fail, int)`
+///
+/// Returns the number of UTF-8 characters in string `s` that start between positions `i` and `j` (both inclusive).
+/// The default for `i` is 1 and for `j` is -1.
+/// If it finds any invalid byte sequence, returns **fail** plus the position of the first invalid byte.
+///
+/// # Implementation-specific behavior
+///
+/// *   `lax` mode is ignored.
+///     See module-level notes on [known incompatibilities](self#known-incompatibilities).
 #[expect(non_camel_case_types)]
 pub struct len;
 

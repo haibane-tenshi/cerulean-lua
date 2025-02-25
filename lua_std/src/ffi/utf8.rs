@@ -371,9 +371,9 @@ where
     })
 }
 
+/// Calculate number of UTF-8 characters.
 ///
-///
-/// From Lua documentation
+/// # From Lua documentation
 ///
 /// **Signature:**
 /// * `(s: string, [i: int, [j: int, [lax: bool]]]) -> int`
