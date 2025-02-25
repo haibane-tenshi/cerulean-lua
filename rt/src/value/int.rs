@@ -20,6 +20,32 @@ impl Int {
     pub fn to_bool(&self) -> bool {
         true
     }
+
+    /// Convert from Rust index to Lua index.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// This can be a source of errors in FFI code.
+    ///
+    /// This function will convert `usize` (which is what vast majority of Rust indices are) to Lua integer
+    /// and will properly offset the value to account for difference between languages.
+    pub fn from_index(index: usize) -> Option<Self> {
+        index
+            .try_into()
+            .ok()
+            .and_then(|n: i64| n.checked_add(1))
+            .map(Int)
+    }
+
+    /// Convert from Lua index to Rust index.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// This can be a source of errors in FFI code.
+    ///
+    /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
+    /// and will properly offset the value to account for difference between languages.
+    pub fn to_index(self) -> Option<usize> {
+        self.0.try_into().ok().and_then(|n: usize| n.checked_sub(1))
+    }
 }
 
 impl Display for Int {
