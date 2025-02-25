@@ -236,7 +236,7 @@ where
             rt.stack.clear();
             let data = s.to_bytes(&rt.core.gc)?;
 
-            let Some(pos) = original_pos.to_index(data.len()) else {
+            let Some(pos) = original_pos.to_offset(data.len()) else {
                 let err = rt
                     .core
                     .gc
@@ -340,7 +340,7 @@ where
 
         let bytes = s.to_bytes(&rt.core.gc)?;
 
-        let Some(start) = i.to_index(bytes.len()) else {
+        let Some(start) = i.to_offset(bytes.len()) else {
             let err = rt
                 .core
                 .gc
@@ -348,7 +348,7 @@ where
             return Err(err);
         };
 
-        let Some(end) = j.to_index(bytes.len()) else {
+        let Some(end) = j.to_offset(bytes.len()) else {
             let err = rt
                 .core
                 .gc
@@ -406,7 +406,7 @@ where
 
         let bytes = s.to_bytes(&rt.core.gc)?;
 
-        let Some(start) = i.to_index(bytes.len()) else {
+        let Some(start) = i.to_offset(bytes.len()) else {
             let err = rt
                 .core
                 .gc
@@ -414,7 +414,7 @@ where
             return Err(err);
         };
 
-        let Some(end) = j.to_index(bytes.len()) else {
+        let Some(end) = j.to_offset(bytes.len()) else {
             let err = rt
                 .core
                 .gc
