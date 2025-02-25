@@ -87,7 +87,6 @@ where
         use chrono::{DateTime, Datelike, FixedOffset, Local, Timelike};
         use rt::ffi::arg_parser::{Int, LuaString, Opts, ParseArgs, Split};
         use rt::gc::LuaPtr;
-        use rt::value::string::try_gc_to_str;
         use rt::value::{KeyValue as Key, TableIndex, Value};
 
         let rest: Opts<(LuaString<_>, Int)> = rt.stack.parse(&mut rt.core.gc)?;
@@ -106,9 +105,7 @@ where
             }
         };
 
-        let format = format
-            .map(|t| try_gc_to_str(t.0 .0, &rt.core.gc))
-            .transpose()?;
+        let format = format.map(|t| t.to_str(&rt.core.gc)).transpose()?;
         let format = format.as_ref().map(AsRef::as_ref).unwrap_or("%c");
 
         let (is_utc, format) = if let Some(format) = format.strip_prefix('!') {
@@ -266,7 +263,6 @@ where
     delegate::from_mut(move |mut rt| {
         use rt::ffi::arg_parser::{LuaString, Opts, ParseArgs, Split};
         use rt::gc::LuaPtr;
-        use rt::value::string::try_gc_to_str;
         use rt::value::Value;
         use std::io::Write;
         use std::process::Stdio;
@@ -285,7 +281,7 @@ where
             return Err(err);
         };
 
-        let command = try_gc_to_str(command.0 .0, &rt.core.gc)?.into_owned();
+        let command = command.to_str(&rt.core.gc)?.into_owned();
 
         let shell = rt.core.gc.get_root_mut(shell);
 
@@ -471,13 +467,12 @@ where
     delegate::from_mut(|mut rt| {
         use rt::ffi::arg_parser::{LuaString, ParseArgs};
         use rt::gc::LuaPtr;
-        use rt::value::string::try_gc_to_str;
         use rt::value::Value;
 
         let name: LuaString<_> = rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
 
-        let name = try_gc_to_str(name.0 .0, &rt.core.gc)?;
+        let name = name.to_str(&rt.core.gc)?;
 
         let Ok(value) = std::env::var(name.as_ref()) else {
             rt.stack.transient().push(Value::Nil);
@@ -641,7 +636,6 @@ where
 {
     delegate::from_mut(|mut rt| {
         use rt::ffi::arg_parser::{LuaString, Opts, ParseArgs, Split};
-        use rt::value::string::try_gc_to_str;
         use rt::value::Value;
 
         let (locale, rest): (LuaString<_>, Opts<(LuaString<_>,)>) =
@@ -649,9 +643,9 @@ where
         rt.stack.clear();
         let (category,) = rest.split();
 
-        let _locale = try_gc_to_str(locale.0 .0, &rt.core.gc)?;
+        let _locale = locale.to_str(&rt.core.gc)?;
         if let Some(category) = category {
-            let category = try_gc_to_str(category.0 .0, &rt.core.gc)?;
+            let category = category.to_str(&rt.core.gc)?;
             let is_valid = matches!(
                 category.as_ref(),
                 "all" | "collate" | "ctype" | "monetary" | "numeric" | "time"
