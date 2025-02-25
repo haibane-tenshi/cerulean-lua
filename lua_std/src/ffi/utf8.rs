@@ -235,10 +235,7 @@ where
             let (s, original_pos): (LuaString<_>, Int) = rt.stack.parse(&mut rt.core.gc)?;
             rt.stack.clear();
             let data = s.to_bytes(&rt.core.gc)?;
-            let original_pos = original_pos.0;
-            let pos = original_pos
-                .checked_sub(1)
-                .and_then(|pos| pos.try_into().ok());
+            let pos = original_pos.to_index();
 
             let pos = match pos {
                 Some(pos) if (0..=data.len()).contains(&pos) => pos,
@@ -281,10 +278,10 @@ where
             }
 
             // Need +1 because Lua indexing start with 1 and not 0.
-            let pos = pos + offset + 1;
+            let pos = Int::from_index(pos + offset).unwrap();
 
             rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
-                stack.push(Value::Int(pos.try_into().unwrap()));
+                stack.push(pos.into());
                 stack.push(Value::Int(code_point.into()));
             });
 
@@ -309,6 +306,72 @@ where
             stack.push(s.into());
             stack.push(Value::Int(1));
         });
+
+        Ok(())
+    })
+}
+
+/// Unpack code points as integers on stack.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, [i: int, [j: int, [lax: bool]]]) -> (...: int)`
+///
+/// Returns the code points (as integers) from all characters in `s` that start between byte position `i` and `j` (both included).
+/// The default for `i` is 1 and for `j` is `i`.
+/// It raises an error if it meets any invalid byte sequence.
+///
+/// # Implementation-specific behavior
+///
+/// *   `lax` mode is ignored.
+///     See module-level notes on [known incompatibilities](self#known-incompatibilities).
+pub fn codepoint<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{Boolean, Int, LuaString, Opts, ParseArgs, Split};
+        use rt::gc::AllocExt;
+        use rt::value::Value;
+
+        let (s, rest): (LuaString<_>, Opts<(Int, Int, Boolean)>) =
+            rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (i, j, _lax) = rest.split();
+        let i = i.unwrap_or(Int(1));
+        let j = j.unwrap_or(i);
+
+        let start = i.to_index().ok_or_else(|| {
+            rt.core
+                .gc
+                .alloc_error_msg(format!("index {i} is out of bounds"))
+        })?;
+        let end = j.to_index().ok_or_else(|| {
+            rt.core
+                .gc
+                .alloc_error_msg(format!("index {j} is out of bounds"))
+        })?;
+
+        let bytes = s.to_bytes(&rt.core.gc)?;
+        let Some(bytes) = bytes.get(start..=end) else {
+            let err = rt
+                .core
+                .gc
+                .alloc_error_msg(format!("range {start}..={end} is out of bounds"));
+            return Err(err);
+        };
+
+        let Ok(s) = std::str::from_utf8(bytes) else {
+            let err = rt.core.gc.alloc_error_msg(format!(
+                "range {start}..={end} does not contain a valid utf-8 sequence"
+            ));
+            return Err(err);
+        };
+
+        rt.stack
+            .transient()
+            .extend(s.chars().map(|ch| Value::Int(u32::from(ch).into())));
 
         Ok(())
     })
