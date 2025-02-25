@@ -1428,7 +1428,7 @@ pub struct Utf8<P>(P);
 impl Utf8<empty::Empty> {
     /// Construct empty module.
     ///
-    /// This library module will use table under `os` key in parent table or construct a new one otherwise.
+    /// This library module will use table under `utf8` key in parent table or construct a new one otherwise.
     /// All included items will be put into the table, potentially overriding existing entries.
     ///
     /// Table entries can included using [`include`](Self::include) method.
@@ -1438,14 +1438,14 @@ impl Utf8<empty::Empty> {
         Utf8(Empty(()))
     }
 
-    /// Construct module introducing all APIs included into [Lua std's os library][lua#6.9].
+    /// Construct module introducing all APIs included into [Lua std's utf8 library][lua#6.5].
     ///
-    /// This library module will use table under `os` key in parent table or construct a new one otherwise.
+    /// This library module will use table under `utf8` key in parent table or construct a new one otherwise.
     /// All included items will be put into the table, potentially overriding existing entries.
     ///
     /// See [provided APIs](Self#provided-apis) for full list.
     ///
-    /// [lua#6.9]: https://www.lua.org/manual/5.4/manual.html#6.9
+    /// [lua#6.5]: https://www.lua.org/manual/5.4/manual.html#6.5
     pub fn full() -> Utf8<utf8::Full> {
         use utf8::Full;
 
