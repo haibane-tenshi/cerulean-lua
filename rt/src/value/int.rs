@@ -39,12 +39,27 @@ impl Int {
     /// Convert from Lua index to Rust index.
     ///
     /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
-    /// This can be a source of errors in FFI code.
+    /// Additionally, Lua permits indexing from the end by using negative indices.
+    /// Both can be a source of errors in FFI code.
     ///
     /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
     /// and will properly offset the value to account for difference between languages.
-    pub fn to_index(self) -> Option<usize> {
-        self.0.try_into().ok().and_then(|n: usize| n.checked_sub(1))
+    /// `None` will be produced for out-of-bounds indicies.
+    pub fn to_index(self, len: usize) -> Option<usize> {
+        let Int(n) = self;
+        match n {
+            0 => None,
+            1.. => {
+                let n: usize = n.try_into().ok()?;
+                let n = n - 1;
+
+                (0..len).contains(&n).then_some(n)
+            }
+            ..0 => {
+                let offset = n.checked_neg()?.try_into().ok()?;
+                len.checked_sub(offset)
+            }
+        }
     }
 }
 
