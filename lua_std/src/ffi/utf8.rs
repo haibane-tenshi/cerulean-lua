@@ -64,12 +64,12 @@ enum Error {
 fn next_code_point(data: &[u8]) -> Result<(u32, usize), Error> {
     assert!(!data.is_empty());
 
-    const TRAIL_MASK: u8 = 0b00111111;
+    const TRAIL_MASK: u8 = 0b0011_1111;
 
     let byte0 = data[0];
     match byte0.leading_ones() {
         0 => {
-            let part0 = (byte0 & 0b0111111) as u32;
+            let part0 = (byte0 & 0b0111_1111) as u32;
 
             Ok((part0, 1))
         }
@@ -78,7 +78,7 @@ fn next_code_point(data: &[u8]) -> Result<(u32, usize), Error> {
                 return Err(Error::MissingBytes);
             };
 
-            let part0 = (byte0 & 0b00011111) as u32;
+            let part0 = (byte0 & 0b0001_1111) as u32;
             let part1 = (byte1 & TRAIL_MASK) as u32;
             let output = (part0 << 6) | part1;
 
@@ -93,7 +93,7 @@ fn next_code_point(data: &[u8]) -> Result<(u32, usize), Error> {
                 return Err(Error::MissingBytes);
             };
 
-            let part0 = (byte0 & 0b00001111) as u32;
+            let part0 = (byte0 & 0b0000_1111) as u32;
             let part1 = (byte1 & TRAIL_MASK) as u32;
             let part2 = (byte2 & TRAIL_MASK) as u32;
             let output = (part0 << 12) | (part1 << 6) | part2;
@@ -109,7 +109,7 @@ fn next_code_point(data: &[u8]) -> Result<(u32, usize), Error> {
                 return Err(Error::MissingBytes);
             };
 
-            let part0 = (byte0 & 0b00000111) as u32;
+            let part0 = (byte0 & 0b0000_0111) as u32;
             let part1 = (byte1 & TRAIL_MASK) as u32;
             let part2 = (byte2 & TRAIL_MASK) as u32;
             let part3 = (byte3 & TRAIL_MASK) as u32;
@@ -228,58 +228,56 @@ where
         Ty: Types,
     {
         delegate::from_mut(|mut rt| {
-            use rt::ffi::arg_parser::{Int, LuaString, ParseArgs};
+            use rt::ffi::arg_parser::{FormatReturns, Int, LuaString, Nil, ParseArgs};
             use rt::gc::AllocExt;
-            use rt::value::Value;
 
-            let (s, original_pos): (LuaString<_>, Int) = rt.stack.parse(&mut rt.core.gc)?;
+            let (s, prev): (LuaString<_>, Int) = rt.stack.parse(&mut rt.core.gc)?;
             rt.stack.clear();
             let data = s.to_bytes(&rt.core.gc)?;
 
-            let Some(pos) = original_pos.to_offset(data.len()) else {
+            let offset = if prev == Int(0) {
+                0
+            } else if let Some(pos) = prev.to_offset(data.len()) {
+                if let Ok((_, count)) = next_code_point(&data[pos..]) {
+                    pos + count
+                } else {
+                    let err = rt.core.gc.alloc_error_msg(format!(
+                        "byte sequence at {pos} does not denote valid utf8 sequence"
+                    ));
+                    return Err(err);
+                }
+            } else {
                 let err = rt
                     .core
                     .gc
-                    .alloc_error_msg(format!("index {original_pos} out of bounds"));
+                    .alloc_error_msg(format!("index {prev} out of bounds"));
                 return Err(err);
             };
 
-            let tail = &data[pos..];
+            let tail = &data[offset..];
+
             if tail.is_empty() {
-                rt.stack.transient().push(Value::Nil);
+                rt.stack.transient().format((Nil, Nil));
                 return Ok(());
             }
 
-            let (code_point, offset) = match next_code_point(tail) {
-                Ok(t) => t,
-                Err(Error::InvalidLeadingByte | Error::MissingBytes) => {
-                    let err = rt.core.gc.alloc_error_msg(format!(
-                        "byte sequence at {original_pos} does not denote valid utf8 sequence"
-                    ));
-                    return Err(err);
-                }
-                Err(Error::Overlong) => {
-                    let err = rt.core.gc.alloc_error_msg(format!(
-                        "byte sequence at {original_pos} contains an overlong utf8 sequence"
-                    ));
-                    return Err(err);
-                }
+            let Ok((code_point, _)) = next_code_point(tail) else {
+                let err = rt.core.gc.alloc_error_msg(format!(
+                    "byte sequence at {prev} does not denote valid utf8 sequence"
+                ));
+                return Err(err);
             };
 
             if char::from_u32(code_point).is_none() {
                 let err = rt.core.gc.alloc_error_msg(format!(
-                    "utf8 sequence at {original_pos} does not contain a valid unicode code point"
+                    "utf8 sequence at {prev} does not contain a valid unicode code point"
                 ));
                 return Err(err);
             }
 
-            // Need +1 because Lua indexing start with 1 and not 0.
-            let pos = Int::from_index(pos + offset).unwrap();
+            let pos = Int::from_index(offset).unwrap();
 
-            rt.stack.transient_in(&mut rt.core.gc, |mut stack, _| {
-                stack.push(pos.into());
-                stack.push(Value::Int(code_point.into()));
-            });
+            rt.stack.transient().format((pos, Int(code_point.into())));
 
             Ok(())
         })
@@ -292,6 +290,7 @@ where
         use rt::value::{Callable, Value};
 
         let (s, rest): (LuaString<_>, Opts<(Boolean,)>) = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
         let (_lax,) = rest.split();
 
         rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
@@ -300,7 +299,7 @@ where
 
             stack.push(callable.into());
             stack.push(s.into());
-            stack.push(Value::Int(1));
+            stack.push(Value::Int(0));
         });
 
         Ok(())
