@@ -48,7 +48,7 @@ use rt::ffi::{self, DLuaFfi};
 use rt::runtime::Core;
 use rt::value::Types;
 
-use crate::lib::set_func;
+use crate::lib::{set_func, set_str};
 use crate::traits::{RootTable, TableEntry};
 
 /// Encode sequence of integers with UTF-32 codes into a string.
@@ -75,5 +75,23 @@ where
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         let fn_body = ffi::from_fn(crate::ffi::utf8::char, "lua_std::std::utf8::char", ());
         set_func("char", fn_body).build(table, core);
+    }
+}
+
+/// Constant containing regex which matches on single UTF-8 byte sequence.
+///
+/// # From Lua documentation
+///
+/// The pattern (a string, not a function) `[\0-\x7F\xC2-\xFD][\x80-\xBF]*` (see §6.4.1),
+/// which matches exactly one UTF-8 byte sequence, assuming that the subject is a valid UTF-8 string.
+#[expect(non_camel_case_types)]
+pub struct charpattern;
+
+impl<Ty> TableEntry<Ty> for charpattern
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        set_str("charpattern", r#"[\0-\x7F\xC2-\xFD][\x80-\xBF]*"#).build(table, core);
     }
 }
