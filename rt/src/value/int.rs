@@ -44,19 +44,53 @@ impl Int {
     ///
     /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
     /// and will properly offset the value to account for difference between languages.
-    /// `None` will be produced for out-of-bounds indicies.
+    ///
+    /// `None` will be produced for indices outside of `0..len` range.
+    ///
+    /// This function is similar to [`Int::to_offset`], however it does not permit indices equal to `len`.
+    /// This ensures that resulting value is safe to use indexing.
     pub fn to_index(self, len: usize) -> Option<usize> {
         let Int(n) = self;
         match n {
             0 => None,
             1.. => {
-                let n: usize = n.try_into().ok()?;
                 let n = n - 1;
+                let n: usize = n.try_into().ok()?;
 
                 (0..len).contains(&n).then_some(n)
             }
             ..0 => {
-                let offset = n.checked_neg()?.try_into().ok()?;
+                let offset = n.unsigned_abs().try_into().ok()?;
+                len.checked_sub(offset)
+            }
+        }
+    }
+
+    /// Convert from Lua index to Rust offset.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// Additionally, Lua permits indexing from the end by using negative indices.
+    /// Both can be a source of errors in FFI code.
+    ///
+    /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
+    /// and will properly offset the value to account for difference between languages.
+    ///
+    /// `None` will be produced for indices outside of `0..=len` range.
+    ///
+    /// This function is similar to [`Int::to_index`], however it permits indices equal to `len`.
+    /// Such indices behave as offsets into range of values and `len` serve as sentinel value denoting end of the range.
+    pub fn to_offset(self, len: usize) -> Option<usize> {
+        let Int(n) = self;
+        match n {
+            0 => None,
+            1.. => {
+                let n = n - 1;
+                let n: usize = n.try_into().ok()?;
+
+                (0..=len).contains(&n).then_some(n)
+            }
+            ..0 => {
+                let offset = n.unsigned_abs().try_into().ok()?;
                 len.checked_sub(offset)
             }
         }
