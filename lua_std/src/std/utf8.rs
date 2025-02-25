@@ -168,3 +168,16 @@ where
         set_func("codepoint", fn_body).build(table, core);
     }
 }
+
+#[expect(non_camel_case_types)]
+pub struct len;
+
+impl<Ty> TableEntry<Ty> for len
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::utf8::len, "lua_std::std::utf8::len", ());
+        set_func("len", fn_body).build(table, core);
+    }
+}
