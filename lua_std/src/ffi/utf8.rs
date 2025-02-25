@@ -440,3 +440,129 @@ where
         Ok(())
     })
 }
+
+///
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, n: int, [i: int]) -> int | fail`
+///
+/// Returns the position (in bytes) where the encoding of the `n-th character of `s` (counting from position `i`) starts.
+/// A negative `n` gets characters before position `i`.
+/// The default for `i` is 1 when `n` is non-negative and `#s + 1` otherwise,
+/// so that `utf8.offset(s, -n)` gets the offset of the `n`-th character from the end of the string.
+/// If the specified character is neither in the subject nor right after its end, the function returns **fail**.
+///
+/// As a special case, when `n` is 0 the function returns the start of the encoding of the character that contains the `i`-th byte of s.
+///
+/// This function assumes that `s` is a valid UTF-8 string.
+///
+/// # Implementation-specific behavior
+///
+/// * This function will Lua panic if `n` is not 0 and `i` does not point at code point boundary.
+pub fn offset<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{FormatReturns, Int, LuaString, Nil, Opts, ParseArgs, Split};
+        use rt::gc::AllocExt;
+
+        let (s, n, rest): (LuaString<_>, Int, Opts<(Int,)>) = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (i,) = rest.split();
+
+        let s = s.to_str(&rt.core.gc)?;
+
+        let offset = match n.0 {
+            1.. => {
+                let i = i.unwrap_or(Int(1));
+                let Some(start) = i.to_offset(s.len()) else {
+                    let err = rt
+                        .core
+                        .gc
+                        .alloc_error_msg(format!("index {i} is out of bounds"));
+                    return Err(err);
+                };
+
+                let Some(s) = s.get(start..) else {
+                    let err = rt
+                        .core
+                        .gc
+                        .alloc_error_msg(format!("index {i} is not on code point boundary"));
+                    return Err(err);
+                };
+
+                // Counting from the beginning.
+                let nth = usize::try_from(n.0).unwrap() - 1;
+                let mut count = 0;
+                let mut iter = s.char_indices().inspect(|_| count += 1);
+                if let Some((offset, _)) = iter.nth(nth) {
+                    offset
+                } else if nth == count + 1 {
+                    // Lua permits pointing to char after the last.
+                    // Its boundary is the length of the string.
+                    s.len()
+                } else {
+                    rt.stack.transient().format(Nil);
+                    return Ok(());
+                }
+            }
+            ..0 => {
+                let end = match i {
+                    Some(i) => match i.to_offset(s.len()) {
+                        Some(i) => i,
+                        None => {
+                            let err = rt
+                                .core
+                                .gc
+                                .alloc_error_msg(format!("index {i} is out of bounds"));
+                            return Err(err);
+                        }
+                    },
+                    None => s.len(),
+                };
+
+                let Some(s) = s.get(..end) else {
+                    let err = rt.core.gc.alloc_error_msg(format!(
+                        "index {} is not on code point boundary",
+                        i.unwrap()
+                    ));
+                    return Err(err);
+                };
+
+                // Counting from the end.
+                let nth = usize::try_from(n.0.unsigned_abs()).unwrap() - 1;
+                let mut iter = s.char_indices().rev();
+                let Some((offset, _)) = iter.nth(nth) else {
+                    rt.stack.transient().format(Nil);
+                    return Ok(());
+                };
+
+                offset
+            }
+            0 => {
+                // Attempt to find char boundary before or at `i`.
+
+                let i = i.unwrap_or(Int(1));
+                let Some(end) = i.to_offset(s.len()) else {
+                    let err = rt
+                        .core
+                        .gc
+                        .alloc_error_msg(format!("index {i} is out of bounds"));
+                    return Err(err);
+                };
+
+                // `str::floor_char_boundary` is unstable.
+                // 0 is considered char boundary, so this never panics.
+                (0..=end).rev().find(|i| s.is_char_boundary(*i)).unwrap()
+            }
+        };
+
+        rt.stack
+            .transient()
+            .format(Int::from_index(offset).unwrap());
+        Ok(())
+    })
+}
