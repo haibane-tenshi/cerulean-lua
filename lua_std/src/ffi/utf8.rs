@@ -448,7 +448,7 @@ where
 /// **Signature:**
 /// * `(s: string, n: int, [i: int]) -> int | fail`
 ///
-/// Returns the position (in bytes) where the encoding of the `n-th character of `s` (counting from position `i`) starts.
+/// Returns the position (in bytes) where the encoding of the `n`-th character of `s` (counting from position `i`) starts.
 /// A negative `n` gets characters before position `i`.
 /// The default for `i` is 1 when `n` is non-negative and `#s + 1` otherwise,
 /// so that `utf8.offset(s, -n)` gets the offset of the `n`-th character from the end of the string.
