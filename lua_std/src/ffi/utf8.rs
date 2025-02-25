@@ -441,7 +441,7 @@ where
     })
 }
 
-///
+/// Calculate code point boundary index.
 ///
 /// # From Lua documentation
 ///

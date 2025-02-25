@@ -197,3 +197,36 @@ where
         set_func("len", fn_body).build(table, core);
     }
 }
+
+/// Calculate code point boundary index.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, n: int, [i: int]) -> int | fail`
+///
+/// Returns the position (in bytes) where the encoding of the `n-th character of `s` (counting from position `i`) starts.
+/// A negative `n` gets characters before position `i`.
+/// The default for `i` is 1 when `n` is non-negative and `#s + 1` otherwise,
+/// so that `utf8.offset(s, -n)` gets the offset of the `n`-th character from the end of the string.
+/// If the specified character is neither in the subject nor right after its end, the function returns **fail**.
+///
+/// As a special case, when `n` is 0 the function returns the start of the encoding of the character that contains the `i`-th byte of s.
+///
+/// This function assumes that `s` is a valid UTF-8 string.
+///
+/// # Implementation-specific behavior
+///
+/// * This function will Lua panic if `n` is not 0 and `i` does not point at code point boundary.
+#[expect(non_camel_case_types)]
+pub struct offset;
+
+impl<Ty> TableEntry<Ty> for offset
+where
+    Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
+{
+    fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
+        let fn_body = ffi::from_fn(crate::ffi::utf8::offset, "lua_std::std::utf8::offset", ());
+        set_func("offset", fn_body).build(table, core);
+    }
+}
