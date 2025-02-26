@@ -1,6 +1,7 @@
 mod builtins;
 pub mod math;
 pub mod os;
+pub mod string;
 pub mod table;
 pub mod utf8;
 
