@@ -1954,7 +1954,7 @@ impl Error for NotNumberError {}
 ///
 /// Otherwise `Index` is just a special variant of [`Int`]:
 /// you can parse it from arguments and convert back to [`Value`]s when necessary.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Index(pub i64);
 
 impl Index {
@@ -2184,6 +2184,16 @@ enum IndexError {
     OutOfBoundsBelow,
     OutOfBoundsAbove,
     NumericOverflow,
+}
+
+impl Display for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            write!(f, "{}_i64", self.0)
+        } else {
+            write!(f, "{}", self.0)
+        }
+    }
 }
 
 impl From<Int> for Index {
