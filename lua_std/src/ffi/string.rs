@@ -125,3 +125,31 @@ where
         Ok(())
     })
 }
+
+/// Return string length in bytes.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string) -> int`
+///
+/// Receives a string and returns its length. The empty string "" has length 0.
+/// Embedded zeros are counted, so "a\000bc\000" has length 5.
+pub fn len<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{Int, LuaString, ParseArgs};
+
+        let s: LuaString<_> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+
+        let bytes = s.to_bytes(&rt.core.gc)?;
+        let len = bytes.len();
+
+        rt.stack
+            .format_sync(&mut rt.core.gc, Int(len.try_into().unwrap()));
+        Ok(())
+    })
+}
