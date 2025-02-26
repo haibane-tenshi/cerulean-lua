@@ -613,6 +613,15 @@ where
         }
     }
 
+    pub fn format_sync<R>(&mut self, heap: &mut Heap<Ty>, values: R)
+    where
+        for<'a> TransientStackGuard<'a, Ty>: crate::ffi::arg_parser::FormatReturns<Ty, R>,
+    {
+        use crate::ffi::arg_parser::FormatReturns;
+
+        self.transient_in(heap, |mut stack, _| stack.format(values))
+    }
+
     pub fn as_slice(&self) -> &[WeakValue<Ty>] {
         self.stack.main[self.boundary..].raw.as_ref()
     }
