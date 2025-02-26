@@ -96,7 +96,7 @@ where
 {
     delegate::from_mut(|mut rt| {
         use rt::error::SignatureError;
-        use rt::ffi::arg_parser::{FormatReturns, Int, TypeMismatchError};
+        use rt::ffi::arg_parser::{Int, TypeMismatchError};
         use rt::gc::AllocExt;
 
         let mut output: Vec<u8> = Vec::with_capacity(rt.stack.len());
@@ -119,9 +119,8 @@ where
             output.push(byte);
         }
 
-        rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
-            stack.format(heap.alloc_str(output))
-        });
+        let s = rt.core.gc.alloc_str(output);
+        rt.stack.format_sync(&mut rt.core.gc, s);
 
         Ok(())
     })
