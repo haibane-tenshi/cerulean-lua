@@ -28,6 +28,7 @@ impl Int {
     ///
     /// This function will convert `usize` (which is what vast majority of Rust indices are) to Lua integer
     /// and will properly offset the value to account for difference between languages.
+    #[deprecated(note = "use methods on Index instead")]
     pub fn from_index(index: usize) -> Option<Self> {
         index
             .try_into()
@@ -49,6 +50,7 @@ impl Int {
     ///
     /// This function is similar to [`Int::to_offset`], however it does not permit indices equal to `len`.
     /// This ensures that resulting value is safe to use indexing.
+    #[deprecated(note = "use methods on Index instead")]
     pub fn to_index(self, len: usize) -> Option<usize> {
         let Int(n) = self;
         match n {
@@ -79,6 +81,7 @@ impl Int {
     ///
     /// This function is similar to [`Int::to_index`], however it permits indices equal to `len`.
     /// Such indices behave as offsets into range of values and `len` serve as sentinel value denoting end of the range.
+    #[deprecated(note = "use methods on Index instead")]
     pub fn to_offset(self, len: usize) -> Option<usize> {
         let Int(n) = self;
         match n {

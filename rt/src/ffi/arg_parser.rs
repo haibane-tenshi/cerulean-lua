@@ -1942,6 +1942,454 @@ impl Display for NotNumberError {
 
 impl Error for NotNumberError {}
 
+/// Lua integer interpreted as array index.
+///
+/// Purpose of this type is to assist in transformation of numbers which represent *indices* into some array between Lua and Rust.
+///
+/// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+/// Additionally, Lua permits indexing from the end by using negative indices.
+/// This can be a source of errors in FFI code.
+///
+/// See helper methods on this type to handle transformations.
+///
+/// Otherwise `Index` is just a special variant of [`Int`]:
+/// you can parse it from arguments and convert back to [`Value`]s when necessary.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Index(pub i64);
+
+impl Index {
+    /// Convert from Rust index to Lua index.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// This can be a source of errors in FFI code.
+    ///
+    /// This function will convert `usize` (which is what vast majority of Rust indices are) to Lua integer
+    /// and will properly offset the value to account for difference between languages.
+    ///
+    /// # Returns
+    ///
+    /// `None` will be produced if final index is not representable.
+    ///
+    /// Under most circumstances this should be impossible.
+    /// Rust's std types do not allocate more than `isize::MAX` bytes,
+    /// so unless address size on target is wider than 64 bits it should be representable as `i64`.
+    ///
+    /// The only edge case is passing `isize::MAX` itself as you need to add 1 to it which causes overflow.
+    /// This function handles it by returning `None`.
+    /// However, if you actually run into this edge case it means
+    /// you operate on arrays containing at least 2^63 elements and at this point you have bigger problems.
+    pub fn from_index(index: usize) -> Option<Self> {
+        index
+            .try_into()
+            .ok()
+            .and_then(|n: i64| n.checked_add(1))
+            .map(Index)
+    }
+
+    /// Convert from Lua index to Rust index.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// Additionally, Lua permits indexing from the end by using negative indices.
+    /// Both can be a source of errors in FFI code.
+    ///
+    /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
+    /// and will properly offset the value to account for difference between languages.
+    /// It only permits indices from the beginning of sequence, so negative indices will be rejected.
+    ///
+    /// If you wish to handle indexing from the end (negative indices) or
+    /// ensure that resulting index stays in bounds consider using [`to_index`](Self::to_index) or [`to_offset`](Self::to_offset) instead.
+    ///
+    /// # Returns
+    ///
+    /// `None` will be produced if
+    /// * input is 0, which is an invalid Lua index
+    /// * input is negative, which represents indexing from the end of the sequence
+    /// * final index is not representable as `usize`
+    ///
+    /// The last point should only be possible if `i64` is smaller than `usize` on target machine,
+    /// e.g. if it has 32-bit addresses.
+    pub fn to_index_from_start(self) -> Option<usize> {
+        let Index(n) = self;
+        match n {
+            1.. => {
+                let n = n - 1;
+                n.try_into().ok()
+            }
+            _ => None,
+        }
+    }
+
+    /// Convert from Lua index to Rust index.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// Additionally, Lua permits indexing from the end by using negative indices.
+    /// Both can be a source of errors in FFI code.
+    ///
+    /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
+    /// and will properly offset the value to account for difference between languages.
+    ///
+    /// This function is similar to [`to_offset`](Self::to_offset), however it does not permit indices equal to `len`.
+    /// This ensures that resulting value is in bounds and safe to use for indexing.
+    ///
+    /// # Returns
+    ///
+    /// `None` will be produced if
+    /// * input is 0, which is an invalid Lua index
+    /// * final index falls outside of `0..len` range
+    /// * final index is not representable as `usize`
+    ///
+    /// The last point should only be possible if `i64` is smaller than `usize` on target machine,
+    /// e.g. if it has 32-bit addresses.
+    pub fn to_index(self, len: usize) -> Option<usize> {
+        self.try_to_index(len).ok()
+    }
+
+    /// Convert from Lua index to Rust index clamping it to `0..len` range.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// Additionally, Lua permits indexing from the end by using negative indices.
+    /// Both can be a source of errors in FFI code.
+    ///
+    /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
+    /// and will properly offset the value to account for difference between languages.
+    /// Output will be clamped to `0..len` range.
+    ///
+    /// This function is similar to [`to_offset_clamp`](Self::to_offset_clamp), however it does not permit indices equal to `len`.
+    /// This ensures that resulting value is in bounds and safe to use for indexing.
+    ///
+    /// # Returns
+    ///
+    /// `None` will be produced if
+    /// * input is 0, which is an invalid Lua index
+    /// * `len` is 0, since empty range contains no valid indicies
+    /// * final index is not representable as `usize`
+    ///
+    /// The last point should only be possible if `i64` is smaller than `usize` on target machine,
+    /// e.g. if it has 32-bit addresses.
+    pub fn to_index_clamp(self, len: usize) -> Option<usize> {
+        match self.try_to_index(len) {
+            Ok(n) => Some(n),
+            Err(IndexError::OutOfBoundsBelow) if !(0..len).is_empty() => Some(0),
+            Err(IndexError::OutOfBoundsBelow) => None,
+            Err(IndexError::OutOfBoundsAbove) => len.checked_sub(1),
+            Err(IndexError::Zero | IndexError::NumericOverflow) => None,
+        }
+    }
+
+    /// Convert from Lua index to Rust offset.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// Additionally, Lua permits indexing from the end by using negative indices.
+    /// Both can be a source of errors in FFI code.
+    ///
+    /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
+    /// and will properly offset the value to account for difference between languages.
+    ///
+    /// This function is similar to [`to_index`](Self::to_index), however it permits indices equal to `len`.
+    /// Such indices behave as offsets into range of values and `len` serve as sentinel value denoting end of the range.
+    /// This is a common practice including in Rust.
+    ///
+    /// # Returns
+    ///
+    /// `None` will be produced if
+    /// * input is 0, which is an invalid Lua index
+    /// * final index falls outside of `0..=len` range
+    /// * final index is not representable as `usize`
+    ///
+    /// The last point should only be possible if `i64` is smaller than `usize` on target machine,
+    /// e.g. if it has 32-bit addresses.
+    pub fn to_offset(self, len: usize) -> Option<usize> {
+        self.try_to_offset(len).ok()
+    }
+
+    /// Convert from Lua index to Rust offset clamping it to `0..=len` range.
+    ///
+    /// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+    /// Additionally, Lua permits indexing from the end by using negative indices.
+    /// Both can be a source of errors in FFI code.
+    ///
+    /// This function will convert Lua integer to `usize` (which is what vast majority of Rust indices are)
+    /// and will properly offset the value to account for difference between languages.
+    /// Output will be clamped to `0..=len` range.
+    ///
+    /// This function is similar to [`to_index_clamp`](Self::to_index_clamp), however it permits indices equal to `len`.
+    /// Such indices behave as offsets into range of values and `len` serve as sentinel value denoting end of the range.
+    /// This is a common practice including in Rust.
+    ///
+    /// # Returns
+    ///
+    /// `None` will be produced if
+    /// * input is 0, which is an invalid Lua index
+    /// * final index is not representable as `usize`
+    ///
+    /// The last point should only be possible if `i64` is smaller than `usize` on target machine,
+    /// e.g. if it has 32-bit addresses.
+    pub fn to_offset_clamp(self, len: usize) -> Option<usize> {
+        match self.try_to_offset(len) {
+            Ok(n) => Some(n),
+            Err(IndexError::OutOfBoundsBelow) => Some(0),
+            Err(IndexError::OutOfBoundsAbove) => Some(len),
+            Err(IndexError::Zero | IndexError::NumericOverflow) => None,
+        }
+    }
+
+    fn try_map(self, len: usize) -> Result<usize, IndexError> {
+        let Index(n) = self;
+        match n {
+            0 => Err(IndexError::Zero),
+            1.. => {
+                let n = n - 1;
+                let n = usize::try_from(n).map_err(|_| IndexError::NumericOverflow)?;
+
+                Ok(n)
+            }
+            ..0 => {
+                let offset =
+                    usize::try_from(n.unsigned_abs()).map_err(|_| IndexError::NumericOverflow)?;
+
+                len.checked_sub(offset).ok_or(IndexError::OutOfBoundsBelow)
+            }
+        }
+    }
+
+    fn try_to_offset(self, len: usize) -> Result<usize, IndexError> {
+        match self.try_map(len) {
+            Ok(n) => {
+                if (0..=len).contains(&n) {
+                    Ok(n)
+                } else {
+                    Err(IndexError::OutOfBoundsAbove)
+                }
+            }
+            t => t,
+        }
+    }
+
+    fn try_to_index(self, len: usize) -> Result<usize, IndexError> {
+        match self.try_map(len) {
+            Ok(n) => {
+                if (0..len).contains(&n) {
+                    Ok(n)
+                } else {
+                    Err(IndexError::OutOfBoundsAbove)
+                }
+            }
+            t => t,
+        }
+    }
+}
+
+enum IndexError {
+    Zero,
+    OutOfBoundsBelow,
+    OutOfBoundsAbove,
+    NumericOverflow,
+}
+
+impl From<Int> for Index {
+    fn from(value: Int) -> Self {
+        let Int(value) = value;
+        Index(value)
+    }
+}
+
+impl From<Index> for Int {
+    fn from(value: Index) -> Self {
+        let Index(value) = value;
+        Int(value)
+    }
+}
+
+impl<Ty> TryFrom<WeakValue<Ty>> for Index
+where
+    Ty: Types,
+{
+    type Error = TypeMismatchError;
+
+    fn try_from(value: WeakValue<Ty>) -> Result<Self, Self::Error> {
+        let value: Int = value.try_into()?;
+        Ok(value.into())
+    }
+}
+
+impl<Ty> ParseAtom<WeakValue<Ty>, Heap<Ty>> for Index
+where
+    Ty: Types,
+{
+    type Error = TypeMismatchError;
+
+    fn parse_atom(value: WeakValue<Ty>, _: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+        let value: Int = value.try_into()?;
+        Ok(value.into())
+    }
+}
+
+use std::ops::{Range, RangeBounds};
+
+/// Convert range of Lua indices to range of Rust indicies.
+///
+/// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+/// Additionally, Lua permits indexing from the end by using negative indices.
+/// Both can be a source of errors in FFI code.
+///
+/// The situation made even worse when index ranges are involved.
+/// Lua std is *incredibly* inconsistent in processing index ranges, making emulating correct behavior a challenge.
+/// Lua ranges are typically inclusive and have complex rules on resolving edge cases such as when a range should be empty or illegal.
+/// This function makes an attempt to accommodate common Lua expectations.
+///
+/// It is best to avoid this method unless interoperability with Lua std is required.
+///
+/// Input range can be any Rust's slice expression, `a..b`, `a..=b`, `a..`, `..` etc. containing [`Index`].
+///
+/// # Transformation process
+///
+/// 1.  The lower bound is resolved to offset `s` transforming it into inclusive bound.
+///     
+///     * If `s` is outside of `0..=len`, range is **illegal**.
+///
+/// 2.  The upper bound is resolved to a *virtual* offset `e` transforming it into exclusive bound.
+///     Virtual offset may be outside of `0..=len` range, including being negative.
+///
+///     * If `s..e` is empty, range is **empty** regardless of value of `e`.
+///     * If original end is 0, range is **empty**.
+///     * If `e` is outside of `0..=len`, range is **illegal**.
+///
+/// 3. `s..e` is normalized, so that `s <= e`.
+/// 4. `s..e` is the result.
+///
+/// Remember that 0 is not a valid index!
+/// You cannot use it in lower bound position (even if excluded).
+/// However, Lua commonly permits it in upper bound position resulting in empty range.
+/// This is likely due to the fact that Lua ranges are *inclusive* (e.g. Rust's `start..=end`),
+/// which makes it difficult to express empty ranges and index into empty arrays.
+///
+/// # Returns
+///
+/// `None` will be produced if
+/// * lower bound is 0
+/// * transformed lower bound falls outside of `0..=len` range
+/// * transformed upper bound is both bigger than transformed lower bounds and `len`
+/// * any index is not representable as `usize`
+///
+/// The last point should only be possible if `i64` is smaller than `usize` on target machine,
+/// e.g. if it has 32-bit addresses.
+pub fn range_from_lua(range: impl RangeBounds<Index>, len: usize) -> Option<Range<usize>> {
+    use std::ops::Bound::*;
+
+    let start = range.start_bound();
+    let end = range.end_bound();
+
+    let start = match start {
+        Included(i) => i.to_offset(len)?,
+        Excluded(i) => i.to_index(len)? + 1,
+        Unbounded => 0,
+    };
+
+    let end = match end {
+        Included(i) => match i.try_to_index(len) {
+            Ok(i) => i + 1,
+            Err(IndexError::Zero | IndexError::OutOfBoundsBelow) => start,
+            Err(IndexError::OutOfBoundsAbove | IndexError::NumericOverflow) => return None,
+        },
+        Excluded(i) => match i.try_to_offset(len) {
+            Ok(i) => i,
+            Err(IndexError::Zero | IndexError::OutOfBoundsBelow) => start,
+            Err(IndexError::OutOfBoundsAbove | IndexError::NumericOverflow) => return None,
+        },
+        Unbounded => len,
+    };
+
+    // Bring empty range to valid shape.
+    let end = end.max(start);
+
+    debug_assert!((0..=len).contains(&start));
+    debug_assert!((0..=len).contains(&end));
+
+    Some(start..end)
+}
+
+/// Convert range of Lua indices to range of Rust indicies, clamping the bounds.
+///
+/// Confusingly for Rust users, Lua indexing start with 1 and not 0.
+/// Additionally, Lua permits indexing from the end by using negative indices.
+/// Both can be a source of errors in FFI code.
+///
+/// The situation made even worse when index ranges are involved.
+/// Lua std is *incredibly* inconsistent in processing index ranges, making emulating correct behavior a challenge.
+/// Lua ranges are typically inclusive and have complex rules on resolving edge cases such as when a range should be empty or illegal.
+/// This function makes an attempt to accommodate common Lua expectations.
+///
+/// It is best to avoid this method unless interoperability with Lua std is required.
+///
+/// Input range can be any Rust's slice expression, `a..b`, `a..=b`, `a..`, `..` etc. containing [`Index`].
+///
+/// # Transformation process
+///
+/// 1.  The lower bound is resolved to offset `s` transforming it into inclusive bound.
+///     
+///     * If `s` is outside of `0..=len`, value is clamped.
+///
+/// 2.  The upper bound is resolved to a *virtual* offset `e` transforming it into exclusive bound.
+///     Virtual offset may be outside of `0..=len` range, including being negative.
+///
+///     * If `s..e` is empty, range is **empty** regardless of value of `e`.
+///     * If original end is 0, range is **empty**.
+///     * If `e` is outside of `0..=len`, value is clamped.
+///
+/// 3. `s..e` is normalized, so that `s <= e`.
+/// 4. `s..e` is the result.
+///
+/// Remember that 0 is not a valid index!
+/// You cannot use it in lower bound position (even if excluded).
+/// However, Lua commonly permits it in upper bound position resulting in empty range.
+/// This is likely due to the fact that Lua ranges are *inclusive* (e.g. Rust's `start..=end`),
+/// which makes it difficult to express empty ranges and index into empty arrays.
+///
+/// # Returns
+///
+/// `None` will be produced if
+/// * starting bound is 0
+/// * any index is not representable as `usize`
+///
+/// The last point should only be possible if `i64` is smaller than `usize` on target machine,
+/// e.g. if it has 32-bit addresses.
+pub fn range_from_lua_clamp(range: impl RangeBounds<Index>, len: usize) -> Option<Range<usize>> {
+    use std::ops::Bound::*;
+
+    let start = range.start_bound();
+    let end = range.end_bound();
+
+    let start = match start {
+        Included(i) => i.to_offset_clamp(len)?,
+        Excluded(i) => i.to_index_clamp(len)? + 1,
+        Unbounded => 0,
+    };
+
+    let end = match end {
+        Included(i) => match i.try_to_index(len) {
+            Ok(i) => i + 1,
+            Err(IndexError::Zero | IndexError::OutOfBoundsBelow) => start,
+            Err(IndexError::OutOfBoundsAbove) => len,
+            Err(IndexError::NumericOverflow) => return None,
+        },
+        Excluded(i) => match i.try_to_offset(len) {
+            Ok(i) => i,
+            Err(IndexError::Zero | IndexError::OutOfBoundsBelow) => start,
+            Err(IndexError::OutOfBoundsAbove) => len,
+            Err(IndexError::NumericOverflow) => return None,
+        },
+        Unbounded => len,
+    };
+
+    // Bring empty range to valid shape.
+    let end = end.max(start);
+
+    debug_assert!((0..=len).contains(&start));
+    debug_assert!((0..=len).contains(&end));
+
+    Some(start..end)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TypeMismatchError {
     pub found: Type,
