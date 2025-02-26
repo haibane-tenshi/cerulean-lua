@@ -28,6 +28,7 @@ where
     T: ?Sized,
     A: Access,
 {
+    #[deprecated]
     pub fn upgrade<M, P>(self, heap: &TrueHeap<M, P>) -> Option<LuaPtr<RootPtr<T, A>>>
     where
         P: Params,
@@ -35,6 +36,7 @@ where
         self.try_upgrade(heap).ok()
     }
 
+    #[deprecated]
     pub fn try_upgrade<M, P>(
         self,
         heap: &TrueHeap<M, P>,
@@ -53,6 +55,7 @@ where
     T: ?Sized,
     A: Access,
 {
+    #[deprecated]
     pub fn downgrade(&self) -> LuaPtr<GcPtr<T, A>> {
         LuaPtr(self.0.downgrade())
     }
@@ -229,5 +232,226 @@ where
 
     fn alloc_error_msg(&mut self, msg: impl Into<Ty::String>) -> RuntimeError<Ty> {
         RuntimeError::from_value(self.alloc_str(msg))
+    }
+}
+
+pub trait GetGc<Heap> {
+    type Output: ?Sized;
+
+    fn try_get<'h>(&self, heap: &'h Heap) -> Result<&'h Self::Output, AlreadyDroppedError>;
+
+    fn get<'h>(&self, heap: &'h Heap) -> Option<&'h Self::Output> {
+        self.try_get(heap).ok()
+    }
+}
+
+pub trait GetGcMut<Heap>: GetGc<Heap> {
+    fn try_get_mut<'h>(
+        &self,
+        heap: &'h mut Heap,
+    ) -> Result<&'h mut Self::Output, AlreadyDroppedError>;
+
+    fn get_mut<'h>(&self, heap: &'h mut Heap) -> Option<&'h mut Self::Output> {
+        self.try_get_mut(heap).ok()
+    }
+}
+
+pub trait GetRoot<Heap> {
+    type Output: ?Sized;
+
+    fn get<'h>(&self, heap: &'h Heap) -> &'h Self::Output;
+}
+
+pub trait GetRootMut<Heap>: GetRoot<Heap> {
+    fn get_mut<'h>(&self, heap: &'h mut Heap) -> &'h mut Self::Output;
+}
+
+pub trait Upgrade<Heap> {
+    type Output;
+
+    fn try_upgrade(&self, heap: &Heap) -> Result<Self::Output, AlreadyDroppedError>;
+
+    fn upgrade(&self, heap: &Heap) -> Option<Self::Output> {
+        self.try_upgrade(heap).ok()
+    }
+}
+
+pub trait Downgrade {
+    type Output;
+
+    fn downgrade(&self) -> Self::Output;
+}
+
+impl<T, A, M, P> GetGc<TrueHeap<M, P>> for GcPtr<T, A>
+where
+    T: Allocated<TrueHeap<M, P>> + ?Sized,
+    A: RefAccess,
+    P: Params,
+{
+    type Output = T;
+
+    fn try_get<'h>(
+        &self,
+        heap: &'h TrueHeap<M, P>,
+    ) -> Result<&'h Self::Output, AlreadyDroppedError> {
+        heap.get(*self).ok_or(AlreadyDroppedError)
+    }
+}
+
+impl<T, A, M, P> GetGcMut<TrueHeap<M, P>> for GcPtr<T, A>
+where
+    T: Allocated<TrueHeap<M, P>> + ?Sized,
+    A: MutAccess,
+    P: Params,
+{
+    fn try_get_mut<'h>(
+        &self,
+        heap: &'h mut TrueHeap<M, P>,
+    ) -> Result<&'h mut Self::Output, AlreadyDroppedError> {
+        heap.get_mut(*self).ok_or(AlreadyDroppedError)
+    }
+}
+
+impl<T, A, M, P> Upgrade<TrueHeap<M, P>> for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+    P: Params,
+{
+    type Output = RootPtr<T, A>;
+
+    fn try_upgrade(&self, heap: &TrueHeap<M, P>) -> Result<Self::Output, AlreadyDroppedError> {
+        heap.upgrade(*self).ok_or(AlreadyDroppedError)
+    }
+}
+
+impl<T, A, M, P> GetGc<TrueHeap<M, P>> for RootPtr<T, A>
+where
+    T: Allocated<TrueHeap<M, P>> + ?Sized,
+    A: RefAccess,
+    P: Params,
+{
+    type Output = T;
+
+    fn try_get<'h>(
+        &self,
+        heap: &'h TrueHeap<M, P>,
+    ) -> Result<&'h Self::Output, AlreadyDroppedError> {
+        heap.get(self.downgrade()).ok_or(AlreadyDroppedError)
+    }
+}
+
+impl<T, A, M, P> GetGcMut<TrueHeap<M, P>> for RootPtr<T, A>
+where
+    T: Allocated<TrueHeap<M, P>> + ?Sized,
+    A: MutAccess,
+    P: Params,
+{
+    fn try_get_mut<'h>(
+        &self,
+        heap: &'h mut TrueHeap<M, P>,
+    ) -> Result<&'h mut Self::Output, AlreadyDroppedError> {
+        heap.get_mut(self.downgrade()).ok_or(AlreadyDroppedError)
+    }
+}
+
+impl<T, A, M, P> GetRoot<TrueHeap<M, P>> for RootPtr<T, A>
+where
+    T: Allocated<TrueHeap<M, P>> + ?Sized,
+    A: RefAccess,
+    P: Params,
+{
+    type Output = T;
+
+    fn get<'h>(&self, heap: &'h TrueHeap<M, P>) -> &'h Self::Output {
+        heap.get_root(self)
+    }
+}
+
+impl<T, A, M, P> GetRootMut<TrueHeap<M, P>> for RootPtr<T, A>
+where
+    T: Allocated<TrueHeap<M, P>> + ?Sized,
+    A: MutAccess,
+    P: Params,
+{
+    fn get_mut<'h>(&self, heap: &'h mut TrueHeap<M, P>) -> &'h mut Self::Output {
+        heap.get_root_mut(self)
+    }
+}
+
+impl<T, A> Downgrade for RootPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    type Output = GcPtr<T, A>;
+
+    fn downgrade(&self) -> Self::Output {
+        RootPtr::downgrade(self)
+    }
+}
+
+impl<Ptr, H> GetGc<H> for LuaPtr<Ptr>
+where
+    Ptr: GetGc<H>,
+{
+    type Output = <Ptr as GetGc<H>>::Output;
+
+    fn try_get<'h>(&self, heap: &'h H) -> Result<&'h Self::Output, AlreadyDroppedError> {
+        self.0.try_get(heap)
+    }
+}
+
+impl<Ptr, H> GetGcMut<H> for LuaPtr<Ptr>
+where
+    Ptr: GetGcMut<H>,
+{
+    fn try_get_mut<'h>(
+        &self,
+        heap: &'h mut H,
+    ) -> Result<&'h mut Self::Output, AlreadyDroppedError> {
+        self.0.try_get_mut(heap)
+    }
+}
+
+impl<Ptr, H> GetRoot<H> for LuaPtr<Ptr>
+where
+    Ptr: GetRoot<H>,
+{
+    type Output = <Ptr as GetRoot<H>>::Output;
+
+    fn get<'h>(&self, heap: &'h H) -> &'h Self::Output {
+        self.0.get(heap)
+    }
+}
+
+impl<Ptr, H> GetRootMut<H> for LuaPtr<Ptr>
+where
+    Ptr: GetRootMut<H>,
+{
+    fn get_mut<'h>(&self, heap: &'h mut H) -> &'h mut Self::Output {
+        self.0.get_mut(heap)
+    }
+}
+
+impl<Ptr, H> Upgrade<H> for LuaPtr<Ptr>
+where
+    Ptr: Upgrade<H>,
+{
+    type Output = LuaPtr<<Ptr as Upgrade<H>>::Output>;
+
+    fn try_upgrade(&self, heap: &H) -> Result<Self::Output, AlreadyDroppedError> {
+        Ok(LuaPtr(self.0.try_upgrade(heap)?))
+    }
+}
+
+impl<Ptr> Downgrade for LuaPtr<Ptr>
+where
+    Ptr: Downgrade,
+{
+    type Output = LuaPtr<<Ptr as Downgrade>::Output>;
+
+    fn downgrade(&self) -> Self::Output {
+        LuaPtr(self.0.downgrade())
     }
 }
