@@ -188,3 +188,68 @@ where
         Ok(())
     })
 }
+
+/// Repeat a string.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, n: int, [sep: string]) -> string`
+///
+/// Returns a string that is the concatenation of `n` copies of the string `s` separated by the string `sep`.
+/// The default value for `sep` is the empty string (that is, no separator).
+/// Returns the empty string if `n` is not positive.
+///
+/// (Note that it is very easy to exhaust the memory of your machine with a single call to this function.)
+///
+/// # Implementation-specific behavior
+///
+/// *   Strings are not required to contain text.
+///     They will be concatenated using raw [`Concat`](rt::value::traits::Concat) op.
+pub fn rep<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{Int, LuaString, Opts, ParseArgs, Split};
+        use rt::ffi::delegate::StackSlot;
+        use rt::gc::AllocExt;
+        use rt::value::traits::Concat;
+
+        let (s, n, rest): (LuaString<_>, Int, Opts<(LuaString<_>,)>) =
+            rt.stack.parse(&mut rt.core.gc)?;
+        let (sep,) = rest.split();
+
+        match n {
+            Int(..=0) => {
+                let output = rt.core.gc.alloc_str("");
+                rt.stack.clear();
+                rt.stack.format_sync(&mut rt.core.gc, output);
+                Ok(())
+            }
+            Int(1) => {
+                rt.stack.adjust_height(StackSlot(1));
+                Ok(())
+            }
+            Int(n) => {
+                let source: &Ty::String = s.as_native(&rt.core.gc)?;
+                let sep = sep.map(|t| t.as_native(&rt.core.gc)).transpose()?;
+
+                let mut output = source.clone();
+
+                for _ in 1..n {
+                    if let Some(sep) = sep {
+                        output.concat(sep);
+                    }
+
+                    output.concat(source);
+                }
+
+                let output = rt.core.gc.alloc_str(output);
+                rt.stack.clear();
+                rt.stack.format_sync(&mut rt.core.gc, output);
+                Ok(())
+            }
+        }
+    })
+}
