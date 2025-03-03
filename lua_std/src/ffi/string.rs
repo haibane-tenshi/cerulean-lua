@@ -270,11 +270,11 @@ where
 ///     however it is unlikely that this function will be used on strings with binary data.
 ///
 ///     Sadly, user attempting to reverse text is for an unpleasant surprise:
-///     *byte-reversed* text is unlikely to contain a valid encoding (which is in particular the case with utf8).
+///     *byte-reversed* text is unlikely to contain a valid encoding (which in particular is the case with utf8).
 ///
 ///     You should use a different function in order to perform reversal on text.
-///     (Note that it may require more than just recording characters in reversed order:
-///     for example Unicode's combining characters are applied to [preceding character][unicode#2.11.1],
+///     (Note that it may require more than just recording characters in reversed order.
+///     For example, Unicode's combining characters are applied to [preceding character][unicode#2.11.1],
 ///     so blindly reversing character sequence will alter how it is rendered.)
 ///
 /// [unicode#2.11.1]: https://www.unicode.org/versions/Unicode16.0.0/core-spec/chapter-2/#G1821
