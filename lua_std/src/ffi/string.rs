@@ -353,3 +353,38 @@ where
         Ok(())
     })
 }
+
+/// Convert string to uppercase.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string) -> string`
+///
+/// Receives a string and returns a copy of this string with all lowercase letters changed to uppercase.
+/// All other characters are left unchanged.
+/// The definition of what a lowercase letter is depends on the current locale.
+///
+/// # Implementation-specific behavior
+///
+/// *   String will be converted to utf8 before modification and converted back afterwards.
+///     'Uppercase' is defined according to the terms of the Unicode Derived Core Property `Uppercase`.
+pub fn upper<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{LuaString, ParseArgs};
+        use rt::gc::AllocExt;
+
+        let s: LuaString<_> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+
+        let s = s.to_str(&rt.core.gc)?;
+        let s = s.to_uppercase();
+        let s = rt.core.gc.alloc_str(s);
+
+        rt.stack.format_sync(&mut rt.core.gc, s);
+        Ok(())
+    })
+}
