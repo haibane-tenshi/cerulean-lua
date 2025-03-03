@@ -298,3 +298,58 @@ where
         Ok(())
     })
 }
+
+/// Return a substring
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string, i: int, [j: int]) -> string`
+///
+/// Returns the substring of `s` that starts at `i` and continues until `j`; `i` and `j` can be negative.
+/// If `j` is absent, then it is assumed to be equal to -1 (which is the same as the string length).
+/// In particular, the call `string.sub(s,1,j)` returns a prefix of `s` with length `j`,
+/// and `string.sub(s, -i)` (for a positive `i`) returns a suffix of `s` with length `i`.
+///
+/// If, after the translation of negative indices, `i` is less than 1, it is corrected to 1.
+/// If `j` is greater than the string length, it is corrected to that length.
+/// If, after these corrections, `i` is greater than `j`, the function returns the empty string.
+///
+/// # Implementation-specific behavior
+///
+/// * `i` and `j` are treated as *byte* offsets.
+pub fn sub<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{range_from_lua_clamp, Index, LuaString, Opts, ParseArgs, Split};
+        use rt::gc::AllocExt;
+
+        let (s, i, rest): (LuaString<_>, Index, Opts<(Index,)>) =
+            rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+        let (j,) = rest.split();
+
+        let bytes = s.to_bytes(&rt.core.gc)?;
+        let range = if let Some(j) = j {
+            range_from_lua_clamp(i..=j, bytes.len())
+        } else {
+            range_from_lua_clamp(i.., bytes.len())
+        };
+
+        let Some(range) = range else {
+            let err = rt
+                .core
+                .gc
+                .alloc_error_msg(format!("index {i} is out of bounds"));
+            return Err(err);
+        };
+
+        let output = bytes[range].to_vec();
+        let output = rt.core.gc.alloc_str(output);
+
+        rt.stack.format_sync(&mut rt.core.gc, output);
+        Ok(())
+    })
+}
