@@ -253,3 +253,48 @@ where
         }
     })
 }
+
+/// Reverse bytes in string.
+///
+/// # From Lua documentation
+///
+/// **Signature:**
+/// * `(s: string) -> string`
+///
+/// Returns a string that is the string `s` reversed.
+///
+/// # Implementation-specific behavior
+///
+/// *   As is customary in Lua behavior of this function is ambiguous.
+///     For the most part `string` library treats strings as *byte sequences*,
+///     however it is unlikely that this function will be used on strings with binary data.
+///
+///     Sadly, user attempting to reverse text is for an unpleasant surprise:
+///     *byte-reversed* text is unlikely to contain a valid encoding (which is in particular the case with utf8).
+///
+///     You should use a different function in order to perform reversal on text.
+///     (Note that it may require more than just recording characters in reversed order:
+///     for example Unicode's combining characters are applied to [preceding character][unicode#2.11.1],
+///     so blindly reversing character sequence will alter how it is rendered.)
+///
+/// [unicode#2.11.1]: https://www.unicode.org/versions/Unicode16.0.0/core-spec/chapter-2/#G1821
+pub fn reverse<Ty>() -> impl Delegate<Ty>
+where
+    Ty: Types,
+{
+    delegate::from_mut(|mut rt| {
+        use rt::ffi::arg_parser::{LuaString, ParseArgs};
+        use rt::gc::AllocExt;
+
+        let s: LuaString<_> = rt.stack.parse(&mut rt.core.gc)?;
+        rt.stack.clear();
+
+        let bytes = s.to_bytes(&rt.core.gc)?;
+        let bytes: Vec<_> = bytes.iter().copied().rev().collect();
+
+        let output = rt.core.gc.alloc_str(bytes);
+
+        rt.stack.format_sync(&mut rt.core.gc, output);
+        Ok(())
+    })
+}
