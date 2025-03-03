@@ -194,12 +194,12 @@ use std::borrow::Cow;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use gc::index::{Access, Gc, GcPtr, Interned, Root, RootPtr};
+use gc::index::{Access, GcPtr, Interned, RefAccess, RootPtr};
 use gc::userdata::Params;
 
 use super::tuple::Tuple;
 use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, NotTextError, RtError};
-use crate::gc::{Heap, LuaPtr};
+use crate::gc::{AsGc, AsRoot, Downgrade, Heap, LuaPtr, Upgrade};
 use crate::runtime::thread::{StackGuard, TransientStackGuard};
 use crate::value::int::NotExactIntError;
 use crate::value::string::IntoEncoding;
@@ -1445,32 +1445,32 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct LuaString<T>(pub T);
 
-impl<T> LuaString<Gc<Interned<T>>>
+impl<Ptr> LuaString<Ptr>
 where
-    T: IntoEncoding + 'static,
+    Ptr: AsGc,
+{
+    pub fn fmt_stringless(&self) -> impl Debug + Display + use<Ptr> {
+        FmtStringless(self.as_gc())
+    }
+}
+
+impl<Ptr> LuaString<Ptr>
+where
+    Ptr: AsGc,
+    <Ptr as AsGc>::Access: RefAccess,
+    <Ptr as AsGc>::Output: IntoEncoding + Sized + 'static,
 {
     pub fn fmt_with<'h, M, P>(
         &self,
         heap: &'h gc::Heap<M, P>,
-    ) -> Result<impl Debug + Display + use<'h, T, M, P>, AlreadyDroppedError>
+    ) -> Result<impl Debug + Display + use<'h, Ptr, M, P>, AlreadyDroppedError>
     where
         P: Params,
     {
         use crate::gc::TryGet;
 
-        let string = heap.try_get(self.0)?.as_inner();
-
+        let string = heap.try_get(self.as_gc())?;
         Ok(FmtWith(string))
-    }
-
-    pub fn to_str<M, P>(
-        self,
-        heap: &gc::Heap<M, P>,
-    ) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<T>>>
-    where
-        P: Params,
-    {
-        crate::value::string::try_gc_to_str(self.0, heap)
     }
 
     pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Result<Cow<'_, [u8]>, AlreadyDroppedError>
@@ -1479,137 +1479,107 @@ where
     {
         use crate::gc::TryGet;
 
-        let value = heap.try_get(self.0)?;
+        let value = heap.try_get(self.as_gc())?;
         Ok(value.to_bytes())
     }
 }
 
-impl<T> LuaString<Gc<Interned<T>>> {
-    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
-        FmtStringless(self.0)
-    }
-}
-
-impl<T> LuaString<LuaPtr<Gc<Interned<T>>>>
+impl<Ptr> LuaString<Ptr>
 where
-    T: IntoEncoding + 'static,
+    Ptr: AsGc<Access = gc::index::Ref>,
+    <Ptr as AsGc>::Output: IntoEncoding + Sized + 'static,
 {
-    pub fn fmt_with<'h, M, P>(
-        &self,
-        heap: &'h gc::Heap<M, P>,
-    ) -> Result<impl Debug + Display + use<'h, T, M, P>, AlreadyDroppedError>
-    where
-        P: Params,
-    {
-        use crate::gc::TryGet;
-
-        let string = heap.try_get(self.0 .0)?.as_inner();
-
-        Ok(FmtWith(string))
-    }
-
     pub fn to_str<M, P>(
         self,
         heap: &gc::Heap<M, P>,
-    ) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<T>>>
-    where
-        P: Params,
-    {
-        crate::value::string::try_gc_to_str(self.0 .0, heap)
-    }
-
-    pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Result<Cow<'_, [u8]>, AlreadyDroppedError>
+    ) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<<Ptr as AsGc>::Output>>>
     where
         P: Params,
     {
         use crate::gc::TryGet;
 
-        let value = heap.try_get(self.0 .0)?;
-        Ok(value.to_bytes())
+        let ptr = self.as_gc();
+        let value = heap.try_get(ptr)?;
+        value.to_str().ok_or_else(|| match heap.try_upgrade(ptr) {
+            Ok(ptr) => AlreadyDroppedOr::Other(NotTextError(ptr)),
+            Err(err) => err.into(),
+        })
     }
 }
 
-impl<T> LuaString<LuaPtr<Gc<Interned<T>>>> {
-    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
-        FmtStringless(self.0 .0)
-    }
-}
-
-impl<T> LuaString<Root<Interned<T>>>
+impl<Ptr> LuaString<Ptr>
 where
-    T: IntoEncoding + 'static,
+    Ptr: AsGc,
+    <Ptr as AsGc>::Access: RefAccess,
 {
-    pub fn fmt_with<'h, M, P>(
+    pub fn as_native<'h, Ty>(
         &self,
-        heap: &'h gc::Heap<M, P>,
-    ) -> impl Debug + Display + use<'h, T, M, P>
+        heap: &'h Heap<Ty>,
+    ) -> Result<&'h Ty::String, AlreadyDroppedError>
     where
-        P: Params,
+        Ty: Types,
+        Ptr: AsGc<Output = Interned<Ty::String>>,
     {
-        let string = heap.get_root(&self.0).as_inner();
-        FmtWith(string)
-    }
+        use crate::gc::TryGet;
 
-    pub fn to_str<'h, M, P>(
-        &self,
-        heap: &'h gc::Heap<M, P>,
-    ) -> Result<Cow<'h, str>, NotTextError<T>>
-    where
-        P: Params,
-    {
-        crate::value::string::try_root_to_str(&self.0, heap)
-    }
-
-    pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Cow<'_, [u8]>
-    where
-        P: Params,
-    {
-        heap.get_root(&self.0).to_bytes()
+        heap.try_get(self.as_gc()).map(|t| t.as_inner())
     }
 }
 
-impl<T> LuaString<Root<Interned<T>>> {
-    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
-        FmtStringless(self.0.downgrade())
-    }
-}
-
-impl<T> LuaString<LuaPtr<Root<Interned<T>>>>
+impl<Ptr> AsGc for LuaString<Ptr>
 where
-    T: IntoEncoding + 'static,
+    Ptr: AsGc,
 {
-    pub fn fmt_with<'h, M, P>(
-        &self,
-        heap: &'h gc::Heap<M, P>,
-    ) -> impl Debug + Display + use<'h, T, M, P>
-    where
-        P: Params,
-    {
-        let string = heap.get_root(&self.0 .0).as_inner();
-        FmtWith(string)
-    }
+    type Access = <Ptr as AsGc>::Access;
+    type Output = <Ptr as AsGc>::Output;
 
-    pub fn to_str<'h, M, P>(
-        &self,
-        heap: &'h gc::Heap<M, P>,
-    ) -> Result<Cow<'h, str>, NotTextError<T>>
-    where
-        P: Params,
-    {
-        crate::value::string::try_root_to_str(&self.0 .0, heap)
-    }
-
-    pub fn to_bytes<M, P>(self, heap: &gc::Heap<M, P>) -> Cow<'_, [u8]>
-    where
-        P: Params,
-    {
-        heap.get_root(&self.0 .0).to_bytes()
+    fn as_gc(&self) -> GcPtr<Self::Output, Self::Access> {
+        self.0.as_gc()
     }
 }
 
-impl<T> LuaString<LuaPtr<Root<Interned<T>>>> {
-    pub fn fmt_stringless(&self) -> impl Debug + Display + use<T> {
-        FmtStringless(self.0 .0.downgrade())
+impl<Ptr> AsRoot for LuaString<Ptr>
+where
+    Ptr: AsRoot,
+{
+    fn as_root(&self) -> &RootPtr<Self::Output, Self::Access> {
+        self.0.as_root()
+    }
+}
+
+impl<T, H> Upgrade<H> for LuaString<T>
+where
+    T: Upgrade<H>,
+{
+    type Output = LuaString<<T as Upgrade<H>>::Output>;
+
+    fn try_upgrade(&self, heap: &H) -> Result<Self::Output, AlreadyDroppedError> {
+        Ok(LuaString(self.0.try_upgrade(heap)?))
+    }
+}
+
+impl<T> Downgrade for LuaString<T>
+where
+    T: Downgrade,
+{
+    type Output = LuaString<<T as Downgrade>::Output>;
+
+    fn downgrade(&self) -> Self::Output {
+        LuaString(self.0.downgrade())
+    }
+}
+
+struct HexBytes<'a>(&'a [u8]);
+
+impl Debug for HexBytes<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl Display for HexBytes<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:02X?}", self.0)
     }
 }
 
@@ -1627,7 +1597,18 @@ where
     T: IntoEncoding,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#}", self)
+        let mut f = f.debug_struct("LuaString");
+
+        if let Some(s) = self.0.to_str() {
+            f.field("content", &"text");
+            f.field("value", &s.as_ref());
+        } else {
+            let bytes = self.0.to_bytes();
+            f.field("content", &"binary");
+            f.field("value", &HexBytes(bytes.as_ref()));
+        }
+
+        f.finish()
     }
 }
 
@@ -1644,25 +1625,42 @@ where
             }
         } else {
             let bytes = self.0.to_bytes();
-            write!(f, "{:02X?}", bytes)
+            write!(f, "{}", HexBytes(bytes.as_ref()))
         }
     }
 }
 
 struct FmtStringless<T>(T);
 
-impl<T> Debug for FmtStringless<Gc<T>>
+impl<T, A> Debug for FmtStringless<GcPtr<T, A>>
 where
     T: ?Sized,
+    A: Access,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.0, f)
+        use std::fmt::Pointer;
+
+        struct AsPointer<T>(T);
+
+        impl<T> Debug for AsPointer<T>
+        where
+            T: Pointer,
+        {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                Pointer::fmt(&self.0, f)
+            }
+        }
+
+        f.debug_struct("LuaString")
+            .field("addr", &AsPointer(self.0))
+            .finish()
     }
 }
 
-impl<T> Display for FmtStringless<Gc<T>>
+impl<T, A> Display for FmtStringless<GcPtr<T, A>>
 where
     T: ?Sized,
+    A: Access,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{string <{:p}>}}", self.0)

@@ -1,11 +1,11 @@
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use gc::{Interned, Root};
+use gc::Root;
 
 use super::Message;
 
-pub struct NotTextError<T>(pub Root<Interned<T>>);
+pub struct NotTextError<T>(pub Root<T>);
 
 impl<T> NotTextError<T> {
     pub(crate) fn into_diagnostic<FileId>(self) -> Message<FileId> {

@@ -274,6 +274,19 @@ impl AsEncoding for PossiblyUtf8Vec {
     }
 }
 
+impl<T> AsEncoding for Interned<T>
+where
+    T: AsEncoding,
+{
+    fn as_bytes(&self) -> Option<&[u8]> {
+        self.as_inner().as_bytes()
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        self.as_inner().as_str()
+    }
+}
+
 impl IntoEncoding for Vec<u8> {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         self.as_slice().into()
@@ -305,6 +318,19 @@ impl IntoEncoding for PossiblyUtf8Vec {
     }
 }
 
+impl<T> IntoEncoding for Interned<T>
+where
+    T: IntoEncoding,
+{
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.as_inner().to_bytes()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        self.as_inner().to_str()
+    }
+}
+
 use gc::userdata::Params;
 use gc::{Gc, Interned, Root};
 
@@ -313,7 +339,7 @@ use crate::error::{AlreadyDroppedOr, NotTextError};
 pub fn try_gc_to_str<T, M, P>(
     ptr: Gc<Interned<T>>,
     heap: &gc::Heap<M, P>,
-) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<T>>>
+) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<Interned<T>>>>
 where
     T: IntoEncoding + 'static,
     P: Params,
@@ -333,7 +359,7 @@ where
 pub fn try_root_to_str<'h, T, M, P>(
     ptr: &Root<Interned<T>>,
     heap: &'h gc::Heap<M, P>,
-) -> Result<Cow<'h, str>, NotTextError<T>>
+) -> Result<Cow<'h, str>, NotTextError<Interned<T>>>
 where
     T: IntoEncoding + 'static,
     P: Params,

@@ -53,7 +53,7 @@ where
     UpvalueCountMismatch(CapturesMismatch),
     Signature(SignatureError),
     NotCallable(NotCallableError<Ty>),
-    NotText(NotTextError<Ty::String>),
+    NotText(NotTextError<Interned<Ty::String>>),
     Thread(ThreadError),
     OpCode(OpCodeError),
 }
@@ -241,11 +241,11 @@ where
     }
 }
 
-impl<Ty> From<NotTextError<Ty::String>> for RuntimeError<Ty>
+impl<Ty> From<NotTextError<Interned<Ty::String>>> for RuntimeError<Ty>
 where
     Ty: Types,
 {
-    fn from(value: NotTextError<Ty::String>) -> Self {
+    fn from(value: NotTextError<Interned<Ty::String>>) -> Self {
         RuntimeError::NotText(value)
     }
 }
