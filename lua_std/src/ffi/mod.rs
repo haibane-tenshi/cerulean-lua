@@ -9,6 +9,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 
+use gc::Interned;
 use repr::index::StackSlot;
 use rt::chunk_cache::ChunkId;
 use rt::error::{AlreadyDroppedError, AlreadyDroppedOr, NotTextError, RtError, RuntimeError};
@@ -218,12 +219,12 @@ where
     enum Error<T> {
         TypeMismatch(TypeMismatchError),
         AlreadyDropped(AlreadyDroppedError),
-        NotText(NotTextError<T>),
+        NotText(NotTextError<Interned<T>>),
         InvalidCommand,
     }
 
-    impl<T> From<AlreadyDroppedOr<NotTextError<T>>> for Error<T> {
-        fn from(value: AlreadyDroppedOr<NotTextError<T>>) -> Self {
+    impl<T> From<AlreadyDroppedOr<NotTextError<Interned<T>>>> for Error<T> {
+        fn from(value: AlreadyDroppedOr<NotTextError<Interned<T>>>) -> Self {
             match value {
                 AlreadyDroppedOr::Dropped(err) => Error::AlreadyDropped(err),
                 AlreadyDroppedOr::Other(err) => Error::NotText(err),
@@ -683,7 +684,7 @@ where
     enum Error<T> {
         TypeMismatch(Type),
         AlreadyDropped(AlreadyDroppedError),
-        NotText(NotTextError<T>),
+        NotText(NotTextError<Interned<T>>),
     }
 
     impl<T> Debug for Error<T> {
@@ -719,8 +720,8 @@ where
         }
     }
 
-    impl<T> From<AlreadyDroppedOr<NotTextError<T>>> for Error<T> {
-        fn from(value: AlreadyDroppedOr<NotTextError<T>>) -> Self {
+    impl<T> From<AlreadyDroppedOr<NotTextError<Interned<T>>>> for Error<T> {
+        fn from(value: AlreadyDroppedOr<NotTextError<Interned<T>>>) -> Self {
             match value {
                 AlreadyDroppedOr::Dropped(err) => Error::AlreadyDropped(err),
                 AlreadyDroppedOr::Other(err) => Error::NotText(err),
@@ -1824,7 +1825,7 @@ where
 
     enum Error<T> {
         AlreadyDropped(AlreadyDroppedError),
-        NotText(NotTextError<T>),
+        NotText(NotTextError<Interned<T>>),
         TypeMismatch(Type),
         UnknownString,
     }
@@ -1854,8 +1855,8 @@ where
         }
     }
 
-    impl<T> From<AlreadyDroppedOr<NotTextError<T>>> for Error<T> {
-        fn from(value: AlreadyDroppedOr<NotTextError<T>>) -> Self {
+    impl<T> From<AlreadyDroppedOr<NotTextError<Interned<T>>>> for Error<T> {
+        fn from(value: AlreadyDroppedOr<NotTextError<Interned<T>>>) -> Self {
             match value {
                 AlreadyDroppedOr::Dropped(err) => Error::AlreadyDropped(err),
                 AlreadyDroppedOr::Other(err) => Error::NotText(err),
