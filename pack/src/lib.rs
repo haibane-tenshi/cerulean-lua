@@ -13,14 +13,14 @@
 //! Control sequences modify current state of encoder/decoder,
 //! value sequences encode/decode actual data.
 //!
-//! In the following *n* indicates a decimal literal, [*n*] indicates an optional decimal literal.
+//! In the following *n* indicates a decimal literal, \[*n*\] indicates an optional decimal literal.
 //!
 //! **Control** sequences:
 //!
 //! * `<` - set little endian
 //! * `>` - set big endian
 //! * `=` - set native endian
-//! * `!`[*n*] - set *maximum* alignment to *n* (default: `usize`)
+//! * `!`\[*n*\] - set *maximum* alignment to *n* (default: `usize`)
 //! * `x` - emit 1 byte of padding
 //! * `X`*op* - emit 0 or more bytes of padding, aligning to *op*, where *op* must be a valid **value** sequence
 //!
@@ -28,25 +28,28 @@
 //!
 //! **Value** sequences describe data type on wire format:
 //!
-//! * `b` - treat as `i8`
-//! * `B` - treat as `u8`
-//! * `h` - treat as `i16`
-//! * `H` - treat as `u16`
-//! * `l` - treat as `i32`
-//! * `L` - treat as `u32`
-//! * `T` - treat as `usize`
-//! * `f` - treat as `f32`
-//! * `d` - treat as `f64`
-//! * `i`[*n*] - treat as signed integer of *n* bytes width (default: `usize`)
-//! * `I`[*n*] - treat as unsigend integer of *n* bytes width (default: `usize`)
-//! * `j` - treat as `i64`
-//! * `J` - treat as `u64`
-//! * `n` - treat as either `i64` or `f64`
-//! * `c`*n* - treat as byte string with length of *n*
-//! * `z` - treat as zero-terminated byte string
-//! * `s`[*n*] - treat as byte string with preceding *n*-byte wide integer length (default: `usize`)
+//! * `b` - represent as `i8`
+//! * `B` - represent as `u8`
+//! * `h` - represent as `i16`
+//! * `H` - represent as `u16`
+//! * `l` - represent as `i32`
+//! * `L` - represent as `u32`
+//! * `T` - represent as `usize`
+//! * `f` - represent as `f32`
+//! * `d` - represent as `f64`
+//! * `i`\[*n*\] - represent as signed integer of *n* bytes width (default: `usize`)
+//! * `I`\[*n*\] - represent as unsigend integer of *n* bytes width (default: `usize`)
+//! * `j` - represent as `i64`
+//! * `J` - represent as `u64`
+//! * `n` - represent as either `i64` or `f64`
+//! * `c`*n* - represent as byte string with length of *n*
+//! * `z` - represent as zero-terminated byte string
+//! * `s`\[*n*\] - represent as byte string with preceding *n*-byte wide integer length (default: `usize`)
 //!
 //! Each value option produces/consumes one data entry.
+//!
+//! Implementation is expected to handle all representation details,
+//! such as trailing `\0` for `z` option etc.
 //!
 //! # Custom-sized integers
 //!
@@ -114,9 +117,20 @@
 //!
 //! [lua#6.4.2]: https://www.lua.org/manual/5.4/manual.html#6.4.2
 
+mod custom;
+mod encoder;
 mod lex;
 
+use custom::{Signed, Unsigned};
+
+pub use encoder::{EncodeError, Encoder};
 pub use lex::{parse_options, PackOptionError};
+
+fn is_little_endian() -> bool {
+    let value = 1_u16;
+    let bytes = value.to_ne_bytes();
+    bytes[0] == 1
+}
 
 /// Selected endianness of packed format.
 ///
@@ -130,10 +144,218 @@ pub enum Endianness {
     Native,
 }
 
+trait ToBytes<T> {
+    fn to_bytes(self, value: T, buf: &mut [u8; 16]) -> &[u8];
+}
+
+impl ToBytes<u8> for Endianness {
+    fn to_bytes(self, value: u8, buf: &mut [u8; 16]) -> &[u8] {
+        buf[0] = value;
+        &buf[..1]
+    }
+}
+
+impl ToBytes<u16> for Endianness {
+    fn to_bytes(self, value: u16, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..2].copy_from_slice(&bytes);
+        &buf[..2]
+    }
+}
+
+impl ToBytes<u32> for Endianness {
+    fn to_bytes(self, value: u32, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..4].copy_from_slice(&bytes);
+        &buf[..4]
+    }
+}
+
+impl ToBytes<u64> for Endianness {
+    fn to_bytes(self, value: u64, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..8].copy_from_slice(&bytes);
+        &buf[..8]
+    }
+}
+
+impl ToBytes<u128> for Endianness {
+    fn to_bytes(self, value: u128, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..16].copy_from_slice(&bytes);
+        &buf[..16]
+    }
+}
+
+impl ToBytes<i8> for Endianness {
+    fn to_bytes(self, value: i8, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..1].copy_from_slice(&bytes);
+        &buf[..1]
+    }
+}
+
+impl ToBytes<i16> for Endianness {
+    fn to_bytes(self, value: i16, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..2].copy_from_slice(&bytes);
+        &buf[..2]
+    }
+}
+
+impl ToBytes<i32> for Endianness {
+    fn to_bytes(self, value: i32, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..4].copy_from_slice(&bytes);
+        &buf[..4]
+    }
+}
+
+impl ToBytes<i64> for Endianness {
+    fn to_bytes(self, value: i64, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..8].copy_from_slice(&bytes);
+        &buf[..8]
+    }
+}
+
+impl ToBytes<i128> for Endianness {
+    fn to_bytes(self, value: i128, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..8].copy_from_slice(&bytes);
+        &buf[..8]
+    }
+}
+
+impl ToBytes<usize> for Endianness {
+    fn to_bytes(self, value: usize, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+        let len = std::mem::size_of::<usize>();
+
+        buf[..len].copy_from_slice(&bytes);
+        &buf[..len]
+    }
+}
+
+impl ToBytes<isize> for Endianness {
+    fn to_bytes(self, value: isize, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+        let len = std::mem::size_of::<isize>();
+
+        buf[..len].copy_from_slice(&bytes);
+        &buf[..len]
+    }
+}
+
+impl ToBytes<f32> for Endianness {
+    fn to_bytes(self, value: f32, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..4].copy_from_slice(&bytes);
+        &buf[..4]
+    }
+}
+
+impl ToBytes<f64> for Endianness {
+    fn to_bytes(self, value: f64, buf: &mut [u8; 16]) -> &[u8] {
+        let bytes = match self {
+            Endianness::Native => value.to_ne_bytes(),
+            Endianness::Big => value.to_be_bytes(),
+            Endianness::Little => value.to_le_bytes(),
+        };
+
+        buf[..8].copy_from_slice(&bytes);
+        &buf[..8]
+    }
+}
+
+impl ToBytes<Signed> for Endianness {
+    fn to_bytes(self, value: Signed, buf: &mut [u8; 16]) -> &[u8] {
+        let _ = self.to_bytes(value.value(), buf);
+        let len = value.len();
+
+        if is_little_endian() {
+            &buf[..len]
+        } else {
+            &buf[16 - len..]
+        }
+    }
+}
+
+impl ToBytes<Unsigned> for Endianness {
+    fn to_bytes(self, value: Unsigned, buf: &mut [u8; 16]) -> &[u8] {
+        let _ = self.to_bytes(value.value(), buf);
+        let len = value.len();
+
+        if is_little_endian() {
+            &buf[..len]
+        } else {
+            &buf[16 - len..]
+        }
+    }
+}
+
 /// Byte width of an integer.
 ///
 /// Lua packing format only permits integers widths in `1..=16` range.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteLength(u8);
 
 impl ByteLength {
@@ -143,11 +365,16 @@ impl ByteLength {
             .then(|| ByteLength(len.try_into().unwrap()))
     }
 
+    fn no_align() -> Self {
+        Self::new(1).unwrap()
+    }
+
     pub fn into_inner(self) -> u8 {
         self.0
     }
 }
 
+/// Packing option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PackOption {
     Control(ControlOption),
@@ -166,14 +393,33 @@ impl From<ValueOption> for PackOption {
     }
 }
 
+/// **Control** option.
+///
+/// Control sequences directly alter encoder/decoder state and do not interact with actual data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ControlOption {
+    /// Set endianness for following values.
     SetEndianness(Endianness),
+
+    /// Set maximum allowed [alignment](crate#alignment).
     MaxAlignment(ByteLength),
+
+    /// Emit/consume a padding byte.
+    ///
+    /// Our encoder always uses 0 as padding byte, but decoders should not rely on this knowledge.
     PadByte,
+
+    /// Emit/consume padding bytes, aligning next item to specified alignment.
+    ///
+    /// Note that this is still subject to current maximum alignment.
+    ///
+    /// Our encoder always uses 0 as padding byte, but decoders should not rely on this knowledge.
     AlignTo(ByteLength),
 }
 
+/// **Value** option.
+///
+/// Value sequences denote on-wire format used to encode/decode values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValueOption {
     U8,
@@ -185,16 +431,346 @@ pub enum ValueOption {
     I16,
     I32,
     I64,
-
     F32,
     F64,
 
+    /// Use unsigned integer of [custom length](crate#custom-sized-integers).
     Unsigned(ByteLength),
+
+    /// Use signed integer of [custom length](crate#custom-sized-integers).
     Signed(ByteLength),
 
+    /// Use Lua number.
+    ///
+    /// Lua likes to pun integers and floats, and this option is direct consequence of that.
+    ///
+    /// During encoding this option will accept either integer or float and will encode it as `f64`.
+    /// This process may be lossy.
+    ///
+    /// During decoding this option will expect a `f64`.
     Number,
 
-    StrFixed { len: usize },
+    /// Use string of fixed length.
+    StrFixed {
+        len: usize,
+    },
+
+    /// Use C-style string (denoted by trailing `\0` byte).
+    ///
+    /// Encoding C-style strings with embedded zeros is an error.
     StrC,
-    StrDyn { len_width: ByteLength },
+
+    /// Use dynamically-sized string.
+    ///
+    /// This option will place string length as integer of specific [custom length](crate#custom-sized-integers) before its content.
+    StrDyn {
+        len_width: ByteLength,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Value<'s> {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+    Usize(usize),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128(i128),
+    F32(f32),
+    F64(f64),
+    Str(&'s [u8]),
+}
+
+impl<'s> Value<'s> {
+    fn as_u8(self) -> Result<u8, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value),
+            Value::U16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_i8(self) -> Result<i8, ValueError> {
+        match self {
+            Value::U8(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => Ok(value),
+            Value::I16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_u16(self) -> Result<u16, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value),
+            Value::U32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_i16(self) -> Result<i16, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => Ok(value.into()),
+            Value::I16(value) => Ok(value),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_u32(self) -> Result<u32, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value.into()),
+            Value::U32(value) => Ok(value),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_i32(self) -> Result<i32, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value.into()),
+            Value::U32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => Ok(value.into()),
+            Value::I16(value) => Ok(value.into()),
+            Value::I32(value) => Ok(value),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_u64(self) -> Result<u64, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value.into()),
+            Value::U32(value) => Ok(value.into()),
+            Value::U64(value) => Ok(value),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_i64(self) -> Result<i64, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value.into()),
+            Value::U32(value) => Ok(value.into()),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => Ok(value.into()),
+            Value::I16(value) => Ok(value.into()),
+            Value::I32(value) => Ok(value.into()),
+            Value::I64(value) => Ok(value),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_u128(self) -> Result<u128, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value.into()),
+            Value::U32(value) => Ok(value.into()),
+            Value::U64(value) => Ok(value.into()),
+            Value::U128(value) => Ok(value),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_i128(self) -> Result<i128, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value.into()),
+            Value::U32(value) => Ok(value.into()),
+            Value::U64(value) => Ok(value.into()),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I8(value) => Ok(value.into()),
+            Value::I16(value) => Ok(value.into()),
+            Value::I32(value) => Ok(value.into()),
+            Value::I64(value) => Ok(value.into()),
+            Value::I128(value) => Ok(value),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_usize(self) -> Result<usize, ValueError> {
+        match self {
+            Value::U8(value) => Ok(value.into()),
+            Value::U16(value) => Ok(value.into()),
+            Value::U32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::U128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::Usize(value) => Ok(value),
+            Value::I8(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I16(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I32(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I64(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::I128(value) => value.try_into().map_err(|_| ValueError::Unrepresentable),
+            Value::F32(_) | Value::F64(_) | Value::Str(_) => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_f32(self) -> Result<f32, ValueError> {
+        match self {
+            Value::F32(value) => Ok(value),
+            Value::F64(value) => Ok(value as _),
+            _ => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_f64(self) -> Result<f64, ValueError> {
+        match self {
+            Value::F32(value) => Ok(value as _),
+            Value::F64(value) => Ok(value),
+            _ => Err(ValueError::IncompatibleType),
+        }
+    }
+
+    fn as_str(self) -> Result<&'s [u8], ValueError> {
+        match self {
+            Value::Str(value) => Ok(value),
+            _ => Err(ValueError::IncompatibleType),
+        }
+    }
+}
+
+impl From<u8> for Value<'_> {
+    fn from(value: u8) -> Self {
+        Value::U8(value)
+    }
+}
+
+impl From<u16> for Value<'_> {
+    fn from(value: u16) -> Self {
+        Value::U16(value)
+    }
+}
+
+impl From<u32> for Value<'_> {
+    fn from(value: u32) -> Self {
+        Value::U32(value)
+    }
+}
+
+impl From<u64> for Value<'_> {
+    fn from(value: u64) -> Self {
+        Value::U64(value)
+    }
+}
+
+impl From<u128> for Value<'_> {
+    fn from(value: u128) -> Self {
+        Value::U128(value)
+    }
+}
+
+impl From<i8> for Value<'_> {
+    fn from(value: i8) -> Self {
+        Value::I8(value)
+    }
+}
+
+impl From<i16> for Value<'_> {
+    fn from(value: i16) -> Self {
+        Value::I16(value)
+    }
+}
+
+impl From<i32> for Value<'_> {
+    fn from(value: i32) -> Self {
+        Value::I32(value)
+    }
+}
+
+impl From<i64> for Value<'_> {
+    fn from(value: i64) -> Self {
+        Value::I64(value)
+    }
+}
+
+impl From<i128> for Value<'_> {
+    fn from(value: i128) -> Self {
+        Value::I128(value)
+    }
+}
+
+impl From<usize> for Value<'_> {
+    fn from(value: usize) -> Self {
+        Value::Usize(value)
+    }
+}
+
+impl<'s> From<&'s [u8]> for Value<'s> {
+    fn from(value: &'s [u8]) -> Self {
+        Value::Str(value)
+    }
+}
+
+enum ValueError {
+    IncompatibleType,
+    Unrepresentable,
 }
