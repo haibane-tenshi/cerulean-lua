@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use logos::{Lexer, Logos};
 
-use super::{ByteLength, Endianness, PackOption};
+use super::{ByteWidth, Endianness, PackOption};
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Logos)]
@@ -139,7 +139,7 @@ pub fn parse_options(
         // Skip spaces between options.
         while lexer.next_if(|t| matches!(t.0, Ok(Token::Space))).is_some() {}
 
-        let (token, span) = lexer.next()?;
+        let (token, span) = lexer.peek().cloned()?;
 
         let mut inner = || {
             let token = token.map_err(|err| match err {
@@ -149,71 +149,23 @@ pub fn parse_options(
                 },
             })?;
 
-            let parse_byte_length = |lexer: &mut std::iter::Peekable<_>| {
+            let parse_byte_width = |lexer: &mut std::iter::Peekable<_>| {
                 if let Some((Ok(Token::Num(len)), span)) = lexer.peek().cloned() {
                     lexer.next();
-                    ByteLength::new(len).ok_or(PackOptionError::InvalidIntWidth {
+                    ByteWidth::new(len).ok_or(PackOptionError::InvalidIntWidth {
                         range: span,
                         width: len,
                     })
                 } else {
                     let align = std::mem::align_of::<usize>();
-                    Ok(ByteLength::new(align).unwrap())
+                    Ok(ByteWidth::new(align).unwrap())
                 }
             };
 
-            let r = match token {
-                Token::LeftAngleBracket => ControlOption::SetEndianness(Endianness::Little).into(),
-                Token::RightAngleBracket => ControlOption::SetEndianness(Endianness::Big).into(),
-                Token::EqualsSign => ControlOption::SetEndianness(Endianness::Native).into(),
-                Token::b => ValueOption::I8.into(),
-                Token::B => ValueOption::U8.into(),
-                Token::h => ValueOption::I16.into(),
-                Token::H => ValueOption::U16.into(),
-                Token::l => ValueOption::I32.into(),
-                Token::L => ValueOption::U32.into(),
-                Token::T => ValueOption::Usize.into(),
-                Token::f => ValueOption::F32.into(),
-                Token::d => ValueOption::F64.into(),
-                Token::j => ValueOption::I64.into(),
-                Token::J => ValueOption::U64.into(),
-                Token::n => ValueOption::Number.into(),
-                Token::z => ValueOption::StrC.into(),
-                Token::x => ControlOption::PadByte.into(),
-                Token::ExclamationMark => {
-                    let len = parse_byte_length(&mut lexer)?;
-                    ControlOption::MaxAlignment(len).into()
-                }
-                Token::i => {
-                    let len = parse_byte_length(&mut lexer)?;
-                    ValueOption::Signed(len).into()
-                }
-                Token::I => {
-                    let len = parse_byte_length(&mut lexer)?;
-                    ValueOption::Unsigned(len).into()
-                }
-                Token::c => {
-                    let len = if let Some((Ok(Token::Num(len)), _)) = lexer.peek().cloned() {
-                        lexer.next();
-                        len
-                    } else {
-                        let err = PackOptionError::ExpectedStrLength { offset: span.end };
-                        return Err(err);
-                    };
+            let parse_value = |lexer: &mut std::iter::Peekable<_>| {
+                let (token, span): (Result<Token, _>, Range<usize>) = lexer.next()?;
 
-                    let r = ValueOption::StrFixed { len };
-                    r.into()
-                }
-                Token::s => {
-                    let len = parse_byte_length(&mut lexer)?;
-                    let r = ValueOption::StrDyn { len_width: len };
-                    r.into()
-                }
-                Token::X => {
-                    let (token, span) = lexer
-                        .next()
-                        .ok_or(PackOptionError::InvalidAlignTo { range: span.end })?;
-
+                let mut inner = || {
                     let token = token.map_err(|err| match err {
                         LexError::UnrecognizedToken => {
                             PackOptionError::UknownOption { offset: span.start }
@@ -223,15 +175,31 @@ pub fn parse_options(
                         },
                     })?;
 
-                    let width = match token {
-                        Token::b | Token::B | Token::z => ByteLength::new(1).unwrap(),
-                        Token::h | Token::H => ByteLength::new(2).unwrap(),
-                        Token::l | Token::L | Token::f => ByteLength::new(4).unwrap(),
-                        Token::j | Token::J | Token::d | Token::n => ByteLength::new(8).unwrap(),
-                        Token::T => ByteLength::new(std::mem::size_of::<usize>()).unwrap(),
-                        Token::i | Token::I | Token::s => parse_byte_length(&mut lexer)?,
+                    let r = match token {
+                        Token::b => ValueOption::I8,
+                        Token::B => ValueOption::U8,
+                        Token::h => ValueOption::I16,
+                        Token::H => ValueOption::U16,
+                        Token::l => ValueOption::I32,
+                        Token::L => ValueOption::U32,
+                        Token::T => ValueOption::Usize,
+                        Token::f => ValueOption::F32,
+                        Token::d => ValueOption::F64,
+                        Token::j => ValueOption::I64,
+                        Token::J => ValueOption::U64,
+                        Token::n => ValueOption::Number,
+                        Token::z => ValueOption::StrC,
+                        Token::i => {
+                            let len = parse_byte_width(lexer)?;
+                            ValueOption::Signed(len)
+                        }
+                        Token::I => {
+                            let len = parse_byte_width(lexer)?;
+                            ValueOption::Unsigned(len)
+                        }
                         Token::c => {
-                            let _ = if let Some((Ok(Token::Num(len)), _)) = lexer.peek().cloned() {
+                            let len = if let Some((Ok(Token::Num(len)), _)) = lexer.peek().cloned()
+                            {
                                 lexer.next();
                                 len
                             } else {
@@ -239,26 +207,54 @@ pub fn parse_options(
                                 return Err(err);
                             };
 
-                            ByteLength::new(1).unwrap()
+                            ValueOption::StrFixed { len }
                         }
-                        Token::Space | Token::Num(_) => {
+                        Token::s => {
+                            let len = parse_byte_width(lexer)?;
+                            ValueOption::StrDyn { len_width: len }
+                        }
+                        _ => {
                             let err = PackOptionError::UknownOption { offset: span.start };
-                            return Err(err);
-                        }
-                        Token::LeftAngleBracket
-                        | Token::RightAngleBracket
-                        | Token::EqualsSign
-                        | Token::ExclamationMark
-                        | Token::x
-                        | Token::X => {
-                            let err = PackOptionError::InvalidAlignTo { range: span.start };
                             return Err(err);
                         }
                     };
 
-                    ControlOption::AlignTo(width).into()
+                    Ok(r)
+                };
+
+                Some(inner())
+            };
+
+            let r = match token {
+                Token::LeftAngleBracket => {
+                    lexer.next();
+                    ControlOption::SetEndianness(Endianness::Little).into()
                 }
-                _ => return Err(PackOptionError::UknownOption { offset: span.start }),
+                Token::RightAngleBracket => {
+                    lexer.next();
+                    ControlOption::SetEndianness(Endianness::Big).into()
+                }
+                Token::EqualsSign => {
+                    lexer.next();
+                    ControlOption::SetEndianness(Endianness::Native).into()
+                }
+                Token::x => {
+                    lexer.next();
+                    ControlOption::PadByte.into()
+                }
+                Token::ExclamationMark => {
+                    lexer.next();
+                    let len = parse_byte_width(&mut lexer)?;
+                    ControlOption::MaxAlignment(len.to_align()).into()
+                }
+                Token::X => {
+                    lexer.next();
+                    let next = parse_value(&mut lexer)
+                        .ok_or(PackOptionError::InvalidAlignTo { range: span.end })??;
+
+                    ControlOption::AlignTo(next.align()).into()
+                }
+                _ => parse_value(&mut lexer).unwrap()?.into(),
             };
 
             Ok(r)

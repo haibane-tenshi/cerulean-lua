@@ -134,7 +134,11 @@ fn is_little_endian() -> bool {
 
 /// Selected endianness of packed format.
 ///
-/// Note that it can be changed by format string,
+/// Endianness determines the order in which bytes in multi-byte data is serialized.
+/// Little-endian puts least significant bytes first, big-endian puts most significant bytes first.
+/// Native-endian is either big or little chosen to match your machine.
+///
+/// Note that endianness can be changed by format string,
 /// so different part of the packed byte sequence may be encoded using different endianness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum Endianness {
@@ -356,17 +360,42 @@ impl ToBytes<Unsigned> for Endianness {
 ///
 /// Lua packing format only permits integers widths in `1..=16` range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ByteLength(u8);
+pub struct ByteWidth(u8);
 
-impl ByteLength {
+impl ByteWidth {
     pub fn new(len: usize) -> Option<Self> {
         (1..=16)
             .contains(&len)
-            .then(|| ByteLength(len.try_into().unwrap()))
+            .then(|| ByteWidth(len.try_into().unwrap()))
     }
 
-    fn no_align() -> Self {
-        Self::new(1).unwrap()
+    pub fn into_inner(self) -> u8 {
+        self.0
+    }
+
+    fn to_align(self) -> Alignment {
+        Alignment(self.0)
+    }
+}
+
+/// Alignment of packed data.
+///
+/// Conventionally, this denotes alignment **from the beginning of the byte stream**;
+/// this has no relation to alignment of serialized data in actual memory.
+///
+/// Alignment can be in any value in `1..=16` range.
+/// Technically, alignments that are not power-of-2 are permitted,
+/// so it may not be a valid alignment in Rust sense.
+/// However attempting to encode/decode data with such alignment may fail.
+/// See [aligment](crate#alignment) section for more details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Alignment(u8);
+
+impl Alignment {
+    pub fn new(len: usize) -> Option<Self> {
+        (1..=16)
+            .contains(&len)
+            .then(|| Alignment(len.try_into().unwrap()))
     }
 
     pub fn into_inner(self) -> u8 {
@@ -402,7 +431,7 @@ pub enum ControlOption {
     SetEndianness(Endianness),
 
     /// Set maximum allowed [alignment](crate#alignment).
-    MaxAlignment(ByteLength),
+    MaxAlignment(Alignment),
 
     /// Emit/consume a padding byte.
     ///
@@ -414,7 +443,7 @@ pub enum ControlOption {
     /// Note that this is still subject to current maximum alignment.
     ///
     /// Our encoder always uses 0 as padding byte, but decoders should not rely on this knowledge.
-    AlignTo(ByteLength),
+    AlignTo(Alignment),
 }
 
 /// **Value** option.
@@ -435,10 +464,10 @@ pub enum ValueOption {
     F64,
 
     /// Use unsigned integer of [custom length](crate#custom-sized-integers).
-    Unsigned(ByteLength),
+    Unsigned(ByteWidth),
 
     /// Use signed integer of [custom length](crate#custom-sized-integers).
-    Signed(ByteLength),
+    Signed(ByteWidth),
 
     /// Use Lua number.
     ///
@@ -464,8 +493,23 @@ pub enum ValueOption {
     ///
     /// This option will place string length as integer of specific [custom length](crate#custom-sized-integers) before its content.
     StrDyn {
-        len_width: ByteLength,
+        len_width: ByteWidth,
     },
+}
+
+impl ValueOption {
+    pub fn align(self) -> Alignment {
+        use ValueOption::*;
+
+        match self {
+            U8 | I8 | StrC | StrFixed { .. } => Alignment::new(1).unwrap(),
+            U16 | I16 => Alignment::new(2).unwrap(),
+            U32 | I32 | F32 => Alignment::new(4).unwrap(),
+            U64 | I64 | F64 | Number => Alignment::new(8).unwrap(),
+            Usize => Alignment::new(std::mem::size_of::<usize>()).unwrap(),
+            Unsigned(width) | Signed(width) | StrDyn { len_width: width } => width.to_align(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

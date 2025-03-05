@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::io::Write;
 
-use super::{ByteLength, ControlOption, Endianness, Value, ValueError, ValueOption};
+use super::{Alignment, ControlOption, Endianness, Value, ValueError, ValueOption};
 
 /// Encoder for Lua binary packing format.
 #[derive(Debug, Clone, Copy)]
@@ -9,19 +9,19 @@ pub struct Encoder<W> {
     writer: W,
     count: usize,
     endianness: Endianness,
-    max_alignment: ByteLength,
+    max_alignment: Alignment,
 }
 
 impl<W> Encoder<W> {
     /// Construct new encoder with native endianness and alignment to 1 byte.
     pub fn new(sink: W) -> Self {
-        Self::new_with(sink, Endianness::Native, ByteLength::new(1).unwrap())
+        Self::new_with(sink, Endianness::Native, Alignment::new(1).unwrap())
     }
 
     /// Construct new encoder.
     ///
     /// Refer to section about [alignment](crate#alignment) about behavior and caveats.
-    pub fn new_with(sink: W, endianness: Endianness, max_alignment: ByteLength) -> Self {
+    pub fn new_with(sink: W, endianness: Endianness, max_alignment: Alignment) -> Self {
         Encoder {
             writer: sink,
             count: 0,
@@ -36,6 +36,8 @@ where
     W: Write,
 {
     fn write_bytes(&mut self, mut buf: &[u8]) -> std::io::Result<()> {
+        // Adopted from Write::write_all.
+        // We want to correctly record how many characters was written because of alignment rules.
         use std::io::{Error, ErrorKind};
 
         while !buf.is_empty() {
@@ -54,7 +56,7 @@ where
         Ok(())
     }
 
-    fn write(&mut self, data: &[u8], align: ByteLength) -> Result<(), EncodeError> {
+    fn align_to(&mut self, align: Alignment) -> Result<(), EncodeError> {
         const PADDING: [u8; 16] = [0; 16];
 
         let len = align.min(self.max_alignment);
@@ -69,8 +71,11 @@ where
         let pad = if tail > 0 { align - tail } else { 0 };
 
         self.write_bytes(&PADDING[..pad])?;
-        self.write_bytes(data)?;
+        Ok(())
+    }
 
+    fn write(&mut self, data: &[u8]) -> Result<(), EncodeError> {
+        self.write_bytes(data)?;
         Ok(())
     }
 
@@ -89,7 +94,7 @@ where
                 self.write_bytes(&[0])?;
                 Ok(())
             }
-            ControlOption::AlignTo(align) => self.write(&[], align),
+            ControlOption::AlignTo(align) => self.align_to(align),
         }
     }
 
@@ -101,71 +106,72 @@ where
         let mut buf = [0; 16];
         let buf = &mut buf;
 
+        self.align_to(ctrl.align())?;
+
         match ctrl {
             ValueOption::U8 => {
                 let value = value.as_u8()?;
-                self.write(&[value], ByteLength::new(1).unwrap())?;
+                self.write(&[value])?;
                 Ok(())
             }
             ValueOption::U16 => {
                 let value = value.as_u16()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(2).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::U32 => {
                 let value = value.as_u32()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(4).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::U64 => {
                 let value = value.as_u64()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(8).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::I8 => {
                 let value = value.as_i8()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(1).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::I16 => {
                 let value = value.as_i16()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(2).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::I32 => {
                 let value = value.as_i32()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(4).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::I64 => {
                 let value = value.as_i64()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(8).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::Usize => {
                 let value = value.as_usize()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                let align = ByteLength::new(std::mem::size_of::<usize>()).unwrap();
-                self.write(bytes, align)?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::F32 => {
                 let value = value.as_f32()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(4).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::F64 => {
                 let value = value.as_f64()?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(8).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::Number => {
@@ -177,21 +183,21 @@ where
                     return Err(ValueError::IncompatibleType.into());
                 };
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, ByteLength::new(8).unwrap())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::Signed(width) => {
                 let value = value.as_i128()?;
                 let value = Signed::new(value, width).ok_or(ValueError::Unrepresentable)?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, value.size())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::Unsigned(width) => {
                 let value = value.as_u128()?;
                 let value = Unsigned::new(value, width).ok_or(ValueError::Unrepresentable)?;
                 let bytes = self.endianness.to_bytes(value, buf);
-                self.write(bytes, value.size())?;
+                self.write(bytes)?;
                 Ok(())
             }
             ValueOption::StrC => {
@@ -207,8 +213,8 @@ where
                     return Err(err);
                 }
 
-                self.write(s, ByteLength::no_align())?;
-                self.write(&[0], ByteLength::no_align())?;
+                self.write(s)?;
+                self.write(&[0])?;
                 Ok(())
             }
             ValueOption::StrFixed { len } => {
@@ -222,7 +228,7 @@ where
                     return Err(err);
                 }
 
-                self.write(s, ByteLength::no_align())?;
+                self.write(s)?;
                 Ok(())
             }
             ValueOption::StrDyn { len_width } => {
@@ -231,8 +237,8 @@ where
                     .ok_or(ValueError::Unrepresentable)?;
                 let bytes = self.endianness.to_bytes(len, buf);
 
-                self.write(bytes, len.size())?;
-                self.write(s, ByteLength::no_align())?;
+                self.write(bytes)?;
+                self.write(s)?;
                 Ok(())
             }
         }
@@ -264,7 +270,7 @@ pub enum EncodeError {
     },
 
     /// Data alignment is not power of 2.
-    BadAlignment { align: ByteLength },
+    BadAlignment { align: Alignment },
 
     /// Writing to sink failed.
     Io(std::io::Error),

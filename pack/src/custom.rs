@@ -1,13 +1,13 @@
-use super::ByteLength;
+use super::ByteWidth;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Signed {
     value: i128,
-    len: ByteLength,
+    len: ByteWidth,
 }
 
 impl Signed {
-    pub(crate) fn new(value: i128, len: ByteLength) -> Option<Self> {
+    pub(crate) fn new(value: i128, len: ByteWidth) -> Option<Self> {
         let bits = len.into_inner() * 8;
 
         debug_assert!((1..=16).contains(&len.into_inner()));
@@ -39,7 +39,7 @@ impl Signed {
         self.len.into_inner().into()
     }
 
-    pub(crate) fn size(self) -> ByteLength {
+    pub(crate) fn size(self) -> ByteWidth {
         self.len
     }
 }
@@ -47,11 +47,11 @@ impl Signed {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Unsigned {
     value: u128,
-    len: ByteLength,
+    len: ByteWidth,
 }
 
 impl Unsigned {
-    pub(crate) fn new(value: u128, len: ByteLength) -> Option<Self> {
+    pub(crate) fn new(value: u128, len: ByteWidth) -> Option<Self> {
         let bits = len.into_inner() * 8;
 
         debug_assert!((1..=16).contains(&len.into_inner()));
@@ -79,7 +79,7 @@ impl Unsigned {
         self.len.into_inner().into()
     }
 
-    pub(crate) fn size(self) -> ByteLength {
+    pub(crate) fn size(self) -> ByteWidth {
         self.len
     }
 }
