@@ -38,10 +38,6 @@ impl Signed {
     pub(crate) fn len(self) -> usize {
         self.len.into_inner().into()
     }
-
-    pub(crate) fn size(self) -> ByteWidth {
-        self.len
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -77,9 +73,5 @@ impl Unsigned {
 
     pub(crate) fn len(self) -> usize {
         self.len.into_inner().into()
-    }
-
-    pub(crate) fn size(self) -> ByteWidth {
-        self.len
     }
 }

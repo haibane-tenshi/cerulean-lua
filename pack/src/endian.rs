@@ -24,6 +24,7 @@ pub enum Endianness {
 }
 
 impl Endianness {
+    #[expect(clippy::wrong_self_convention)]
     pub(crate) fn from_bytes_signed(self, len: ByteWidth, buf: &[u8]) -> Option<Signed> {
         let e: usize = len.into_inner().into();
         let bytes = buf.get(..e)?;
@@ -63,6 +64,7 @@ impl Endianness {
         Some(num)
     }
 
+    #[expect(clippy::wrong_self_convention)]
     pub(crate) fn from_bytes_unsigned(self, len: ByteWidth, buf: &[u8]) -> Option<Unsigned> {
         let e: usize = len.into_inner().into();
         let bytes = buf.get(..e)?;
@@ -296,6 +298,7 @@ impl ToBytes<Unsigned> for Endianness {
 }
 
 pub(crate) trait FromBytes<T> {
+    #[expect(clippy::wrong_self_convention)]
     fn from_bytes(self, buf: &[u8]) -> Option<T>;
 }
 
