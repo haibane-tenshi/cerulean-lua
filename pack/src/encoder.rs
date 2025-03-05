@@ -100,8 +100,8 @@ where
 
     /// Put in a value.
     pub fn put_value(&mut self, ctrl: ValueOption, value: Value<'_>) -> Result<(), EncodeError> {
-        use super::ToBytes;
         use crate::custom::{Signed, Unsigned};
+        use crate::endian::ToBytes;
 
         let mut buf = [0; 16];
         let buf = &mut buf;
