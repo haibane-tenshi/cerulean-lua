@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::ops::Range;
 
 use logos::{Lexer, Logos};
@@ -95,8 +96,9 @@ pub(crate) enum LexError {
     NumberTooBig,
 }
 
+/// Formatting specifier error.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PackOptionError {
+pub enum PackSpecError {
     /// Encountered unrecognized packing option.
     UknownOption {
         /// Offset into option's string.
@@ -123,13 +125,41 @@ pub enum PackOptionError {
         offset: usize,
     },
     /// Only entry options are permitted as argument to align-to (option `X`).
-    InvalidAlignTo { range: usize },
+    InvalidAlignTo { offset: usize },
 }
+
+impl Display for PackSpecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PackSpecError::UknownOption { offset } => write!(
+                f,
+                "encountered unknown formatting specifier at index {offset}"
+            ),
+            PackSpecError::NumberTooBig { range } => {
+                write!(f, "number at {range:?} is too big to fit into usize")
+            }
+            PackSpecError::InvalidIntWidth { range: _, width } => write!(
+                f,
+                "specified integer width ({width}) is outside of 1..=16 range"
+            ),
+            PackSpecError::ExpectedStrLength { offset } => write!(
+                f,
+                "fixed sized string expects its length (at index {offset})"
+            ),
+            PackSpecError::InvalidAlignTo { offset } => write!(
+                f,
+                "align-to specifier expects a valid value specifier (at index {offset})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PackSpecError {}
 
 /// Parse format specifier string.
 ///
 /// See [description of the format](crate#format-string) in crate-level documentation.
-pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackOptionError>> + use<'_> {
+pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackSpecError>> + use<'_> {
     use logos::Lexer;
 
     use super::{ControlSpec, ValueSpec};
@@ -144,8 +174,8 @@ pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackOption
 
         let mut inner = || {
             let token = token.map_err(|err| match err {
-                LexError::UnrecognizedToken => PackOptionError::UknownOption { offset: span.start },
-                LexError::NumberTooBig => PackOptionError::NumberTooBig {
+                LexError::UnrecognizedToken => PackSpecError::UknownOption { offset: span.start },
+                LexError::NumberTooBig => PackSpecError::NumberTooBig {
                     range: span.clone(),
                 },
             })?;
@@ -153,7 +183,7 @@ pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackOption
             let parse_byte_width = |lexer: &mut std::iter::Peekable<_>| {
                 if let Some((Ok(Token::Num(len)), span)) = lexer.peek().cloned() {
                     lexer.next();
-                    ByteWidth::new(len).ok_or(PackOptionError::InvalidIntWidth {
+                    ByteWidth::new(len).ok_or(PackSpecError::InvalidIntWidth {
                         range: span,
                         width: len,
                     })
@@ -169,9 +199,9 @@ pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackOption
                 let mut inner = || {
                     let token = token.map_err(|err| match err {
                         LexError::UnrecognizedToken => {
-                            PackOptionError::UknownOption { offset: span.start }
+                            PackSpecError::UknownOption { offset: span.start }
                         }
-                        LexError::NumberTooBig => PackOptionError::NumberTooBig {
+                        LexError::NumberTooBig => PackSpecError::NumberTooBig {
                             range: span.clone(),
                         },
                     })?;
@@ -204,7 +234,7 @@ pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackOption
                                 lexer.next();
                                 len
                             } else {
-                                let err = PackOptionError::ExpectedStrLength { offset: span.end };
+                                let err = PackSpecError::ExpectedStrLength { offset: span.end };
                                 return Err(err);
                             };
 
@@ -215,7 +245,7 @@ pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackOption
                             ValueSpec::StrDyn { len_width: len }
                         }
                         _ => {
-                            let err = PackOptionError::UknownOption { offset: span.start };
+                            let err = PackSpecError::UknownOption { offset: span.start };
                             return Err(err);
                         }
                     };
@@ -251,7 +281,7 @@ pub fn parse_format(s: &str) -> impl Iterator<Item = Result<PackSpec, PackOption
                 Token::X => {
                     lexer.next();
                     let next = parse_value(&mut lexer)
-                        .ok_or(PackOptionError::InvalidAlignTo { range: span.end })??;
+                        .ok_or(PackSpecError::InvalidAlignTo { offset: span.end })??;
 
                     ControlSpec::AlignTo(next.align()).into()
                 }

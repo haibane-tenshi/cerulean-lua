@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use super::{Alignment, ControlSpec, Endianness, Value, ValueSpec};
 
 /// Decoder for Lua binary packing format.
@@ -214,6 +216,7 @@ impl<'s> Decoder<'s> {
     }
 }
 
+/// Decoding error.
 #[derive(Debug, Clone, Copy)]
 pub enum DecodeError {
     /// Reached EoF while there is more data is expected.
@@ -225,3 +228,22 @@ pub enum DecodeError {
     /// Length of dynamic string didn't fit into `usize`.
     LenOverflow { len: u128 },
 }
+
+impl Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DecodeError::UnexpectedEoF => write!(f, "reached unexpected eof"),
+            DecodeError::BadAlignment { align } => write!(
+                f,
+                "target alignment ({}) must be a power of 2",
+                align.into_inner()
+            ),
+            DecodeError::LenOverflow { len } => write!(
+                f,
+                "dynamically-sized string length ({len}) that is not representable as usize"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {}

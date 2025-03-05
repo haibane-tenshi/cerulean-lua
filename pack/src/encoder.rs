@@ -245,7 +245,7 @@ where
     }
 }
 
-/// Possible encoding errors.
+/// Encoding error.
 #[derive(Debug)]
 pub enum EncodeError {
     /// Attempted to serialize value incompatible with target type.
@@ -312,10 +312,12 @@ impl Display for EncodeError {
             ),
             EncodeError::BadAlignment { align } => write!(
                 f,
-                "target alignment must be a power of 2 (resolved to {})",
+                "target alignment ({}) must be a power of 2",
                 align.into_inner()
             ),
             EncodeError::Io(err) => Display::fmt(err, f),
         }
     }
 }
+
+impl std::error::Error for EncodeError {}

@@ -138,7 +138,7 @@ mod lex;
 pub use decoder::{DecodeError, Decoder};
 pub use encoder::{EncodeError, Encoder};
 pub use endian::Endianness;
-pub use lex::{parse_format, PackOptionError};
+pub use lex::{parse_format, PackSpecError};
 
 /// Byte width of an integer.
 ///
@@ -231,7 +231,7 @@ pub enum ControlSpec {
     AlignTo(Alignment),
 }
 
-/// **Value** option.
+/// **Value** specifier.
 ///
 /// Value specifiers encode/decode actual data entries.
 /// Each value specifier defines representation of single entry in packed form.
