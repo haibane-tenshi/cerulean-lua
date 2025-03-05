@@ -780,5 +780,10 @@ mod test {
     #[test]
     fn parse_failures() {
         fail("c");
+        fail("X");
+        fail("!17");
+        fail("i17");
+        fail("I17");
+        fail("s17");
     }
 }
