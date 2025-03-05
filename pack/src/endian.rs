@@ -11,7 +11,7 @@ fn is_little_endian() -> bool {
 ///
 /// Endianness determines the order in which bytes in multi-byte data is serialized.
 /// Little-endian puts least significant bytes first, big-endian puts most significant bytes first.
-/// Native-endian is either big or little chosen to match your machine.
+/// Native-endian is chosen to be either big or little endian to match endianness of your compilation target.
 ///
 /// Note that endianness can be changed by format string,
 /// so different part of the packed byte sequence may be encoded using different endianness.

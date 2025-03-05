@@ -2,31 +2,32 @@
 //!
 //! Lua standard library defines functions for packing and unpacking binary data into Lua strings (which are effectively `Vec<u8>`)
 //! according to a custom format.
-//! This crate contains implementations for parsing the format string as well as encoding/decoding routines.
+//! This crate contains implementations for format string parser as well as encoding/decoding routines.
 //!
 //! # Format string
 //!
-//! Format string may contain any sequence of the following options.
-//! Additionally, space can be used to separate sequences.
+//! Format string is a sequence of 0 or more formatting specifiers, possibly separated by space (` `, U+0020).
+//! Specifiers are split into two groups: **control** and **value** specifiers.
 //!
-//! Options are split into **control** and **value** sequences.
-//! Control sequences modify current state of encoder/decoder,
-//! value sequences encode/decode actual data.
+//! **Control** specifiers alter current state of encoder/decoder, affecting representation of following values.
+//! Those include endianness, [alignment](#alignment) (from the beginning of the byte stream), as well as custom padding.
 //!
-//! In the following *n* indicates a decimal literal, \[*n*\] indicates an optional decimal literal.
+//! **Value** specifiers encode/decode actual data entries.
+//! Each value specifier defines representation of single entry in packed form.
 //!
-//! **Control** sequences:
+//! Below is the full list of recognized specifiers.
+//! *n* indicates a decimal literal, \[*n*\] indicates an optional decimal literal.
+//!
+//! **Control** specifier:
 //!
 //! * `<` - set little endian
 //! * `>` - set big endian
 //! * `=` - set native endian
 //! * `!`\[*n*\] - set *maximum* alignment to *n* (default: `usize`)
-//! * `x` - emit 1 byte of padding
-//! * `X`*op* - emit 0 or more bytes of padding, aligning to *op*, where *op* must be a valid **value** sequence
+//! * `x` - 1 byte of padding
+//! * `X`*op* - 0 or more bytes of padding, aligning to *op*, where *op* must be a valid **value** specifier
 //!
-//! See [alignment](#alignment) section for discussion about target alignment and related pitfalls.
-//!
-//! **Value** sequences describe data type on wire format:
+//! **Value** specifiers:
 //!
 //! * `b` - represent as `i8`
 //! * `B` - represent as `u8`
@@ -39,46 +40,51 @@
 //! * `d` - represent as `f64`
 //! * `i`\[*n*\] - represent as signed integer of *n* bytes width (default: `usize`)
 //! * `I`\[*n*\] - represent as unsigend integer of *n* bytes width (default: `usize`)
-//! * `j` - represent as `i64`
-//! * `J` - represent as `u64`
-//! * `n` - represent as either `i64` or `f64`
+//! * `j` - represent as `i64` (Lua signed integer)
+//! * `J` - represent as `u64` (Lua unsigned integer)
+//! * `n` - represent as `f64`, consume any integer/float (Lua number)
 //! * `c`*n* - represent as byte string with length of *n*
 //! * `z` - represent as zero-terminated byte string
-//! * `s`\[*n*\] - represent as byte string with preceding *n*-byte wide integer length (default: `usize`)
-//!
-//! Each value option produces/consumes one data entry.
-//!
-//! Implementation is expected to handle all representation details,
-//! such as trailing `\0` for `z` option etc.
+//! * `s`\[*n*\] - represent as byte string with preceding length represented as *n*-byte wide unsigned integer (default: `usize`)
 //!
 //! # Custom-sized integers
 //!
-//! Packing format has special options for packing unconventionally-sized integers, such as `i3` and `I11`.
+//! Packing format includes special options for packing unconventionally-sized integers, such as `i3` and `I11`.
 //! (Note that Lua here specifies number of *bytes* as opposed to number of bits; so for example Rust's `u32` is equivalent to `I4` option).
+//!
 //! Those are defined in the same way as conventional Rust integers:
-//! both signed and unsigned variants use complement of 2,
-//! signed integers have range of -2^(*n* * 8 - 1) to 2^(*n* * 8 - 1) - 1 (with 0 mapping to all bits equal to 0),
-//! unsigned integers have range of 0 to 2^(*n* * 8) - 1.
+//! * signed variants use complement of 2
+//! * signed integers have range of -2^(*n* * 8 - 1) to 2^(*n* * 8 - 1) - 1 (with 0 mapping to all bits set to 0)
+//! * unsigned integers have range of 0 to 2^(*n* * 8) - 1
 //!
 //! # Coercions
 //!
-//! Numeric data may be coerced during encoding/decoding.
-//! There are no coercions between integers and floats.
+//! Packing format supports three categories of data: integers, floats and strings.
+//! Coercions between categories are not permitted, so for example you cannot serialize `u32` as `f64`.
+//! However, coercions within each category are tentatively allowed for convenience sake.
 //!
-//! Encoder will attempt to coerce input integers to the type specified by the format if such coercion is lossless,
-//! i.e. input is within representable range of target type.
-//! This coercion may happen between signed and unsigned variants as well.
+//! The only exception to this rule is `n` specifier (Lua number).
+//! It will forcibly coerce integers to `f64` during encoding even if such conversion is lossy.
 //!
-//! Encoder will forcefully coerce floats, regardless of representability.
-//! `f32` to `f64` coercions are always lossless, however `f64` to `f32` coercions may lose precision.
+//! Encoder behavior:
+//! *   Integers may get coerced to target representation if such coercion is lossless,
+//!     i.e. input value is representable by target type.
+//!     In particular, attempting to serialize negative integers as unsigned integer will always fail.
+//! *   Floats can always get coerced to each other.
+//!     `f32` to `f64` coercion is always lossless, `f64` to `f32` coercion may lose precision.
+//! *   Lua number (`n` option) is an exception to coercion rules.
+//!     It will always serialize its output as `f64`, coercing both integers and floats as necessary.
+//!     This conversion may be lossy.
+//! *   Strings perform no coercions.
+//!     Packed representation choice is independent from payload.
+//! *   C-style strings (`z` option) payload must not contain embedded zeros, even if it is a terminating one.
 //!
-//! Decoder will never perform coercions of native integer and float types and will return them as is.
-//! Custom-sized integers will be coerced to a bigger native integer type.
-//! Since custom integers can only be at most 16 bytes long, it can always be represented by `i128` or `u128`
-//! (which is the only case where those two are generated).
-//!
-//! String data does not participate in coercions.
-//! However, encoded length of `s` option will be internally coerced to `usize` using the same rules.
+//! Decoder behavior:
+//! *   Decoder performs no type coercions: produced values will have the same type as their specifier.
+//! *   Lua number (`n` option) is always parsed as `f64` due to our encoding convention.
+//! *   Custom-sized integers (`i` and `I` options) are deserialized as either `i128` and `u128`.
+//!     This is due to the fact that each number may be up to 16 bytes wide.
+//! *   After deserializing, length of dynamically-sized string (`s` option) will be additionally coerced to `usize`.
 //!
 //! # Alignment
 //!
@@ -111,9 +117,15 @@
 //! This isn't a problem for most options as those emit regular integers or floats for which alignment is equal to their size.
 //! However there are three problematic value options which may produce invalid alignments: `i`, `I` and `s`.
 //! You should be careful when handling those options with sizes that are not power of 2.
-//! Depending on maximum alignment it may be considered invalid to encode/decode data using such options.
+//! Depending on set maximum alignment it may be considered invalid to encode/decode data using such options.
 //!
 //! # Known incompatibilities
+//!
+//! *   Original spec defines options in terms of C types: `short`, `long`, etc.
+//!     Those may have different width depending on target platform.
+//!     This implementation takes liberty and sets representation to fixed well-known Rust types.
+//! *   This crate assumes that Lua numeric types are 64 bit wide.
+//!     As such `j` option represents `i64`, `J` represents `u64` and `n` represents `f64`.
 //!
 //! [lua#6.4.2]: https://www.lua.org/manual/5.4/manual.html#6.4.2
 
@@ -126,11 +138,11 @@ mod lex;
 pub use decoder::{DecodeError, Decoder};
 pub use encoder::{EncodeError, Encoder};
 pub use endian::Endianness;
-pub use lex::{parse_options, PackOptionError};
+pub use lex::{parse_format, PackOptionError};
 
 /// Byte width of an integer.
 ///
-/// Lua packing format only permits integers widths in `1..=16` range.
+/// Byte width can be any value in `1..=16` range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteWidth(u8);
 
@@ -175,31 +187,32 @@ impl Alignment {
     }
 }
 
-/// Packing option.
+/// Packing format specifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PackOption {
-    Control(ControlOption),
-    Value(ValueOption),
+pub enum PackSpec {
+    Control(ControlSpec),
+    Value(ValueSpec),
 }
 
-impl From<ControlOption> for PackOption {
-    fn from(value: ControlOption) -> Self {
-        PackOption::Control(value)
+impl From<ControlSpec> for PackSpec {
+    fn from(value: ControlSpec) -> Self {
+        PackSpec::Control(value)
     }
 }
 
-impl From<ValueOption> for PackOption {
-    fn from(value: ValueOption) -> Self {
-        PackOption::Value(value)
+impl From<ValueSpec> for PackSpec {
+    fn from(value: ValueSpec) -> Self {
+        PackSpec::Value(value)
     }
 }
 
-/// **Control** option.
+/// **Control** specifier.
 ///
-/// Control sequences directly alter encoder/decoder state and do not interact with actual data.
+/// Control specifiers alter encoder/decoder state, affecting representation of following values.
+/// They do not interact with actual data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ControlOption {
-    /// Set endianness for following values.
+pub enum ControlSpec {
+    /// Set endianness for representation of following values.
     SetEndianness(Endianness),
 
     /// Set maximum allowed [alignment](crate#alignment).
@@ -207,22 +220,23 @@ pub enum ControlOption {
 
     /// Emit/consume a padding byte.
     ///
-    /// Our encoder always uses 0 as padding byte, but decoders should not rely on this knowledge.
+    /// Our encoder uses 0 as padding byte, but decoders should not rely on this knowledge.
     PadByte,
 
     /// Emit/consume padding bytes, aligning next item to specified alignment.
     ///
-    /// Note that this is still subject to current maximum alignment.
+    /// Note that this option is still subject to current maximum alignment.
     ///
-    /// Our encoder always uses 0 as padding byte, but decoders should not rely on this knowledge.
+    /// Our encoder uses 0 as padding byte, but decoders should not rely on this knowledge.
     AlignTo(Alignment),
 }
 
 /// **Value** option.
 ///
-/// Value sequences denote on-wire format used to encode/decode values.
+/// Value specifiers encode/decode actual data entries.
+/// Each value specifier defines representation of single entry in packed form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ValueOption {
+pub enum ValueSpec {
     U8,
     U16,
     U32,
@@ -258,7 +272,7 @@ pub enum ValueOption {
 
     /// Use C-style string (denoted by trailing `\0` byte).
     ///
-    /// Encoding C-style strings with embedded zeros is an error.
+    /// It is an error for payload to contain embedded zeros (even if it is a terminating one).
     StrC,
 
     /// Use dynamically-sized string.
@@ -269,9 +283,10 @@ pub enum ValueOption {
     },
 }
 
-impl ValueOption {
+impl ValueSpec {
+    /// Requested alignment of this specifier.
     pub fn align(self) -> Alignment {
-        use ValueOption::*;
+        use ValueSpec::*;
 
         match self {
             U8 | I8 | StrC | StrFixed { .. } => Alignment::new(1).unwrap(),
@@ -284,6 +299,7 @@ impl ValueOption {
     }
 }
 
+/// Possible payloads that can be produced/emitted.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value<'s> {
     U8(u8),

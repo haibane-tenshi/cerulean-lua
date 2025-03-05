@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::io::Write;
 
-use super::{Alignment, ControlOption, Endianness, Value, ValueError, ValueOption};
+use super::{Alignment, ControlSpec, Endianness, Value, ValueError, ValueSpec};
 
 /// Encoder for Lua binary packing format.
 #[derive(Debug, Clone, Copy)]
@@ -79,27 +79,27 @@ where
         Ok(())
     }
 
-    /// Put in a control sequence.
-    pub fn put_control(&mut self, ctrl: ControlOption) -> Result<(), EncodeError> {
+    /// Apply control sequence.
+    pub fn apply_control(&mut self, ctrl: ControlSpec) -> Result<(), EncodeError> {
         match ctrl {
-            ControlOption::SetEndianness(endianness) => {
+            ControlSpec::SetEndianness(endianness) => {
                 self.endianness = endianness;
                 Ok(())
             }
-            ControlOption::MaxAlignment(align) => {
+            ControlSpec::MaxAlignment(align) => {
                 self.max_alignment = align;
                 Ok(())
             }
-            ControlOption::PadByte => {
+            ControlSpec::PadByte => {
                 self.write_bytes(&[0])?;
                 Ok(())
             }
-            ControlOption::AlignTo(align) => self.align_to(align),
+            ControlSpec::AlignTo(align) => self.align_to(align),
         }
     }
 
-    /// Put in a value.
-    pub fn put_value(&mut self, ctrl: ValueOption, value: Value<'_>) -> Result<(), EncodeError> {
+    /// Encode a value into byte stream according to value specifier.
+    pub fn put_value(&mut self, ctrl: ValueSpec, value: Value<'_>) -> Result<(), EncodeError> {
         use crate::custom::{Signed, Unsigned};
         use crate::endian::ToBytes;
 
@@ -109,72 +109,72 @@ where
         self.align_to(ctrl.align())?;
 
         match ctrl {
-            ValueOption::U8 => {
+            ValueSpec::U8 => {
                 let value = value.as_u8()?;
                 self.write(&[value])?;
                 Ok(())
             }
-            ValueOption::U16 => {
+            ValueSpec::U16 => {
                 let value = value.as_u16()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::U32 => {
+            ValueSpec::U32 => {
                 let value = value.as_u32()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::U64 => {
+            ValueSpec::U64 => {
                 let value = value.as_u64()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::I8 => {
+            ValueSpec::I8 => {
                 let value = value.as_i8()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::I16 => {
+            ValueSpec::I16 => {
                 let value = value.as_i16()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::I32 => {
+            ValueSpec::I32 => {
                 let value = value.as_i32()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::I64 => {
+            ValueSpec::I64 => {
                 let value = value.as_i64()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::Usize => {
+            ValueSpec::Usize => {
                 let value = value.as_usize()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::F32 => {
+            ValueSpec::F32 => {
                 let value = value.as_f32()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::F64 => {
+            ValueSpec::F64 => {
                 let value = value.as_f64()?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::Number => {
+            ValueSpec::Number => {
                 let value = if let Ok(value) = value.as_i64() {
                     value as _
                 } else if let Ok(value) = value.as_f64() {
@@ -186,21 +186,21 @@ where
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::Signed(width) => {
+            ValueSpec::Signed(width) => {
                 let value = value.as_i128()?;
                 let value = Signed::new(value, width).ok_or(ValueError::Unrepresentable)?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::Unsigned(width) => {
+            ValueSpec::Unsigned(width) => {
                 let value = value.as_u128()?;
                 let value = Unsigned::new(value, width).ok_or(ValueError::Unrepresentable)?;
                 let bytes = self.endianness.to_bytes(value, buf);
                 self.write(bytes)?;
                 Ok(())
             }
-            ValueOption::StrC => {
+            ValueSpec::StrC => {
                 let s = value.as_str()?;
 
                 let inner_zero = s
@@ -217,7 +217,7 @@ where
                 self.write(&[0])?;
                 Ok(())
             }
-            ValueOption::StrFixed { len } => {
+            ValueSpec::StrFixed { len } => {
                 let s = value.as_str()?;
 
                 if s.len() != len {
@@ -231,7 +231,7 @@ where
                 self.write(s)?;
                 Ok(())
             }
-            ValueOption::StrDyn { len_width } => {
+            ValueSpec::StrDyn { len_width } => {
                 let s = value.as_str()?;
                 let len = Unsigned::new(s.len().try_into().unwrap(), len_width)
                     .ok_or(ValueError::Unrepresentable)?;

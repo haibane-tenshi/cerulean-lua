@@ -1,4 +1,4 @@
-use super::{Alignment, ControlOption, Endianness, Value, ValueOption};
+use super::{Alignment, ControlSpec, Endianness, Value, ValueSpec};
 
 /// Decoder for Lua binary packing format.
 pub struct Decoder<'s> {
@@ -15,6 +15,8 @@ impl<'s> Decoder<'s> {
     }
 
     /// Construct new decoder.
+    ///
+    /// Refer to section about [alignment](crate#alignment) about behavior and caveats.
     pub fn new_with(source: &'s [u8], endianness: Endianness, max_alignment: Alignment) -> Self {
         Decoder {
             source,
@@ -49,30 +51,30 @@ impl<'s> Decoder<'s> {
         }
     }
 
-    /// Take control sequence out of byte stream.
-    pub fn take_control(&mut self, ctrl: ControlOption) -> Result<(), DecodeError> {
+    /// Apply control sequence.
+    pub fn apply_control(&mut self, ctrl: ControlSpec) -> Result<(), DecodeError> {
         match ctrl {
-            ControlOption::SetEndianness(endianness) => {
+            ControlSpec::SetEndianness(endianness) => {
                 self.endianness = endianness;
                 Ok(())
             }
-            ControlOption::MaxAlignment(align) => {
+            ControlSpec::MaxAlignment(align) => {
                 self.max_alignment = align;
                 Ok(())
             }
-            ControlOption::PadByte => self.read(1),
-            ControlOption::AlignTo(align) => self.align_to(align),
+            ControlSpec::PadByte => self.read(1),
+            ControlSpec::AlignTo(align) => self.align_to(align),
         }
     }
 
-    /// Decode value out of byte stream.
-    pub fn take_value(&mut self, ctrl: ValueOption) -> Result<Value<'s>, DecodeError> {
+    /// Decode value out of byte stream according to value specifier.
+    pub fn take_value(&mut self, ctrl: ValueSpec) -> Result<Value<'s>, DecodeError> {
         use crate::endian::FromBytes;
 
         self.align_to(ctrl.align())?;
 
         match ctrl {
-            ValueOption::U8 => {
+            ValueSpec::U8 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -80,7 +82,7 @@ impl<'s> Decoder<'s> {
                 self.read(1).unwrap();
                 Ok(Value::U8(value))
             }
-            ValueOption::U16 => {
+            ValueSpec::U16 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -88,7 +90,7 @@ impl<'s> Decoder<'s> {
                 self.read(2).unwrap();
                 Ok(Value::U16(value))
             }
-            ValueOption::U32 => {
+            ValueSpec::U32 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -96,7 +98,7 @@ impl<'s> Decoder<'s> {
                 self.read(4).unwrap();
                 Ok(Value::U32(value))
             }
-            ValueOption::U64 => {
+            ValueSpec::U64 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -104,7 +106,7 @@ impl<'s> Decoder<'s> {
                 self.read(8).unwrap();
                 Ok(Value::U64(value))
             }
-            ValueOption::I8 => {
+            ValueSpec::I8 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -112,7 +114,7 @@ impl<'s> Decoder<'s> {
                 self.read(1).unwrap();
                 Ok(Value::I8(value))
             }
-            ValueOption::I16 => {
+            ValueSpec::I16 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -120,7 +122,7 @@ impl<'s> Decoder<'s> {
                 self.read(2).unwrap();
                 Ok(Value::I16(value))
             }
-            ValueOption::I32 => {
+            ValueSpec::I32 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -128,7 +130,7 @@ impl<'s> Decoder<'s> {
                 self.read(4).unwrap();
                 Ok(Value::I32(value))
             }
-            ValueOption::I64 => {
+            ValueSpec::I64 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -136,7 +138,7 @@ impl<'s> Decoder<'s> {
                 self.read(8).unwrap();
                 Ok(Value::I64(value))
             }
-            ValueOption::Usize => {
+            ValueSpec::Usize => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -144,7 +146,7 @@ impl<'s> Decoder<'s> {
                 self.read(std::mem::size_of::<usize>()).unwrap();
                 Ok(Value::Usize(value))
             }
-            ValueOption::F32 => {
+            ValueSpec::F32 => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -152,7 +154,7 @@ impl<'s> Decoder<'s> {
                 self.read(4).unwrap();
                 Ok(Value::F32(value))
             }
-            ValueOption::F64 | ValueOption::Number => {
+            ValueSpec::F64 | ValueSpec::Number => {
                 let value = self
                     .endianness
                     .from_bytes(self.source)
@@ -160,7 +162,7 @@ impl<'s> Decoder<'s> {
                 self.read(8).unwrap();
                 Ok(Value::F64(value))
             }
-            ValueOption::Signed(len) => {
+            ValueSpec::Signed(len) => {
                 let value = self
                     .endianness
                     .from_bytes_signed(len, self.source)
@@ -168,7 +170,7 @@ impl<'s> Decoder<'s> {
                 self.read(value.len()).unwrap();
                 Ok(Value::I128(value.value()))
             }
-            ValueOption::Unsigned(len) => {
+            ValueSpec::Unsigned(len) => {
                 let value = self
                     .endianness
                     .from_bytes_unsigned(len, self.source)
@@ -176,12 +178,12 @@ impl<'s> Decoder<'s> {
                 self.read(value.len()).unwrap();
                 Ok(Value::U128(value.value()))
             }
-            ValueOption::StrFixed { len } => {
+            ValueSpec::StrFixed { len } => {
                 let s = self.source.get(..len).ok_or(DecodeError::UnexpectedEoF)?;
                 self.read(len).unwrap();
                 Ok(Value::Str(s))
             }
-            ValueOption::StrC => {
+            ValueSpec::StrC => {
                 let len = self
                     .source
                     .iter()
@@ -193,7 +195,7 @@ impl<'s> Decoder<'s> {
                 self.read(len).unwrap();
                 Ok(Value::Str(s))
             }
-            ValueOption::StrDyn { len_width } => {
+            ValueSpec::StrDyn { len_width } => {
                 let len = self
                     .endianness
                     .from_bytes_unsigned(len_width, self.source)
