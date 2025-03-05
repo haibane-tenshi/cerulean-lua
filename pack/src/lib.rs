@@ -606,3 +606,179 @@ enum ValueError {
     IncompatibleType,
     Unrepresentable,
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn parse1(fmt: &str, result: impl Into<PackSpec>) {
+        let mut iter = parse_format(fmt);
+        assert_eq!(iter.next(), Some(Ok(result.into())));
+        assert_eq!(iter.next(), None);
+    }
+
+    fn fail(fmt: &str) {
+        let res = parse_format(fmt).find(|f| f.is_err());
+        assert!(res.is_some());
+    }
+
+    fn success(fmt: &str) {
+        let res = parse_format(fmt).find(|f| f.is_err());
+        assert!(res.is_none());
+    }
+
+    fn make_align(align: usize) -> Alignment {
+        Alignment::new(align).unwrap()
+    }
+
+    #[test]
+    fn parse_recognized() {
+        let usize_len = std::mem::size_of::<usize>();
+
+        parse1("<", ControlSpec::SetEndianness(Endianness::Little));
+        parse1(">", ControlSpec::SetEndianness(Endianness::Big));
+        parse1("=", ControlSpec::SetEndianness(Endianness::Native));
+
+        parse1("!", ControlSpec::MaxAlignment(make_align(usize_len)));
+        for i in 1..=16 {
+            parse1(&format!("!{i}"), ControlSpec::MaxAlignment(make_align(i)));
+        }
+
+        parse1("x", ControlSpec::PadByte);
+
+        parse1("b", ValueSpec::I8);
+        parse1("B", ValueSpec::U8);
+        parse1("h", ValueSpec::I16);
+        parse1("H", ValueSpec::U16);
+        parse1("l", ValueSpec::I32);
+        parse1("L", ValueSpec::U32);
+        parse1("j", ValueSpec::I64);
+        parse1("J", ValueSpec::U64);
+        parse1("T", ValueSpec::Usize);
+        parse1("f", ValueSpec::F32);
+        parse1("d", ValueSpec::F64);
+        parse1("n", ValueSpec::Number);
+
+        parse1("i", ValueSpec::Signed(ByteWidth::new(usize_len).unwrap()));
+        parse1("I", ValueSpec::Unsigned(ByteWidth::new(usize_len).unwrap()));
+        for i in 1..=16 {
+            parse1(
+                &format!("i{i}"),
+                ValueSpec::Signed(ByteWidth::new(i).unwrap()),
+            );
+            parse1(
+                &format!("I{i}"),
+                ValueSpec::Unsigned(ByteWidth::new(i).unwrap()),
+            );
+        }
+
+        parse1("z", ValueSpec::StrC);
+        parse1("c0", ValueSpec::StrFixed { len: 0 });
+        parse1("c4", ValueSpec::StrFixed { len: 4 });
+        parse1("c999999", ValueSpec::StrFixed { len: 999999 });
+
+        parse1(
+            "s",
+            ValueSpec::StrDyn {
+                len_width: ByteWidth::new(usize_len).unwrap(),
+            },
+        );
+        for i in 1..=16 {
+            parse1(
+                &format!("s{i}"),
+                ValueSpec::StrDyn {
+                    len_width: ByteWidth::new(i).unwrap(),
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn parse_align_to() {
+        let align1 = Alignment::new(1).unwrap();
+        let align2 = Alignment::new(2).unwrap();
+        let align4 = Alignment::new(4).unwrap();
+        let align8 = Alignment::new(8).unwrap();
+        let align_usize = Alignment::new(std::mem::size_of::<usize>()).unwrap();
+
+        parse1("Xb", ControlSpec::AlignTo(align1));
+        parse1("XB", ControlSpec::AlignTo(align1));
+        parse1("Xh", ControlSpec::AlignTo(align2));
+        parse1("XH", ControlSpec::AlignTo(align2));
+        parse1("Xl", ControlSpec::AlignTo(align4));
+        parse1("XL", ControlSpec::AlignTo(align4));
+        parse1("Xj", ControlSpec::AlignTo(align8));
+        parse1("XJ", ControlSpec::AlignTo(align8));
+        parse1("XT", ControlSpec::AlignTo(align_usize));
+        parse1("Xf", ControlSpec::AlignTo(align4));
+        parse1("Xd", ControlSpec::AlignTo(align8));
+        parse1("Xn", ControlSpec::AlignTo(align8));
+
+        parse1("Xi", ControlSpec::AlignTo(align_usize));
+        parse1("XI", ControlSpec::AlignTo(align_usize));
+        for i in 1..=16 {
+            parse1(
+                &format!("Xi{i}"),
+                ControlSpec::AlignTo(Alignment::new(i).unwrap()),
+            );
+            parse1(
+                &format!("XI{i}"),
+                ControlSpec::AlignTo(Alignment::new(i).unwrap()),
+            );
+        }
+
+        parse1("Xz", ControlSpec::AlignTo(align1));
+        parse1("Xc0", ControlSpec::AlignTo(align1));
+        parse1("Xc4", ControlSpec::AlignTo(align1));
+        parse1("Xc999999", ControlSpec::AlignTo(align1));
+
+        parse1("Xs", ControlSpec::AlignTo(align_usize));
+        for i in 1..=16 {
+            parse1(
+                &format!("Xs{i}"),
+                ControlSpec::AlignTo(Alignment::new(i).unwrap()),
+            );
+        }
+    }
+
+    #[test]
+    fn parse_align_to_reject() {
+        fail("X<");
+        fail("X>");
+        fail("X=");
+        fail("X!");
+        fail("X!4");
+        fail("Xx");
+
+        fail("XX");
+
+        fail("XXb");
+    }
+
+    #[test]
+    fn parse_whitespace() {
+        success(" b");
+        success("b ");
+        success(" b ");
+        success("b b b");
+
+        success("b  b");
+        success("b   b");
+        success("b    b");
+        success("b     b");
+    }
+
+    #[test]
+    fn parse_whitespace_reject() {
+        fail("! 12");
+        fail("i 12");
+        fail("I 12");
+        fail("s 12");
+        fail("c 12");
+    }
+
+    #[test]
+    fn parse_failures() {
+        fail("c");
+    }
+}
