@@ -145,7 +145,7 @@ where
 {
     delegate::from_mut(|mut rt| {
         use rt::error::SignatureError;
-        use rt::gc::AllocExt;
+        use rt::gc::{AllocExt, Downgrade};
         use rt::value::Value;
 
         let mut r = String::new();
@@ -286,7 +286,7 @@ where
     delegate::from_mut(|mut rt| {
         use rt::ffi::arg_parser::{Boolean, LuaString, Opts, ParseArgs, Split};
         use rt::ffi::{boxed, from_fn};
-        use rt::gc::LuaPtr;
+        use rt::gc::{Downgrade, LuaPtr};
         use rt::value::{Callable, Value};
 
         let (s, rest): (LuaString<_>, Opts<(Boolean,)>) = rt.stack.parse(&mut rt.core.gc)?;

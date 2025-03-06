@@ -1326,7 +1326,7 @@ where
         use tempfile::Builder;
 
         use rt::ffi::arg_parser::ParseArgs;
-        use rt::gc::AllocExt;
+        use rt::gc::{AllocExt, Downgrade};
 
         let () = rt.stack.parse(&mut rt.core.gc)?;
 

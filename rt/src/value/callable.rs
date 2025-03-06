@@ -6,7 +6,7 @@ use gc::Trace;
 use super::{Refs, Strong, Types, Value, Weak};
 use crate::error::AlreadyDroppedError;
 use crate::ffi::arg_parser::TypeMismatchError;
-use crate::gc::Heap;
+use crate::gc::{Downgrade, Heap, Upgrade};
 
 pub use crate::runtime::Closure as LuaClosure;
 
@@ -22,20 +22,13 @@ where
     Rust(Rf::RustCallable<Ty::RustClosure>),
 }
 
-impl<Ty> WeakCallable<Ty>
+impl<Ty> Upgrade<Heap<Ty>> for WeakCallable<Ty>
 where
     Ty: Types,
 {
-    pub fn upgrade(self, heap: &Heap<Ty>) -> Option<StrongCallable<Ty>> {
-        let r = match self {
-            Callable::Rust(t) => Callable::Rust(t.upgrade(heap)?),
-            Callable::Lua(t) => Callable::Lua(t.upgrade(heap)?),
-        };
+    type Output = StrongCallable<Ty>;
 
-        Some(r)
-    }
-
-    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<StrongCallable<Ty>, AlreadyDroppedError> {
+    fn try_upgrade(&self, heap: &Heap<Ty>) -> Result<Self::Output, AlreadyDroppedError> {
         let r = match self {
             Callable::Rust(t) => Callable::Rust(t.try_upgrade(heap)?),
             Callable::Lua(t) => Callable::Lua(t.try_upgrade(heap)?),
@@ -45,11 +38,13 @@ where
     }
 }
 
-impl<Ty> StrongCallable<Ty>
+impl<Ty> Downgrade for StrongCallable<Ty>
 where
     Ty: Types,
 {
-    pub fn downgrade(&self) -> WeakCallable<Ty> {
+    type Output = WeakCallable<Ty>;
+
+    fn downgrade(&self) -> Self::Output {
         match self {
             Callable::Rust(t) => Callable::Rust(t.downgrade()),
             Callable::Lua(t) => Callable::Lua(t.downgrade()),

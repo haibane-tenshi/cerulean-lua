@@ -2057,6 +2057,7 @@ where
     use bitvec::vec::BitVec;
     use rt::error::RuntimeError;
     use rt::ffi::delegate::{Delegate, Request, Response, RuntimeView, StackSlot, State};
+    use rt::gc::{Downgrade, Upgrade};
     use rt::value::{Callable, Strong, StrongValue, WeakValue};
     use std::ops::RangeInclusive;
     use std::pin::Pin;

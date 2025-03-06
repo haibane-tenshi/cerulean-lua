@@ -538,6 +538,7 @@ where
     where
         F: FnMut(Ty::String) -> Root<Interned<Ty::String>>,
     {
+        use crate::gc::Downgrade;
         use crate::value::StrongValue;
         use Value::*;
 

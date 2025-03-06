@@ -491,6 +491,7 @@ where
         &mut self,
         opcode: OpCode,
     ) -> Result<ControlFlow<ChangeFrame<Ty>>, AlreadyDroppedOr<opcode_err::Cause>> {
+        use crate::gc::Downgrade;
         use opcode_err::Cause;
         use repr::opcode::OpCode::*;
 

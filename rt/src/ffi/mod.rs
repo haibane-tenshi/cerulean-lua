@@ -458,7 +458,7 @@ where
     Ty: Types<LuaClosure = Closure<Ty>>,
 {
     let f = move || {
-        use crate::gc::LuaPtr;
+        use crate::gc::{Downgrade, LuaPtr};
         use crate::runtime::FunctionPtr;
         use crate::value::Callable;
         use delegate::Request;

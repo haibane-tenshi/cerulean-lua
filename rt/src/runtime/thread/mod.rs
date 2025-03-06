@@ -548,7 +548,7 @@ where
 {
     pub(super) fn init(self, mut stack: Stack<Ty>, heap: &mut Heap<Ty>) -> Thread<Ty> {
         use crate::ffi::delegate::RuntimeView;
-        use crate::gc::LuaPtr;
+        use crate::gc::{Downgrade, LuaPtr, Upgrade};
         use crate::value::Value;
 
         let ThreadImpetus { first_callable } = self;
@@ -564,7 +564,7 @@ where
                 // This is because constructing Lua closures is a fallible operation and
                 // failing here is rather inconvenient going as far as affecting our public APIs.
                 // If construction of Lua frame is bound fail it is still going happen
-                // but at a later point where it will be evaluated when executing an already existing thread.
+                // but at a later point where the thread already exists.
                 // At that time runtime is prepared to handle such occurrence.
 
                 let mut stack = stack.full_guard();

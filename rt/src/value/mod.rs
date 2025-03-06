@@ -15,7 +15,7 @@ use enumoid::Enumoid;
 use gc::Trace;
 
 use crate::error::{AlreadyDroppedError, InvalidKeyError};
-use crate::gc::Heap;
+use crate::gc::{Downgrade, Heap, Upgrade};
 use crate::runtime::MetatableRegistry;
 
 pub use boolean::Boolean;
@@ -258,20 +258,6 @@ impl<Ty> StrongValue<Ty>
 where
     Ty: Types,
 {
-    pub fn downgrade(&self) -> WeakValue<Ty> {
-        match self {
-            Value::Nil => Value::Nil,
-            Value::Bool(t) => Value::Bool(*t),
-            Value::Int(t) => Value::Int(*t),
-            Value::Float(t) => Value::Float(*t),
-            Value::String(t) => Value::String(t.downgrade()),
-            Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade())),
-            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t.downgrade())),
-            Value::Table(t) => Value::Table(t.downgrade()),
-            Value::Userdata(t) => Value::Userdata(t.downgrade()),
-        }
-    }
-
     /// Produce metatable reference.
     ///
     /// If the value carries a metatable (it is table or userdata), that metatable will be returned.
@@ -328,30 +314,6 @@ impl<Ty> WeakValue<Ty>
 where
     Ty: Types,
 {
-    pub fn upgrade(self, heap: &Heap<Ty>) -> Option<StrongValue<Ty>> {
-        self.try_upgrade(heap).ok()
-    }
-
-    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<StrongValue<Ty>, AlreadyDroppedError> {
-        let r = match self {
-            Value::Nil => Value::Nil,
-            Value::Bool(t) => Value::Bool(t),
-            Value::Int(t) => Value::Int(t),
-            Value::Float(t) => Value::Float(t),
-            Value::String(t) => Value::String(t.try_upgrade(heap)?),
-            Value::Function(Callable::Lua(t)) => {
-                Value::Function(Callable::Lua(t.try_upgrade(heap)?))
-            }
-            Value::Function(Callable::Rust(t)) => {
-                Value::Function(Callable::Rust(t.try_upgrade(heap)?))
-            }
-            Value::Table(t) => Value::Table(t.try_upgrade(heap)?),
-            Value::Userdata(t) => Value::Userdata(t.try_upgrade(heap)?),
-        };
-
-        Ok(r)
-    }
-
     /// Produce metatable reference.
     ///
     /// If the value carries a metatable (it is table or userdata), that metatable will be returned.
@@ -428,6 +390,48 @@ where
             | Function(Callable::Lua(_))
             | Table(_)
             | Userdata(_) => true,
+        }
+    }
+}
+
+impl<Ty> Upgrade<Heap<Ty>> for WeakValue<Ty>
+where
+    Ty: Types,
+{
+    type Output = StrongValue<Ty>;
+
+    fn try_upgrade(&self, heap: &Heap<Ty>) -> Result<Self::Output, AlreadyDroppedError> {
+        let r = match self {
+            Value::Nil => Value::Nil,
+            Value::Bool(t) => Value::Bool(*t),
+            Value::Int(t) => Value::Int(*t),
+            Value::Float(t) => Value::Float(*t),
+            Value::String(t) => Value::String(t.try_upgrade(heap)?),
+            Value::Function(t) => Value::Function(t.try_upgrade(heap)?),
+            Value::Table(t) => Value::Table(t.try_upgrade(heap)?),
+            Value::Userdata(t) => Value::Userdata(t.try_upgrade(heap)?),
+        };
+
+        Ok(r)
+    }
+}
+
+impl<Ty> Downgrade for StrongValue<Ty>
+where
+    Ty: Types,
+{
+    type Output = WeakValue<Ty>;
+
+    fn downgrade(&self) -> Self::Output {
+        match self {
+            Value::Nil => Value::Nil,
+            Value::Bool(t) => Value::Bool(*t),
+            Value::Int(t) => Value::Int(*t),
+            Value::Float(t) => Value::Float(*t),
+            Value::String(t) => Value::String(t.downgrade()),
+            Value::Function(t) => Value::Function(t.downgrade()),
+            Value::Table(t) => Value::Table(t.downgrade()),
+            Value::Userdata(t) => Value::Userdata(t.downgrade()),
         }
     }
 }

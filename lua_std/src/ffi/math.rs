@@ -773,6 +773,7 @@ where
     use rt::builtins::raw::{lt, MetamethodRequired};
     use rt::ffi::arg_parser::FormatReturns;
     use rt::ffi::delegate::{Request, StackSlot};
+    use rt::gc::{Downgrade, Upgrade};
     use rt::value::{Callable, Strong, Value};
     use std::ops::ControlFlow;
 
@@ -935,6 +936,7 @@ where
     use rt::builtins::raw::{gt, MetamethodRequired};
     use rt::ffi::arg_parser::FormatReturns;
     use rt::ffi::delegate::{Request, StackSlot};
+    use rt::gc::{Downgrade, Upgrade};
     use rt::value::{Callable, Strong, Value};
     use std::ops::ControlFlow;
 

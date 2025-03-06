@@ -66,7 +66,7 @@ pub mod full;
 pub mod raw;
 pub mod table;
 
-use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, NotCallableError};
+use crate::error::{AlreadyDroppedOr, NotCallableError};
 use crate::gc::Heap;
 use crate::runtime::thread::TransientStackGuard;
 use crate::runtime::MetatableRegistry;
@@ -84,7 +84,7 @@ pub fn prepare_invoke<Ty>(
 where
     Ty: Types,
 {
-    use crate::gc::LuaPtr;
+    use crate::gc::{LuaPtr, Upgrade};
     use crate::runtime::thread::frame::BuiltinMetamethod;
 
     let key = heap
@@ -93,9 +93,9 @@ where
 
     inner_prepare_invoke(callable, stack, heap, registry, key).map_err(|err| match err {
         AlreadyDroppedOr::Dropped(err) => AlreadyDroppedOr::Dropped(err),
-        AlreadyDroppedOr::Other(_) => match callable.upgrade(heap) {
-            Some(value) => AlreadyDroppedOr::Other(NotCallableError(value)),
-            None => AlreadyDroppedOr::Dropped(AlreadyDroppedError),
+        AlreadyDroppedOr::Other(_) => match callable.try_upgrade(heap) {
+            Ok(value) => AlreadyDroppedOr::Other(NotCallableError(value)),
+            Err(err) => AlreadyDroppedOr::Dropped(err),
         },
     })
 }
@@ -110,7 +110,7 @@ pub(crate) fn inner_prepare_invoke<Ty>(
 where
     Ty: Types,
 {
-    use crate::gc::TryGet;
+    use crate::gc::{TryGet, Upgrade};
     use crate::value::TableIndex;
     use repr::index::StackSlot;
 

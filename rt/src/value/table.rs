@@ -206,6 +206,8 @@ where
     Ty: Types,
 {
     pub fn downgrade(&self) -> KeyValue<Weak, Ty> {
+        use crate::gc::Downgrade;
+
         match self {
             KeyValue::Bool(t) => KeyValue::Bool(*t),
             KeyValue::Int(t) => KeyValue::Int(*t),
@@ -227,6 +229,8 @@ where
     }
 
     pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<KeyValue<Strong, Ty>, AlreadyDroppedError> {
+        use crate::gc::Upgrade;
+
         let r = match self {
             KeyValue::Bool(t) => KeyValue::Bool(t),
             KeyValue::Int(t) => KeyValue::Int(t),

@@ -23,44 +23,6 @@ impl<P> LuaPtr<P> {
     }
 }
 
-impl<T, A> LuaPtr<GcPtr<T, A>>
-where
-    T: ?Sized,
-    A: Access,
-{
-    #[deprecated]
-    pub fn upgrade<M, P>(self, heap: &TrueHeap<M, P>) -> Option<LuaPtr<RootPtr<T, A>>>
-    where
-        P: Params,
-    {
-        self.try_upgrade(heap).ok()
-    }
-
-    #[deprecated]
-    pub fn try_upgrade<M, P>(
-        self,
-        heap: &TrueHeap<M, P>,
-    ) -> Result<LuaPtr<RootPtr<T, A>>, AlreadyDroppedError>
-    where
-        P: Params,
-    {
-        let LuaPtr(ptr) = self;
-        let ptr = heap.try_upgrade(ptr)?;
-        Ok(LuaPtr(ptr))
-    }
-}
-
-impl<T, A> LuaPtr<RootPtr<T, A>>
-where
-    T: ?Sized,
-    A: Access,
-{
-    #[deprecated]
-    pub fn downgrade(&self) -> LuaPtr<GcPtr<T, A>> {
-        LuaPtr(self.0.downgrade())
-    }
-}
-
 impl<P> From<P> for LuaPtr<P> {
     fn from(value: P) -> Self {
         LuaPtr(value)

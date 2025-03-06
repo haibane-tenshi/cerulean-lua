@@ -38,6 +38,8 @@ where
     Ty: Types,
 {
     delegate::from_mut(|rt| {
+        use rt::gc::Upgrade;
+
         let (cond, msg): (WeakValue<Ty>, Maybe<WeakValue<Ty>>) = rt.stack.parse(&mut rt.core.gc)?;
 
         if cond.to_bool() {
@@ -45,7 +47,7 @@ where
         } else {
             let err = msg
                 .into_option()
-                .map(|t| t.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
+                .map(|t| t.try_upgrade(&rt.core.gc))
                 .transpose()?
                 .unwrap_or_else(|| {
                     let msg = rt.core.alloc_string("assertion failed!".into());
@@ -80,12 +82,14 @@ where
     Ty: Types,
 {
     delegate::from_mut(|mut rt| {
+        use rt::gc::Upgrade;
+
         let (msg, level): (WeakValue<_>, Opts<(Int,)>) = rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
         let (level,) = level.split();
         let _level = level.unwrap_or(Int(1)).0;
 
-        let msg = msg.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
+        let msg = msg.try_upgrade(&rt.core.gc)?;
         let err = RuntimeError::from_value(msg);
         Err(err)
     })
@@ -428,6 +432,7 @@ where
     Ty: Types<LuaClosure = Closure<Ty>>,
 {
     use rt::ffi::coroutine::State as CoState;
+    use rt::gc::Upgrade;
     use std::pin::Pin;
 
     #[derive(Clone, Copy, Default)]
@@ -468,8 +473,9 @@ where
                         return CoState::Complete(Err(RuntimeError::from_msg(msg)));
                     };
 
-                    let Some(callable) = callable.upgrade(&rt.core.gc) else {
-                        return CoState::Complete(Err(AlreadyDroppedError.into()));
+                    let callable = match callable.try_upgrade(&rt.core.gc) {
+                        Ok(t) => t,
+                        Err(err) => return CoState::Complete(Err(err.into())),
                     };
 
                     let r = delegate::Request::Invoke {
@@ -673,6 +679,7 @@ where
     use repr::index::FunctionId;
     use rt::error::NotTextError;
     use rt::ffi::arg_parser::{ParseArgs, Split};
+    use rt::gc::{Downgrade, Upgrade};
     use rt::runtime::FunctionPtr;
     use rt::value::{Type, Weak};
 
@@ -837,13 +844,13 @@ where
                 let source = match source {
                     ChunkSource::String(s) => s,
                     ChunkSource::Function(callable) => {
-                        let callable = callable.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError)?;
+                        let callable = callable.try_upgrade(&rt.core.gc)?;
 
                         persist_callable = Some(callable.clone());
                         persist_name = name;
                         persist_mode = mode;
                         persist_env = env
-                            .map(|value| value.upgrade(&rt.core.gc).ok_or(AlreadyDroppedError))
+                            .map(|value| value.try_upgrade(&rt.core.gc))
                             .transpose()?;
 
                         let request = Request::Invoke {
@@ -955,6 +962,7 @@ where
     delegate::from_mut(|mut rt| {
         use repr::index::FunctionId;
         use rt::ffi::arg_parser::{ParseArgs, Split};
+        use rt::gc::Downgrade;
         use rt::runtime::FunctionPtr;
 
         let opts: Opts<(FromLuaString<PathBuf>, Mode, WeakValue<Ty>)> =

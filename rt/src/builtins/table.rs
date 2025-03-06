@@ -72,7 +72,7 @@ fn lookup_chain<'h, 'r, Ty>(
 where
     Ty: Types,
 {
-    use crate::gc::LuaPtr;
+    use crate::gc::{LuaPtr, Upgrade};
     use crate::value::Value;
 
     let first = match target {
