@@ -1600,11 +1600,11 @@ where
         let mut f = f.debug_struct("LuaString");
 
         if let Some(s) = self.0.to_str() {
-            f.field("content", &"text");
+            f.field("type", &"text");
             f.field("value", &s.as_ref());
         } else {
             let bytes = self.0.to_bytes();
-            f.field("content", &"binary");
+            f.field("type", &"binary");
             f.field("value", &HexBytes(bytes.as_ref()));
         }
 

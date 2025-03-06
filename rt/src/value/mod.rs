@@ -635,7 +635,10 @@ where
             Value::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
             Value::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
             Value::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
-            Value::String(arg0) => f.debug_tuple("String").field(&LuaString(*arg0)).finish(),
+            Value::String(arg0) => f
+                .debug_tuple("String")
+                .field(&LuaString(*arg0).fmt_stringless())
+                .finish(),
             Value::Function(arg0) => f.debug_tuple("Function").field(arg0).finish(),
             Value::Table(arg0) => f.debug_tuple("Table").field(arg0).finish(),
             Value::Userdata(arg0) => f.debug_tuple("Userdata").field(arg0).finish(),
