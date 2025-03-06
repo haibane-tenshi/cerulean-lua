@@ -296,7 +296,7 @@ where
 {
     fn from(value: LoadError) -> Self {
         match value {
-            LoadError::Immutable(err) => RuntimeError::Immutable(err),
+            LoadError::Immutable(err) => RuntimeError::ImmutableCache(err),
             LoadError::CompilationFailure(diag) => RuntimeError::Diagnostic(diag),
         }
     }
