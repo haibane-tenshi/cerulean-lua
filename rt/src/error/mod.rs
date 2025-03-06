@@ -1,5 +1,4 @@
 pub mod already_dropped;
-pub mod borrow;
 mod closure;
 pub mod diagnostic;
 pub mod invalid_key;
@@ -23,14 +22,13 @@ use crate::value::{StrongValue, Types, Value};
 
 pub use crate::chunk_cache::ImmutableCacheError;
 pub use already_dropped::{AlreadyDroppedError, AlreadyDroppedOr};
-pub use borrow::BorrowError;
 pub use closure::{CapturesMismatch, MalformedClosureError, MissingChunk, MissingFunction};
 pub use diagnostic::Diagnostic;
 pub use invalid_key::InvalidKeyError;
 pub use not_callable::NotCallableError;
 pub use not_text::NotTextError;
 pub use opcode::Error as OpCodeError;
-pub use out_of_bounds_stack::OutOfBoundsStack;
+pub use out_of_bounds_stack::StackOutOfBounds;
 pub use signature::SignatureError;
 pub use thread::{ReentryFailure, ThreadError, ThreadPanicked};
 pub use value::ValueError;
@@ -42,15 +40,14 @@ where
     Ty: Types,
 {
     Value(ValueError<Ty>),
-    Borrow(BorrowError),
     AlreadyDropped(AlreadyDroppedError),
     InvalidKey(InvalidKeyError),
     Immutable(ImmutableCacheError),
     Diagnostic(Box<Diagnostic>),
     MissingChunk(MissingChunk),
     MissingFunction(MissingFunction),
-    OutOfBoundsStack(OutOfBoundsStack),
-    UpvalueCountMismatch(CapturesMismatch),
+    StackOutOfBounds(StackOutOfBounds),
+    CapturesMismatch(CapturesMismatch),
     Signature(SignatureError),
     NotCallable(NotCallableError<Ty>),
     NotText(NotTextError<Interned<Ty::String>>),
@@ -90,15 +87,14 @@ where
 
         let message = match self {
             RuntimeError::Value(err) => err.into_diagnostic(heap),
-            RuntimeError::Borrow(err) => err.into_diagnostic(),
             RuntimeError::AlreadyDropped(err) => err.into_diagnostic(),
             RuntimeError::InvalidKey(err) => err.into_diagnostic(),
             RuntimeError::Immutable(err) => err.into_diagnostic(),
             RuntimeError::Diagnostic(diag) => return *diag,
             RuntimeError::MissingChunk(err) => err.into_diagnostic(),
             RuntimeError::MissingFunction(err) => err.into_diagnostic(),
-            RuntimeError::OutOfBoundsStack(err) => err.into_diagnostic(),
-            RuntimeError::UpvalueCountMismatch(err) => err.into_diagnostic(),
+            RuntimeError::StackOutOfBounds(err) => err.into_diagnostic(),
+            RuntimeError::CapturesMismatch(err) => err.into_diagnostic(),
             RuntimeError::Signature(err) => err.into_diagnostic(),
             RuntimeError::NotCallable(err) => err.into_diagnostic(),
             RuntimeError::NotText(err) => err.into_diagnostic(),
@@ -141,15 +137,6 @@ where
     }
 }
 
-impl<Ty> From<BorrowError> for RuntimeError<Ty>
-where
-    Ty: Types,
-{
-    fn from(value: BorrowError) -> Self {
-        Self::Borrow(value)
-    }
-}
-
 impl<Ty> From<MissingChunk> for RuntimeError<Ty>
 where
     Ty: Types,
@@ -168,12 +155,12 @@ where
     }
 }
 
-impl<Ty> From<OutOfBoundsStack> for RuntimeError<Ty>
+impl<Ty> From<StackOutOfBounds> for RuntimeError<Ty>
 where
     Ty: Types,
 {
-    fn from(value: OutOfBoundsStack) -> Self {
-        RuntimeError::OutOfBoundsStack(value)
+    fn from(value: StackOutOfBounds) -> Self {
+        RuntimeError::StackOutOfBounds(value)
     }
 }
 
@@ -182,7 +169,7 @@ where
     Ty: Types,
 {
     fn from(value: CapturesMismatch) -> Self {
-        RuntimeError::UpvalueCountMismatch(value)
+        RuntimeError::CapturesMismatch(value)
     }
 }
 
@@ -258,7 +245,7 @@ where
         match value {
             MalformedClosureError::MissingChunk(err) => RuntimeError::MissingChunk(err),
             MalformedClosureError::MissingFunction(err) => RuntimeError::MissingFunction(err),
-            MalformedClosureError::CapturesMismatch(err) => RuntimeError::UpvalueCountMismatch(err),
+            MalformedClosureError::CapturesMismatch(err) => RuntimeError::CapturesMismatch(err),
         }
     }
 }
@@ -279,15 +266,14 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Value(arg0) => f.debug_tuple("Value").field(arg0).finish(),
-            Self::Borrow(arg0) => f.debug_tuple("Borrow").field(arg0).finish(),
             Self::AlreadyDropped(arg0) => f.debug_tuple("AlreadyDropped").field(arg0).finish(),
             Self::InvalidKey(arg0) => f.debug_tuple("InvalidKey").field(arg0).finish(),
             Self::Immutable(arg0) => f.debug_tuple("Immutable").field(arg0).finish(),
             Self::Diagnostic(arg0) => f.debug_tuple("Diagnostic").field(arg0).finish(),
             Self::MissingChunk(arg0) => f.debug_tuple("MissingChunk").field(arg0).finish(),
             Self::MissingFunction(arg0) => f.debug_tuple("MissingFunction").field(arg0).finish(),
-            Self::OutOfBoundsStack(arg0) => f.debug_tuple("OutOfBoundsStack").field(arg0).finish(),
-            Self::UpvalueCountMismatch(arg0) => {
+            Self::StackOutOfBounds(arg0) => f.debug_tuple("OutOfBoundsStack").field(arg0).finish(),
+            Self::CapturesMismatch(arg0) => {
                 f.debug_tuple("UpvalueCountMismatch").field(arg0).finish()
             }
             Self::Signature(arg0) => f.debug_tuple("Signature").field(arg0).finish(),
@@ -317,15 +303,14 @@ where
     fn clone(&self) -> Self {
         match self {
             Self::Value(arg0) => Self::Value(arg0.clone()),
-            Self::Borrow(arg0) => Self::Borrow(arg0.clone()),
             Self::AlreadyDropped(arg0) => Self::AlreadyDropped(arg0.clone()),
             Self::InvalidKey(arg0) => Self::InvalidKey(arg0.clone()),
             Self::Immutable(arg0) => Self::Immutable(arg0.clone()),
             Self::Diagnostic(arg0) => Self::Diagnostic(arg0.clone()),
             Self::MissingChunk(arg0) => Self::MissingChunk(arg0.clone()),
             Self::MissingFunction(arg0) => Self::MissingFunction(arg0.clone()),
-            Self::OutOfBoundsStack(arg0) => Self::OutOfBoundsStack(arg0.clone()),
-            Self::UpvalueCountMismatch(arg0) => Self::UpvalueCountMismatch(arg0.clone()),
+            Self::StackOutOfBounds(arg0) => Self::StackOutOfBounds(arg0.clone()),
+            Self::CapturesMismatch(arg0) => Self::CapturesMismatch(arg0.clone()),
             Self::Signature(arg0) => Self::Signature(arg0.clone()),
             Self::NotCallable(arg0) => Self::NotCallable(arg0.clone()),
             Self::NotText(arg0) => Self::NotText(arg0.clone()),
@@ -340,47 +325,6 @@ where
     Ty: Types,
     Self: Debug + Display,
 {
-}
-
-#[derive(Debug)]
-pub enum RefAccessError {
-    Dropped(AlreadyDroppedError),
-    Borrowed(BorrowError),
-}
-
-impl Display for RefAccessError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Dropped(err) => write!(f, "{err}"),
-            Self::Borrowed(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl Error for RefAccessError {}
-
-impl From<AlreadyDroppedError> for RefAccessError {
-    fn from(value: AlreadyDroppedError) -> Self {
-        RefAccessError::Dropped(value)
-    }
-}
-
-impl From<BorrowError> for RefAccessError {
-    fn from(value: BorrowError) -> Self {
-        RefAccessError::Borrowed(value)
-    }
-}
-
-impl<Ty> From<RefAccessError> for RuntimeError<Ty>
-where
-    Ty: Types,
-{
-    fn from(value: RefAccessError) -> Self {
-        match value {
-            RefAccessError::Dropped(err) => err.into(),
-            RefAccessError::Borrowed(err) => err.into(),
-        }
-    }
 }
 
 pub(crate) trait ExtraDiagnostic<FileId> {

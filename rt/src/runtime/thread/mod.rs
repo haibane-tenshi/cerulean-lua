@@ -372,7 +372,7 @@ where
         &mut self,
         ctrl: Control<FrameControl<Ty>, DelegateThreadControl>,
     ) -> Result<Control<Prompt, ThreadControl>, RtError<Ty>> {
-        use crate::error::OutOfBoundsStack;
+        use crate::error::StackOutOfBounds;
 
         match ctrl {
             Control::Frame(ctrl) => self.modify_call_stack(ctrl).map(Control::Frame),
@@ -380,7 +380,7 @@ where
                 let (ctrl, start) = ctrl.into_thread_control();
 
                 if start > self.thread.stack.len() {
-                    return Err(OutOfBoundsStack.into());
+                    return Err(StackOutOfBounds.into());
                 }
 
                 self.thread.protected = start;
@@ -401,9 +401,9 @@ where
                 callable,
                 start,
             } => {
-                use crate::error::OutOfBoundsStack;
+                use crate::error::StackOutOfBounds;
 
-                let stack = self.thread.stack.guard(start).ok_or(OutOfBoundsStack)?;
+                let stack = self.thread.stack.guard(start).ok_or(StackOutOfBounds)?;
                 let frame = Frame::new(
                     callable,
                     event,
