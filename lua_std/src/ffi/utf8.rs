@@ -228,14 +228,14 @@ where
         Ty: Types,
     {
         delegate::from_mut(|mut rt| {
-            use rt::ffi::arg_parser::{FormatReturns, Int, LuaString, Nil, ParseArgs};
+            use rt::ffi::arg_parser::{FormatReturns, Index, Int, LuaString, Nil, ParseArgs};
             use rt::gc::AllocExt;
 
-            let (s, prev): (LuaString<_>, Int) = rt.stack.parse(&mut rt.core.gc)?;
+            let (s, prev): (LuaString<_>, Index) = rt.stack.parse(&mut rt.core.gc)?;
             rt.stack.clear();
             let data = s.to_bytes(&rt.core.gc)?;
 
-            let offset = if prev == Int(0) {
+            let offset = if prev == Index(0) {
                 0
             } else if let Some(pos) = prev.to_offset(data.len()) {
                 if let Ok((_, count)) = next_code_point(&data[pos..]) {
@@ -275,7 +275,7 @@ where
                 return Err(err);
             }
 
-            let pos = Int::from_index(offset).unwrap();
+            let pos = Index::from_index(offset).unwrap();
 
             rt.stack.transient().format((pos, Int(code_point.into())));
 
@@ -326,38 +326,33 @@ where
     Ty: Types,
 {
     delegate::from_mut(|mut rt| {
-        use rt::ffi::arg_parser::{Boolean, Int, LuaString, Opts, ParseArgs, Split};
+        use rt::ffi::arg_parser::{
+            range_from_lua, Boolean, Index, LuaString, Opts, ParseArgs, Split,
+        };
         use rt::gc::AllocExt;
         use rt::value::Value;
 
-        let (s, rest): (LuaString<_>, Opts<(Int, Int, Boolean)>) =
+        let (s, rest): (LuaString<_>, Opts<(Index, Index, Boolean)>) =
             rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
         let (i, j, _lax) = rest.split();
-        let i = i.unwrap_or(Int(1));
+        let i = i.unwrap_or(Index(1));
         let j = j.unwrap_or(i);
 
         let bytes = s.to_bytes(&rt.core.gc)?;
 
-        let Some(start) = i.to_offset(bytes.len()) else {
+        let Some(range) = range_from_lua(i..=j, bytes.len()) else {
             let err = rt
                 .core
                 .gc
-                .alloc_error_msg(format!("index {i} is out of bounds"));
+                .alloc_error_msg(format!("range {:?} is out of bounds", i..=j));
             return Err(err);
         };
 
-        let Some(end) = j.to_offset(bytes.len()) else {
-            let err = rt
-                .core
-                .gc
-                .alloc_error_msg(format!("index {j} is out of bounds"));
-            return Err(err);
-        };
-
-        let Ok(s) = std::str::from_utf8(&bytes[start..=end]) else {
+        let Ok(s) = std::str::from_utf8(&bytes[range]) else {
             let err = rt.core.gc.alloc_error_msg(format!(
-                "range {start}..={end} does not contain a valid utf-8 sequence"
+                "range {:?} does not contain a valid utf-8 sequence",
+                i..=j
             ));
             return Err(err);
         };
@@ -392,36 +387,29 @@ where
 {
     delegate::from_mut(|mut rt| {
         use rt::ffi::arg_parser::{
-            Boolean, FormatReturns, Int, LuaString, Nil, Opts, ParseArgs, Split,
+            range_from_lua, Boolean, FormatReturns, Index, Int, LuaString, Nil, Opts, ParseArgs,
+            Split,
         };
         use rt::gc::AllocExt;
 
-        let (s, rest): (LuaString<_>, Opts<(Int, Int, Boolean)>) =
+        let (s, rest): (LuaString<_>, Opts<(Index, Index, Boolean)>) =
             rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
         let (i, j, _lax) = rest.split();
-        let i = i.unwrap_or(Int(1));
-        let j = j.unwrap_or(Int(-1));
+        let i = i.unwrap_or(Index(1));
+        let j = j.unwrap_or(Index(-1));
 
         let bytes = s.to_bytes(&rt.core.gc)?;
 
-        let Some(start) = i.to_offset(bytes.len()) else {
+        let Some(range) = range_from_lua(i..=j, bytes.len()) else {
             let err = rt
                 .core
                 .gc
-                .alloc_error_msg(format!("index {i} is out of bounds"));
+                .alloc_error_msg(format!("range {:?} is out of bounds", i..=j));
             return Err(err);
         };
 
-        let Some(end) = j.to_offset(bytes.len()) else {
-            let err = rt
-                .core
-                .gc
-                .alloc_error_msg(format!("index {j} is out of bounds"));
-            return Err(err);
-        };
-
-        match std::str::from_utf8(&bytes[start..=end]) {
+        match std::str::from_utf8(&bytes[range]) {
             Ok(s) => {
                 let len = s.chars().count();
 
@@ -429,10 +417,9 @@ where
             }
             Err(err) => {
                 let valid_len = err.valid_up_to();
+                let pos = Index::from_index(valid_len).unwrap();
 
-                rt.stack
-                    .transient()
-                    .format((Nil, Int(valid_len.try_into().unwrap())));
+                rt.stack.transient().format((Nil, pos));
             }
         };
 
@@ -465,10 +452,11 @@ where
     Ty: Types,
 {
     delegate::from_mut(|mut rt| {
-        use rt::ffi::arg_parser::{FormatReturns, Int, LuaString, Nil, Opts, ParseArgs, Split};
+        use rt::ffi::arg_parser::{FormatReturns, Index, LuaString, Nil, Opts, ParseArgs, Split};
         use rt::gc::AllocExt;
 
-        let (s, n, rest): (LuaString<_>, Int, Opts<(Int,)>) = rt.stack.parse(&mut rt.core.gc)?;
+        let (s, n, rest): (LuaString<_>, Index, Opts<(Index,)>) =
+            rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
         let (i,) = rest.split();
 
@@ -476,7 +464,7 @@ where
 
         let offset = match n.0 {
             1.. => {
-                let i = i.unwrap_or(Int(1));
+                let i = i.unwrap_or(Index(1));
                 let Some(start) = i.to_offset(s.len()) else {
                     let err = rt
                         .core
@@ -494,7 +482,7 @@ where
                 };
 
                 // Counting from the beginning.
-                let nth = usize::try_from(n.0).unwrap() - 1;
+                let nth = n.to_index_from_start().unwrap();
                 let mut count = 0;
                 let mut iter = s.char_indices().inspect(|_| count += 1);
                 if let Some((offset, _)) = iter.nth(nth) {
@@ -532,7 +520,7 @@ where
                 };
 
                 // Counting from the end.
-                let nth = usize::try_from(n.0.unsigned_abs()).unwrap() - 1;
+                let nth = Index(-n.0).to_index_from_start().unwrap();
                 let mut iter = s.char_indices().rev();
                 let Some((offset, _)) = iter.nth(nth) else {
                     rt.stack.transient().format(Nil);
@@ -543,8 +531,7 @@ where
             }
             0 => {
                 // Attempt to find char boundary before or at `i`.
-
-                let i = i.unwrap_or(Int(1));
+                let i = i.unwrap_or(Index(1));
                 let Some(end) = i.to_offset(s.len()) else {
                     let err = rt
                         .core
@@ -561,7 +548,7 @@ where
 
         rt.stack
             .transient()
-            .format(Int::from_index(offset).unwrap());
+            .format(Index::from_index(offset).unwrap());
         Ok(())
     })
 }

@@ -2208,6 +2208,16 @@ impl From<Index> for Int {
     }
 }
 
+impl<Ty> From<Index> for WeakValue<Ty>
+where
+    Ty: Types,
+{
+    fn from(value: Index) -> Self {
+        let Index(n) = value;
+        Value::Int(n)
+    }
+}
+
 impl<Ty> TryFrom<WeakValue<Ty>> for Index
 where
     Ty: Types,
