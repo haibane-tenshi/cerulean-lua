@@ -23,7 +23,7 @@ impl<T> Display for NotTextError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "string at <{:p}> cannot be interpreted as text",
+            "string at <{}> cannot be interpreted as text",
             self.0.location()
         )
     }

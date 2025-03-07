@@ -85,7 +85,7 @@
 //! one for normal values, one for light userdata and one for full userdata.
 //! Owning type index directly allows for very straightforward resolution to this situation.
 
-use std::fmt::{Debug, Pointer};
+use std::fmt::{Debug, Display, Pointer};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -256,7 +256,7 @@ where
     A: Access,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
+        write!(f, "{}", self.location())
     }
 }
 
@@ -379,7 +379,7 @@ where
     A: Access,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
+        write!(f, "{}", self.location())
     }
 }
 
@@ -982,12 +982,12 @@ where
     }
 }
 
-impl<T> Pointer for Location<T>
+impl<T> Display for Location<T>
 where
     T: ?Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{:p}:{}", self.ty, self.index, self.gen)
+        write!(f, "{}@{:p}:{}", self.ty, self.index, self.gen)
     }
 }
 
