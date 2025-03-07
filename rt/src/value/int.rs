@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 
 use super::ops::{
-    Add, AddAssign, BitAnd, BitAndAssign, BitNot, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
-    DivAssign, FloorDiv, Mul, MulAssign, Neg, Pow, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign,
-    Sub, SubAssign,
+    Add, AddAssign, BitAnd, BitAndAssign, BitNot, BitOr, BitOrAssign, BitXor, BitXorAssign,
+    CheckedDiv, CheckedFloorDiv, CheckedPow, CheckedRem, Div, DivAssign, FloorDiv, Mul, MulAssign,
+    Neg, Pow, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 use super::{Float, Refs, Type, Types, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
@@ -172,6 +172,16 @@ impl DivAssign for Int {
     }
 }
 
+impl CheckedDiv for Int {
+    fn checked_div(self, rhs: Self) -> Option<Self::Output> {
+        if rhs != Int(0) {
+            Some(self / rhs)
+        } else {
+            None
+        }
+    }
+}
+
 impl FloorDiv for Int {
     type Output = Self;
 
@@ -180,11 +190,27 @@ impl FloorDiv for Int {
     }
 }
 
+impl CheckedFloorDiv for Int {
+    fn checked_floor_div(self, rhs: Self) -> Option<Self::Output> {
+        self.checked_div(rhs)
+    }
+}
+
 impl Rem for Int {
     type Output = Self;
 
     fn rem(self, rhs: Self) -> Self::Output {
         Int(self.0.rem_euclid(rhs.0))
+    }
+}
+
+impl CheckedRem for Int {
+    fn checked_rem(self, rhs: Self) -> Option<Self::Output> {
+        if rhs != Int(0) {
+            Some(self % rhs)
+        } else {
+            None
+        }
     }
 }
 
@@ -197,6 +223,12 @@ impl RemAssign for Int {
 impl Pow for Int {
     type Output = Self;
 
+    fn pow(self, rhs: Self) -> Self::Output {
+        self.checked_pow(rhs).unwrap()
+    }
+}
+
+impl CheckedPow for Int {
     fn checked_pow(self, rhs: Self) -> Option<Self::Output> {
         let Int(lhs) = self;
         let Int(rhs) = rhs;

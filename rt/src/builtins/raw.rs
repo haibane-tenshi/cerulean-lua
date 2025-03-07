@@ -132,11 +132,13 @@ pub fn div<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Opti
 where
     Ty: Types,
 {
+    use crate::value::ops::CheckedDiv;
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(_), Value::Int(0)] => Continue(None),
-        [Value::Int(lhs), Value::Int(rhs)] => Continue(Some((Int(lhs) / Int(rhs)).into())),
+        [Value::Int(lhs), Value::Int(rhs)] => {
+            Continue(Int(lhs).checked_div(Int(rhs)).map(Into::into))
+        }
         [Value::Float(lhs), Value::Float(rhs)] => Continue(Some((Float(lhs) / Float(rhs)).into())),
         _ => Break(MetamethodRequired),
     }
@@ -162,12 +164,13 @@ pub fn floor_div<Ty>(
 where
     Ty: Types,
 {
-    use crate::value::ops::FloorDiv;
+    use crate::value::ops::{CheckedFloorDiv, FloorDiv};
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(_), Value::Int(0)] => Continue(None),
-        [Value::Int(lhs), Value::Int(rhs)] => Continue(Some((Int(lhs).floor_div(Int(rhs))).into())),
+        [Value::Int(lhs), Value::Int(rhs)] => {
+            Continue(Int(lhs).checked_floor_div(Int(rhs)).map(Into::into))
+        }
         [Value::Float(lhs), Value::Float(rhs)] => {
             Continue(Some((Float(lhs).floor_div(Float(rhs))).into()))
         }
@@ -203,11 +206,13 @@ pub fn rem<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Opti
 where
     Ty: Types,
 {
+    use crate::value::ops::CheckedRem;
     use crate::value::{Float, Int};
 
     match args {
-        [Value::Int(_), Value::Int(0)] => Continue(None),
-        [Value::Int(lhs), Value::Int(rhs)] => Continue(Some((Int(lhs) % Int(rhs)).into())),
+        [Value::Int(lhs), Value::Int(rhs)] => {
+            Continue(Int(lhs).checked_rem(Int(rhs)).map(Into::into))
+        }
         [Value::Float(lhs), Value::Float(rhs)] => Continue(Some((Float(lhs) % Float(rhs)).into())),
         _ => Break(MetamethodRequired),
     }
@@ -242,7 +247,7 @@ pub fn pow<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Opti
 where
     Ty: Types,
 {
-    use crate::value::ops::Pow;
+    use crate::value::ops::{CheckedPow, Pow};
     use crate::value::{Float, Int};
 
     match args {

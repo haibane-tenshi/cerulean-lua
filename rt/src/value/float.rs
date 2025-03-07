@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 
 use super::ops::{
-    Add, AddAssign, Div, DivAssign, FloorDiv, Mul, MulAssign, Neg, Pow, Rem, RemAssign, Sub,
-    SubAssign,
+    Add, AddAssign, CheckedDiv, CheckedFloorDiv, CheckedPow, CheckedRem, Div, DivAssign, FloorDiv,
+    Mul, MulAssign, Neg, Pow, Rem, RemAssign, Sub, SubAssign,
 };
 use super::{Int, Refs, Type, Types, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
@@ -143,6 +143,12 @@ impl DivAssign for Float {
     }
 }
 
+impl CheckedDiv for Float {
+    fn checked_div(self, rhs: Self) -> Option<Self::Output> {
+        Some(self / rhs)
+    }
+}
+
 impl FloorDiv for Float {
     type Output = Self;
 
@@ -151,6 +157,12 @@ impl FloorDiv for Float {
         let Float(rhs) = rhs;
 
         Float((lhs / rhs).floor())
+    }
+}
+
+impl CheckedFloorDiv for Float {
+    fn checked_floor_div(self, rhs: Self) -> Option<Self::Output> {
+        Some(self.floor_div(rhs))
     }
 }
 
@@ -172,13 +184,21 @@ impl RemAssign for Float {
     }
 }
 
+impl CheckedRem for Float {
+    fn checked_rem(self, rhs: Self) -> Option<Self::Output> {
+        Some(self % rhs)
+    }
+}
+
 impl Pow for Float {
     type Output = Self;
 
     fn pow(self, rhs: Self) -> Self::Output {
         Float(self.0.powf(rhs.0))
     }
+}
 
+impl CheckedPow for Float {
     fn checked_pow(self, rhs: Self) -> Option<Self::Output> {
         Some(self.pow(rhs))
     }

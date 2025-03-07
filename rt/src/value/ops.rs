@@ -8,7 +8,7 @@
 //! From perspective of Lua they describe **raw** operations on underlying values.
 //! It is used as a building block for more complex and featureful operations.
 //! For this reason traits are only implemented on selection of strongly-typed Lua values
-//! ([`Int`](super::Int), [`Float`](super::Float) and others) but not on [`Value`]s.
+//! ([`Int`], [`Float`](super::Float) and others) but not on [`Value`](super::Value)s.
 //!
 //! If you are looking for a way to operate on `Value`s or handle metamethods/coercions,
 //! refer to [`builtins`](crate::builtins) module instead.
@@ -28,14 +28,14 @@
 //! * [`MulAssign`]
 //! * [`Div`]
 //! * [`DivAssign`]
-//! * `CheckedDiv` - to add
-//! * [`FloorDiv`] - [Lua specific] division that rounds to nearest smaller integer
-//! * `CheckedFloorDic` - to add?
+//! * [`CheckedDiv`] - \[custom\] variant that shouldn't panic
+//! * [`FloorDiv`] - \[Lua specific\] division that rounds to nearest smaller integer
+//! * [`CheckedFloorDiv`] - \[Lua specific\]\[custom\] variant that shouldn't panic
 //! * [`Rem`]
 //! * [`RemAssign`]
-//! * `CheckedRem` - to add
-//! * [`Pow`] - [Lua specific] raise number to the power
-//! * `CheckedPow` - to add?
+//! * [`CheckedRem`] - \[custom\] variant that shouldn't panic
+//! * [`Pow`] - \[Lua specific\] raise number to the power
+//! * [`CheckedPow`] - \[custom\] variant that shouldn't panic
 //!
 //! Bitwise ops:
 //!
@@ -61,7 +61,8 @@
 //! Some arithmetic operations exist in both checked ([`CheckedDiv`], [`CheckedFloorDiv`], [`CheckedRem`] and [`CheckedPow`]) and
 //! unchecked form ([`Div`], [`FloorDiv`], [`Rem`] and [`Pow`]).
 //!
-//! According to Lua spec, before performing any of those operations integer arguments must get coerced to floats.
+//! According to Lua spec, before performing any of those operations integer arguments must get coerced to floats likely to prevent integer exceptions.
+//! (Other ops don't panic because Lua defines integer arithmetic as wrapping.)
 //! For floats there is no reason to have checked versions: it can always emit a `NaN` in case of trouble,
 //! and most programs expect this behavior.
 //!
@@ -70,7 +71,7 @@
 //! This means that it is possible for any op to be applied to integer arguments,
 //! which can lead to Rust panics on bad inputs.
 //!
-//! To handle the matter gracefully, builtins will always use **checked versions for integers** (and **unchecked for floats**).
+//! To handle the matter gracefully, builtins will always use **checked versions for integers** and **unchecked for floats**.
 //! Failing to produce a value in checked ops is then elevated into Lua runtime error.
 
 use super::Int;
@@ -81,20 +82,32 @@ pub use std::ops::{
     SubAssign,
 };
 
+pub trait CheckedDiv<Rhs = Self>: Div<Rhs> {
+    fn checked_div(self, rhs: Rhs) -> Option<Self::Output>;
+}
+
+pub trait CheckedRem<Rhs = Self>: Rem<Rhs> {
+    fn checked_rem(self, rhs: Rhs) -> Option<Self::Output>;
+}
+
 pub trait FloorDiv<Rhs = Self> {
     type Output;
 
     fn floor_div(self, rhs: Rhs) -> Self::Output;
 }
 
+pub trait CheckedFloorDiv<Rhs = Self>: FloorDiv<Rhs> {
+    fn checked_floor_div(self, rhs: Rhs) -> Option<Self::Output>;
+}
+
 pub trait Pow<Rhs = Self>: Sized {
     type Output;
 
-    fn checked_pow(self, rhs: Rhs) -> Option<Self::Output>;
+    fn pow(self, rhs: Rhs) -> Self::Output;
+}
 
-    fn pow(self, rhs: Rhs) -> Self::Output {
-        self.checked_pow(rhs).unwrap()
-    }
+pub trait CheckedPow<Rhs = Self>: Pow<Rhs> {
+    fn checked_pow(self, rhs: Rhs) -> Option<Self::Output>;
 }
 
 pub trait Len {
