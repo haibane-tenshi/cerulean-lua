@@ -214,7 +214,7 @@ where
         use rt::ffi::arg_parser::{Int, LuaString, Opts, ParseArgs, Split};
         use rt::ffi::delegate::StackSlot;
         use rt::gc::AllocExt;
-        use rt::value::traits::Concat;
+        use rt::value::ops::Concat;
 
         let (s, n, rest): (LuaString<_>, Int, Opts<(LuaString<_>,)>) =
             rt.stack.parse(&mut rt.core.gc)?;

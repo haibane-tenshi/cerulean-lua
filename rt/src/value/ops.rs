@@ -73,89 +73,13 @@
 //! To handle the matter gracefully, builtins will always use **checked versions for integers** (and **unchecked for floats**).
 //! Failing to produce a value in checked ops is then elevated into Lua runtime error.
 
-use std::hash::Hash;
+use super::Int;
 
-use gc::index::Allocated;
-use gc::{Gc, GcCell, Interned, Root, RootCell, Trace};
-
-use super::string::{FromEncoding, IntoEncoding, PossiblyUtf8Vec};
-use super::userdata::{DefaultParams, FullUserdata};
-use super::{Int, KeyValue, Value};
-use crate::ffi::DLuaFfi;
-use crate::gc::{Heap, LuaPtr};
-use crate::runtime::Closure;
-
-pub use gc::userdata::Metatable;
 pub use std::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Not as BitNot, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub,
     SubAssign,
 };
-
-pub trait Refs: Sized + 'static {
-    type String<T>;
-    type LuaCallable<T>;
-    type RustCallable<T>;
-    type Table<T>;
-    type FullUserdata<T: ?Sized>;
-}
-
-pub struct Strong;
-
-impl Refs for Strong {
-    type String<T> = LuaPtr<Root<Interned<T>>>;
-    type LuaCallable<T> = LuaPtr<Root<T>>;
-    type RustCallable<T> = LuaPtr<RootCell<T>>;
-    type Table<T> = LuaPtr<RootCell<T>>;
-    type FullUserdata<T: ?Sized> = LuaPtr<RootCell<T>>;
-}
-
-pub struct Weak;
-
-impl Refs for Weak {
-    type String<T> = LuaPtr<Gc<Interned<T>>>;
-    type LuaCallable<T> = LuaPtr<Gc<T>>;
-    type RustCallable<T> = LuaPtr<GcCell<T>>;
-    type Table<T> = LuaPtr<GcCell<T>>;
-    type FullUserdata<T: ?Sized> = LuaPtr<GcCell<T>>;
-}
-
-pub trait Types: Sized + 'static {
-    type String: Trace + Concat + Len + Clone + Ord + Hash + IntoEncoding + FromEncoding;
-    type LuaClosure: Trace;
-    type RustClosure: Trace;
-    type Table: Len + Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
-    type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
-        + Allocated<Heap<Self>>
-        + ?Sized;
-}
-
-pub type Meta<Ty> = GcCell<<Ty as Types>::Table>;
-
-pub struct DefaultTypes;
-
-impl Types for DefaultTypes {
-    type String = PossiblyUtf8Vec;
-    type LuaClosure = Closure<Self>;
-    type RustClosure = Box<dyn DLuaFfi<Self>>;
-    type Table = super::Table<Weak, Self>;
-    type FullUserdata = dyn FullUserdata<Meta<Self>, DefaultParams<Self>>;
-}
-
-pub trait TableIndex<Rf, Ty>
-where
-    Rf: Refs,
-    Ty: Types,
-{
-    fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty>;
-    fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>);
-    fn first_key(&self) -> Option<&KeyValue<Rf, Ty>>;
-    fn next_key(&self, key: &KeyValue<Rf, Ty>) -> Option<&KeyValue<Rf, Ty>>;
-    fn border(&self) -> i64;
-    fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
-        !matches!(self.get(key), Value::Nil)
-    }
-}
 
 pub trait FloorDiv<Rhs = Self> {
     type Output;

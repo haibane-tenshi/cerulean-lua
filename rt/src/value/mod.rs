@@ -3,29 +3,86 @@ pub mod callable;
 pub mod float;
 pub mod int;
 pub mod nil;
+pub mod ops;
 pub mod string;
 pub mod table;
-pub mod traits;
 pub mod userdata;
 
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
 use enumoid::Enumoid;
-use gc::Trace;
+use gc::index::Allocated;
+use gc::{Gc, GcCell, Interned, Root, RootCell, Trace};
 
 use crate::error::{AlreadyDroppedError, InvalidKeyError};
-use crate::gc::{Downgrade, Heap, Upgrade};
+use crate::ffi::DLuaFfi;
+use crate::gc::{Downgrade, Heap, LuaPtr, Upgrade};
+use crate::runtime::Closure;
 use crate::runtime::MetatableRegistry;
+use string::{FromEncoding, IntoEncoding, PossiblyUtf8Vec};
+use userdata::FullUserdata;
+
+pub use gc::userdata::Metatable;
 
 pub use boolean::Boolean;
 pub use callable::Callable;
 pub use float::Float;
 pub use int::Int;
 pub use nil::Nil;
-pub use table::{KeyValue, Table};
-pub use traits::{Concat, Len, Meta, Metatable, Refs, Strong, TableIndex, Types, Weak};
+pub use ops::{Concat, Len};
+pub use table::{KeyValue, Table, TableIndex};
 pub use userdata::DefaultParams;
+
+pub trait Refs: Sized + 'static {
+    type String<T>;
+    type LuaCallable<T>;
+    type RustCallable<T>;
+    type Table<T>;
+    type FullUserdata<T: ?Sized>;
+}
+
+pub struct Strong;
+
+impl Refs for Strong {
+    type String<T> = LuaPtr<Root<Interned<T>>>;
+    type LuaCallable<T> = LuaPtr<Root<T>>;
+    type RustCallable<T> = LuaPtr<RootCell<T>>;
+    type Table<T> = LuaPtr<RootCell<T>>;
+    type FullUserdata<T: ?Sized> = LuaPtr<RootCell<T>>;
+}
+
+pub struct Weak;
+
+impl Refs for Weak {
+    type String<T> = LuaPtr<Gc<Interned<T>>>;
+    type LuaCallable<T> = LuaPtr<Gc<T>>;
+    type RustCallable<T> = LuaPtr<GcCell<T>>;
+    type Table<T> = LuaPtr<GcCell<T>>;
+    type FullUserdata<T: ?Sized> = LuaPtr<GcCell<T>>;
+}
+
+pub trait Types: Sized + 'static {
+    type String: Trace + Concat + Len + Clone + Ord + Hash + IntoEncoding + FromEncoding;
+    type LuaClosure: Trace;
+    type RustClosure: Trace;
+    type Table: Len + Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
+    type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
+        + Allocated<Heap<Self>>
+        + ?Sized;
+}
+
+pub type Meta<Ty> = GcCell<<Ty as Types>::Table>;
+
+pub struct DefaultTypes;
+
+impl Types for DefaultTypes {
+    type String = PossiblyUtf8Vec;
+    type LuaClosure = Closure<Self>;
+    type RustClosure = Box<dyn DLuaFfi<Self>>;
+    type Table = Table<Weak, Self>;
+    type FullUserdata = dyn FullUserdata<Meta<Self>, DefaultParams<Self>>;
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Type {

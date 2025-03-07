@@ -283,7 +283,7 @@ where
             use rt::builtins::table::GetIndexCache;
             use rt::ffi::arg_parser::{Float, Int};
             use rt::gc::{LuaPtr, TryGet};
-            use rt::value::traits::Concat;
+            use rt::value::ops::Concat;
             use rt::value::{KeyValue as Key, Value};
             use std::borrow::Cow;
             use std::ops::ControlFlow;
@@ -378,7 +378,7 @@ where
             use rt::builtins::coerce;
             use rt::ffi::arg_parser::{Float, Int};
             use rt::gc::{LuaPtr, TryGet};
-            use rt::value::traits::Concat;
+            use rt::value::ops::Concat;
             use rt::value::{KeyValue as Key, Value};
             use std::borrow::Cow;
 

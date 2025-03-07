@@ -6,10 +6,25 @@ use gc::Trace;
 use ordered_float::NotNan;
 
 use super::callable::Callable;
-use super::traits::Len;
-use super::{Int, Meta, Metatable, Refs, Strong, TableIndex, Type, Types, Value, Weak};
+use super::ops::Len;
+use super::{Int, Meta, Metatable, Refs, Strong, Type, Types, Value, Weak};
 use crate::error::{AlreadyDroppedError, InvalidKeyError};
 use crate::gc::Heap;
+
+pub trait TableIndex<Rf, Ty>
+where
+    Rf: Refs,
+    Ty: Types,
+{
+    fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty>;
+    fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>);
+    fn first_key(&self) -> Option<&KeyValue<Rf, Ty>>;
+    fn next_key(&self, key: &KeyValue<Rf, Ty>) -> Option<&KeyValue<Rf, Ty>>;
+    fn border(&self) -> i64;
+    fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
+        !matches!(self.get(key), Value::Nil)
+    }
+}
 
 pub struct Table<Rf, Ty>
 where

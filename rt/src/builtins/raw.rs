@@ -162,7 +162,7 @@ pub fn floor_div<Ty>(
 where
     Ty: Types,
 {
-    use crate::value::traits::FloorDiv;
+    use crate::value::ops::FloorDiv;
     use crate::value::{Float, Int};
 
     match args {
@@ -242,7 +242,7 @@ pub fn pow<Ty>(args: [WeakValue<Ty>; 2]) -> ControlFlow<MetamethodRequired, Opti
 where
     Ty: Types,
 {
-    use crate::value::traits::Pow;
+    use crate::value::ops::Pow;
     use crate::value::{Float, Int};
 
     match args {

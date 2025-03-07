@@ -59,7 +59,7 @@ where
                         if metamethod == Value::Nil {
                             // Fallback.
                             if let Value::Table(LuaPtr(ptr)) = value {
-                                use rt::value::traits::Len;
+                                use rt::value::ops::Len;
 
                                 let table: &Ty::Table = rt.core.gc.try_get(ptr)?;
                                 return Ok(State::Complete(table.len().into()));

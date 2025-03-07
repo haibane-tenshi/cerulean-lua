@@ -373,7 +373,7 @@ where
     {
         let body = || {
             delegate::from_mut(|mut rt| {
-                use rt::value::traits::TableIndex;
+                use rt::value::TableIndex;
 
                 let (LuaTable(LuaPtr(table)), Int(prev)) = rt.stack.parse(&mut rt.core.gc)?;
                 rt.stack.clear();
@@ -875,7 +875,7 @@ where
 
                 let finalize = match part {
                     Some(LuaString(LuaPtr(ptr))) => {
-                        use rt::value::traits::{Concat, Len};
+                        use rt::value::ops::{Concat, Len};
 
                         let part = rt.core.gc.get(ptr).ok_or(AlreadyDroppedError)?.as_inner();
 
@@ -1036,7 +1036,7 @@ where
     Ty: Types,
 {
     delegate::from_mut(|mut rt| {
-        use rt::value::traits::TableIndex;
+        use rt::value::TableIndex;
 
         let (table, index): (LuaTable<_>, Maybe<WeakValue<Ty>>) =
             rt.stack.parse(&mut rt.core.gc)?;
@@ -1678,7 +1678,7 @@ where
     }
 
     delegate::from_mut(|mut rt| {
-        use rt::value::traits::Len;
+        use rt::value::ops::Len;
 
         let value: StringOrTable<Ty> = rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
@@ -1722,7 +1722,7 @@ where
     Ty: Types,
 {
     delegate::from_mut(|mut rt| {
-        use rt::value::traits::TableIndex;
+        use rt::value::TableIndex;
 
         let (table, index): (LuaTable<_>, WeakValue<_>) = rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
@@ -1762,7 +1762,7 @@ where
     Ty: Types,
 {
     delegate::from_mut(|mut rt| {
-        use rt::value::traits::TableIndex;
+        use rt::value::TableIndex;
 
         let (table, index, value): (LuaTable<_>, WeakValue<_>, WeakValue<_>) =
             rt.stack.parse(&mut rt.core.gc)?;

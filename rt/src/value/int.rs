@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 
-use super::traits::{
+use super::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitNot, BitOr, BitOrAssign, BitXor, BitXorAssign, Div,
     DivAssign, FloorDiv, Mul, MulAssign, Neg, Pow, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign,
     Sub, SubAssign,

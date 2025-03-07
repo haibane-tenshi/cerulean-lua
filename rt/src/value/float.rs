@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 
-use super::traits::{
+use super::ops::{
     Add, AddAssign, Div, DivAssign, FloorDiv, Mul, MulAssign, Neg, Pow, Rem, RemAssign, Sub,
     SubAssign,
 };
