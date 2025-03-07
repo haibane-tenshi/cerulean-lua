@@ -27,7 +27,7 @@ where
         mut rt: RuntimeView<'_, Ty>,
         response: Response<Ty>,
     ) -> State<Request<Ty>, Result<WeakValue<Ty>, RuntimeError<Ty>>> {
-        use rt::builtins::raw::{self, MetamethodRequired};
+        use rt::builtins::raw_ops::{self, MetamethodRequired};
         use rt::builtins::{find_metavalue, prepare_invoke};
         use rt::ffi::delegate::rearrange;
         use rt::gc::{Heap, LuaPtr, TryGet};
@@ -43,50 +43,56 @@ where
 
             let current = std::mem::replace(self, Len::Finished);
             match (current, response) {
-                (Len::Started(value), Response::Resume) => match raw::len([value], &rt.core.gc)? {
-                    ControlFlow::Break(MetamethodRequired) => {
-                        let key = {
-                            let name = rt
-                                .core
-                                .gc
-                                .find_interned(&Ty::String::from("__len"))
-                                .ok_or_else(|| err_msg(&mut rt.core.gc, value.type_()))?;
-                            KeyValue::String(LuaPtr(name.downgrade()))
-                        };
-                        let metamethod =
-                            find_metavalue([value], key, &rt.core.gc, &rt.core.metatable_registry)?;
+                (Len::Started(value), Response::Resume) => {
+                    match raw_ops::len([value], &rt.core.gc)? {
+                        ControlFlow::Break(MetamethodRequired) => {
+                            let key = {
+                                let name = rt
+                                    .core
+                                    .gc
+                                    .find_interned(&Ty::String::from("__len"))
+                                    .ok_or_else(|| err_msg(&mut rt.core.gc, value.type_()))?;
+                                KeyValue::String(LuaPtr(name.downgrade()))
+                            };
+                            let metamethod = find_metavalue(
+                                [value],
+                                key,
+                                &rt.core.gc,
+                                &rt.core.metatable_registry,
+                            )?;
 
-                        if metamethod == Value::Nil {
-                            // Fallback.
-                            if let Value::Table(LuaPtr(ptr)) = value {
-                                use rt::value::ops::Len;
+                            if metamethod == Value::Nil {
+                                // Fallback.
+                                if let Value::Table(LuaPtr(ptr)) = value {
+                                    use rt::value::ops::Len;
 
-                                let table: &Ty::Table = rt.core.gc.try_get(ptr)?;
-                                return Ok(State::Complete(table.len().into()));
-                            } else {
-                                return Err(err_msg(&mut rt.core.gc, value.type_()));
+                                    let table: &Ty::Table = rt.core.gc.try_get(ptr)?;
+                                    return Ok(State::Complete(table.len().into()));
+                                } else {
+                                    return Err(err_msg(&mut rt.core.gc, value.type_()));
+                                }
                             }
+
+                            let start = rt.stack.top();
+                            let mut stack = rt.stack.guard_at(start).unwrap();
+                            let mut stack = stack.transient();
+                            stack.push(value);
+
+                            let callable = prepare_invoke(
+                                metamethod,
+                                stack,
+                                &rt.core.gc,
+                                &rt.core.metatable_registry,
+                            )?;
+
+                            let request = Request::Invoke { callable, start };
+
+                            *self = Len::CalledMeta(start);
+                            Ok(State::Yielded(request))
                         }
-
-                        let start = rt.stack.top();
-                        let mut stack = rt.stack.guard_at(start).unwrap();
-                        let mut stack = stack.transient();
-                        stack.push(value);
-
-                        let callable = prepare_invoke(
-                            metamethod,
-                            stack,
-                            &rt.core.gc,
-                            &rt.core.metatable_registry,
-                        )?;
-
-                        let request = Request::Invoke { callable, start };
-
-                        *self = Len::CalledMeta(start);
-                        Ok(State::Yielded(request))
+                        ControlFlow::Continue(res) => Ok(State::Complete(res.into())),
                     }
-                    ControlFlow::Continue(res) => Ok(State::Complete(res.into())),
-                },
+                }
                 (Len::CalledMeta(start), Response::Evaluated(res)) => {
                     res?;
 

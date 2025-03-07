@@ -770,7 +770,7 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     use rt::builtins::coerce::CoerceArgs;
-    use rt::builtins::raw::{lt, MetamethodRequired};
+    use rt::builtins::raw_ops::{lt, MetamethodRequired};
     use rt::ffi::arg_parser::FormatReturns;
     use rt::ffi::delegate::{Request, StackSlot};
     use rt::gc::{Downgrade, Upgrade};
@@ -933,7 +933,7 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     use rt::builtins::coerce::CoerceArgs;
-    use rt::builtins::raw::{gt, MetamethodRequired};
+    use rt::builtins::raw_ops::{gt, MetamethodRequired};
     use rt::ffi::arg_parser::FormatReturns;
     use rt::ffi::delegate::{Request, StackSlot};
     use rt::gc::{Downgrade, Upgrade};

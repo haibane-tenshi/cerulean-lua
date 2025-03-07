@@ -655,7 +655,7 @@ where
     ) -> Result<ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::UnaOpCause>> {
         use crate::builtins::coerce::CoerceArgs;
         use crate::builtins::find_metavalue;
-        use crate::builtins::raw::{unary_op, MetamethodRequired};
+        use crate::builtins::raw_ops::{unary_op, MetamethodRequired};
         use ControlFlow::*;
 
         let [val] = &args;
@@ -719,7 +719,7 @@ where
     ) -> Result<std::ops::ControlFlow<Invoke<Ty>>, AlreadyDroppedOr<opcode_err::BinOpCause>> {
         use crate::builtins::coerce::CoerceArgs;
         use crate::builtins::find_metavalue;
-        use crate::builtins::raw::{inner_binary_op, AsHeap, Intern, MetamethodRequired};
+        use crate::builtins::raw_ops::{inner_binary_op, AsHeap, Intern, MetamethodRequired};
 
         struct Inner<'a, 'rt, Ty>(&'a mut ActiveFrame<'rt, Ty>)
         where

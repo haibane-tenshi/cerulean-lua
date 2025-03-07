@@ -63,7 +63,7 @@
 
 pub mod coerce;
 pub mod full;
-pub mod raw;
+pub mod raw_ops;
 pub mod table;
 
 use crate::error::{AlreadyDroppedOr, NotCallableError};

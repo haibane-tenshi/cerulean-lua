@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 use repr::opcode::{AriBinOp, BinOp, BitBinOp, EqBinOp, RelBinOp, StrBinOp, UnaOp};
 
 use crate::builtins::coerce::CoerceArgs;
-use crate::builtins::raw::MetamethodRequired;
+use crate::builtins::raw_ops::MetamethodRequired;
 use crate::builtins::{find_metavalue, prepare_invoke};
 use crate::error::{AlreadyDroppedError, AlreadyDroppedOr, RtError};
 use crate::ffi::arg_parser::ParseArgs;
@@ -28,7 +28,7 @@ where
 
     try_repeat(move |mut rt: RuntimeView<'_, _>| match state {
         State::Started => {
-            use crate::builtins::raw::binary_op;
+            use crate::builtins::raw_ops::binary_op;
 
             let heap = &mut rt.core.gc;
             let mut stack = rt.stack.transient();
@@ -267,7 +267,7 @@ where
 
     try_repeat(move |mut rt: RuntimeView<'_, _>| match state {
         State::Started => {
-            use crate::builtins::raw::unary_op;
+            use crate::builtins::raw_ops::unary_op;
 
             let heap = &mut rt.core.gc;
             let mut stack = rt.stack.transient();
