@@ -590,7 +590,7 @@ where
     Ty: Types,
 {
     use crate::gc::{LuaPtr, TryGet};
-    use crate::value::{KeyValue, Len, Metatable, TableIndex};
+    use crate::value::{Key, Len, Metatable, TableIndex};
 
     match args {
         [Value::String(LuaPtr(ptr))] => {
@@ -607,7 +607,7 @@ where
                 let meta = heap.try_get(*meta)?;
                 let key: Ty::String = BuiltinMetamethod::Len.to_str().into();
                 if let Some(key) = heap.find_interned(&key) {
-                    let key = KeyValue::String(LuaPtr(key.downgrade()));
+                    let key = Key::String(LuaPtr(key.downgrade()));
                     meta.contains_key(&key)
                 } else {
                     false

@@ -12,7 +12,7 @@ use crate::ffi::delegate::{
 };
 use crate::gc::LuaPtr;
 use crate::runtime::thread::frame::Event;
-use crate::value::{KeyValue, Types, Value};
+use crate::value::{Key, Types, Value};
 
 fn binary_op<Ty>(op: BinOp) -> impl Delegate<Ty>
 where
@@ -59,7 +59,7 @@ where
             let s = heap
                 .intern(event.to_metamethod().to_str().into())
                 .downgrade();
-            let key = KeyValue::String(LuaPtr(s));
+            let key = Key::String(LuaPtr(s));
             let metavalue = find_metavalue(args, key, heap, &rt.core.metatable_registry)?;
 
             match metavalue {
@@ -299,7 +299,7 @@ where
             let s = heap
                 .intern(event.to_metamethod().to_str().into())
                 .downgrade();
-            let key = KeyValue::String(LuaPtr(s));
+            let key = Key::String(LuaPtr(s));
             let metavalue = find_metavalue(args, key, heap, &rt.core.metatable_registry)?;
 
             match metavalue {

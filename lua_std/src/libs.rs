@@ -226,12 +226,12 @@ where
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>) {
         use rt::gc::LuaPtr;
-        use rt::value::{KeyValue, TableIndex, Value};
+        use rt::value::{Key, TableIndex, Value};
 
         let Table { name, builder } = self;
 
         let key = core.gc.intern(name.as_ref().into());
-        let key = KeyValue::String(LuaPtr(key.downgrade()));
+        let key = Key::String(LuaPtr(key.downgrade()));
         let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
             core.gc.upgrade(ptr).unwrap()
         } else {
@@ -253,12 +253,12 @@ where
 {
     fn build(self, table: &RootTable<Ty>, core: &mut Core<Ty>, extra: &mut Ex) {
         use rt::gc::LuaPtr;
-        use rt::value::{KeyValue, TableIndex, Value};
+        use rt::value::{Key, TableIndex, Value};
 
         let Table { name, builder } = self;
 
         let key = core.gc.intern(name.as_ref().into());
-        let key = KeyValue::String(LuaPtr(key.downgrade()));
+        let key = Key::String(LuaPtr(key.downgrade()));
         let local_table = if let Value::Table(LuaPtr(ptr)) = core.gc[table].get(&key) {
             core.gc.upgrade(ptr).unwrap()
         } else {
@@ -1535,7 +1535,7 @@ where
     use rt::ffi::boxed;
     use rt::gc::LuaPtr;
     use rt::runtime::Core;
-    use rt::value::{Callable, KeyValue as Key, TableIndex, Value};
+    use rt::value::{Callable, Key, TableIndex, Value};
 
     move |table: &RootTable<Ty>, core: &mut Core<Ty>| {
         let key = core.alloc_string(name.into());
@@ -1557,7 +1557,7 @@ where
 {
     use rt::gc::LuaPtr;
     use rt::runtime::Core;
-    use rt::value::{KeyValue as Key, TableIndex, Value};
+    use rt::value::{Key, TableIndex, Value};
 
     move |table: &RootTable<Ty>, core: &mut Core<Ty>| {
         let key = core.alloc_string(name.into());

@@ -10,7 +10,7 @@ use rt::ffi::arg_parser::ParseFrom;
 use rt::ffi::{self, DLuaFfi};
 use rt::gc::LuaPtr;
 use rt::runtime::{Closure, Core};
-use rt::value::{KeyValue, TableIndex, Types, Value};
+use rt::value::{Key, TableIndex, Types, Value};
 
 use crate::lib::set_func;
 use crate::traits::{RootTable, TableEntry};
@@ -196,7 +196,7 @@ where
         let key = core.alloc_string("_G".into());
 
         core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
+            Key::String(LuaPtr(key.downgrade())),
             Value::Table(LuaPtr(value.downgrade())),
         );
     }
@@ -223,7 +223,7 @@ where
         let version = core.alloc_string("Lua 5.4".into());
 
         core.gc[value].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
+            Key::String(LuaPtr(key.downgrade())),
             Value::String(LuaPtr(version.downgrade())),
         );
     }

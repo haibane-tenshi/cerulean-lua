@@ -16,12 +16,12 @@ where
     Rf: Refs,
     Ty: Types,
 {
-    fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty>;
-    fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>);
-    fn first_key(&self) -> Option<&KeyValue<Rf, Ty>>;
-    fn next_key(&self, key: &KeyValue<Rf, Ty>) -> Option<&KeyValue<Rf, Ty>>;
+    fn get(&self, key: &Key<Rf, Ty>) -> Value<Rf, Ty>;
+    fn set(&mut self, key: Key<Rf, Ty>, value: Value<Rf, Ty>);
+    fn first_key(&self) -> Option<&Key<Rf, Ty>>;
+    fn next_key(&self, key: &Key<Rf, Ty>) -> Option<&Key<Rf, Ty>>;
     fn border(&self) -> i64;
-    fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
+    fn contains_key(&self, key: &Key<Rf, Ty>) -> bool {
         !matches!(self.get(key), Value::Nil)
     }
 }
@@ -31,7 +31,7 @@ where
     Rf: Refs,
     Ty: Types,
 {
-    data: BTreeMap<KeyValue<Rf, Ty>, Value<Rf, Ty>>,
+    data: BTreeMap<Key<Rf, Ty>, Value<Rf, Ty>>,
     metatable: Option<Meta<Ty>>,
 }
 
@@ -39,14 +39,14 @@ impl<Rf, Ty> TableIndex<Rf, Ty> for Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
-    KeyValue<Rf, Ty>: Ord,
+    Key<Rf, Ty>: Ord,
     Value<Rf, Ty>: Clone,
 {
-    fn get(&self, key: &KeyValue<Rf, Ty>) -> Value<Rf, Ty> {
+    fn get(&self, key: &Key<Rf, Ty>) -> Value<Rf, Ty> {
         self.data.get(key).cloned().unwrap_or_default()
     }
 
-    fn set(&mut self, key: KeyValue<Rf, Ty>, value: Value<Rf, Ty>) {
+    fn set(&mut self, key: Key<Rf, Ty>, value: Value<Rf, Ty>) {
         match value {
             Value::Nil => {
                 self.data.remove(&key);
@@ -57,11 +57,11 @@ where
         }
     }
 
-    fn first_key(&self) -> Option<&KeyValue<Rf, Ty>> {
+    fn first_key(&self) -> Option<&Key<Rf, Ty>> {
         self.data.first_key_value().map(|(key, _)| key)
     }
 
-    fn next_key(&self, key: &KeyValue<Rf, Ty>) -> Option<&KeyValue<Rf, Ty>> {
+    fn next_key(&self, key: &Key<Rf, Ty>) -> Option<&Key<Rf, Ty>> {
         use std::ops::Bound;
 
         let (key, _) = self
@@ -75,7 +75,7 @@ where
         Table::border(self)
     }
 
-    fn contains_key(&self, key: &KeyValue<Rf, Ty>) -> bool {
+    fn contains_key(&self, key: &Key<Rf, Ty>) -> bool {
         self.data.contains_key(key)
     }
 }
@@ -84,16 +84,16 @@ impl<Rf, Ty> Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
-    KeyValue<Rf, Ty>: Ord,
+    Key<Rf, Ty>: Ord,
 {
-    pub fn get_ref<'s>(&'s self, key: &KeyValue<Rf, Ty>) -> Option<&'s Value<Rf, Ty>> {
+    pub fn get_ref<'s>(&'s self, key: &Key<Rf, Ty>) -> Option<&'s Value<Rf, Ty>> {
         self.data.get(key)
     }
 
     pub fn border(&self) -> i64 {
         // Inefficient, but will get fixed when table layout is improved.
         (0..)
-            .find(|&i| !self.data.contains_key(&KeyValue::Int(i + 1)))
+            .find(|&i| !self.data.contains_key(&Key::Int(i + 1)))
             .unwrap_or(i64::MAX)
     }
 }
@@ -102,7 +102,7 @@ impl<Rf, Ty> Len for Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
-    KeyValue<Rf, Ty>: Ord,
+    Key<Rf, Ty>: Ord,
 {
     fn len(&self) -> Int {
         Int(self.border())
@@ -147,7 +147,7 @@ impl<Rf, Ty> Debug for Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
-    KeyValue<Rf, Ty>: Debug,
+    Key<Rf, Ty>: Debug,
     Value<Rf, Ty>: Debug,
     Meta<Ty>: Debug,
 {
@@ -163,7 +163,7 @@ impl<Rf, Ty> Clone for Table<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
-    KeyValue<Rf, Ty>: Clone,
+    Key<Rf, Ty>: Clone,
     Value<Rf, Ty>: Clone,
     Meta<Ty>: Clone,
 {
@@ -188,7 +188,7 @@ where
     }
 }
 
-pub enum KeyValue<Rf: Refs, Ty: Types> {
+pub enum Key<Rf: Refs, Ty: Types> {
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
@@ -198,69 +198,69 @@ pub enum KeyValue<Rf: Refs, Ty: Types> {
     Userdata(Rf::FullUserdata<Ty::FullUserdata>),
 }
 
-impl<Rf, Ty> KeyValue<Rf, Ty>
+impl<Rf, Ty> Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
 {
     pub fn type_(&self) -> Type {
         match self {
-            KeyValue::Bool(_) => Type::Bool,
-            KeyValue::Int(_) => Type::Int,
-            KeyValue::Float(_) => Type::Float,
-            KeyValue::String(_) => Type::String,
-            KeyValue::Function(_) => Type::Function,
-            KeyValue::Table(_) => Type::Table,
-            KeyValue::Userdata(_) => Type::Userdata,
+            Key::Bool(_) => Type::Bool,
+            Key::Int(_) => Type::Int,
+            Key::Float(_) => Type::Float,
+            Key::String(_) => Type::String,
+            Key::Function(_) => Type::Function,
+            Key::Table(_) => Type::Table,
+            Key::Userdata(_) => Type::Userdata,
         }
     }
 }
 
-impl<Ty> KeyValue<Strong, Ty>
+impl<Ty> Key<Strong, Ty>
 where
     Ty: Types,
 {
-    pub fn downgrade(&self) -> KeyValue<Weak, Ty> {
+    pub fn downgrade(&self) -> Key<Weak, Ty> {
         use crate::gc::Downgrade;
 
         match self {
-            KeyValue::Bool(t) => KeyValue::Bool(*t),
-            KeyValue::Int(t) => KeyValue::Int(*t),
-            KeyValue::Float(not_nan) => KeyValue::Float(*not_nan),
-            KeyValue::String(t) => KeyValue::String(t.downgrade()),
-            KeyValue::Function(callable) => KeyValue::Function(callable.downgrade()),
-            KeyValue::Table(t) => KeyValue::Table(t.downgrade()),
-            KeyValue::Userdata(t) => KeyValue::Userdata(t.downgrade()),
+            Key::Bool(t) => Key::Bool(*t),
+            Key::Int(t) => Key::Int(*t),
+            Key::Float(not_nan) => Key::Float(*not_nan),
+            Key::String(t) => Key::String(t.downgrade()),
+            Key::Function(callable) => Key::Function(callable.downgrade()),
+            Key::Table(t) => Key::Table(t.downgrade()),
+            Key::Userdata(t) => Key::Userdata(t.downgrade()),
         }
     }
 }
 
-impl<Ty> KeyValue<Weak, Ty>
+impl<Ty> Key<Weak, Ty>
 where
     Ty: Types,
 {
-    pub fn upgrade(self, heap: &Heap<Ty>) -> Option<KeyValue<Strong, Ty>> {
+    pub fn upgrade(self, heap: &Heap<Ty>) -> Option<Key<Strong, Ty>> {
         self.try_upgrade(heap).ok()
     }
 
-    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<KeyValue<Strong, Ty>, AlreadyDroppedError> {
+    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<Key<Strong, Ty>, AlreadyDroppedError> {
         use crate::gc::Upgrade;
 
         let r = match self {
-            KeyValue::Bool(t) => KeyValue::Bool(t),
-            KeyValue::Int(t) => KeyValue::Int(t),
-            KeyValue::Float(not_nan) => KeyValue::Float(not_nan),
-            KeyValue::String(t) => KeyValue::String(t.try_upgrade(heap)?),
-            KeyValue::Function(callable) => KeyValue::Function(callable.try_upgrade(heap)?),
-            KeyValue::Table(t) => KeyValue::Table(t.try_upgrade(heap)?),
-            KeyValue::Userdata(t) => KeyValue::Userdata(t.try_upgrade(heap)?),
+            Key::Bool(t) => Key::Bool(t),
+            Key::Int(t) => Key::Int(t),
+            Key::Float(not_nan) => Key::Float(not_nan),
+            Key::String(t) => Key::String(t.try_upgrade(heap)?),
+            Key::Function(callable) => Key::Function(callable.try_upgrade(heap)?),
+            Key::Table(t) => Key::Table(t.try_upgrade(heap)?),
+            Key::Userdata(t) => Key::Userdata(t.try_upgrade(heap)?),
         };
 
         Ok(r)
     }
 }
 
-impl<Rf, Ty> Trace for KeyValue<Rf, Ty>
+impl<Rf, Ty> Trace for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -270,7 +270,7 @@ where
     Rf::FullUserdata<Ty::FullUserdata>: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
-        use KeyValue::*;
+        use Key::*;
 
         match self {
             Bool(_) | Int(_) | Float(_) => (),
@@ -282,7 +282,7 @@ where
     }
 }
 
-impl<Rf, Ty> Debug for KeyValue<Rf, Ty>
+impl<Rf, Ty> Debug for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -304,7 +304,7 @@ where
     }
 }
 
-impl<Rf, Ty> Clone for KeyValue<Rf, Ty>
+impl<Rf, Ty> Clone for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -327,7 +327,7 @@ where
     }
 }
 
-impl<Rf, Ty> Copy for KeyValue<Rf, Ty>
+impl<Rf, Ty> Copy for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -338,7 +338,7 @@ where
 {
 }
 
-impl<Rf, Ty> PartialEq for KeyValue<Rf, Ty>
+impl<Rf, Ty> PartialEq for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -361,7 +361,7 @@ where
     }
 }
 
-impl<Rf, Ty> Eq for KeyValue<Rf, Ty>
+impl<Rf, Ty> Eq for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -372,7 +372,7 @@ where
 {
 }
 
-impl<Rf, Ty> PartialOrd for KeyValue<Rf, Ty>
+impl<Rf, Ty> PartialOrd for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -382,7 +382,7 @@ where
     Rf::FullUserdata<Ty::FullUserdata>: PartialOrd,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        use KeyValue::*;
+        use Key::*;
 
         match (self, other) {
             (Bool(lhs), Bool(rhs)) => lhs.partial_cmp(rhs),
@@ -404,7 +404,7 @@ where
     }
 }
 
-impl<Rf, Ty> Ord for KeyValue<Rf, Ty>
+impl<Rf, Ty> Ord for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -414,7 +414,7 @@ where
     Rf::FullUserdata<Ty::FullUserdata>: Ord,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use KeyValue::*;
+        use Key::*;
 
         match (self, other) {
             (Bool(lhs), Bool(rhs)) => lhs.cmp(rhs),
@@ -436,7 +436,7 @@ where
     }
 }
 
-impl<Rf, Ty> Hash for KeyValue<Rf, Ty>
+impl<Rf, Ty> Hash for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -446,7 +446,7 @@ where
     Rf::FullUserdata<Ty::FullUserdata>: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        use KeyValue::*;
+        use Key::*;
 
         core::mem::discriminant(self).hash(state);
 
@@ -462,7 +462,7 @@ where
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for KeyValue<Rf, Ty>
+impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Key<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
@@ -471,16 +471,16 @@ where
 
     fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
         let r = match value {
-            Value::Bool(t) => KeyValue::Bool(t),
-            Value::Int(t) => KeyValue::Int(t),
+            Value::Bool(t) => Key::Bool(t),
+            Value::Int(t) => Key::Int(t),
             Value::Float(t) => {
                 let t = NotNan::new(t).map_err(|_| InvalidKeyError::Nan)?;
-                KeyValue::Float(t)
+                Key::Float(t)
             }
-            Value::String(t) => KeyValue::String(t),
-            Value::Function(t) => KeyValue::Function(t),
-            Value::Table(t) => KeyValue::Table(t),
-            Value::Userdata(t) => KeyValue::Userdata(t),
+            Value::String(t) => Key::String(t),
+            Value::Function(t) => Key::Function(t),
+            Value::Table(t) => Key::Table(t),
+            Value::Userdata(t) => Key::Userdata(t),
             Value::Nil => return Err(InvalidKeyError::Nil),
         };
 
@@ -488,20 +488,20 @@ where
     }
 }
 
-impl<Rf, Ty> From<KeyValue<Rf, Ty>> for Value<Rf, Ty>
+impl<Rf, Ty> From<Key<Rf, Ty>> for Value<Rf, Ty>
 where
     Rf: Refs,
     Ty: Types,
 {
-    fn from(value: KeyValue<Rf, Ty>) -> Self {
+    fn from(value: Key<Rf, Ty>) -> Self {
         match value {
-            KeyValue::Bool(t) => Value::Bool(t),
-            KeyValue::Int(t) => Value::Int(t),
-            KeyValue::Float(t) => Value::Float(t.into_inner()),
-            KeyValue::Function(t) => Value::Function(t),
-            KeyValue::String(t) => Value::String(t),
-            KeyValue::Table(t) => Value::Table(t),
-            KeyValue::Userdata(t) => Value::Userdata(t),
+            Key::Bool(t) => Value::Bool(t),
+            Key::Int(t) => Value::Int(t),
+            Key::Float(t) => Value::Float(t.into_inner()),
+            Key::Function(t) => Value::Function(t),
+            Key::String(t) => Value::String(t),
+            Key::Table(t) => Value::Table(t),
+            Key::Userdata(t) => Value::Userdata(t),
         }
     }
 }

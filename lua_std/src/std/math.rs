@@ -26,7 +26,7 @@ use gc::RootCell;
 use rt::ffi::{self, DLuaFfi};
 use rt::gc::LuaPtr;
 use rt::runtime::Core;
-use rt::value::{KeyValue, TableIndex, Types, Value};
+use rt::value::{Key, TableIndex, Types, Value};
 
 use crate::lib::set_func;
 use crate::traits::{RootTable, TableEntry, TableEntryEx};
@@ -330,10 +330,7 @@ where
         let key = core.gc.intern("huge".into());
         let value = f64::INFINITY;
 
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Float(value),
-        );
+        core.gc[table].set(Key::String(LuaPtr(key.downgrade())), Value::Float(value));
     }
 }
 
@@ -409,7 +406,7 @@ where
         let key = core.gc.intern("maxinteger".into());
         let value = i64::MAX;
 
-        core.gc[table].set(KeyValue::String(LuaPtr(key.downgrade())), Value::Int(value));
+        core.gc[table].set(Key::String(LuaPtr(key.downgrade())), Value::Int(value));
     }
 }
 
@@ -458,7 +455,7 @@ where
         let key = core.gc.intern("mininteger".into());
         let value = i64::MIN;
 
-        core.gc[table].set(KeyValue::String(LuaPtr(key.downgrade())), Value::Int(value));
+        core.gc[table].set(Key::String(LuaPtr(key.downgrade())), Value::Int(value));
     }
 }
 
@@ -511,10 +508,7 @@ where
         let key = core.gc.intern("pi".into());
         let value = std::f64::consts::PI;
 
-        core.gc[table].set(
-            KeyValue::String(LuaPtr(key.downgrade())),
-            Value::Float(value),
-        );
+        core.gc[table].set(Key::String(LuaPtr(key.downgrade())), Value::Float(value));
     }
 }
 

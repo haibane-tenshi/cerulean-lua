@@ -133,7 +133,7 @@ use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
 use crate::plugin::Plugin;
 use crate::value::{
-    Callable, KeyValue, Meta, SolitaryType, Strong, StrongValue, Types, Value, Weak, WeakValue,
+    Callable, Key, Meta, SolitaryType, Strong, StrongValue, Types, Value, Weak, WeakValue,
 };
 use orchestrator::Orchestrator;
 use thread::frame::Event;
@@ -274,11 +274,11 @@ where
         Cache { events }
     }
 
-    fn lookup_event(&self, event: Event) -> KeyValue<Weak, Ty> {
+    fn lookup_event(&self, event: Event) -> Key<Weak, Ty> {
         use crate::gc::LuaPtr;
 
         let ptr = self.events.get(event).downgrade();
-        KeyValue::String(LuaPtr(ptr))
+        Key::String(LuaPtr(ptr))
     }
 }
 

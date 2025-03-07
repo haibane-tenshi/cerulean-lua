@@ -24,7 +24,7 @@ use gc::{GcCell, RootCell};
 use crate::error::{AlreadyDroppedError, AlreadyDroppedOr};
 use crate::gc::Heap;
 use crate::runtime::MetatableRegistry;
-use crate::value::{Callable, KeyValue as Key, Strong, Types, WeakKey, WeakValue};
+use crate::value::{Callable, Key, Strong, Types, WeakKey, WeakValue};
 
 /// Resolve metavalue out of a list of values.
 ///

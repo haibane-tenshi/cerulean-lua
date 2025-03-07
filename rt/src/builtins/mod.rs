@@ -70,7 +70,7 @@ use crate::error::{AlreadyDroppedOr, NotCallableError};
 use crate::gc::Heap;
 use crate::runtime::thread::TransientStackGuard;
 use crate::runtime::MetatableRegistry;
-use crate::value::{Callable, KeyValue, Strong, Types, Value, Weak};
+use crate::value::{Callable, Key, Strong, Types, Value, Weak};
 
 // Temporary reexport.
 pub use table::find_metavalue;
@@ -89,7 +89,7 @@ where
 
     let key = heap
         .find_interned(&BuiltinMetamethod::Call.to_str().into())
-        .map(|s| KeyValue::String(LuaPtr(s.downgrade())));
+        .map(|s| Key::String(LuaPtr(s.downgrade())));
 
     inner_prepare_invoke(callable, stack, heap, registry, key).map_err(|err| match err {
         AlreadyDroppedOr::Dropped(err) => AlreadyDroppedOr::Dropped(err),
@@ -105,7 +105,7 @@ pub(crate) fn inner_prepare_invoke<Ty>(
     mut stack: TransientStackGuard<'_, Ty>,
     heap: &Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
-    key: Option<KeyValue<Weak, Ty>>,
+    key: Option<Key<Weak, Ty>>,
 ) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<InnerNotCallableError>>
 where
     Ty: Types,

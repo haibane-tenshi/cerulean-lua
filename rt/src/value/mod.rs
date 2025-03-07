@@ -31,7 +31,7 @@ pub use float::Float;
 pub use int::Int;
 pub use nil::Nil;
 pub use ops::{Concat, Len};
-pub use table::{KeyValue, Table, TableIndex};
+pub use table::{Key, Table, TableIndex};
 pub use userdata::DefaultParams;
 
 pub trait Refs: Sized + 'static {
@@ -245,8 +245,8 @@ impl Display for SolitaryType {
 pub type StrongValue<Ty> = Value<Strong, Ty>;
 pub type WeakValue<Ty> = Value<Weak, Ty>;
 
-pub type WeakKey<Ty> = KeyValue<Weak, Ty>;
-pub type StrongKey<Ty> = KeyValue<Strong, Ty>;
+pub type WeakKey<Ty> = Key<Weak, Ty>;
+pub type StrongKey<Ty> = Key<Strong, Ty>;
 
 /// Enum representing all possible Lua values.
 ///
@@ -306,7 +306,7 @@ where
     ///
     /// If you are in charge of constructing a key, it might be better to do it directly
     /// in case the value is not float.
-    pub fn into_key(self) -> Result<KeyValue<Rf, Ty>, InvalidKeyError> {
+    pub fn into_key(self) -> Result<Key<Rf, Ty>, InvalidKeyError> {
         self.try_into()
     }
 }

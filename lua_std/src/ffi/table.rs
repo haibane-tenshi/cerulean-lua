@@ -233,7 +233,7 @@ where
             len: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::gc::LuaPtr;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
 
             let j = match len {
                 Value::Int(j) => j,
@@ -284,7 +284,7 @@ where
             use rt::ffi::arg_parser::{Float, Int};
             use rt::gc::{LuaPtr, TryGet};
             use rt::value::ops::Concat;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
             use std::borrow::Cow;
             use std::ops::ControlFlow;
 
@@ -379,7 +379,7 @@ where
             use rt::ffi::arg_parser::{Float, Int};
             use rt::gc::{LuaPtr, TryGet};
             use rt::value::ops::Concat;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
             use std::borrow::Cow;
 
             let value = match value {
@@ -557,7 +557,7 @@ where
                         State::Complete(Ok(value)) => value,
                     };
 
-                    use rt::value::KeyValue as Key;
+                    use rt::value::Key;
 
                     let mut co = set_index(rt.stack[0], Key::Int(current + 1), value);
 
@@ -692,7 +692,7 @@ where
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::{GetIndexCache, SetIndexCache};
             use rt::error::RuntimeError;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
             use std::ops::ControlFlow;
 
             let Value::Int(len) = len else {
@@ -786,7 +786,7 @@ where
             current: i64,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::ffi::arg_parser::ParseArgs;
-            use rt::value::KeyValue as Key;
+            use rt::value::Key;
 
             let list = rt.stack[0];
 
@@ -971,7 +971,7 @@ where
             use rt::builtins::table::{GetIndexCache, SetIndexCache};
             use rt::ffi::arg_parser::{Int, LuaTable, Opts, ParseArgs, Split};
             use rt::ffi::delegate::StackSlot;
-            use rt::value::{KeyValue as Key, WeakValue};
+            use rt::value::{Key, WeakValue};
             use std::ops::ControlFlow;
 
             let (a1, f, e, t, a2): (LuaTable<_>, Int, Int, Int, Opts<(LuaTable<_>,)>) =
@@ -1128,7 +1128,7 @@ where
             target_range: RangeInclusive<i64>,
             value: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
-            use rt::value::KeyValue as Key;
+            use rt::value::Key;
 
             rt.stack.transient().push(value);
 
@@ -1170,7 +1170,7 @@ where
             target_range: RangeInclusive<i64>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::ffi::delegate::StackSlot;
-            use rt::value::KeyValue as Key;
+            use rt::value::Key;
 
             for i in target_range.clone().rev() {
                 let value = rt.stack.pop().unwrap();
@@ -1219,7 +1219,7 @@ where
 {
     delegate::from_mut(|mut rt| {
         use rt::gc::LuaPtr;
-        use rt::value::{KeyValue as Key, TableIndex, Value};
+        use rt::value::{Key, TableIndex, Value};
 
         let mut table = Ty::Table::default();
 
@@ -1495,7 +1495,7 @@ where
             len: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::get_index;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
 
             let Value::Int(len) = len else {
                 let err = rt.core.alloc_error_msg(format!(
@@ -1543,7 +1543,7 @@ where
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::{GetIndexCache, SetIndexCache};
             use rt::ffi::delegate::StackSlot;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
             use std::ops::ControlFlow;
 
             *rt.stack
@@ -1647,7 +1647,7 @@ where
             value: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::set_index;
-            use rt::value::KeyValue as Key;
+            use rt::value::Key;
 
             let mut co = set_index(list, Key::Int(current - 1), value);
             match co.resume(rt.reborrow(), Response::Resume) {
@@ -1669,7 +1669,7 @@ where
             len: i64,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::{get_index, set_index};
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
 
             for current in (current..=len).skip(1) {
                 let mut co = get_index(list, Key::Int(current));
@@ -1910,7 +1910,7 @@ where
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::GetIndexCache;
             use rt::gc::LuaPtr;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
             use std::ops::ControlFlow;
 
             let j = match j {
@@ -1979,7 +1979,7 @@ where
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::get_index;
             use rt::gc::LuaPtr;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
 
             let target = Value::Table(LuaPtr(list.downgrade()));
             for current in (current..=j).skip(1) {
@@ -2416,7 +2416,7 @@ where
             len: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::GetIndexCache;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
             use std::ops::ControlFlow;
 
             let Value::Int(len) = len else {
@@ -2481,7 +2481,7 @@ where
             value: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::get_index;
-            use rt::value::KeyValue as Key;
+            use rt::value::Key;
 
             let value = value.try_upgrade(&rt.core.gc)?;
             cache.push(value);
@@ -2599,7 +2599,7 @@ where
             mut cache: Vec<StrongValue<Ty>>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::SetIndexCache;
-            use rt::value::{KeyValue as Key, Value};
+            use rt::value::{Key, Value};
             use std::ops::ControlFlow;
 
             let list = rt.stack[0];
@@ -2649,7 +2649,7 @@ where
             current: i64,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use super::builtins::set_index;
-            use rt::value::KeyValue as Key;
+            use rt::value::Key;
 
             for current in (current..).skip(1) {
                 let Some(value) = cache.pop() else {

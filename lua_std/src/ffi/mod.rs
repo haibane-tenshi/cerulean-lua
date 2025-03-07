@@ -21,7 +21,7 @@ use rt::ffi::delegate::{self, Delegate, Request, RuntimeView};
 use rt::ffi::{self, boxed, DLuaFfi, LuaFfi};
 use rt::gc::{Heap, LuaPtr, TryGet};
 use rt::runtime::Closure;
-use rt::value::table::KeyValue;
+use rt::value::table::Key;
 use rt::value::{Callable, Int, Nil, StrongValue, Types, Value, WeakValue};
 
 /// Runtime assertion.
@@ -379,7 +379,7 @@ where
                 rt.stack.clear();
 
                 let table: &Ty::Table = rt.core.gc.get(table).ok_or(AlreadyDroppedError)?;
-                match table.next_key(&KeyValue::Int(prev)).copied() {
+                match table.next_key(&Key::Int(prev)).copied() {
                     Some(key) => {
                         let value = table.get(&key);
                         rt.stack.transient().format((key, value));
@@ -1111,7 +1111,7 @@ where
                 let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
 
                 let key_string = rt.core.alloc_string("__pairs".into());
-                let key = KeyValue::String(LuaPtr(key_string.downgrade()));
+                let key = Key::String(LuaPtr(key_string.downgrade()));
                 let metavalue = rt::builtins::find_metavalue(
                     [value],
                     key,
@@ -1189,7 +1189,7 @@ where
                         .gc
                         .get(metatable)
                         .ok_or(AlreadyDroppedError)?
-                        .get(&KeyValue::String(LuaPtr(key)))
+                        .get(&Key::String(LuaPtr(key)))
                 };
 
                 let r = if let Value::Nil = __metatable {
@@ -1249,7 +1249,7 @@ where
                 rt.core
                     .gc
                     .try_get(metatable)?
-                    .contains_key(&KeyValue::String(LuaPtr(key)))
+                    .contains_key(&Key::String(LuaPtr(key)))
             }
             None => false,
         };
@@ -1296,7 +1296,7 @@ where
 
     fn find_first<Ty>(
         rt: &RuntimeView<'_, Ty>,
-        key: KeyValue<Weak, Ty>,
+        key: Key<Weak, Ty>,
     ) -> Result<usize, AlreadyDroppedError>
     where
         Ty: Types,
@@ -1350,7 +1350,7 @@ where
         match current {
             State::Started => {
                 let s = rt.core.alloc_string("__tostring".into());
-                let key = KeyValue::String(LuaPtr(s.downgrade()));
+                let key = Key::String(LuaPtr(s.downgrade()));
 
                 // The first value that needs metamethod call for conversion.
                 // Everything before it can be safely rendered using default Display impl.
@@ -1392,7 +1392,7 @@ where
 
                 print_value(&mut stdout, value, rt.core)?;
 
-                let key = KeyValue::String(LuaPtr(persist_key.as_ref().unwrap().downgrade()));
+                let key = Key::String(LuaPtr(persist_key.as_ref().unwrap().downgrade()));
                 let last = find_first(&rt, key)?;
 
                 for value in rt.stack.drain(..StackSlot(last)) {
@@ -1466,7 +1466,7 @@ where
                 let value: WeakValue<_> = rt.stack.parse(&mut rt.core.gc)?;
 
                 let s = rt.core.alloc_string("__tostring".into());
-                let key = KeyValue::String(LuaPtr(s.downgrade()));
+                let key = Key::String(LuaPtr(s.downgrade()));
                 let metavalue = rt::builtins::find_metavalue(
                     [value],
                     key,

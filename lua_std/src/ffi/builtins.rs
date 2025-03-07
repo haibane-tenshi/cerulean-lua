@@ -1,6 +1,6 @@
 use rt::error::RuntimeError;
 use rt::ffi::delegate::{Request, Response, RuntimeView, StackSlot, State};
-use rt::value::{KeyValue, Types, Weak, WeakValue};
+use rt::value::{Key, Types, Weak, WeakValue};
 
 pub(crate) fn len<Ty>(value: WeakValue<Ty>) -> Len<Ty>
 where
@@ -31,7 +31,7 @@ where
         use rt::builtins::{find_metavalue, prepare_invoke};
         use rt::ffi::delegate::rearrange;
         use rt::gc::{Heap, LuaPtr, TryGet};
-        use rt::value::{KeyValue, Value};
+        use rt::value::{Key, Value};
         use std::ops::ControlFlow;
 
         let body = move || {
@@ -52,7 +52,7 @@ where
                                     .gc
                                     .find_interned(&Ty::String::from("__len"))
                                     .ok_or_else(|| err_msg(&mut rt.core.gc, value.type_()))?;
-                                KeyValue::String(LuaPtr(name.downgrade()))
+                                Key::String(LuaPtr(name.downgrade()))
                             };
                             let metamethod = find_metavalue(
                                 [value],
@@ -110,7 +110,7 @@ where
     }
 }
 
-pub(crate) fn get_index<Ty>(table: WeakValue<Ty>, key: KeyValue<Weak, Ty>) -> GetIndex<Ty>
+pub(crate) fn get_index<Ty>(table: WeakValue<Ty>, key: Key<Weak, Ty>) -> GetIndex<Ty>
 where
     Ty: Types,
 {
@@ -123,7 +123,7 @@ where
 {
     Started {
         target: WeakValue<Ty>,
-        key: KeyValue<Weak, Ty>,
+        key: Key<Weak, Ty>,
     },
     CalledMethod {
         start: StackSlot,
@@ -206,7 +206,7 @@ where
 
 pub(crate) fn set_index<Ty>(
     table: WeakValue<Ty>,
-    key: KeyValue<Weak, Ty>,
+    key: Key<Weak, Ty>,
     value: WeakValue<Ty>,
 ) -> SetIndex<Ty>
 where
@@ -225,7 +225,7 @@ where
 {
     Started {
         target: WeakValue<Ty>,
-        key: KeyValue<Weak, Ty>,
+        key: Key<Weak, Ty>,
         value: WeakValue<Ty>,
     },
     CalledMethod {

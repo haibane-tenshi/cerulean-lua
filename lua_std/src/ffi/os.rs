@@ -87,7 +87,7 @@ where
         use chrono::{DateTime, Datelike, FixedOffset, Local, Timelike};
         use rt::ffi::arg_parser::{Int, LuaString, Opts, ParseArgs, Split};
         use rt::gc::LuaPtr;
-        use rt::value::{KeyValue as Key, TableIndex, Value};
+        use rt::value::{Key, TableIndex, Value};
 
         let rest: Opts<(LuaString<_>, Int)> = rt.stack.parse(&mut rt.core.gc)?;
         rt.stack.clear();
