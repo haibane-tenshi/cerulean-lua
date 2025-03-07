@@ -24,7 +24,7 @@ use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::orchestrator::ThreadManagerGuard;
 use crate::runtime::{Cache, Closure, Core, Interned, ThreadId};
 use crate::value::callable::Callable;
-use crate::value::{Strong, StrongValue, TableIndex, Types, Value, WeakValue};
+use crate::value::{StrongCallable, StrongValue, TableIndex, Types, Value, WeakValue};
 
 use super::Event;
 pub(crate) use upvalue_register::UpvalueRegister;
@@ -70,7 +70,7 @@ where
     }
 }
 
-struct Invoke<Ty>(Event, Callable<Strong, Ty>, StackSlot)
+struct Invoke<Ty>(Event, StrongCallable<Ty>, StackSlot)
 where
     Ty: Types;
 
@@ -79,7 +79,7 @@ where
     Ty: Types,
 {
     Return(StackSlot),
-    Invoke(Option<Event>, Callable<Strong, Ty>, StackSlot),
+    Invoke(Option<Event>, StrongCallable<Ty>, StackSlot),
 }
 
 impl<Ty> From<Invoke<Ty>> for ChangeFrame<Ty>
@@ -913,7 +913,7 @@ where
         &mut self,
         callable: WeakValue<Ty>,
         start: StackSlot,
-    ) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<InnerNotCallableError>> {
+    ) -> Result<StrongCallable<Ty>, AlreadyDroppedOr<InnerNotCallableError>> {
         use crate::builtins::inner_prepare_invoke;
 
         let key = self.internal_cache.lookup_event(Event::Call);

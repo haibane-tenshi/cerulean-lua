@@ -37,7 +37,7 @@ use repr::opcode::{BinOp as BinaryOp, UnaOp as UnaryOp};
 
 use crate::error::AlreadyDroppedError;
 use crate::gc::Heap;
-use crate::value::{Int, Refs, Types, Value, WeakValue};
+use crate::value::{Int, Types, Value, WeakValue};
 
 /// Operation cannot be resolved using raw builtin behavior and require a metamethod call.
 #[derive(Debug)]
@@ -546,9 +546,8 @@ where
     inner_binary_op(op, args, cmp_int_flt, heap)
 }
 
-pub fn neg<Rf, Ty>(args: [Value<Rf, Ty>; 1]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
+pub fn neg<Ty>(args: [WeakValue<Ty>; 1]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::{Float, Int};
@@ -566,9 +565,8 @@ where
     }
 }
 
-pub fn bit_not<Rf, Ty>(args: [Value<Rf, Ty>; 1]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
+pub fn bit_not<Ty>(args: [WeakValue<Ty>; 1]) -> ControlFlow<MetamethodRequired, WeakValue<Ty>>
 where
-    Rf: Refs,
     Ty: Types,
 {
     use crate::value::Int;

@@ -75,7 +75,7 @@ use crate::error::{RtError, ThreadError, ThreadPanicked};
 use crate::ffi::delegate::Response;
 use crate::ffi::DLuaFfi;
 use crate::gc::Heap;
-use crate::value::{Callable, Strong, Types};
+use crate::value::{StrongCallable, Types};
 
 use super::orchestrator::{ThreadId, ThreadManagerGuard, ThreadStatus};
 use super::{Cache, Closure, Core};
@@ -527,14 +527,14 @@ pub(super) struct ThreadImpetus<Ty>
 where
     Ty: Types,
 {
-    first_callable: Callable<Strong, Ty>,
+    first_callable: StrongCallable<Ty>,
 }
 
 impl<Ty> ThreadImpetus<Ty>
 where
     Ty: Types,
 {
-    pub(super) fn new(callable: Callable<Strong, Ty>) -> Self {
+    pub(super) fn new(callable: StrongCallable<Ty>) -> Self {
         ThreadImpetus {
             first_callable: callable,
         }
@@ -549,7 +549,7 @@ where
     pub(super) fn init(self, mut stack: Stack<Ty>, heap: &mut Heap<Ty>) -> Thread<Ty> {
         use crate::ffi::delegate::RuntimeView;
         use crate::gc::{Downgrade, LuaPtr, Upgrade};
-        use crate::value::Value;
+        use crate::value::{Callable, Value};
 
         let ThreadImpetus { first_callable } = self;
 

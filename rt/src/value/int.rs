@@ -6,7 +6,7 @@ use super::ops::{
     CheckedDiv, CheckedFloorDiv, CheckedPow, CheckedRem, Div, DivAssign, FloorDiv, Mul, MulAssign,
     Neg, Pow, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
-use super::{Float, Refs, Type, Types, Value};
+use super::{Float, Refs, Type, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
@@ -365,14 +365,13 @@ impl ShrAssign for Int {
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Int
+impl<Rf> TryFrom<Value<Rf>> for Int
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Int(value) => Ok(Int(value)),
             value => {
@@ -387,10 +386,9 @@ where
     }
 }
 
-impl<Rf, Ty> From<Int> for Value<Rf, Ty>
+impl<Rf> From<Int> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     fn from(value: Int) -> Self {
         let Int(value) = value;

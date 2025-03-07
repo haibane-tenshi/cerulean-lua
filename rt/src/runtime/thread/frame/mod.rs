@@ -12,7 +12,7 @@ use crate::ffi::delegate::RuntimeView;
 use crate::ffi::DLuaFfi;
 use crate::runtime::closure::UpvaluePlace;
 use crate::runtime::{Cache, Closure, Core, Heap};
-use crate::value::{Callable, Strong, Types};
+use crate::value::{Callable, StrongCallable, Types};
 
 use super::super::orchestrator::{ThreadId, ThreadManagerGuard};
 use super::stack::{RawStackSlot, Stack, StackGuard};
@@ -152,7 +152,7 @@ where
     Ty::RustClosure: DLuaFfi<Ty>,
 {
     pub(super) fn new(
-        callable: Callable<Strong, Ty>,
+        callable: StrongCallable<Ty>,
         event: Option<Event>,
         heap: &mut Heap<Ty>,
         chunk_cache: &dyn ChunkCache,
@@ -349,7 +349,7 @@ where
     Ty: Types,
 {
     InitAndEnter {
-        callable: Callable<Strong, Ty>,
+        callable: StrongCallable<Ty>,
         start: RawStackSlot,
         event: Option<Event>,
     },

@@ -203,7 +203,7 @@ use crate::gc::{AsGc, AsRoot, Downgrade, Heap, LuaPtr, Upgrade};
 use crate::runtime::thread::{StackGuard, TransientStackGuard};
 use crate::value::int::NotExactIntError;
 use crate::value::string::IntoEncoding;
-use crate::value::{Refs, Strong, Type, Types, Value, Weak, WeakValue};
+use crate::value::{Refs, Type, Types, Value, WeakValue};
 use sealed::{BubbleUp, Sealed};
 
 pub use crate::value::{Boolean, Callable, Float, Int, Nil};
@@ -464,14 +464,14 @@ where
     }
 }
 
-impl<Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &[Value<Rf, Ty>]
+impl<Rf, Ty, T> ExtractArgs<T, Heap<Ty>> for &[Value<Rf>]
 where
     Rf: Refs,
     Ty: Types,
-    Value<Rf, Ty>: Clone,
-    T: ParseAtom<Value<Rf, Ty>, Heap<Ty>>,
+    Value<Rf>: Clone,
+    T: ParseAtom<Value<Rf>, Heap<Ty>>,
 {
-    type Error = MissingArg<<T as ParseAtom<Value<Rf, Ty>, Heap<Ty>>>::Error>;
+    type Error = MissingArg<<T as ParseAtom<Value<Rf>, Heap<Ty>>>::Error>;
 
     fn extract(self, gc: &mut Heap<Ty>) -> Result<(Self, T), Self::Error> {
         let (value, view) = self.split_first().ok_or(MissingArg::Missing)?;
@@ -499,86 +499,79 @@ impl<T, Ex> ParseAtom<T, Ex> for T {
     }
 }
 
-impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Nil
+impl<Rf, Ex> ParseAtom<Value<Rf>, Ex> for Nil
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, _: &mut Ex) -> Result<Self, Self::Error> {
         value.try_into()
     }
 }
 
-impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Boolean
+impl<Rf, Ex> ParseAtom<Value<Rf>, Ex> for Boolean
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, _: &mut Ex) -> Result<Self, Self::Error> {
         value.try_into()
     }
 }
 
-impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Int
+impl<Rf, Ex> ParseAtom<Value<Rf>, Ex> for Int
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, _: &mut Ex) -> Result<Self, Self::Error> {
         value.try_into()
     }
 }
 
-impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Float
+impl<Rf, Ex> ParseAtom<Value<Rf>, Ex> for Float
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, _: &mut Ex) -> Result<Self, Self::Error> {
         value.try_into()
     }
 }
 
-impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for LuaString<Rf::String<Ty::String>>
+impl<Rf, Ex> ParseAtom<Value<Rf>, Ex> for LuaString<Rf::String>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, _: &mut Ex) -> Result<Self, Self::Error> {
         value.try_into()
     }
 }
 
-impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for LuaTable<Rf::Table<Ty::Table>>
+impl<Rf, Ex> ParseAtom<Value<Rf>, Ex> for LuaTable<Rf::Table>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, _: &mut Ex) -> Result<Self, Self::Error> {
         value.try_into()
     }
 }
 
-impl<Rf, Ty, Ex> ParseAtom<Value<Rf, Ty>, Ex> for Callable<Rf, Ty>
+impl<Rf, Ex> ParseAtom<Value<Rf>, Ex> for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn parse_atom(value: Value<Rf, Ty>, _: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, _: &mut Ex) -> Result<Self, Self::Error> {
         value.try_into()
     }
 }
@@ -739,8 +732,8 @@ where
 impl<Ty, T, R> FormatReturns<Ty, R> for T
 where
     Ty: Types,
-    T: Extend<Value<Weak, Ty>>,
-    R: Into<Value<Weak, Ty>>,
+    T: Extend<WeakValue<Ty>>,
+    R: Into<WeakValue<Ty>>,
 {
     fn format(&mut self, value: R) {
         let value = value.into();
@@ -1334,11 +1327,10 @@ impl<T> From<Nil> for NilOr<T> {
     }
 }
 
-impl<T, Rf, Ty> From<NilOr<T>> for Value<Rf, Ty>
+impl<T, Rf> From<NilOr<T>> for Value<Rf>
 where
-    T: Into<Value<Rf, Ty>>,
+    T: Into<Value<Rf>>,
     Rf: Refs,
-    Ty: Types,
 {
     fn from(value: NilOr<T>) -> Self {
         match value {
@@ -1348,15 +1340,14 @@ where
     }
 }
 
-impl<T, Rf, Ty> TryFrom<Value<Rf, Ty>> for NilOr<T>
+impl<T, Rf> TryFrom<Value<Rf>> for NilOr<T>
 where
     Rf: Refs,
-    Ty: Types,
-    Value<Rf, Ty>: TryInto<T>,
+    Value<Rf>: TryInto<T>,
 {
-    type Error = <Value<Rf, Ty> as TryInto<T>>::Error;
+    type Error = <Value<Rf> as TryInto<T>>::Error;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Nil => Ok(NilOr::Nil),
             value => value.try_into().map(NilOr::Some),
@@ -1364,15 +1355,14 @@ where
     }
 }
 
-impl<Rf, Ty, Ex, T> ParseAtom<Value<Rf, Ty>, Ex> for NilOr<T>
+impl<Rf, Ex, T> ParseAtom<Value<Rf>, Ex> for NilOr<T>
 where
     Rf: Refs,
-    Ty: Types,
-    T: ParseAtom<Value<Rf, Ty>, Ex>,
+    T: ParseAtom<Value<Rf>, Ex>,
 {
-    type Error = <T as ParseAtom<Value<Rf, Ty>, Ex>>::Error;
+    type Error = <T as ParseAtom<Value<Rf>, Ex>>::Error;
 
-    fn parse_atom(value: Value<Rf, Ty>, extra: &mut Ex) -> Result<Self, Self::Error> {
+    fn parse_atom(value: Value<Rf>, extra: &mut Ex) -> Result<Self, Self::Error> {
         match value {
             Value::Nil => Ok(NilOr::Nil),
             value => ParseAtom::parse_atom(value, extra).map(NilOr::Some),
@@ -1388,41 +1378,14 @@ pub trait ParseFrom<T: ?Sized>: Sized {
     fn parse(value: &T) -> Result<Self, Self::Error>;
 }
 
-impl<Ty, T> ParseAtom<Value<Strong, Ty>, Heap<Ty>> for FromLuaString<T>
-where
-    Ty: Types,
-    T: ParseFrom<Ty::String>,
-{
-    type Error = StrongConvertError<<T as ParseFrom<Ty::String>>::Error>;
-
-    fn parse_atom(value: Value<Strong, Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
-        use crate::gc::LuaPtr;
-
-        let Value::String(LuaPtr(ptr)) = value else {
-            let err = TypeMismatchError {
-                expected: Type::String,
-                found: value.type_(),
-            };
-
-            return Err(err.into());
-        };
-
-        let value = extra.get_root(&ptr).as_ref();
-
-        ParseFrom::parse(value)
-            .map(FromLuaString)
-            .map_err(StrongConvertError::Other)
-    }
-}
-
-impl<Ty, T> ParseAtom<Value<Weak, Ty>, Heap<Ty>> for FromLuaString<T>
+impl<Ty, T> ParseAtom<WeakValue<Ty>, Heap<Ty>> for FromLuaString<T>
 where
     Ty: Types,
     T: ParseFrom<Ty::String>,
 {
     type Error = WeakConvertError<<T as ParseFrom<Ty::String>>::Error>;
 
-    fn parse_atom(value: Value<Weak, Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
+    fn parse_atom(value: WeakValue<Ty>, extra: &mut Heap<Ty>) -> Result<Self, Self::Error> {
         use crate::gc::LuaPtr;
 
         let Value::String(LuaPtr(ptr)) = value else {
@@ -1667,11 +1630,10 @@ where
     }
 }
 
-impl<T, Rf, Ty> From<LuaString<T>> for Value<Rf, Ty>
+impl<T, Rf> From<LuaString<T>> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    T: Into<Rf::String<Ty::String>>,
+    T: Into<Rf::String>,
 {
     fn from(value: LuaString<T>) -> Self {
         let LuaString(value) = value;
@@ -1680,14 +1642,13 @@ where
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaString<Rf::String<Ty::String>>
+impl<Rf> TryFrom<Value<Rf>> for LuaString<Rf::String>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::String(value) => Ok(LuaString(value)),
             value => {
@@ -1705,11 +1666,10 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct LuaTable<T>(pub T);
 
-impl<Rf, Ty, T> From<LuaTable<T>> for Value<Rf, Ty>
+impl<Rf, T> From<LuaTable<T>> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::Table<Ty::Table>: From<T>,
+    Rf::Table: From<T>,
 {
     fn from(value: LuaTable<T>) -> Self {
         let LuaTable(value) = value;
@@ -1717,14 +1677,13 @@ where
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaTable<Rf::Table<Ty::Table>>
+impl<Rf> TryFrom<Value<Rf>> for LuaTable<Rf::Table>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Table(t) => Ok(LuaTable(t)),
             value => {
@@ -1782,11 +1741,10 @@ where
 #[derive(Debug)]
 pub struct LuaUserdata<T>(pub T);
 
-impl<Rf, Ty, T> From<LuaUserdata<T>> for Value<Rf, Ty>
+impl<Rf, T> From<LuaUserdata<T>> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::FullUserdata<Ty::FullUserdata>: From<T>,
+    Rf::FullUserdata: From<T>,
 {
     fn from(value: LuaUserdata<T>) -> Self {
         let LuaUserdata(value) = value;
@@ -1794,14 +1752,13 @@ where
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for LuaUserdata<Rf::FullUserdata<Ty::FullUserdata>>
+impl<Rf> TryFrom<Value<Rf>> for LuaUserdata<Rf::FullUserdata>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Userdata(t) => Ok(LuaUserdata(t)),
             value => {

@@ -5,7 +5,7 @@ use crate::chunk_cache::ChunkCache;
 use crate::error::thread::ReentryFailure;
 use crate::error::ThreadError;
 use crate::ffi::DLuaFfi;
-use crate::value::{Callable, Strong, Types};
+use crate::value::{StrongCallable, Types};
 
 use super::thread::frame::UpvalueRegister;
 use super::thread::stack::{Stack, StackGuard};
@@ -115,7 +115,7 @@ impl<Ty> ThreadStore<Ty>
 where
     Ty: Types,
 {
-    fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
+    fn new_thread(&mut self, callable: StrongCallable<Ty>) -> ThreadId {
         let id = self.next_id;
         self.next_id = ThreadId(id.0 + 1);
 
@@ -325,7 +325,7 @@ impl<Ty> ThreadManager<Ty>
 where
     Ty: Types,
 {
-    fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
+    fn new_thread(&mut self, callable: StrongCallable<Ty>) -> ThreadId {
         self.store.new_thread(callable)
     }
 
@@ -491,7 +491,7 @@ where
         }
     }
 
-    pub(crate) fn new_thread(&mut self, callable: Callable<Strong, Ty>) -> ThreadId {
+    pub(crate) fn new_thread(&mut self, callable: StrongCallable<Ty>) -> ThreadId {
         self.manager.new_thread(callable)
     }
 

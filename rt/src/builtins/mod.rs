@@ -70,17 +70,17 @@ use crate::error::{AlreadyDroppedOr, NotCallableError};
 use crate::gc::Heap;
 use crate::runtime::thread::TransientStackGuard;
 use crate::runtime::MetatableRegistry;
-use crate::value::{Callable, Key, Strong, Types, Value, Weak};
+use crate::value::{Key, StrongCallable, Types, Value, WeakKey, WeakValue};
 
 // Temporary reexport.
 pub use table::find_metavalue;
 
 pub fn prepare_invoke<Ty>(
-    callable: Value<Weak, Ty>,
+    callable: WeakValue<Ty>,
     stack: TransientStackGuard<'_, Ty>,
     heap: &Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
-) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<NotCallableError<Ty>>>
+) -> Result<StrongCallable<Ty>, AlreadyDroppedOr<NotCallableError<Ty>>>
 where
     Ty: Types,
 {
@@ -101,12 +101,12 @@ where
 }
 
 pub(crate) fn inner_prepare_invoke<Ty>(
-    mut callable: Value<Weak, Ty>,
+    mut callable: WeakValue<Ty>,
     mut stack: TransientStackGuard<'_, Ty>,
     heap: &Heap<Ty>,
     registry: &MetatableRegistry<Ty::Table>,
-    key: Option<Key<Weak, Ty>>,
-) -> Result<Callable<Strong, Ty>, AlreadyDroppedOr<InnerNotCallableError>>
+    key: Option<WeakKey<Ty>>,
+) -> Result<StrongCallable<Ty>, AlreadyDroppedOr<InnerNotCallableError>>
 where
     Ty: Types,
 {

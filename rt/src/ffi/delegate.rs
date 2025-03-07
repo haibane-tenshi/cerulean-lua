@@ -166,7 +166,7 @@ use crate::chunk_cache::{ChunkCache, ChunkId};
 use crate::error::{Diagnostic, RtError, RuntimeError};
 use crate::runtime::thread::StackGuard;
 use crate::runtime::{Closure, Core, FunctionPtr, ThreadId};
-use crate::value::{Callable, Strong, Types, WeakValue};
+use crate::value::{StrongCallable, Types, WeakValue};
 
 pub use super::coroutine::State;
 pub use repr::index::StackSlot;
@@ -308,7 +308,7 @@ where
     Ty: Types,
 {
     Invoke {
-        callable: Callable<Strong, Ty>,
+        callable: StrongCallable<Ty>,
         start: StackSlot,
     },
     Resume {

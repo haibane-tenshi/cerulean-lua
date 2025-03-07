@@ -10,16 +10,15 @@ use crate::gc::{Downgrade, Heap, Upgrade};
 
 pub use crate::runtime::Closure as LuaClosure;
 
-pub type StrongCallable<Ty> = Callable<Strong, Ty>;
-pub type WeakCallable<Ty> = Callable<Weak, Ty>;
+pub type StrongCallable<Ty> = Callable<Strong<Ty>>;
+pub type WeakCallable<Ty> = Callable<Weak<Ty>>;
 
-pub enum Callable<Rf, Ty>
+pub enum Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
-    Lua(Rf::LuaCallable<Ty::LuaClosure>),
-    Rust(Rf::RustCallable<Ty::RustClosure>),
+    Lua(Rf::LuaClosure),
+    Rust(Rf::RustClosure),
 }
 
 impl<Ty> Upgrade<Heap<Ty>> for WeakCallable<Ty>
@@ -52,12 +51,11 @@ where
     }
 }
 
-impl<Rf, Ty> Trace for Callable<Rf, Ty>
+impl<Rf> Trace for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Trace,
-    Rf::RustCallable<Ty::RustClosure>: Trace,
+    Rf::LuaClosure: Trace,
+    Rf::RustClosure: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         match self {
@@ -67,12 +65,11 @@ where
     }
 }
 
-impl<Rf, Ty> Debug for Callable<Rf, Ty>
+impl<Rf> Debug for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Debug,
-    Rf::RustCallable<Ty::RustClosure>: Debug,
+    Rf::LuaClosure: Debug,
+    Rf::RustClosure: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -106,12 +103,11 @@ where
     }
 }
 
-impl<Rf, Ty> Clone for Callable<Rf, Ty>
+impl<Rf> Clone for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Clone,
-    Rf::RustCallable<Ty::RustClosure>: Clone,
+    Rf::LuaClosure: Clone,
+    Rf::RustClosure: Clone,
 {
     fn clone(&self) -> Self {
         match self {
@@ -121,21 +117,19 @@ where
     }
 }
 
-impl<Rf, Ty> Copy for Callable<Rf, Ty>
+impl<Rf> Copy for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Copy,
-    Rf::RustCallable<Ty::RustClosure>: Copy,
+    Rf::LuaClosure: Copy,
+    Rf::RustClosure: Copy,
 {
 }
 
-impl<Rf, Ty> PartialEq for Callable<Rf, Ty>
+impl<Rf> PartialEq for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: PartialEq,
-    Rf::RustCallable<Ty::RustClosure>: PartialEq,
+    Rf::LuaClosure: PartialEq,
+    Rf::RustClosure: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -146,21 +140,19 @@ where
     }
 }
 
-impl<Rf, Ty> Eq for Callable<Rf, Ty>
+impl<Rf> Eq for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Eq,
-    Rf::RustCallable<Ty::RustClosure>: Eq,
+    Rf::LuaClosure: Eq,
+    Rf::RustClosure: Eq,
 {
 }
 
-impl<Rf, Ty> PartialOrd for Callable<Rf, Ty>
+impl<Rf> PartialOrd for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: PartialOrd,
-    Rf::RustCallable<Ty::RustClosure>: PartialOrd,
+    Rf::LuaClosure: PartialOrd,
+    Rf::RustClosure: PartialOrd,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering;
@@ -174,12 +166,11 @@ where
     }
 }
 
-impl<Rf, Ty> Ord for Callable<Rf, Ty>
+impl<Rf> Ord for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Ord,
-    Rf::RustCallable<Ty::RustClosure>: Ord,
+    Rf::LuaClosure: Ord,
+    Rf::RustClosure: Ord,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
@@ -193,12 +184,11 @@ where
     }
 }
 
-impl<Rf, Ty> Hash for Callable<Rf, Ty>
+impl<Rf> Hash for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::LuaCallable<Ty::LuaClosure>: Hash,
-    Rf::RustCallable<Ty::RustClosure>: Hash,
+    Rf::LuaClosure: Hash,
+    Rf::RustClosure: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
@@ -210,14 +200,13 @@ where
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Callable<Rf, Ty>
+impl<Rf> TryFrom<Value<Rf>> for Callable<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         use super::Type;
 
         match value {
@@ -234,12 +223,11 @@ where
     }
 }
 
-impl<Rf, Ty> From<Callable<Rf, Ty>> for Value<Rf, Ty>
+impl<Rf> From<Callable<Rf>> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
-    fn from(value: Callable<Rf, Ty>) -> Self {
+    fn from(value: Callable<Rf>) -> Self {
         Value::Function(value)
     }
 }

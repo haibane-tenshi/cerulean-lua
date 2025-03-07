@@ -5,7 +5,7 @@ use super::ops::{
     Add, AddAssign, CheckedDiv, CheckedFloorDiv, CheckedPow, CheckedRem, Div, DivAssign, FloorDiv,
     Mul, MulAssign, Neg, Pow, Rem, RemAssign, Sub, SubAssign,
 };
-use super::{Int, Refs, Type, Types, Value};
+use super::{Int, Refs, Type, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
@@ -204,14 +204,13 @@ impl CheckedPow for Float {
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Float
+impl<Rf> TryFrom<Value<Rf>> for Float
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Float(value) => Ok(Float(value)),
             value => {
@@ -226,10 +225,9 @@ where
     }
 }
 
-impl<Rf, Ty> From<Float> for Value<Rf, Ty>
+impl<Rf> From<Float> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     fn from(value: Float) -> Self {
         let Float(value) = value;

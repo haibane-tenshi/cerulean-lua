@@ -26,47 +26,19 @@ use userdata::FullUserdata;
 pub use gc::userdata::Metatable;
 
 pub use boolean::Boolean;
-pub use callable::Callable;
+pub use callable::{Callable, StrongCallable, WeakCallable};
 pub use float::Float;
 pub use int::Int;
 pub use nil::Nil;
 pub use ops::{Concat, Len};
-pub use table::{Key, Table, TableIndex};
+pub use table::{Key, StrongKey, Table, TableIndex, WeakKey};
 pub use userdata::DefaultParams;
-
-pub trait Refs: Sized + 'static {
-    type String<T>;
-    type LuaCallable<T>;
-    type RustCallable<T>;
-    type Table<T>;
-    type FullUserdata<T: ?Sized>;
-}
-
-pub struct Strong;
-
-impl Refs for Strong {
-    type String<T> = LuaPtr<Root<Interned<T>>>;
-    type LuaCallable<T> = LuaPtr<Root<T>>;
-    type RustCallable<T> = LuaPtr<RootCell<T>>;
-    type Table<T> = LuaPtr<RootCell<T>>;
-    type FullUserdata<T: ?Sized> = LuaPtr<RootCell<T>>;
-}
-
-pub struct Weak;
-
-impl Refs for Weak {
-    type String<T> = LuaPtr<Gc<Interned<T>>>;
-    type LuaCallable<T> = LuaPtr<Gc<T>>;
-    type RustCallable<T> = LuaPtr<GcCell<T>>;
-    type Table<T> = LuaPtr<GcCell<T>>;
-    type FullUserdata<T: ?Sized> = LuaPtr<GcCell<T>>;
-}
 
 pub trait Types: Sized + 'static {
     type String: Trace + Concat + Len + Clone + Ord + Hash + IntoEncoding + FromEncoding;
     type LuaClosure: Trace;
     type RustClosure: Trace;
-    type Table: Len + Metatable<Meta<Self>> + TableIndex<Weak, Self> + Default + Trace;
+    type Table: Len + Metatable<Meta<Self>> + TableIndex<Weak<Self>> + Default + Trace;
     type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
         + Allocated<Heap<Self>>
         + ?Sized;
@@ -80,8 +52,44 @@ impl Types for DefaultTypes {
     type String = PossiblyUtf8Vec;
     type LuaClosure = Closure<Self>;
     type RustClosure = Box<dyn DLuaFfi<Self>>;
-    type Table = Table<Weak, Self>;
+    type Table = Table<Weak<Self>>;
     type FullUserdata = dyn FullUserdata<Meta<Self>, DefaultParams<Self>>;
+}
+
+pub struct Strong<Ty>(Ty);
+pub struct Weak<Ty>(Ty);
+
+pub trait Refs: Sized + 'static {
+    type String;
+    type LuaClosure;
+    type RustClosure;
+    type Table;
+    type FullUserdata;
+    type Meta;
+}
+
+impl<Ty> Refs for Strong<Ty>
+where
+    Ty: Types,
+{
+    type String = LuaPtr<Root<Interned<Ty::String>>>;
+    type LuaClosure = LuaPtr<Root<Ty::LuaClosure>>;
+    type RustClosure = LuaPtr<RootCell<Ty::RustClosure>>;
+    type Table = LuaPtr<RootCell<Ty::Table>>;
+    type FullUserdata = LuaPtr<RootCell<Ty::FullUserdata>>;
+    type Meta = Meta<Ty>;
+}
+
+impl<Ty> Refs for Weak<Ty>
+where
+    Ty: Types,
+{
+    type String = LuaPtr<Gc<Interned<Ty::String>>>;
+    type LuaClosure = LuaPtr<Gc<Ty::LuaClosure>>;
+    type RustClosure = LuaPtr<GcCell<Ty::RustClosure>>;
+    type Table = LuaPtr<GcCell<Ty::Table>>;
+    type FullUserdata = LuaPtr<GcCell<Ty::FullUserdata>>;
+    type Meta = Meta<Ty>;
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -242,11 +250,8 @@ impl Display for SolitaryType {
     }
 }
 
-pub type StrongValue<Ty> = Value<Strong, Ty>;
-pub type WeakValue<Ty> = Value<Weak, Ty>;
-
-pub type WeakKey<Ty> = Key<Weak, Ty>;
-pub type StrongKey<Ty> = Key<Strong, Ty>;
+pub type StrongValue<Ty> = Value<Strong<Ty>>;
+pub type WeakValue<Ty> = Value<Weak<Ty>>;
 
 /// Enum representing all possible Lua values.
 ///
@@ -262,21 +267,20 @@ pub type StrongKey<Ty> = Key<Strong, Ty>;
 /// Default rendering will only include the contents.
 /// Alternate rendering will include type information as well,
 /// but looks a little bit nicer compared to `Debug` output.
-pub enum Value<Rf: Refs, Ty: Types> {
+pub enum Value<Rf: Refs> {
     Nil,
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(Rf::String<Ty::String>),
-    Function(Callable<Rf, Ty>),
-    Table(Rf::Table<Ty::Table>),
-    Userdata(Rf::FullUserdata<Ty::FullUserdata>),
+    String(Rf::String),
+    Function(Callable<Rf>),
+    Table(Rf::Table),
+    Userdata(Rf::FullUserdata),
 }
 
-impl<Rf, Ty> Value<Rf, Ty>
+impl<Rf> Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     pub fn to_bool(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
@@ -306,7 +310,7 @@ where
     ///
     /// If you are in charge of constructing a key, it might be better to do it directly
     /// in case the value is not float.
-    pub fn into_key(self) -> Result<Key<Rf, Ty>, InvalidKeyError> {
+    pub fn into_key(self) -> Result<Key<Rf>, InvalidKeyError> {
         self.try_into()
     }
 }
@@ -502,14 +506,13 @@ where
     }
 }
 
-impl<Rf, Ty> Trace for Value<Rf, Ty>
+impl<Rf> Trace for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Trace,
-    Callable<Rf, Ty>: Trace,
-    Rf::Table<Ty::Table>: Trace,
-    Rf::FullUserdata<Ty::FullUserdata>: Trace,
+    Rf::String: Trace,
+    Callable<Rf>: Trace,
+    Rf::Table: Trace,
+    Rf::FullUserdata: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         use Value::*;
@@ -524,14 +527,13 @@ where
     }
 }
 
-impl<Rf, Ty> Debug for Value<Rf, Ty>
+impl<Rf> Debug for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Debug,
-    Callable<Rf, Ty>: Debug,
-    Rf::Table<Ty::Table>: Debug,
-    Rf::FullUserdata<Ty::FullUserdata>: Debug,
+    Rf::String: Debug,
+    Callable<Rf>: Debug,
+    Rf::Table: Debug,
+    Rf::FullUserdata: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -547,14 +549,13 @@ where
     }
 }
 
-impl<Rf, Ty> Clone for Value<Rf, Ty>
+impl<Rf> Clone for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Clone,
-    Callable<Rf, Ty>: Clone,
-    Rf::Table<Ty::Table>: Clone,
-    Rf::FullUserdata<Ty::FullUserdata>: Clone,
+    Rf::String: Clone,
+    Callable<Rf>: Clone,
+    Rf::Table: Clone,
+    Rf::FullUserdata: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -571,25 +572,23 @@ where
     }
 }
 
-impl<Rf, Ty> Copy for Value<Rf, Ty>
+impl<Rf> Copy for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Copy,
-    Callable<Rf, Ty>: Copy,
-    Rf::Table<Ty::Table>: Copy,
-    Rf::FullUserdata<Ty::FullUserdata>: Copy,
+    Rf::String: Copy,
+    Callable<Rf>: Copy,
+    Rf::Table: Copy,
+    Rf::FullUserdata: Copy,
 {
 }
 
-impl<Rf, Ty> PartialEq for Value<Rf, Ty>
+impl<Rf> PartialEq for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: PartialEq,
-    Callable<Rf, Ty>: PartialEq,
-    Rf::Table<Ty::Table>: PartialEq,
-    Rf::FullUserdata<Ty::FullUserdata>: PartialEq,
+    Rf::String: PartialEq,
+    Callable<Rf>: PartialEq,
+    Rf::Table: PartialEq,
+    Rf::FullUserdata: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -605,23 +604,21 @@ where
     }
 }
 
-impl<Rf, Ty> Eq for Value<Rf, Ty>
+impl<Rf> Eq for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Eq,
-    Callable<Rf, Ty>: Eq,
-    Rf::Table<Ty::Table>: Eq,
-    Rf::FullUserdata<Ty::FullUserdata>: Eq,
+    Rf::String: Eq,
+    Callable<Rf>: Eq,
+    Rf::Table: Eq,
+    Rf::FullUserdata: Eq,
 {
 }
 
 // No, clippy, you cannot.
 #[allow(clippy::derivable_impls)]
-impl<Rf, Ty> Default for Value<Rf, Ty>
+impl<Rf> Default for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     fn default() -> Self {
         Value::Nil

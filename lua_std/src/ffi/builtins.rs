@@ -1,6 +1,6 @@
 use rt::error::RuntimeError;
 use rt::ffi::delegate::{Request, Response, RuntimeView, StackSlot, State};
-use rt::value::{Key, Types, Weak, WeakValue};
+use rt::value::{Types, WeakKey, WeakValue};
 
 pub(crate) fn len<Ty>(value: WeakValue<Ty>) -> Len<Ty>
 where
@@ -110,7 +110,7 @@ where
     }
 }
 
-pub(crate) fn get_index<Ty>(table: WeakValue<Ty>, key: Key<Weak, Ty>) -> GetIndex<Ty>
+pub(crate) fn get_index<Ty>(table: WeakValue<Ty>, key: WeakKey<Ty>) -> GetIndex<Ty>
 where
     Ty: Types,
 {
@@ -123,7 +123,7 @@ where
 {
     Started {
         target: WeakValue<Ty>,
-        key: Key<Weak, Ty>,
+        key: WeakKey<Ty>,
     },
     CalledMethod {
         start: StackSlot,
@@ -206,7 +206,7 @@ where
 
 pub(crate) fn set_index<Ty>(
     table: WeakValue<Ty>,
-    key: Key<Weak, Ty>,
+    key: WeakKey<Ty>,
     value: WeakValue<Ty>,
 ) -> SetIndex<Ty>
 where
@@ -225,7 +225,7 @@ where
 {
     Started {
         target: WeakValue<Ty>,
-        key: Key<Weak, Ty>,
+        key: WeakKey<Ty>,
         value: WeakValue<Ty>,
     },
     CalledMethod {

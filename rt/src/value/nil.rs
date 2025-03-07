@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use super::{Refs, Type, Types, Value};
+use super::{Refs, Type, Value};
 use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -22,14 +22,13 @@ impl Display for Nil {
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Nil
+impl<Rf> TryFrom<Value<Rf>> for Nil
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Nil => Ok(Nil),
             value => {
@@ -44,10 +43,9 @@ where
     }
 }
 
-impl<Rf, Ty> From<Nil> for Value<Rf, Ty>
+impl<Rf> From<Nil> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     fn from(Nil: Nil) -> Self {
         Value::Nil

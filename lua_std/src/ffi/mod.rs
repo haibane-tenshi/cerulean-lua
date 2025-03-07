@@ -685,7 +685,7 @@ where
 
     enum ChunkSource<Ty: Types> {
         String(String),
-        Function(Callable<Weak, Ty>),
+        Function(Callable<Weak<Ty>>),
     }
 
     enum Error<T> {
@@ -1291,12 +1291,12 @@ where
     Ty: Types<RustClosure = Box<dyn DLuaFfi<Ty>>>,
 {
     use rt::runtime::Core;
-    use rt::value::Weak;
+    use rt::value::WeakKey;
     use std::io::Write;
 
     fn find_first<Ty>(
         rt: &RuntimeView<'_, Ty>,
-        key: Key<Weak, Ty>,
+        key: WeakKey<Ty>,
     ) -> Result<usize, AlreadyDroppedError>
     where
         Ty: Types,

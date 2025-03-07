@@ -695,7 +695,7 @@ where
     use rt::value::{Type, Value};
 
     delegate::from_mut(|mut rt| {
-        let x: Value<_, _> = rt.stack.as_slice().parse(&mut rt.core.gc)?;
+        let x: Value<_> = rt.stack.as_slice().parse(&mut rt.core.gc)?;
 
         rt.stack.transient_in(&mut rt.core.gc, |mut stack, heap| {
             stack.clear();
@@ -774,7 +774,7 @@ where
     use rt::ffi::arg_parser::FormatReturns;
     use rt::ffi::delegate::{Request, StackSlot};
     use rt::gc::{Downgrade, Upgrade};
-    use rt::value::{Callable, Strong, Value};
+    use rt::value::{StrongCallable, StrongValue, Value};
     use std::ops::ControlFlow;
 
     enum State<Ty>
@@ -783,8 +783,8 @@ where
     {
         Started,
         CalledLt {
-            current: Value<Strong, Ty>,
-            lt_callable: Callable<Strong, Ty>,
+            current: StrongValue<Ty>,
+            lt_callable: StrongCallable<Ty>,
             count: StackSlot,
         },
         Finished,
@@ -937,7 +937,7 @@ where
     use rt::ffi::arg_parser::FormatReturns;
     use rt::ffi::delegate::{Request, StackSlot};
     use rt::gc::{Downgrade, Upgrade};
-    use rt::value::{Callable, Strong, Value};
+    use rt::value::{StrongCallable, StrongValue, Value};
     use std::ops::ControlFlow;
 
     enum State<Ty>
@@ -946,8 +946,8 @@ where
     {
         Started,
         CalledGt {
-            current: Value<Strong, Ty>,
-            gt_callable: Callable<Strong, Ty>,
+            current: StrongValue<Ty>,
+            gt_callable: StrongCallable<Ty>,
             count: StackSlot,
         },
         Finished,

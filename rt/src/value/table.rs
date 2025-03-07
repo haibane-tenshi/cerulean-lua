@@ -7,46 +7,43 @@ use ordered_float::NotNan;
 
 use super::callable::Callable;
 use super::ops::Len;
-use super::{Int, Meta, Metatable, Refs, Strong, Type, Types, Value, Weak};
+use super::{Int, Metatable, Refs, Strong, Type, Types, Value, Weak};
 use crate::error::{AlreadyDroppedError, InvalidKeyError};
-use crate::gc::Heap;
+use crate::gc::{Downgrade, Heap, Upgrade};
 
-pub trait TableIndex<Rf, Ty>
+pub trait TableIndex<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
-    fn get(&self, key: &Key<Rf, Ty>) -> Value<Rf, Ty>;
-    fn set(&mut self, key: Key<Rf, Ty>, value: Value<Rf, Ty>);
-    fn first_key(&self) -> Option<&Key<Rf, Ty>>;
-    fn next_key(&self, key: &Key<Rf, Ty>) -> Option<&Key<Rf, Ty>>;
+    fn get(&self, key: &Key<Rf>) -> Value<Rf>;
+    fn set(&mut self, key: Key<Rf>, value: Value<Rf>);
+    fn first_key(&self) -> Option<&Key<Rf>>;
+    fn next_key(&self, key: &Key<Rf>) -> Option<&Key<Rf>>;
     fn border(&self) -> i64;
-    fn contains_key(&self, key: &Key<Rf, Ty>) -> bool {
+    fn contains_key(&self, key: &Key<Rf>) -> bool {
         !matches!(self.get(key), Value::Nil)
     }
 }
 
-pub struct Table<Rf, Ty>
+pub struct Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
-    data: BTreeMap<Key<Rf, Ty>, Value<Rf, Ty>>,
-    metatable: Option<Meta<Ty>>,
+    data: BTreeMap<Key<Rf>, Value<Rf>>,
+    metatable: Option<Rf::Meta>,
 }
 
-impl<Rf, Ty> TableIndex<Rf, Ty> for Table<Rf, Ty>
+impl<Rf> TableIndex<Rf> for Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Key<Rf, Ty>: Ord,
-    Value<Rf, Ty>: Clone,
+    Key<Rf>: Ord,
+    Value<Rf>: Clone,
 {
-    fn get(&self, key: &Key<Rf, Ty>) -> Value<Rf, Ty> {
+    fn get(&self, key: &Key<Rf>) -> Value<Rf> {
         self.data.get(key).cloned().unwrap_or_default()
     }
 
-    fn set(&mut self, key: Key<Rf, Ty>, value: Value<Rf, Ty>) {
+    fn set(&mut self, key: Key<Rf>, value: Value<Rf>) {
         match value {
             Value::Nil => {
                 self.data.remove(&key);
@@ -57,11 +54,11 @@ where
         }
     }
 
-    fn first_key(&self) -> Option<&Key<Rf, Ty>> {
+    fn first_key(&self) -> Option<&Key<Rf>> {
         self.data.first_key_value().map(|(key, _)| key)
     }
 
-    fn next_key(&self, key: &Key<Rf, Ty>) -> Option<&Key<Rf, Ty>> {
+    fn next_key(&self, key: &Key<Rf>) -> Option<&Key<Rf>> {
         use std::ops::Bound;
 
         let (key, _) = self
@@ -75,18 +72,17 @@ where
         Table::border(self)
     }
 
-    fn contains_key(&self, key: &Key<Rf, Ty>) -> bool {
+    fn contains_key(&self, key: &Key<Rf>) -> bool {
         self.data.contains_key(key)
     }
 }
 
-impl<Rf, Ty> Table<Rf, Ty>
+impl<Rf> Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Key<Rf, Ty>: Ord,
+    Key<Rf>: Ord,
 {
-    pub fn get_ref<'s>(&'s self, key: &Key<Rf, Ty>) -> Option<&'s Value<Rf, Ty>> {
+    pub fn get_ref<'s>(&'s self, key: &Key<Rf>) -> Option<&'s Value<Rf>> {
         self.data.get(key)
     }
 
@@ -98,40 +94,37 @@ where
     }
 }
 
-impl<Rf, Ty> Len for Table<Rf, Ty>
+impl<Rf> Len for Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Key<Rf, Ty>: Ord,
+    Key<Rf>: Ord,
 {
     fn len(&self) -> Int {
         Int(self.border())
     }
 }
 
-impl<Rf, Ty> Metatable<Meta<Ty>> for Table<Rf, Ty>
+impl<Rf> Metatable<Rf::Meta> for Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
-    fn metatable(&self) -> Option<&Meta<Ty>> {
+    fn metatable(&self) -> Option<&Rf::Meta> {
         self.metatable.as_ref()
     }
 
-    fn set_metatable(&mut self, mt: Option<Meta<Ty>>) -> Option<Meta<Ty>> {
+    fn set_metatable(&mut self, mt: Option<Rf::Meta>) -> Option<Rf::Meta> {
         std::mem::replace(&mut self.metatable, mt)
     }
 }
 
-impl<Rf, Ty> Trace for Table<Rf, Ty>
+impl<Rf> Trace for Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Trace,
-    Callable<Rf, Ty>: Trace,
-    Rf::Table<Ty::Table>: Trace,
-    Rf::FullUserdata<Ty::FullUserdata>: Trace,
-    Meta<Ty>: Trace,
+    Rf::String: Trace,
+    Callable<Rf>: Trace,
+    Rf::Table: Trace,
+    Rf::FullUserdata: Trace,
+    Rf::Meta: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         for (key, value) in self.data.iter() {
@@ -143,13 +136,12 @@ where
     }
 }
 
-impl<Rf, Ty> Debug for Table<Rf, Ty>
+impl<Rf> Debug for Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Key<Rf, Ty>: Debug,
-    Value<Rf, Ty>: Debug,
-    Meta<Ty>: Debug,
+    Key<Rf>: Debug,
+    Value<Rf>: Debug,
+    Rf::Meta: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Table")
@@ -159,26 +151,24 @@ where
     }
 }
 
-impl<Rf, Ty> Clone for Table<Rf, Ty>
+impl<Rf> Clone for Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Key<Rf, Ty>: Clone,
-    Value<Rf, Ty>: Clone,
-    Meta<Ty>: Clone,
+    Key<Rf>: Clone,
+    Value<Rf>: Clone,
+    Rf::Meta: Clone,
 {
     fn clone(&self) -> Self {
         Self {
             data: self.data.clone(),
-            metatable: self.metatable,
+            metatable: self.metatable.clone(),
         }
     }
 }
 
-impl<Rf, Ty> Default for Table<Rf, Ty>
+impl<Rf> Default for Table<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     fn default() -> Self {
         Self {
@@ -188,20 +178,22 @@ where
     }
 }
 
-pub enum Key<Rf: Refs, Ty: Types> {
+pub type WeakKey<Ty> = Key<Weak<Ty>>;
+pub type StrongKey<Ty> = Key<Strong<Ty>>;
+
+pub enum Key<Rf: Refs> {
     Bool(bool),
     Int(i64),
     Float(NotNan<f64>),
-    String(Rf::String<Ty::String>),
-    Function(Callable<Rf, Ty>),
-    Table(Rf::Table<Ty::Table>),
-    Userdata(Rf::FullUserdata<Ty::FullUserdata>),
+    String(Rf::String),
+    Function(Callable<Rf>),
+    Table(Rf::Table),
+    Userdata(Rf::FullUserdata),
 }
 
-impl<Rf, Ty> Key<Rf, Ty>
+impl<Rf> Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     pub fn type_(&self) -> Type {
         match self {
@@ -216,13 +208,13 @@ where
     }
 }
 
-impl<Ty> Key<Strong, Ty>
+impl<Ty> Downgrade for StrongKey<Ty>
 where
     Ty: Types,
 {
-    pub fn downgrade(&self) -> Key<Weak, Ty> {
-        use crate::gc::Downgrade;
+    type Output = WeakKey<Ty>;
 
+    fn downgrade(&self) -> Self::Output {
         match self {
             Key::Bool(t) => Key::Bool(*t),
             Key::Int(t) => Key::Int(*t),
@@ -235,21 +227,17 @@ where
     }
 }
 
-impl<Ty> Key<Weak, Ty>
+impl<Ty> Upgrade<Heap<Ty>> for WeakKey<Ty>
 where
     Ty: Types,
 {
-    pub fn upgrade(self, heap: &Heap<Ty>) -> Option<Key<Strong, Ty>> {
-        self.try_upgrade(heap).ok()
-    }
+    type Output = StrongKey<Ty>;
 
-    pub fn try_upgrade(self, heap: &Heap<Ty>) -> Result<Key<Strong, Ty>, AlreadyDroppedError> {
-        use crate::gc::Upgrade;
-
+    fn try_upgrade(&self, heap: &Heap<Ty>) -> Result<Self::Output, AlreadyDroppedError> {
         let r = match self {
-            Key::Bool(t) => Key::Bool(t),
-            Key::Int(t) => Key::Int(t),
-            Key::Float(not_nan) => Key::Float(not_nan),
+            Key::Bool(t) => Key::Bool(*t),
+            Key::Int(t) => Key::Int(*t),
+            Key::Float(not_nan) => Key::Float(*not_nan),
             Key::String(t) => Key::String(t.try_upgrade(heap)?),
             Key::Function(callable) => Key::Function(callable.try_upgrade(heap)?),
             Key::Table(t) => Key::Table(t.try_upgrade(heap)?),
@@ -260,14 +248,13 @@ where
     }
 }
 
-impl<Rf, Ty> Trace for Key<Rf, Ty>
+impl<Rf> Trace for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Trace,
-    Callable<Rf, Ty>: Trace,
-    Rf::Table<Ty::Table>: Trace,
-    Rf::FullUserdata<Ty::FullUserdata>: Trace,
+    Rf::String: Trace,
+    Callable<Rf>: Trace,
+    Rf::Table: Trace,
+    Rf::FullUserdata: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         use Key::*;
@@ -282,14 +269,13 @@ where
     }
 }
 
-impl<Rf, Ty> Debug for Key<Rf, Ty>
+impl<Rf> Debug for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Debug,
-    Callable<Rf, Ty>: Debug,
-    Rf::Table<Ty::Table>: Debug,
-    Rf::FullUserdata<Ty::FullUserdata>: Debug,
+    Rf::String: Debug,
+    Callable<Rf>: Debug,
+    Rf::Table: Debug,
+    Rf::FullUserdata: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -304,14 +290,13 @@ where
     }
 }
 
-impl<Rf, Ty> Clone for Key<Rf, Ty>
+impl<Rf> Clone for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Clone,
-    Callable<Rf, Ty>: Clone,
-    Rf::Table<Ty::Table>: Clone,
-    Rf::FullUserdata<Ty::FullUserdata>: Clone,
+    Rf::String: Clone,
+    Callable<Rf>: Clone,
+    Rf::Table: Clone,
+    Rf::FullUserdata: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -327,25 +312,23 @@ where
     }
 }
 
-impl<Rf, Ty> Copy for Key<Rf, Ty>
+impl<Rf> Copy for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Copy,
-    Callable<Rf, Ty>: Copy,
-    Rf::Table<Ty::Table>: Copy,
-    Rf::FullUserdata<Ty::FullUserdata>: Copy,
+    Rf::String: Copy,
+    Callable<Rf>: Copy,
+    Rf::Table: Copy,
+    Rf::FullUserdata: Copy,
 {
 }
 
-impl<Rf, Ty> PartialEq for Key<Rf, Ty>
+impl<Rf> PartialEq for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: PartialEq,
-    Callable<Rf, Ty>: PartialEq,
-    Rf::Table<Ty::Table>: PartialEq,
-    Rf::FullUserdata<Ty::FullUserdata>: PartialEq,
+    Rf::String: PartialEq,
+    Callable<Rf>: PartialEq,
+    Rf::Table: PartialEq,
+    Rf::FullUserdata: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -361,25 +344,23 @@ where
     }
 }
 
-impl<Rf, Ty> Eq for Key<Rf, Ty>
+impl<Rf> Eq for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Eq,
-    Callable<Rf, Ty>: Eq,
-    Rf::Table<Ty::Table>: Eq,
-    Rf::FullUserdata<Ty::FullUserdata>: Eq,
+    Rf::String: Eq,
+    Callable<Rf>: Eq,
+    Rf::Table: Eq,
+    Rf::FullUserdata: Eq,
 {
 }
 
-impl<Rf, Ty> PartialOrd for Key<Rf, Ty>
+impl<Rf> PartialOrd for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: PartialOrd,
-    Callable<Rf, Ty>: PartialOrd,
-    Rf::Table<Ty::Table>: PartialOrd,
-    Rf::FullUserdata<Ty::FullUserdata>: PartialOrd,
+    Rf::String: PartialOrd,
+    Callable<Rf>: PartialOrd,
+    Rf::Table: PartialOrd,
+    Rf::FullUserdata: PartialOrd,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use Key::*;
@@ -404,14 +385,13 @@ where
     }
 }
 
-impl<Rf, Ty> Ord for Key<Rf, Ty>
+impl<Rf> Ord for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Ord,
-    Callable<Rf, Ty>: Ord,
-    Rf::Table<Ty::Table>: Ord,
-    Rf::FullUserdata<Ty::FullUserdata>: Ord,
+    Rf::String: Ord,
+    Callable<Rf>: Ord,
+    Rf::Table: Ord,
+    Rf::FullUserdata: Ord,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use Key::*;
@@ -436,14 +416,13 @@ where
     }
 }
 
-impl<Rf, Ty> Hash for Key<Rf, Ty>
+impl<Rf> Hash for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
-    Rf::String<Ty::String>: Hash,
-    Callable<Rf, Ty>: Hash,
-    Rf::Table<Ty::Table>: Hash,
-    Rf::FullUserdata<Ty::FullUserdata>: Hash,
+    Rf::String: Hash,
+    Callable<Rf>: Hash,
+    Rf::Table: Hash,
+    Rf::FullUserdata: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         use Key::*;
@@ -462,14 +441,13 @@ where
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Key<Rf, Ty>
+impl<Rf> TryFrom<Value<Rf>> for Key<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
     type Error = InvalidKeyError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         let r = match value {
             Value::Bool(t) => Key::Bool(t),
             Value::Int(t) => Key::Int(t),
@@ -488,12 +466,11 @@ where
     }
 }
 
-impl<Rf, Ty> From<Key<Rf, Ty>> for Value<Rf, Ty>
+impl<Rf> From<Key<Rf>> for Value<Rf>
 where
     Rf: Refs,
-    Ty: Types,
 {
-    fn from(value: Key<Rf, Ty>) -> Self {
+    fn from(value: Key<Rf>) -> Self {
         match value {
             Key::Bool(t) => Value::Bool(t),
             Key::Int(t) => Value::Int(t),

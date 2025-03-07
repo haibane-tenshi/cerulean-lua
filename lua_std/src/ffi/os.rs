@@ -732,6 +732,7 @@ where
 
     use rt::error::RuntimeError;
     use rt::ffi::delegate::{Request, Response, RuntimeView, StackSlot, State};
+    use rt::gc::Downgrade;
     use rt::value::WeakValue;
 
     use super::builtins::{GetIndex, SetIndex};

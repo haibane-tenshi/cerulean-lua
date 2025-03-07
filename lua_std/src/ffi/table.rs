@@ -2058,7 +2058,7 @@ where
     use rt::error::RuntimeError;
     use rt::ffi::delegate::{Delegate, Request, Response, RuntimeView, StackSlot, State};
     use rt::gc::{Downgrade, Upgrade};
-    use rt::value::{Callable, Strong, StrongValue, WeakValue};
+    use rt::value::{StrongCallable, StrongValue, WeakValue};
     use std::ops::RangeInclusive;
     use std::pin::Pin;
 
@@ -2180,29 +2180,29 @@ where
         Started,
         CalledLen {
             co: Len<Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
         },
         ToSlowGetIndex {
             boundary: StackSlot,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             range: RangeInclusive<i64>,
             cache: Vec<StrongValue<Ty>>,
         },
         IterGetIndex {
             co: GetIndex<Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             range: RangeInclusive<i64>,
             cache: Vec<StrongValue<Ty>>,
         },
         ConstructHeap {
             boundary: StackSlot,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             heap: Heap<Ty>,
             index: HeapIndex,
         },
         HeapSort {
             boundary: StackSlot,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             heap: Heap<Ty>,
             index: HeapIndex,
         },
@@ -2378,7 +2378,7 @@ where
             use rt::ffi::arg_parser::{Callable, LuaTable, Opts, ParseArgs, Split};
             use rt::gc::LuaPtr;
 
-            let (list, rest): (LuaTable<_>, Opts<(Callable<_, _>,)>) =
+            let (list, rest): (LuaTable<_>, Opts<(Callable<_>,)>) =
                 rt.stack.parse(&mut rt.core.gc)?;
             rt.stack.clear();
             let (cmp,) = rest.split();
@@ -2412,7 +2412,7 @@ where
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
             list: WeakValue<Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             len: WeakValue<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             use rt::builtins::table::GetIndexCache;
@@ -2475,7 +2475,7 @@ where
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
             list: WeakValue<Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             range: RangeInclusive<i64>,
             mut cache: Vec<StrongValue<Ty>>,
             value: WeakValue<Ty>,
@@ -2513,7 +2513,7 @@ where
         fn contruct_heap_head(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             mut heap: Heap<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             let Some(index) = heap.construct_next_cmp() else {
@@ -2542,7 +2542,7 @@ where
         fn construct_heap_tail(
             &mut self,
             rt: RuntimeView<'_, Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             mut heap: Heap<Ty>,
             index: HeapIndex,
             should_swap: bool,
@@ -2554,7 +2554,7 @@ where
         fn heapsort_head(
             &mut self,
             mut rt: RuntimeView<'_, Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             mut heap: Heap<Ty>,
         ) -> Result<State<Request<Ty>, ()>, RuntimeError<Ty>> {
             let Some(index) = heap.sort_next_cmp() else {
@@ -2584,7 +2584,7 @@ where
         fn heapsort_tail(
             &mut self,
             rt: RuntimeView<'_, Ty>,
-            cmp: Callable<Strong, Ty>,
+            cmp: StrongCallable<Ty>,
             mut heap: Heap<Ty>,
             index: HeapIndex,
             should_swap: bool,

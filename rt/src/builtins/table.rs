@@ -24,7 +24,7 @@ use gc::{GcCell, RootCell};
 use crate::error::{AlreadyDroppedError, AlreadyDroppedOr};
 use crate::gc::Heap;
 use crate::runtime::MetatableRegistry;
-use crate::value::{Callable, Key, Strong, Types, WeakKey, WeakValue};
+use crate::value::{Key, StrongCallable, Types, WeakKey, WeakValue};
 
 /// Resolve metavalue out of a list of values.
 ///
@@ -150,7 +150,7 @@ pub struct CallRequired<Ty>
 where
     Ty: Types,
 {
-    pub func: Callable<Strong, Ty>,
+    pub func: StrongCallable<Ty>,
     pub target: WeakValue<Ty>,
 }
 
