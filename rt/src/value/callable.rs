@@ -88,8 +88,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Callable::Lua(t) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Callable::Rust(t) => write!(f, "{{[rust] closure <{t:p}>}}"),
+            Callable::Lua(t) => write!(f, "{{[lua] closure <{}>}}", t.0.location()),
+            Callable::Rust(t) => write!(f, "{{[rust] closure <{}>}}", t.0.location()),
         }
     }
 }
@@ -100,8 +100,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Callable::Lua(t) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Callable::Rust(t) => write!(f, "{{[rust] closure <{t:p}>}}"),
+            Callable::Lua(t) => write!(f, "{{[lua] closure <{}>}}", t.0.location()),
+            Callable::Rust(t) => write!(f, "{{[rust] closure <{}>}}", t.0.location()),
         }
     }
 }
