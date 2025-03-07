@@ -153,7 +153,7 @@ where
             let current = std::mem::replace(self, GetIndex::Finished);
             match (current, response) {
                 (GetIndex::Started { target, key }, Response::Resume) => {
-                    let index = rt.core.dialect.tab_get(key.into());
+                    let index = rt.core.dialect.get_index(key.into());
                     let index = index.try_into().unwrap();
 
                     let call =
@@ -256,7 +256,7 @@ where
             let current = std::mem::replace(self, SetIndex::Finished);
             match (current, response) {
                 (SetIndex::Started { target, key, value }, Response::Resume) => {
-                    let index = rt.core.dialect.tab_get(key.into());
+                    let index = rt.core.dialect.get_index(key.into());
                     let index = index.try_into().unwrap();
 
                     let call = match set_index(

@@ -213,7 +213,7 @@ pub(super) enum TabDebugInfo {
 }
 
 impl TabDebugInfo {
-    pub(super) fn with_tab_set(debug_info: DebugInfo) -> Option<Self> {
+    pub(super) fn with_set_index(debug_info: DebugInfo) -> Option<Self> {
         use repr::debug_info::opcode::Place::*;
         use DebugInfo::*;
 
@@ -249,7 +249,7 @@ impl TabDebugInfo {
         Some(r)
     }
 
-    pub(super) fn with_tab_get(debug_info: DebugInfo) -> Option<Self> {
+    pub(super) fn with_get_index(debug_info: DebugInfo) -> Option<Self> {
         use repr::debug_info::opcode::Place::*;
         use DebugInfo::*;
 

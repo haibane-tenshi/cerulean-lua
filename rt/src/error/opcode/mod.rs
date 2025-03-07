@@ -51,8 +51,8 @@ pub enum Cause {
     Invoke(Invoke),
     UnaOp(UnaOpCause),
     BinOp(BinOpCause),
-    TabGet(TabCause),
-    TabSet(TabCause),
+    GetIndex(TabCause),
+    SetIndex(TabCause),
 }
 
 impl Error {
@@ -116,11 +116,11 @@ impl Error {
                     malformed_diagnostic()
                 }
             }
-            TabGet(cause) => {
-                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_tab_get))
+            GetIndex(cause) => {
+                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_get_index))
             }
-            TabSet(cause) => {
-                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_tab_set))
+            SetIndex(cause) => {
+                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_set_index))
             }
         }
     }

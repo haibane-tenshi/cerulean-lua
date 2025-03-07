@@ -173,8 +173,8 @@ use crate::index::{ConstId, InstrOffset, RecipeId, StackSlot, UpvalueSlot};
 /// There are currently three such instructions:
 ///
 /// * [`TabCreate`](OpCode::TabCreate) - create fresh empty table.
-/// * [`TabGet`](OpCode::TabGet) - lookup key in table and clone the value onto the stack.
-/// * [`TabSet`](OpCode::TabSet) - move value into table under specified key.
+/// * [`GetIndex`](OpCode::GetIndex) - lookup key in table and clone the value onto the stack.
+/// * [`SetIndex`](OpCode::SetIndex) - move value into table under specified key.
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
     Panic,
@@ -194,8 +194,8 @@ pub enum OpCode {
     JumpIf { cond: bool, offset: InstrOffset },
     Loop { offset: InstrOffset },
     TabCreate,
-    TabGet,
-    TabSet,
+    GetIndex,
+    SetIndex,
 }
 
 impl OpCode {
@@ -220,8 +220,8 @@ impl OpCode {
             JumpIf { .. } => "JumpIf",
             Loop { .. } => "Loop",
             TabCreate => "TabCreate",
-            TabSet => "TabSet",
-            TabGet => "TabGet",
+            SetIndex => "SetIndex",
+            GetIndex => "GetIndex",
         }
     }
 }
@@ -292,8 +292,8 @@ impl Display for OpCode {
             JumpIf { cond, offset } => format!("{name:<11} [{cond:>5}] [{:>3}]", offset.0),
             Loop { offset } => format!("{name:<11} [{:>3}]", offset.0),
             TabCreate => format!("{name:<11}"),
-            TabSet => format!("{name:<11}"),
-            TabGet => format!("{name:<11}"),
+            SetIndex => format!("{name:<11}"),
+            GetIndex => format!("{name:<11}"),
         };
 
         write!(f, "{s}")

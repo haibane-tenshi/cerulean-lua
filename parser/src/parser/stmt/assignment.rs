@@ -96,7 +96,7 @@ pub(crate) fn assignment<'s, 'origin>(
                                         frag.emit(OpCode::LoadStack(table), debug_info.clone());
                                         frag.emit(OpCode::LoadStack(field), debug_info.clone());
                                         frag.emit_load_stack(expr_slot, debug_info.clone());
-                                        frag.emit(OpCode::TabSet, debug_info.clone());
+                                        frag.emit(OpCode::SetIndex, debug_info.clone());
                                         // Remove leftover value.
                                         frag.emit_adjust_to(expr_slot, debug_info);
                                     }

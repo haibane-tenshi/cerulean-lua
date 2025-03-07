@@ -141,7 +141,7 @@ impl Place {
                     },
                 };
 
-                (OpCode::TabGet, debug_info)
+                (OpCode::GetIndex, debug_info)
             }
         }
     }
@@ -648,7 +648,7 @@ fn tab_call<'s, 'origin>(
                     Literal::String(ident.to_string()),
                     DebugInfo::Literal(ident_span.clone()),
                 );
-                frag.emit(OpCode::TabGet, debug_info);
+                frag.emit(OpCode::GetIndex, debug_info);
 
                 // Pass table itself as the first argument.
                 let instr_id = frag

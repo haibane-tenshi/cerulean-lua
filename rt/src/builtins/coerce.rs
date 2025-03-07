@@ -363,8 +363,8 @@ pub trait CoerceArgs<Ty: Types>: sealed::Sealed {
 
     fn bit_not(&self, args: [WeakValue<Ty>; 1]) -> [WeakValue<Ty>; 1];
 
-    fn tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
-    fn tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
+    fn set_index(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
+    fn get_index(&self, key: WeakValue<Ty>) -> WeakValue<Ty>;
 
     fn cmp_float_and_int(&self) -> bool;
 
@@ -612,7 +612,7 @@ where
         }
     }
 
-    fn tab_set(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
+    fn set_index(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_set_float_to_int {
@@ -631,7 +631,7 @@ where
         }
     }
 
-    fn tab_get(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
+    fn get_index(&self, key: WeakValue<Ty>) -> WeakValue<Ty> {
         use crate::value::{Float, Int};
 
         if !self.tab_get_float_to_int {

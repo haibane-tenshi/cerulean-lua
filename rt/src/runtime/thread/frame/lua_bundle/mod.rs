@@ -626,16 +626,16 @@ where
 
                 ControlFlow::Continue(())
             }
-            TabGet => {
+            GetIndex => {
                 let args = self.stack.lua_guard().take2()?;
                 self.exec_get_index(args)
-                    .map_err(|err| err.map_other(Cause::TabGet))?
+                    .map_err(|err| err.map_other(Cause::GetIndex))?
                     .map_br(Into::into)
             }
-            TabSet => {
+            SetIndex => {
                 let args = self.stack.lua_guard().take3()?;
                 self.exec_set_index(args)
-                    .map_err(|err| err.map_other(Cause::TabSet))?
+                    .map_err(|err| err.map_other(Cause::SetIndex))?
                     .map_br(Into::into)
             }
         };
@@ -828,7 +828,7 @@ where
         let coerced_index = self
             .core
             .dialect
-            .tab_get(index)
+            .get_index(index)
             .try_into()
             .map_err(InvalidKey)?;
         let index_key = self.internal_cache.lookup_event(Event::Index);
@@ -877,7 +877,7 @@ where
         let coerced_index = self
             .core
             .dialect
-            .tab_set(index)
+            .set_index(index)
             .try_into()
             .map_err(InvalidKey)?;
         let newindex_key = self.internal_cache.lookup_event(Event::NewIndex);

@@ -613,12 +613,12 @@ impl<'s> StackView<'s, '_> {
                 self.push(None);
             }
             OpCode::Jump { .. } | OpCode::Loop { .. } => (),
-            OpCode::TabGet => {
+            OpCode::GetIndex => {
                 self.pop();
                 self.pop();
                 self.push(None);
             }
-            OpCode::TabSet => {
+            OpCode::SetIndex => {
                 self.pop();
                 self.pop();
                 self.pop();
