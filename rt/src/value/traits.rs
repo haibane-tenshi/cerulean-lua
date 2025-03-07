@@ -1,12 +1,12 @@
 //! Raw operations on Lua primitives.
 //!
-//! This module contains traits describing all ops permitted on Lua primitive values.
-//! It mostly consist of reimports of `std` ops (such as [`Add`], [`Mul`] and others),
+//! This module contains traits describing all ops permitted on Lua primitives.
+//! It mostly consist of `std::ops` reimports (such as [`Add`], [`Mul`] and others),
 //! but there are also Lua-specific methods mixed in (such as [`Len`])
 //!
 //! Note that traits inside this module adhere to Rust's conventions.
 //! From perspective of Lua they describe **raw** operations on underlying values.
-//! It is used as a building block to build more complex and featureful operations.
+//! It is used as a building block for more complex and featureful operations.
 //! For this reason traits are only implemented on selection of strongly-typed Lua values
 //! ([`Int`](super::Int), [`Float`](super::Float) and others) but not on [`Value`]s.
 //!
@@ -62,16 +62,16 @@
 //! unchecked form ([`Div`], [`FloorDiv`], [`Rem`] and [`Pow`]).
 //!
 //! According to Lua spec, before performing any of those operations integer arguments must get coerced to floats.
-//! For float values there is no reason to have checked versions: it can always emit a `NaN` in case of trouble,
+//! For floats there is no reason to have checked versions: it can always emit a `NaN` in case of trouble,
 //! and most programs expect this behavior.
 //!
-//! However, coercions inside our runtime are configurable.
-//! This means that it is possible that those ops will be performed on integer arguments,
-//! which can lead to Rust panics when provided with bad inputs.
+//! However, you should remember that coercions are performed in a separate step,
+//! moreover our runtime allows to configure them.
+//! This means that it is possible for any op to be applied to integer arguments,
+//! which can lead to Rust panics on bad inputs.
 //!
-//! To handle the matter gracefully, when those ops of when invoked
-//! runtime and builtins will always use **checked versions for integers** (and **unchecked for floats**).
-//! Failing to produce a value is then elevated into Lua runtime error.
+//! To handle the matter gracefully, builtins will always use **checked versions for integers** (and **unchecked for floats**).
+//! Failing to produce a value in checked ops is then elevated into Lua runtime error.
 
 use std::hash::Hash;
 
