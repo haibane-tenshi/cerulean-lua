@@ -489,7 +489,8 @@ impl<Ty> DisplayWith<Heap<Ty>> for WeakValue<Ty>
 where
     Ty: CoreTypes,
 {
-    type Output<'a> = ValueWith<'a, Self, Heap<Ty>>
+    type Output<'a>
+        = ValueWith<'a, Self, Heap<Ty>>
     where
         Self: 'a;
 
@@ -502,7 +503,8 @@ impl<Ty> DisplayWith<Heap<Ty>> for StrongValue<Ty>
 where
     Ty: CoreTypes,
 {
-    type Output<'a> = ValueWith<'a, Self, Heap<Ty>>
+    type Output<'a>
+        = ValueWith<'a, Self, Heap<Ty>>
     where
         Self: 'a;
 
