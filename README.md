@@ -45,7 +45,22 @@ Unfortunately due to an oversight, all crates are currently versioned as `0.1` (
 Actual `0.1` version will come into effect on specific commit/tag pair (which is yet to happen).
 
 As of progress towards the goal, `main` branch should contain a functional interpreter capable of running Lua scripts, with many features already implemented (see below).
-It should be able to run simple scripts.
+
+# Running interpreter
+
+To compile and run this project you need to install [Rust toolchain](https://rust-lang.org/tools/install/).
+
+Once installed, clone repo and run 
+
+```
+cargo run -- run <script_path>
+```
+
+to execute Lua scripts.
+
+In current state it should be able to run simple scripts.
+
+This project is not published to Cargo.
 
 # Features
 
