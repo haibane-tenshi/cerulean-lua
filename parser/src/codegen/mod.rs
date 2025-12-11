@@ -16,7 +16,7 @@ use std::fmt::Display;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ident<'s>(pub &'s str);
 
-impl<'s> Ident<'s> {
+impl Ident<'_> {
     pub fn env() -> Self {
         Ident("_ENV")
     }
@@ -26,7 +26,7 @@ impl<'s> Ident<'s> {
     }
 }
 
-impl<'s> Display for Ident<'s> {
+impl Display for Ident<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }

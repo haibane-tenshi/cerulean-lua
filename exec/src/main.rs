@@ -56,61 +56,71 @@ fn main() -> Result<()> {
 
     match command {
         Command::Run { path } => {
-            use lua_std::global_env;
-            use rt::chunk_cache::ChunkId;
-            use rt::chunk_cache::{MainCache, SingleChunk, VecCache};
+            use lua_std::Std;
+            use lua_std::{lib, std};
+            use rt::builtins::coerce::CustomPolicy;
+            use rt::chunk_cache::VecCache;
             use rt::gc::{Heap, LuaPtr};
-            use rt::runtime::{Core, DialectBuilder, Interner, Runtime};
-            use rt::value::traits::DefaultTypes;
-            use rt::value::Value;
+            use rt::runtime::{Core, Runtime};
+            use rt::value::DefaultTypes;
+            use rt::value::{Callable, Value};
 
-            let (env_chunk, builder) = global_env::empty()
-                .include(global_env::assert())
-                .include(global_env::pcall())
-                .include(global_env::print())
-                // .include(global_env::load())
-                // .include(global_env::loadfile())
-                .include(global_env::setmetatable())
-                .include(global_env::getmetatable())
-                .finish();
-
-            let chunk_cache = {
-                let env = SingleChunk {
-                    chunk: env_chunk,
-                    source: None,
-                    location: None,
-                };
-                MainCache::new(env, VecCache::new())
-            };
-
-            let mut gc = Heap::<DefaultTypes>::new();
             let core = Core {
                 global_env: Value::Nil,
-                primitive_metatables: Default::default(),
-                dialect: DialectBuilder::lua_5_4(),
+                metatable_registry: Default::default(),
+                dialect: CustomPolicy::lua_5_4(),
                 gc: Heap::new(),
-                string_interner: Interner::new(&mut gc),
             };
 
+            let chunk_cache = VecCache::new();
             let mut runtime = Runtime::<DefaultTypes, _>::new(chunk_cache, core);
 
-            let run = || {
-                let global_env = builder(runtime.view(), ChunkId(0), ())?;
-                runtime.core.global_env = Value::Table(LuaPtr(global_env));
+            let env = Std::empty()
+                .include(std::assert)
+                .include(std::error)
+                .include(std::pcall)
+                .include(std::print)
+                .include(std::tostring)
+                .include(std::load)
+                .include(std::loadfile)
+                .include(std::setmetatable)
+                .include(std::getmetatable)
+                .include(std::collectgarbage)
+                .include(std::dofile)
+                .include(std::_G)
+                .include(std::_VERSION)
+                .include(std::ipairs)
+                .include(std::next)
+                .include(std::pairs)
+                .include(std::select)
+                .include(std::tonumber)
+                .include(std::type_)
+                .include(std::warn)
+                .include(lib::Math::full())
+                .include(lib::MathRand::full());
 
-                runtime.view().invoke(rt::ffi::call_file(&path))
-            };
+            runtime.include(env);
 
-            if let Err(err) = run() {
+            let callable = runtime
+                .core
+                .gc
+                .alloc_cell(rt::ffi::boxed(rt::ffi::call_file(&path)));
+            let main = runtime.new_thread(Callable::Rust(LuaPtr(callable)));
+
+            if let Err(_err) = runtime.resume(main) {
                 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-
-                let view = runtime.view();
 
                 let mut writer = StandardStream::stdout(ColorChoice::Always);
 
-                view.backtrace().emit(&mut writer)?;
-                view.into_diagnostic(err)
-                    .emit(&mut writer, &Default::default())?;
+                for thread in runtime.panic_stack(main) {
+                    thread.backtrace().emit(&mut writer)?;
+                    thread
+                        .error()
+                        .unwrap()
+                        .clone()
+                        .into_diagnostic(&runtime.core.gc, &runtime.chunk_cache)
+                        .emit(&mut writer, &Default::default())?;
+                }
 
                 return Err(anyhow::Error::msg("runtime error"));
             }

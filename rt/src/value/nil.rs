@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
-use super::{CoreTypes, Type, TypeMismatchError, Types, Value};
-use crate::gc::{TryFromWithGc, TryIntoWithGc};
+use super::{Refs, Type, Value};
+use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Nil;
@@ -22,14 +22,13 @@ impl Display for Nil {
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Nil
+impl<Rf> TryFrom<Value<Rf>> for Nil
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Nil => Ok(Nil),
             value => {
@@ -44,79 +43,11 @@ where
     }
 }
 
-impl<Rf, Ty> From<Nil> for Value<Rf, Ty>
+impl<Rf> From<Nil> for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     fn from(Nil: Nil) -> Self {
         Value::Nil
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum NilOr<T> {
-    #[default]
-    Nil,
-    Some(T),
-}
-
-impl<T> NilOr<T> {
-    pub fn into_option(self) -> Option<T> {
-        self.into()
-    }
-}
-
-impl<T> From<Option<T>> for NilOr<T> {
-    fn from(value: Option<T>) -> Self {
-        match value {
-            Some(t) => NilOr::Some(t),
-            None => NilOr::Nil,
-        }
-    }
-}
-
-impl<T> From<NilOr<T>> for Option<T> {
-    fn from(value: NilOr<T>) -> Self {
-        match value {
-            NilOr::Nil => None,
-            NilOr::Some(t) => Some(t),
-        }
-    }
-}
-
-impl<T, Rf, Ty, Gc> TryFromWithGc<Value<Rf, Ty>, Gc> for NilOr<T>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    Value<Rf, Ty>: TryIntoWithGc<T, Gc>,
-{
-    type Error = <Value<Rf, Ty> as TryIntoWithGc<T, Gc>>::Error;
-
-    fn try_from_with_gc(value: Value<Rf, Ty>, gc: &mut Gc) -> Result<NilOr<T>, Self::Error> {
-        match value {
-            Value::Nil => Ok(NilOr::Nil),
-            value => Ok(NilOr::Some(value.try_into_with_gc(gc)?)),
-        }
-    }
-}
-
-impl<T> From<Nil> for NilOr<T> {
-    fn from(Nil: Nil) -> Self {
-        NilOr::Nil
-    }
-}
-
-impl<T, Rf, Ty> From<NilOr<T>> for Value<Rf, Ty>
-where
-    T: Into<Value<Rf, Ty>>,
-    Rf: Types,
-    Ty: CoreTypes,
-{
-    fn from(value: NilOr<T>) -> Self {
-        match value {
-            NilOr::Nil => Value::Nil,
-            NilOr::Some(value) => value.into(),
-        }
     }
 }

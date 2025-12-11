@@ -34,8 +34,9 @@
 //! Every userdata object consist of three parts: *object* itself, *method dispatcher* function and *metatable*.
 //!
 //! * *Method dispatcher* traslates Lua invocations into actual Rust function calls.
-//! * Userdata interface is not compatible with our Lua ABI because it needs to retain access to underlying object.
-//!     This isn't a problem: Lua interacts with all userdata through *metatable* methods.
+//! * *Metatable* is required because Lua doesn't know how to interact with trait object directly
+//!     (and in fact userdata interface is incompatible with our Lua calling convention,
+//!     so metatable works as an intermediate in this case).
 //!
 //! We get different kind of userdata depending on which combination of parts is available:
 //!
@@ -50,12 +51,17 @@
 //!
 //! In order to construct userdata object all you need is to put respective parts together.
 //! This portion of the process is fully automated, [`Heap`](crate::Heap) does everything for you in its getter methods.
-//! Instead, you should focus on providing correct parts.
+//! Instead, you should focus on providing correct components.
 //!
-//! Out of those method dispatcher is most critical.
-//! As already discussed dispatcher is responsible for actually calling Rust methods on your value.
-//! A dispatcher can be set using [`Heap::set_dispatcher`](crate::Heap::set_dispatcher) for each individual type.
-//! By design all values of one type share dispatcher method.
+//! Out of those method dispatcher is the most critical part.
+//! As already discussed dispatcher is responsible for actually calling Rust methods on your type.
+//! A dispatcher can be set using [`Heap::set_dispatcher_of`](crate::Heap::set_dispatcher_of) for each individual type.
+//!
+//! Notably **all values of one type share dispatcher function**.
+//! This is by design: due to how Rust works, dispatcher function *must* get fixed the moment trait object is constructed.
+//! This causes potential problems such as inconsistent behavior in case objects of the same type are constructed with different dispatchers.
+//! It is especially egregious when a downstream crate tries to extend API surface of a type by implementing a new trait.
+//! The situation can be solved by providing a single global dispatcher for every type - and that is exactly what is done here.
 //!
 //! There are two ways to provide metatable for [`FullUserdata`].
 //! The simplest option is to set it in allocation method using [`Heap::alloc_full_userdata`](crate::Heap::alloc_full_userdata).
@@ -64,6 +70,8 @@
 //!
 //! For this reason it is meaningless to implement [`Userdata`] trait on its own -
 //! unless you wish to completely replace provided mechanism.
+
+use crate::Root;
 
 /// Type constructor for arguments and output of userdata dispacher.
 pub trait Params: 'static {
@@ -83,12 +91,11 @@ pub trait Userdata<P>
 where
     P: Params,
 {
-    fn method(&self, ident: P::Id<'_>, rt: P::Rt<'_>) -> Option<P::Res>;
+    fn method(&self, ident: P::Id<'_>) -> Option<P::Res>;
 }
 
 /// Signature of method dispatcher function for type `T`.
-pub type Dispatcher<T, P> =
-    fn(&T, <P as Params>::Id<'_>, <P as Params>::Rt<'_>) -> Option<<P as Params>::Res>;
+pub type Dispatcher<T, P> = fn(Root<T>, <P as Params>::Id<'_>) -> Option<<P as Params>::Res>;
 
 /// Trait describing types that contain its own Lua metatable.
 pub trait Metatable<M> {

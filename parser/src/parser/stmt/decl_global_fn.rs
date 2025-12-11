@@ -51,7 +51,7 @@ pub(crate) fn decl_global_fn<'s, 'origin>(
                 };
 
                 frag.emit(OpCode::MakeClosure(recipe_id), debug_info.clone());
-                frag.emit(OpCode::TabSet, debug_info);
+                frag.emit(OpCode::SetIndex, debug_info);
                 frag.commit();
 
                 trace!(span=?span.span(), str=&source[span.span()]);
@@ -123,7 +123,7 @@ pub(crate) fn fn_name<'s, 'origin>(
                             let ((ident, ident_span), span) = output.take();
 
                             frag.emit(
-                                OpCode::TabGet,
+                                OpCode::GetIndex,
                                 DebugInfo::LoadTable {
                                     table: total_span.clone(),
                                     index: ident_span.clone(),
@@ -160,7 +160,7 @@ pub(crate) fn fn_name<'s, 'origin>(
                             let ((ident, ident_span), span) = output.take();
 
                             frag.emit(
-                                OpCode::TabGet,
+                                OpCode::GetIndex,
                                 DebugInfo::LoadTable {
                                     table: total_span,
                                     index: ident_span.clone(),

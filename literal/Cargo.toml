@@ -1,0 +1,7 @@
+[package]
+name = "literal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lexical = { version = "7.0.4", default-features = false, features = ["power-of-two", "format", "parse-integers", "parse-floats"]}

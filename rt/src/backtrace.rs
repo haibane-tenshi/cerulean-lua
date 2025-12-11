@@ -1,13 +1,16 @@
 use std::io::{Result, Write};
 
+use crate::runtime::ThreadId;
+
 #[derive(Debug, Clone)]
 pub struct Backtrace {
+    pub thread_id: ThreadId,
     pub frames: Vec<BacktraceFrame>,
 }
 
 impl Backtrace {
     pub fn emit(&self, writer: &mut impl Write) -> Result<()> {
-        writeln!(writer, "backtrace:")?;
+        writeln!(writer, "thread [id={}] backtrace:", self.thread_id)?;
 
         for (i, frame) in self.frames.iter().enumerate() {
             let BacktraceFrame {

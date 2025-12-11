@@ -474,7 +474,7 @@ pub struct StackView<'s, 'origin> {
     inner_state: InnerState,
 }
 
-impl<'s, 'origin> StackView<'s, 'origin> {
+impl<'s> StackView<'s, '_> {
     pub fn new_block<'a>(stack: &'a mut Stack<'s>) -> StackView<'s, 'a> {
         StackView::new_block_at(stack, stack.len())
     }
@@ -613,12 +613,12 @@ impl<'s, 'origin> StackView<'s, 'origin> {
                 self.push(None);
             }
             OpCode::Jump { .. } | OpCode::Loop { .. } => (),
-            OpCode::TabGet => {
+            OpCode::GetIndex => {
                 self.pop();
                 self.pop();
                 self.push(None);
             }
-            OpCode::TabSet => {
+            OpCode::SetIndex => {
                 self.pop();
                 self.pop();
                 self.pop();
@@ -663,7 +663,7 @@ impl<'s, 'origin> StackView<'s, 'origin> {
     }
 }
 
-impl<'s, 'origin> Drop for StackView<'s, 'origin> {
+impl Drop for StackView<'_, '_> {
     fn drop(&mut self) {
         self.stack.apply(self.inner_state)
     }

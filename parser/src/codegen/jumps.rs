@@ -84,7 +84,7 @@ impl<'a> JumpsView<'a> {
     }
 }
 
-impl<'a> Drop for JumpsView<'a> {
+impl Drop for JumpsView<'_> {
     fn drop(&mut self) {
         self.store.jumps.remove(&self.fragment_id);
         for vec in self.store.jumps.values_mut() {

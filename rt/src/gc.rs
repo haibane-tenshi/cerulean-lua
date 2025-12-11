@@ -1,131 +1,25 @@
-//! Utilities to deal with our garbage collector idiosyncracies.
+//! Utilities to help dealing with our garbage collector idiosyncrasies.
 
-use std::fmt::Display;
 use std::hash::Hash;
 
-use gc::index::{Access, Allocated, GcPtr, RootPtr};
+use gc::index::{Access, Allocated, GcPtr, MutAccess, RefAccess, RootPtr};
 use gc::userdata::Params;
-use gc::{Gc, GcCell, Heap as TrueHeap, Root, RootCell, Trace};
+use gc::{Heap as TrueHeap, Trace};
 
-use crate::ffi::{LuaFfi, LuaFfiMut, LuaFfiOnce};
+use crate::error::RuntimeError;
 use crate::value::userdata::DefaultParams;
-use crate::value::{CoreTypes, Meta};
+use crate::value::{Meta, StrongKey, StrongValue, Types};
+
+pub use crate::error::AlreadyDroppedError;
 
 pub type Heap<Ty> = TrueHeap<Meta<Ty>, DefaultParams<Ty>>;
 
-pub trait TryFromWithGc<T, Gc>: Sized {
-    type Error;
-
-    fn try_from_with_gc(value: T, gc: &mut Gc) -> Result<Self, Self::Error>;
-}
-
-impl<T, Gc, U> TryFromWithGc<T, Gc> for U
-where
-    T: TryInto<U>,
-{
-    type Error = <T as TryInto<U>>::Error;
-
-    fn try_from_with_gc(value: T, _gc: &mut Gc) -> Result<Self, Self::Error> {
-        value.try_into()
-    }
-}
-
-pub trait TryIntoWithGc<T, Gc> {
-    type Error;
-
-    fn try_into_with_gc(self, gc: &mut Gc) -> Result<T, Self::Error>;
-}
-
-impl<T, Gc, U> TryIntoWithGc<T, Gc> for U
-where
-    T: TryFromWithGc<U, Gc>,
-{
-    type Error = <T as TryFromWithGc<U, Gc>>::Error;
-
-    fn try_into_with_gc(self, gc: &mut Gc) -> Result<T, Self::Error> {
-        T::try_from_with_gc(self, gc)
-    }
-}
-
-pub trait FromWithGc<T, Gc> {
-    fn from_with_gc(value: T, gc: &mut Gc) -> Self;
-}
-
-impl<T, Gc, U> FromWithGc<T, Gc> for U
-where
-    T: TryIntoWithGc<U, Gc, Error = std::convert::Infallible>,
-{
-    fn from_with_gc(value: T, gc: &mut Gc) -> Self {
-        match value.try_into_with_gc(gc) {
-            Ok(t) => t,
-            Err(err) => match err {},
-        }
-    }
-}
-
-pub trait IntoWithGc<T, Gc> {
-    fn into_with_gc(self, gc: &mut Gc) -> T;
-}
-
-impl<T, Gc, U> IntoWithGc<T, Gc> for U
-where
-    T: FromWithGc<U, Gc>,
-{
-    fn into_with_gc(self, gc: &mut Gc) -> T {
-        T::from_with_gc(self, gc)
-    }
-}
-
-pub trait DisplayWith<Gc> {
-    type Output<'a>: Display
-    where
-        Self: 'a,
-        Gc: 'a;
-
-    fn display<'a>(&'a self, extra: &'a Gc) -> Self::Output<'a>;
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Trace)]
 pub struct LuaPtr<P>(pub P);
 
 impl<P> LuaPtr<P> {
     pub fn into_inner(self) -> P {
         self.0
-    }
-}
-
-impl<T, A> LuaPtr<GcPtr<T, A>>
-where
-    T: ?Sized,
-    A: Access,
-{
-    pub fn upgrade<M, P>(self, heap: &TrueHeap<M, P>) -> Option<LuaPtr<RootPtr<T, A>>>
-    where
-        P: Params,
-    {
-        let LuaPtr(ptr) = self;
-        let ptr = heap.upgrade(ptr)?;
-        Some(LuaPtr(ptr))
-    }
-}
-
-impl<T, A> LuaPtr<RootPtr<T, A>>
-where
-    T: ?Sized,
-    A: Access,
-{
-    pub fn downgrade(&self) -> LuaPtr<GcPtr<T, A>> {
-        LuaPtr(self.0.downgrade())
-    }
-}
-
-impl<P> Trace for LuaPtr<P>
-where
-    P: Trace,
-{
-    fn trace(&self, collector: &mut gc::Collector) {
-        let LuaPtr(ptr) = self;
-        ptr.trace(collector);
     }
 }
 
@@ -229,172 +123,207 @@ where
     }
 }
 
-impl<Ty, P> LuaFfiOnce<Ty> for LuaPtr<P>
-where
-    Ty: CoreTypes,
-    P: LuaFfiOnce<Ty>,
-{
-    fn call_once(
-        self,
-        rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
-        self.0.call_once(rt)
-    }
+pub trait TryGet: Sized {
+    fn try_get<T, A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
+    where
+        T: Allocated<Self> + ?Sized,
+        A: RefAccess;
 
-    fn debug_info(&self) -> crate::ffi::DebugInfo {
-        self.0.debug_info()
-    }
+    fn try_get_mut<T, A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
+    where
+        T: Allocated<Self> + ?Sized,
+        A: MutAccess;
+
+    fn try_upgrade<T, A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
+    where
+        T: ?Sized,
+        A: Access;
 }
 
-impl<Ty, P> LuaFfiMut<Ty> for LuaPtr<P>
+impl<P, M> TryGet for TrueHeap<M, P>
 where
-    Ty: CoreTypes,
-    P: LuaFfiMut<Ty>,
-{
-    fn call_mut(
-        &mut self,
-        rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
-        self.0.call_mut(rt)
-    }
-}
-
-impl<Ty, P> LuaFfi<Ty> for LuaPtr<P>
-where
-    Ty: CoreTypes,
-    P: LuaFfi<Ty>,
-{
-    fn call(
-        &self,
-        rt: crate::runtime::RuntimeView<'_, Ty>,
-    ) -> Result<(), crate::error::RuntimeError<crate::value::StrongValue<Ty>>> {
-        self.0.call(rt)
-    }
-}
-
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Gc<T>>
-where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
-    M: 'static,
     P: Params,
 {
-    type Output<'a> = LuaPtrDisplay<'a, Gc<T>, M, P>;
+    fn try_get<T, A>(&self, ptr: GcPtr<T, A>) -> Result<&T, AlreadyDroppedError>
+    where
+        T: Allocated<Self> + ?Sized,
+        A: RefAccess,
+    {
+        self.get(ptr).ok_or(AlreadyDroppedError)
+    }
 
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
+    fn try_get_mut<T, A>(&mut self, ptr: GcPtr<T, A>) -> Result<&mut T, AlreadyDroppedError>
+    where
+        T: Allocated<Self> + ?Sized,
+        A: MutAccess,
+    {
+        self.get_mut(ptr).ok_or(AlreadyDroppedError)
+    }
+
+    fn try_upgrade<T, A>(&self, ptr: GcPtr<T, A>) -> Result<RootPtr<T, A>, AlreadyDroppedError>
+    where
+        T: ?Sized,
+        A: Access,
+    {
+        self.upgrade(ptr).ok_or(AlreadyDroppedError)
     }
 }
 
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<GcCell<T>>
+pub trait AllocExt<Ty>
 where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
-    M: 'static,
-    P: Params,
+    Ty: Types,
 {
-    type Output<'a> = LuaPtrDisplay<'a, GcCell<T>, M, P>;
+    fn alloc_str(&mut self, s: impl Into<Ty::String>) -> StrongValue<Ty>;
 
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
+    fn alloc_str_key(&mut self, s: impl Into<Ty::String>) -> StrongKey<Ty>;
+
+    fn alloc_error_msg(&mut self, s: impl Into<Ty::String>) -> RuntimeError<Ty>;
+}
+
+impl<Ty> AllocExt<Ty> for Heap<Ty>
+where
+    Ty: Types,
+{
+    fn alloc_str(&mut self, s: impl Into<<Ty as Types>::String>) -> StrongValue<Ty> {
+        StrongValue::String(LuaPtr(self.intern(s.into())))
+    }
+
+    fn alloc_str_key(&mut self, s: impl Into<<Ty as Types>::String>) -> StrongKey<Ty> {
+        StrongKey::String(LuaPtr(self.intern(s.into())))
+    }
+
+    fn alloc_error_msg(&mut self, msg: impl Into<Ty::String>) -> RuntimeError<Ty> {
+        RuntimeError::from_value(self.alloc_str(msg))
     }
 }
 
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<Root<T>>
-where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
-    M: 'static,
-    P: Params,
-{
-    type Output<'a> = LuaPtrDisplay<'a, Root<T>, M, P>;
+pub trait AsGc {
+    type Access: Access;
+    type Output: ?Sized;
 
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
+    fn as_gc(&self) -> GcPtr<Self::Output, Self::Access>;
+}
+
+pub trait AsRoot: AsGc {
+    fn as_root(&self) -> &RootPtr<Self::Output, Self::Access>;
+}
+
+pub trait Upgrade<Heap> {
+    type Output;
+
+    fn try_upgrade(&self, heap: &Heap) -> Result<Self::Output, AlreadyDroppedError>;
+
+    fn upgrade(&self, heap: &Heap) -> Option<Self::Output> {
+        self.try_upgrade(heap).ok()
     }
 }
 
-impl<T, M, P> DisplayWith<TrueHeap<M, P>> for LuaPtr<RootCell<T>>
-where
-    T: Allocated<M, P> + Display + ?Sized + 'static,
-    M: 'static,
-    P: Params,
-{
-    type Output<'a> = LuaPtrDisplay<'a, RootCell<T>, M, P>;
+pub trait Downgrade {
+    type Output;
 
-    fn display<'a>(&'a self, extra: &'a TrueHeap<M, P>) -> Self::Output<'a> {
-        LuaPtrDisplay {
-            ptr: &self.0,
-            heap: extra,
-        }
+    fn downgrade(&self) -> Self::Output;
+}
+
+impl<T, A> AsGc for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
+    type Access = A;
+    type Output = T;
+
+    fn as_gc(&self) -> GcPtr<Self::Output, Self::Access> {
+        *self
     }
 }
 
-pub struct LuaPtrDisplay<'a, Ptr, M, P> {
-    ptr: &'a Ptr,
-    heap: &'a TrueHeap<M, P>,
-}
-
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, Gc<T>, M, P>
+impl<T, A, M, P> Upgrade<TrueHeap<M, P>> for GcPtr<T, A>
 where
-    T: Allocated<M, P> + Display + ?Sized,
+    T: ?Sized,
+    A: Access,
     P: Params,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
+    type Output = RootPtr<T, A>;
 
-        if let Some(value) = heap.get(*ptr) {
-            write!(f, "{value}")?;
-        }
-
-        Ok(())
+    fn try_upgrade(&self, heap: &TrueHeap<M, P>) -> Result<Self::Output, AlreadyDroppedError> {
+        heap.upgrade(*self).ok_or(AlreadyDroppedError)
     }
 }
 
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, GcCell<T>, M, P>
+impl<T, A> AsGc for RootPtr<T, A>
 where
-    T: Allocated<M, P> + Display + ?Sized,
-    P: Params,
+    T: ?Sized,
+    A: Access,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
+    type Access = A;
+    type Output = T;
 
-        if let Some(value) = heap.get(**ptr) {
-            write!(f, "{value}")?;
-        }
-
-        Ok(())
+    fn as_gc(&self) -> GcPtr<Self::Output, Self::Access> {
+        self.downgrade()
     }
 }
 
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, Root<T>, M, P>
+impl<T, A> AsRoot for RootPtr<T, A>
 where
-    T: Allocated<M, P> + Display + ?Sized,
-    P: Params,
+    T: ?Sized,
+    A: Access,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
-
-        let value = heap.get_root(*ptr);
-        write!(f, "{value}")
+    fn as_root(&self) -> &RootPtr<Self::Output, Self::Access> {
+        self
     }
 }
 
-impl<'a, T, M, P> Display for LuaPtrDisplay<'a, RootCell<T>, M, P>
+impl<T, A> Downgrade for RootPtr<T, A>
 where
-    T: Allocated<M, P> + Display + ?Sized,
-    P: Params,
+    T: ?Sized,
+    A: Access,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let LuaPtrDisplay { ptr, heap } = self;
+    type Output = GcPtr<T, A>;
 
-        let value = heap.get_root(*ptr);
-        write!(f, "{value}")
+    fn downgrade(&self) -> Self::Output {
+        RootPtr::downgrade(self)
+    }
+}
+
+impl<Ptr> AsGc for LuaPtr<Ptr>
+where
+    Ptr: AsGc,
+{
+    type Access = <Ptr as AsGc>::Access;
+    type Output = <Ptr as AsGc>::Output;
+
+    fn as_gc(&self) -> GcPtr<Self::Output, Self::Access> {
+        self.0.as_gc()
+    }
+}
+
+impl<Ptr> AsRoot for LuaPtr<Ptr>
+where
+    Ptr: AsRoot,
+{
+    fn as_root(&self) -> &RootPtr<Self::Output, Self::Access> {
+        self.0.as_root()
+    }
+}
+
+impl<Ptr, H> Upgrade<H> for LuaPtr<Ptr>
+where
+    Ptr: Upgrade<H>,
+{
+    type Output = LuaPtr<<Ptr as Upgrade<H>>::Output>;
+
+    fn try_upgrade(&self, heap: &H) -> Result<Self::Output, AlreadyDroppedError> {
+        Ok(LuaPtr(self.0.try_upgrade(heap)?))
+    }
+}
+
+impl<Ptr> Downgrade for LuaPtr<Ptr>
+where
+    Ptr: Downgrade,
+{
+    type Output = LuaPtr<<Ptr as Downgrade>::Output>;
+
+    fn downgrade(&self) -> Self::Output {
+        LuaPtr(self.0.downgrade())
     }
 }

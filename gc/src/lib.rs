@@ -261,14 +261,15 @@
 
 #![forbid(unsafe_code)]
 
-mod heap;
+pub mod heap;
 pub mod index;
 mod trace;
 pub mod userdata;
 mod vec_list;
 
+pub use gc_derive::Trace;
 pub use heap::{Collector, Heap};
-pub use index::{Gc, GcCell, Root, RootCell};
+pub use index::{Gc, GcCell, Interned, Root, RootCell};
 pub use trace::{Trace, Untrace};
 
 #[cfg(test)]
@@ -286,11 +287,11 @@ mod test {
 
     fn assert_root_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Root<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         let p0 = heap.get_root(ptr) as *const _;
-        let p1 = heap.get(ptr).unwrap() as *const _;
+        let p1 = heap.get(ptr.downgrade()).unwrap() as *const _;
         let p2 = &heap[ptr] as *const _;
 
         assert_eq!(p0, p1);
@@ -299,13 +300,13 @@ mod test {
 
     fn assert_root_cell_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &RootCell<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         let p0 = heap.get_root(ptr) as *const _;
         let p1 = heap.get_root_mut(ptr) as *const _;
-        let p2 = heap.get(ptr).unwrap() as *const _;
-        let p3 = heap.get_mut(ptr).unwrap() as *const _;
+        let p2 = heap.get(ptr.downgrade()).unwrap() as *const _;
+        let p3 = heap.get_mut(ptr.downgrade()).unwrap() as *const _;
         let p4 = &heap[ptr] as *const _;
         let p5 = &mut heap[ptr] as *const _;
 
@@ -318,63 +319,63 @@ mod test {
 
     fn assert_gc_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Gc<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
-        let _p1 = heap.get(ptr).unwrap() as *const _;
+        let _p1 = heap.get(*ptr).unwrap() as *const _;
     }
 
     fn assert_gc_cell_ptr_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &GcCell<T>)
     where
-        T: Allocated<M, P> + ?Sized,
+        T: Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
-        let p0 = heap.get(ptr).unwrap() as *const _;
-        let p1 = heap.get_mut(ptr).unwrap() as *const _;
+        let p0 = heap.get(*ptr).unwrap() as *const _;
+        let p1 = heap.get_mut(*ptr).unwrap() as *const _;
 
         assert_eq!(p0, p1);
     }
 
     fn assert_root_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Root<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         assert_eq!(heap.get_root(ptr), value);
-        assert_eq!(heap.get(ptr), Some(value));
+        assert_eq!(heap.get(ptr.downgrade()), Some(value));
         assert_eq!(&heap[ptr], value);
     }
 
     fn assert_root_cell_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &RootCell<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
         use std::ops::{Index, IndexMut};
 
         assert_eq!(heap.get_root(ptr), value);
         assert_eq!(heap.get_root_mut(ptr), value);
-        assert_eq!(heap.get(ptr), Some(value));
-        assert_eq!(heap.get_mut(ptr).map(|t| &*t), Some(value));
+        assert_eq!(heap.get(ptr.downgrade()), Some(value));
+        assert_eq!(heap.get_mut(ptr.downgrade()).map(|t| &*t), Some(value));
         assert_eq!(heap.index(ptr), value);
         assert_eq!(*heap.index_mut(ptr), *value);
     }
 
     fn assert_gc_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &Gc<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
-        assert_eq!(heap.get(ptr), Some(value));
+        assert_eq!(heap.get(*ptr), Some(value));
     }
 
     fn assert_gc_cell_value_eq<T, M, P>(heap: &mut Heap<M, P>, ptr: &GcCell<T>, value: &T)
     where
-        T: Debug + Eq + Allocated<M, P> + ?Sized,
+        T: Debug + Eq + Allocated<Heap<M, P>> + ?Sized,
         P: Params,
     {
-        assert_eq!(heap.get(ptr), Some(value));
-        assert_eq!(heap.get_mut(ptr).map(|t| &*t), Some(value));
+        assert_eq!(heap.get(*ptr), Some(value));
+        assert_eq!(heap.get_mut(*ptr).map(|t| &*t), Some(value));
     }
 
     #[test]
@@ -383,6 +384,46 @@ mod test {
 
         let _: Root<u32> = heap.alloc(3);
         let _: RootCell<Custom> = heap.alloc_cell(Custom);
+    }
+
+    #[test]
+    fn try_alloc_t() {
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let _: Result<Root<u32>, _> = heap.try_alloc(3);
+        let _: Result<RootCell<u32>, _> = heap.try_alloc_cell(3);
+
+        let a = heap.alloc(3).downgrade();
+
+        for i in 1..30 {
+            if heap.try_alloc(i).is_err() {
+                break;
+            }
+        }
+
+        assert!(heap.get(a).is_some());
+    }
+
+    #[test]
+    fn intern() {
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let a = heap.intern("test");
+        let b = heap.intern("test");
+
+        assert_eq!(a.location(), b.location());
+    }
+
+    #[test]
+    fn intern_from() {
+        use crate::index::Interned;
+
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let a: Root<Interned<String>> = heap.intern_from("test");
+        let b = heap.intern("test".to_string());
+
+        assert_eq!(a.location(), b.location());
     }
 
     #[test]
@@ -601,12 +642,23 @@ mod test {
         assert_root_ptr_eq(&mut heap, &c);
     }
 
+    #[test]
+    fn downcast() {
+        let mut heap = Heap::<(), UnitParams>::new();
+
+        let a: Root<dyn Userdata<_>> = heap.alloc_as(5_usize);
+        let _: Gc<usize> = heap.downcast(a.downgrade()).unwrap();
+
+        let a: Root<dyn FullUserdata<_, _>> = heap.alloc_as(5_usize);
+        let _: Gc<usize> = heap.downcast(a.downgrade()).unwrap();
+    }
+
     struct ReturnU32;
 
     impl Params for ReturnU32 {
         type Id<'id> = ();
         type Rt<'rt> = ();
-        type Res = u32;
+        type Res = String;
     }
 
     #[test]
@@ -617,31 +669,31 @@ mod test {
         let b: Root<dyn FullUserdata<_, _>> = heap.alloc_as(5_u32);
         let c: Root<dyn Userdata<_>> = heap.alloc_as(7_u64);
 
-        assert_eq!(heap.get_root(&a).method((), ()), None);
-        assert_eq!(heap.get_root(&b).method((), ()), None);
-        assert_eq!(heap.get_root(&c).method((), ()), None);
+        assert_eq!(heap.get_root(&a).method(()), None);
+        assert_eq!(heap.get_root(&b).method(()), None);
+        assert_eq!(heap.get_root(&c).method(()), None);
 
-        heap.set_dispatcher::<u32>(|value, _, _| Some(*value));
+        heap.set_dispatcher_of::<u32>(|value, _| Some(format!("{:p}", value)));
 
-        assert_eq!(heap.get_root(&a).method((), ()), Some(3));
-        assert_eq!(heap.get_root(&b).method((), ()), Some(5));
-        assert_eq!(heap.get_root(&c).method((), ()), None);
+        assert_eq!(heap.get_root(&a).method(()).as_deref(), Some("0x0:0"));
+        assert_eq!(heap.get_root(&b).method(()).as_deref(), Some("0x1:0"));
+        assert_eq!(heap.get_root(&c).method(()), None);
 
-        heap.set_dispatcher::<u64>(|_, _, _| Some(0));
+        heap.set_dispatcher_of::<u64>(|_, _| Some("123".to_string()));
 
-        assert_eq!(heap.get_root(&a).method((), ()), Some(3));
-        assert_eq!(heap.get_root(&b).method((), ()), Some(5));
-        assert_eq!(heap.get_root(&c).method((), ()), Some(0));
+        assert_eq!(heap.get_root(&a).method(()).as_deref(), Some("0x0:0"));
+        assert_eq!(heap.get_root(&b).method(()).as_deref(), Some("0x1:0"));
+        assert_eq!(heap.get_root(&c).method(()).as_deref(), Some("123"));
 
-        heap.set_dispatcher::<u32>(|value, _, _| Some(*value + 1));
+        heap.set_dispatcher_of::<u32>(|value, _| Some(format!("{:p} + 2", value)));
 
-        assert_eq!(heap.get_root(&a).method((), ()), Some(4));
-        assert_eq!(heap.get_root(&b).method((), ()), Some(6));
-        assert_eq!(heap.get_root(&c).method((), ()), Some(0));
+        assert_eq!(heap.get_root(&a).method(()).as_deref(), Some("0x0:0 + 2"));
+        assert_eq!(heap.get_root(&b).method(()).as_deref(), Some("0x1:0 + 2"));
+        assert_eq!(heap.get_root(&c).method(()).as_deref(), Some("123"));
 
         let d: Root<dyn Userdata<_>> = heap.alloc_as(9_u32);
 
-        assert_eq!(heap.get_root(&d).method((), ()), Some(10));
+        assert_eq!(heap.get_root(&d).method(()).as_deref(), Some("0x2:0 + 2"));
     }
 
     #[test]
@@ -654,7 +706,7 @@ mod test {
         assert_eq!(heap.get_root(&a).metatable(), None);
         assert_eq!(heap.get_root(&b).metatable(), None);
 
-        heap.set_metatable::<u32>(Some(2));
+        heap.set_metatable_of::<u32>(Some(2));
         assert_eq!(heap.metatable_of::<u32>(), Some(&2));
 
         let c: Root<dyn FullUserdata<_, _>> = heap.alloc_as(5_u32);
@@ -673,7 +725,7 @@ mod test {
         assert_eq!(heap.get_root(&d).metatable(), None);
         assert_eq!(heap.get_root(&e).metatable(), Some(&10));
 
-        heap.set_metatable::<u64>(Some(15));
+        heap.set_metatable_of::<u64>(Some(15));
         assert_eq!(heap.metatable_of::<u64>(), Some(&15));
 
         heap.get_root_mut(&e).set_metatable(Some(12));
@@ -687,7 +739,7 @@ mod test {
         assert_eq!(heap.get_root(&e).metatable(), Some(&12));
         assert_eq!(heap.get_root(&f).metatable(), Some(&15));
 
-        let prev = heap.set_metatable::<u32>(None);
+        let prev = heap.set_metatable_of::<u32>(None);
 
         assert_eq!(prev, Some(2));
         assert_eq!(heap.metatable_of::<u32>(), None);

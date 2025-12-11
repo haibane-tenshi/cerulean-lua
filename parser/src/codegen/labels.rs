@@ -122,7 +122,7 @@ pub struct LabelsView<'s, 'origin> {
     prev_state: InnerState,
 }
 
-impl<'s, 'origin> LabelsView<'s, 'origin> {
+impl<'s> LabelsView<'s, '_> {
     pub fn borrow<'a>(&'a mut self) -> &'a mut Labels<'s> {
         self.labels
     }
@@ -218,7 +218,7 @@ impl<'s, 'origin> LabelsView<'s, 'origin> {
     }
 }
 
-impl<'s, 'origin> Drop for LabelsView<'s, 'origin> {
+impl Drop for LabelsView<'_, '_> {
     fn drop(&mut self) {
         self.labels.apply(self.prev_state)
     }

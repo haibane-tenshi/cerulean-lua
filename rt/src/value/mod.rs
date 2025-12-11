@@ -3,28 +3,94 @@ pub mod callable;
 pub mod float;
 pub mod int;
 pub mod nil;
+pub mod ops;
 pub mod string;
 pub mod table;
-pub mod traits;
 pub mod userdata;
 
-use std::error::Error;
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 
 use enumoid::Enumoid;
-use gc::Trace;
+use gc::index::Allocated;
+use gc::{Gc, GcCell, Interned, Root, RootCell, Trace};
 
-use crate::gc::{DisplayWith, Heap, TryFromWithGc};
+use crate::error::{AlreadyDroppedError, InvalidKeyError};
+use crate::ffi::DLuaFfi;
+use crate::gc::{Downgrade, Heap, LuaPtr, Upgrade};
+use crate::runtime::Closure;
+use crate::runtime::MetatableRegistry;
+use string::{FromEncoding, IntoEncoding, PossiblyUtf8Vec};
+use userdata::FullUserdata;
+
+pub use gc::userdata::Metatable;
 
 pub use boolean::Boolean;
-pub use callable::Callable;
+pub use callable::{Callable, StrongCallable, WeakCallable};
 pub use float::Float;
 pub use int::Int;
-pub use nil::{Nil, NilOr};
-pub use string::LuaString;
-pub use table::{KeyValue, LuaTable, Table};
-pub use traits::{Concat, CoreTypes, Len, Meta, Metatable, Strong, TableIndex, Types, Weak};
+pub use nil::Nil;
+pub use ops::{Concat, Len};
+pub use table::{Key, StrongKey, Table, TableIndex, WeakKey};
 pub use userdata::DefaultParams;
+
+pub trait Types: Sized + 'static {
+    type String: Trace + Concat + Len + Clone + Ord + Hash + IntoEncoding + FromEncoding;
+    type LuaClosure: Trace;
+    type RustClosure: Trace;
+    type Table: Len + Metatable<Meta<Self>> + TableIndex<Weak<Self>> + Default + Trace;
+    type FullUserdata: FullUserdata<Meta<Self>, DefaultParams<Self>>
+        + Allocated<Heap<Self>>
+        + ?Sized;
+}
+
+pub type Meta<Ty> = GcCell<<Ty as Types>::Table>;
+
+pub struct DefaultTypes;
+
+impl Types for DefaultTypes {
+    type String = PossiblyUtf8Vec;
+    type LuaClosure = Closure<Self>;
+    type RustClosure = Box<dyn DLuaFfi<Self>>;
+    type Table = Table<Weak<Self>>;
+    type FullUserdata = dyn FullUserdata<Meta<Self>, DefaultParams<Self>>;
+}
+
+pub struct Strong<Ty>(Ty);
+pub struct Weak<Ty>(Ty);
+
+pub trait Refs: Sized + 'static {
+    type String;
+    type LuaClosure;
+    type RustClosure;
+    type Table;
+    type FullUserdata;
+    type Meta;
+}
+
+impl<Ty> Refs for Strong<Ty>
+where
+    Ty: Types,
+{
+    type String = LuaPtr<Root<Interned<Ty::String>>>;
+    type LuaClosure = LuaPtr<Root<Ty::LuaClosure>>;
+    type RustClosure = LuaPtr<RootCell<Ty::RustClosure>>;
+    type Table = LuaPtr<RootCell<Ty::Table>>;
+    type FullUserdata = LuaPtr<RootCell<Ty::FullUserdata>>;
+    type Meta = Meta<Ty>;
+}
+
+impl<Ty> Refs for Weak<Ty>
+where
+    Ty: Types,
+{
+    type String = LuaPtr<Gc<Interned<Ty::String>>>;
+    type LuaClosure = LuaPtr<Gc<Ty::LuaClosure>>;
+    type RustClosure = LuaPtr<GcCell<Ty::RustClosure>>;
+    type Table = LuaPtr<GcCell<Ty::Table>>;
+    type FullUserdata = LuaPtr<GcCell<Ty::FullUserdata>>;
+    type Meta = Meta<Ty>;
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
@@ -50,6 +116,23 @@ impl Type {
         let ty: LuaType = self.into();
         ty.to_str()
     }
+
+    pub(crate) fn cmp(self, other: Self) -> std::cmp::Ordering {
+        fn to_discr(value: Type) -> u8 {
+            match value {
+                Type::Nil => 0,
+                Type::Bool => 1,
+                Type::Int => 2,
+                Type::Float => 3,
+                Type::String => 4,
+                Type::Function => 5,
+                Type::Table => 6,
+                Type::Userdata => 7,
+            }
+        }
+
+        to_discr(self).cmp(&to_discr(other))
+    }
 }
 
 impl Display for Type {
@@ -69,15 +152,15 @@ impl Display for Type {
     }
 }
 
-impl From<TypeWithoutMetatable> for Type {
-    fn from(value: TypeWithoutMetatable) -> Self {
+impl From<SolitaryType> for Type {
+    fn from(value: SolitaryType) -> Self {
         match value {
-            TypeWithoutMetatable::Nil => Type::Nil,
-            TypeWithoutMetatable::Bool => Type::Bool,
-            TypeWithoutMetatable::Int => Type::Int,
-            TypeWithoutMetatable::Float => Type::Float,
-            TypeWithoutMetatable::String => Type::String,
-            TypeWithoutMetatable::Function => Type::Function,
+            SolitaryType::Nil => Type::Nil,
+            SolitaryType::Bool => Type::Bool,
+            SolitaryType::Int => Type::Int,
+            SolitaryType::Float => Type::Float,
+            SolitaryType::String => Type::String,
+            SolitaryType::Function => Type::Function,
         }
     }
 }
@@ -130,21 +213,22 @@ impl From<Type> for LuaType {
     }
 }
 
-impl From<TypeWithoutMetatable> for LuaType {
-    fn from(value: TypeWithoutMetatable) -> Self {
+impl From<SolitaryType> for LuaType {
+    fn from(value: SolitaryType) -> Self {
         match value {
-            TypeWithoutMetatable::Nil => LuaType::Nil,
-            TypeWithoutMetatable::Bool => LuaType::Boolean,
-            TypeWithoutMetatable::Int => LuaType::Number,
-            TypeWithoutMetatable::Float => LuaType::Number,
-            TypeWithoutMetatable::String => LuaType::String,
-            TypeWithoutMetatable::Function => LuaType::Function,
+            SolitaryType::Nil => LuaType::Nil,
+            SolitaryType::Bool => LuaType::Boolean,
+            SolitaryType::Int => LuaType::Number,
+            SolitaryType::Float => LuaType::Number,
+            SolitaryType::String => LuaType::String,
+            SolitaryType::Function => LuaType::Function,
         }
     }
 }
 
+/// Lua type which doesn't carry a metatable.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Enumoid)]
-pub enum TypeWithoutMetatable {
+pub enum SolitaryType {
     Nil,
     Bool,
     Int,
@@ -153,21 +237,21 @@ pub enum TypeWithoutMetatable {
     Function,
 }
 
-impl TypeWithoutMetatable {
+impl SolitaryType {
     pub fn to_str(self) -> &'static str {
         let ty: LuaType = self.into();
         ty.to_str()
     }
 }
 
-impl Display for TypeWithoutMetatable {
+impl Display for SolitaryType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_str())
     }
 }
 
-pub type StrongValue<Ty> = Value<Strong, Ty>;
-pub type WeakValue<Ty> = Value<Weak, Ty>;
+pub type StrongValue<Ty> = Value<Strong<Ty>>;
+pub type WeakValue<Ty> = Value<Weak<Ty>>;
 
 /// Enum representing all possible Lua values.
 ///
@@ -183,21 +267,20 @@ pub type WeakValue<Ty> = Value<Weak, Ty>;
 /// Default rendering will only include the contents.
 /// Alternate rendering will include type information as well,
 /// but looks a little bit nicer compared to `Debug` output.
-pub enum Value<Rf: Types, Ty: CoreTypes> {
+pub enum Value<Rf: Refs> {
     Nil,
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(Rf::String<Ty::String>),
-    Function(Callable<Rf, Ty>),
-    Table(Rf::Table<Ty::Table>),
-    Userdata(Rf::FullUserdata<Ty::FullUserdata>),
+    String(Rf::String),
+    Function(Callable<Rf>),
+    Table(Rf::Table),
+    Userdata(Rf::FullUserdata),
 }
 
-impl<Rf, Ty> Value<Rf, Ty>
+impl<Rf> Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     pub fn to_bool(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
@@ -219,52 +302,144 @@ where
     pub fn take(&mut self) -> Self {
         std::mem::take(self)
     }
+
+    /// Convert value into table key.
+    ///
+    /// Lua does not permit table indexing using `nil` or `NaN`.
+    /// This function ensures that value does not contain invalid entry.
+    ///
+    /// If you are in charge of constructing a key, it might be better to do it directly
+    /// in case the value is not float.
+    pub fn into_key(self) -> Result<Key<Rf>, InvalidKeyError> {
+        self.try_into()
+    }
 }
 
 impl<Ty> StrongValue<Ty>
 where
-    Ty: CoreTypes,
-    Ty::RustClosure: Clone,
+    Ty: Types,
 {
-    pub fn downgrade(&self) -> WeakValue<Ty> {
+    /// Produce metatable reference.
+    ///
+    /// If the value carries a metatable (it is table or userdata), that metatable will be returned.
+    /// Heap is required to follow through reference.
+    ///
+    /// If the value doesn't carry a metatable (e.g. one of [`SolitaryType`]), metatable will be taken from the registry.
+    pub fn metatable(
+        &self,
+        heap: &Heap<Ty>,
+        registry: &MetatableRegistry<Ty::Table>,
+    ) -> Option<Meta<Ty>> {
+        use crate::gc::LuaPtr;
+        use SolitaryType::*;
+
         match self {
-            Value::Nil => Value::Nil,
-            Value::Bool(t) => Value::Bool(*t),
-            Value::Int(t) => Value::Int(*t),
-            Value::Float(t) => Value::Float(*t),
-            Value::String(t) => Value::String(t.downgrade()),
-            Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.downgrade())),
-            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t.downgrade())),
-            Value::Table(t) => Value::Table(t.downgrade()),
-            Value::Userdata(t) => Value::Userdata(t.downgrade()),
+            Value::Nil => registry.get_gc(Nil),
+            Value::Bool(_) => registry.get_gc(Bool),
+            Value::Int(_) => registry.get_gc(Int),
+            Value::Float(_) => registry.get_gc(Float),
+            Value::String(_) => registry.get_gc(String),
+            Value::Function(_) => registry.get_gc(Function),
+            Value::Table(LuaPtr(t)) => heap.get_root(t).metatable().copied(),
+            Value::Userdata(LuaPtr(t)) => heap.get_root(t).metatable().copied(),
+        }
+    }
+
+    pub fn fmt_with<'s, 'h>(
+        &'s self,
+        heap: &'h Heap<Ty>,
+    ) -> impl Debug + Display + use<'s, 'h, Ty> {
+        use crate::ffi::arg_parser::FmtWith as FmtStringWith;
+
+        let string = if let Value::String(s) = self {
+            let s = heap.get_root(&s.0).as_inner();
+            Some(FmtStringWith::new(s))
+        } else {
+            None
+        };
+
+        FmtWith {
+            value: self.downgrade(),
+            string,
+        }
+    }
+
+    pub fn fmt_stringless<'s>(&self) -> impl Debug + Display + use<'s, Ty> {
+        FmtStringless {
+            value: self.downgrade(),
         }
     }
 }
 
 impl<Ty> WeakValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
-    pub fn upgrade(self, heap: &Heap<Ty>) -> Option<StrongValue<Ty>> {
+    /// Produce metatable reference.
+    ///
+    /// If the value carries a metatable (it is table or userdata), that metatable will be returned.
+    /// Heap is required to follow through reference.
+    /// Error will be returned if the value behind reference was garbage collected.
+    ///
+    /// If the value doesn't carry a metatable (e.g. one of [`SolitaryType`]), metatable will be taken from the registry.
+    pub fn metatable(
+        &self,
+        heap: &Heap<Ty>,
+        registry: &MetatableRegistry<Ty::Table>,
+    ) -> Result<Option<Meta<Ty>>, AlreadyDroppedError> {
+        use crate::gc::LuaPtr;
+        use SolitaryType::*;
+
         let r = match self {
-            Value::Nil => Value::Nil,
-            Value::Bool(t) => Value::Bool(t),
-            Value::Int(t) => Value::Int(t),
-            Value::Float(t) => Value::Float(t),
-            Value::String(t) => Value::String(t.upgrade(heap)?),
-            Value::Function(Callable::Lua(t)) => Value::Function(Callable::Lua(t.upgrade(heap)?)),
-            Value::Function(Callable::Rust(t)) => Value::Function(Callable::Rust(t.upgrade(heap)?)),
-            Value::Table(t) => Value::Table(t.upgrade(heap)?),
-            Value::Userdata(t) => Value::Userdata(t.upgrade(heap)?),
+            Value::Nil => registry.get_gc(Nil),
+            Value::Bool(_) => registry.get_gc(Bool),
+            Value::Int(_) => registry.get_gc(Int),
+            Value::Float(_) => registry.get_gc(Float),
+            Value::String(_) => registry.get_gc(String),
+            Value::Function(_) => registry.get_gc(Function),
+            Value::Table(LuaPtr(t)) => heap
+                .get(*t)
+                .ok_or(AlreadyDroppedError)?
+                .metatable()
+                .copied(),
+            Value::Userdata(LuaPtr(t)) => heap
+                .get(*t)
+                .ok_or(AlreadyDroppedError)?
+                .metatable()
+                .copied(),
         };
 
-        Some(r)
+        Ok(r)
+    }
+
+    pub fn fmt_with<'s, 'h>(
+        &'s self,
+        heap: &'h Heap<Ty>,
+    ) -> Result<impl Debug + Display + use<'s, 'h, Ty>, AlreadyDroppedError> {
+        use crate::ffi::arg_parser::LuaString;
+
+        let string = if let Value::String(s) = self {
+            Some(LuaString(*s).fmt_with(heap)?)
+        } else {
+            None
+        };
+
+        let r = FmtWith {
+            value: *self,
+            string,
+        };
+
+        Ok(r)
+    }
+
+    pub fn fmt_stringless(&self) -> impl Debug + Display + use<'_, Ty> {
+        FmtStringless { value: *self }
     }
 }
 
 impl<Ty> WeakValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     pub(crate) fn is_transient(&self) -> bool {
         use Value::*;
@@ -280,36 +455,64 @@ where
     }
 }
 
+impl<Ty> Upgrade<Heap<Ty>> for WeakValue<Ty>
+where
+    Ty: Types,
+{
+    type Output = StrongValue<Ty>;
+
+    fn try_upgrade(&self, heap: &Heap<Ty>) -> Result<Self::Output, AlreadyDroppedError> {
+        let r = match self {
+            Value::Nil => Value::Nil,
+            Value::Bool(t) => Value::Bool(*t),
+            Value::Int(t) => Value::Int(*t),
+            Value::Float(t) => Value::Float(*t),
+            Value::String(t) => Value::String(t.try_upgrade(heap)?),
+            Value::Function(t) => Value::Function(t.try_upgrade(heap)?),
+            Value::Table(t) => Value::Table(t.try_upgrade(heap)?),
+            Value::Userdata(t) => Value::Userdata(t.try_upgrade(heap)?),
+        };
+
+        Ok(r)
+    }
+}
+
+impl<Ty> Downgrade for StrongValue<Ty>
+where
+    Ty: Types,
+{
+    type Output = WeakValue<Ty>;
+
+    fn downgrade(&self) -> Self::Output {
+        match self {
+            Value::Nil => Value::Nil,
+            Value::Bool(t) => Value::Bool(*t),
+            Value::Int(t) => Value::Int(*t),
+            Value::Float(t) => Value::Float(*t),
+            Value::String(t) => Value::String(t.downgrade()),
+            Value::Function(t) => Value::Function(t.downgrade()),
+            Value::Table(t) => Value::Table(t.downgrade()),
+            Value::Userdata(t) => Value::Userdata(t.downgrade()),
+        }
+    }
+}
+
 impl<Ty> From<StrongValue<Ty>> for WeakValue<Ty>
 where
-    Ty: CoreTypes,
+    Ty: Types,
 {
     fn from(value: StrongValue<Ty>) -> Self {
         value.downgrade()
     }
 }
 
-impl<Ty> TryFromWithGc<WeakValue<Ty>, Heap<Ty>> for StrongValue<Ty>
+impl<Rf> Trace for Value<Rf>
 where
-    Ty: CoreTypes,
-{
-    type Error = crate::error::AlreadyDroppedError;
-
-    fn try_from_with_gc(value: WeakValue<Ty>, heap: &mut Heap<Ty>) -> Result<Self, Self::Error> {
-        use crate::error::AlreadyDroppedError;
-
-        value.upgrade(heap).ok_or(AlreadyDroppedError)
-    }
-}
-
-impl<Rf, Ty> Trace for Value<Rf, Ty>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: Trace,
-    Callable<Rf, Ty>: Trace,
-    Rf::Table<Ty::Table>: Trace,
-    Rf::FullUserdata<Ty::FullUserdata>: Trace,
+    Rf: Refs,
+    Rf::String: Trace,
+    Callable<Rf>: Trace,
+    Rf::Table: Trace,
+    Rf::FullUserdata: Trace,
 {
     fn trace(&self, collector: &mut gc::Collector) {
         use Value::*;
@@ -324,14 +527,13 @@ where
     }
 }
 
-impl<Rf, Ty> Debug for Value<Rf, Ty>
+impl<Rf> Debug for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: Debug,
-    Callable<Rf, Ty>: Debug,
-    Rf::Table<Ty::Table>: Debug,
-    Rf::FullUserdata<Ty::FullUserdata>: Debug,
+    Rf: Refs,
+    Rf::String: Debug,
+    Callable<Rf>: Debug,
+    Rf::Table: Debug,
+    Rf::FullUserdata: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -347,14 +549,13 @@ where
     }
 }
 
-impl<Rf, Ty> Clone for Value<Rf, Ty>
+impl<Rf> Clone for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: Clone,
-    Callable<Rf, Ty>: Clone,
-    Rf::Table<Ty::Table>: Clone,
-    Rf::FullUserdata<Ty::FullUserdata>: Clone,
+    Rf: Refs,
+    Rf::String: Clone,
+    Callable<Rf>: Clone,
+    Rf::Table: Clone,
+    Rf::FullUserdata: Clone,
 {
     #[allow(clippy::clone_on_copy)]
     fn clone(&self) -> Self {
@@ -371,25 +572,23 @@ where
     }
 }
 
-impl<Rf, Ty> Copy for Value<Rf, Ty>
+impl<Rf> Copy for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: Copy,
-    Callable<Rf, Ty>: Copy,
-    Rf::Table<Ty::Table>: Copy,
-    Rf::FullUserdata<Ty::FullUserdata>: Copy,
+    Rf: Refs,
+    Rf::String: Copy,
+    Callable<Rf>: Copy,
+    Rf::Table: Copy,
+    Rf::FullUserdata: Copy,
 {
 }
 
-impl<Rf, Ty> PartialEq for Value<Rf, Ty>
+impl<Rf> PartialEq for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: PartialEq,
-    Callable<Rf, Ty>: PartialEq,
-    Rf::Table<Ty::Table>: PartialEq,
-    Rf::FullUserdata<Ty::FullUserdata>: PartialEq,
+    Rf: Refs,
+    Rf::String: PartialEq,
+    Callable<Rf>: PartialEq,
+    Rf::Table: PartialEq,
+    Rf::FullUserdata: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -405,146 +604,118 @@ where
     }
 }
 
-impl<Rf, Ty> Eq for Value<Rf, Ty>
+impl<Rf> Eq for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: Eq,
-    Callable<Rf, Ty>: Eq,
-    Rf::Table<Ty::Table>: Eq,
-    Rf::FullUserdata<Ty::FullUserdata>: Eq,
+    Rf: Refs,
+    Rf::String: Eq,
+    Callable<Rf>: Eq,
+    Rf::Table: Eq,
+    Rf::FullUserdata: Eq,
 {
 }
 
 // No, clippy, you cannot.
 #[allow(clippy::derivable_impls)]
-impl<Rf, Ty> Default for Value<Rf, Ty>
+impl<Rf> Default for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     fn default() -> Self {
         Value::Nil
     }
 }
 
-pub struct ValueWith<'a, Value, Heap>(&'a Value, &'a Heap);
+struct FmtWith<T, S> {
+    value: T,
+    string: Option<S>,
+}
 
-impl<'a, Ty> Display for ValueWith<'a, WeakValue<Ty>, Heap<Ty>>
+impl<Ty, S> Debug for FmtWith<WeakValue<Ty>, S>
 where
-    Ty: CoreTypes,
+    Ty: Types,
+    S: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Value::*;
-
-        let ValueWith(value, heap) = self;
-
-        match value {
-            Nil => write!(f, "nil"),
-            Bool(t) => write!(f, "{t}"),
-            Int(t) => write!(f, "{t}"),
-            Float(t) => write!(f, "{t}"),
-            String(t) => {
-                if let Some(s) = heap.get(t.0).map(AsRef::as_ref) {
-                    write!(f, "{s}")
-                } else {
-                    Ok(())
-                }
-            }
-            Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Function(Callable::Rust(t)) => write!(f, "{{[rust] closure <{t:p}>}}"),
-            Table(t) => write!(f, "{{table <{t:p}>}}"),
-            Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
+        match &self.value {
+            Value::Nil => write!(f, "Nil"),
+            Value::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
+            Value::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
+            Value::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
+            Value::String(_) => f
+                .debug_tuple("String")
+                .field(self.string.as_ref().unwrap())
+                .finish(),
+            Value::Function(arg0) => f.debug_tuple("Function").field(arg0).finish(),
+            Value::Table(arg0) => f.debug_tuple("Table").field(arg0).finish(),
+            Value::Userdata(arg0) => f.debug_tuple("Userdata").field(arg0).finish(),
         }
     }
 }
 
-impl<'a, Ty> Display for ValueWith<'a, StrongValue<Ty>, Heap<Ty>>
+impl<Ty, S> Display for FmtWith<WeakValue<Ty>, S>
 where
-    Ty: CoreTypes,
+    Ty: Types,
+    S: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Value::*;
+        use crate::ffi::arg_parser::{LuaTable, LuaUserdata};
 
-        let ValueWith(value, heap) = self;
-
-        match value {
-            Nil => write!(f, "nil"),
-            Bool(t) => write!(f, "{t}"),
-            Int(t) => write!(f, "{t}"),
-            Float(t) => write!(f, "{t}"),
-            String(t) => {
-                let s = heap.get_root(&t.0).as_ref();
-                write!(f, "{s}")
-            }
-            Function(Callable::Lua(t)) => write!(f, "{{[lua] closure <{t:p}>}}"),
-            Function(Callable::Rust(t)) => write!(f, "{{[rust] closure <{t:p}>}}"),
-            Table(t) => write!(f, "{{table <{t:p}>}}"),
-            Userdata(t) => write!(f, "{{userdata <{t:p}>}}"),
+        match &self.value {
+            Value::Nil => Display::fmt(&Nil, f),
+            Value::Bool(v) => Display::fmt(&Boolean(*v), f),
+            Value::Int(v) => Display::fmt(&Int(*v), f),
+            Value::Float(v) => Display::fmt(&Float(*v), f),
+            Value::String(_) => Display::fmt(self.string.as_ref().unwrap(), f),
+            Value::Function(v) => Display::fmt(v, f),
+            Value::Table(v) => Display::fmt(&LuaTable(*v), f),
+            Value::Userdata(v) => Display::fmt(&LuaUserdata(*v), f),
         }
     }
 }
 
-impl<Ty> DisplayWith<Heap<Ty>> for WeakValue<Ty>
+struct FmtStringless<T> {
+    value: T,
+}
+
+impl<Ty> Debug for FmtStringless<WeakValue<Ty>>
 where
-    Ty: CoreTypes,
-{
-    type Output<'a>
-        = ValueWith<'a, Self, Heap<Ty>>
-    where
-        Self: 'a;
-
-    fn display<'a>(&'a self, extra: &'a Heap<Ty>) -> Self::Output<'a> {
-        ValueWith(self, extra)
-    }
-}
-
-impl<Ty> DisplayWith<Heap<Ty>> for StrongValue<Ty>
-where
-    Ty: CoreTypes,
-{
-    type Output<'a>
-        = ValueWith<'a, Self, Heap<Ty>>
-    where
-        Self: 'a;
-
-    fn display<'a>(&'a self, extra: &'a Heap<Ty>) -> Self::Output<'a> {
-        ValueWith(self, extra)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TypeMismatchError {
-    pub found: Type,
-    pub expected: Type,
-}
-
-impl Display for TypeMismatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let TypeMismatchError { found, expected } = self;
-
-        write!(f, "expected value of type `{expected}`, found `{found}`")
-    }
-}
-
-impl Error for TypeMismatchError {}
-
-#[derive(Debug, Clone, Copy)]
-pub enum TypeMismatchOrError<E> {
-    TypeMismatch(TypeMismatchError),
-    Other(E),
-}
-
-impl<E> Display for TypeMismatchOrError<E>
-where
-    E: Display,
+    Ty: Types,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TypeMismatchOrError::TypeMismatch(err) => write!(f, "{err}"),
-            TypeMismatchOrError::Other(err) => write!(f, "{err}"),
+        use crate::ffi::arg_parser::LuaString;
+
+        match &self.value {
+            Value::Nil => write!(f, "Nil"),
+            Value::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
+            Value::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
+            Value::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
+            Value::String(arg0) => f
+                .debug_tuple("String")
+                .field(&LuaString(*arg0).fmt_stringless())
+                .finish(),
+            Value::Function(arg0) => f.debug_tuple("Function").field(arg0).finish(),
+            Value::Table(arg0) => f.debug_tuple("Table").field(arg0).finish(),
+            Value::Userdata(arg0) => f.debug_tuple("Userdata").field(arg0).finish(),
         }
     }
 }
 
-impl<E> Error for TypeMismatchOrError<E> where Self: Debug + Display {}
+impl<Ty> Display for FmtStringless<WeakValue<Ty>>
+where
+    Ty: Types,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::ffi::arg_parser::{LuaString, LuaTable, LuaUserdata};
+
+        match &self.value {
+            Value::Nil => Display::fmt(&Nil, f),
+            Value::Bool(v) => Display::fmt(&Boolean(*v), f),
+            Value::Int(v) => Display::fmt(&Int(*v), f),
+            Value::Float(v) => Display::fmt(&Float(*v), f),
+            Value::String(v) => Display::fmt(&LuaString(*v).fmt_stringless(), f),
+            Value::Function(v) => Display::fmt(v, f),
+            Value::Table(v) => Display::fmt(&LuaTable(*v), f),
+            Value::Userdata(v) => Display::fmt(&LuaUserdata(*v), f),
+        }
+    }
+}

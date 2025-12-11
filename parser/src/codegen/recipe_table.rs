@@ -67,7 +67,7 @@ impl<'a> RecipeTableView<'a> {
     }
 }
 
-impl<'a> Drop for RecipeTableView<'a> {
+impl Drop for RecipeTableView<'_> {
     fn drop(&mut self) {
         let RecipeTableView {
             recipe_table,

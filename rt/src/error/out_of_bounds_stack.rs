@@ -1,9 +1,9 @@
 use codespan_reporting::diagnostic::Diagnostic;
 
 #[derive(Debug, Clone, Copy)]
-pub struct OutOfBoundsStack;
+pub struct StackOutOfBounds;
 
-impl OutOfBoundsStack {
+impl StackOutOfBounds {
     pub(crate) fn into_diagnostic<FileId>(self) -> Diagnostic<FileId> {
         use super::ExtraDiagnostic;
 

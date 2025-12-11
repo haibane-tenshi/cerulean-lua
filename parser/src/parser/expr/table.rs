@@ -224,7 +224,7 @@ fn bracket<'s, 'origin>(
                     *info = debug_info.clone();
                 }
 
-                frag.emit(OpCode::TabSet, debug_info);
+                frag.emit(OpCode::SetIndex, debug_info);
                 frag.commit();
 
                 span.put(FieldType::Bracket)
@@ -298,7 +298,7 @@ fn name<'s, 'origin>(
             .map_output(move |output| {
                 let (debug_info, span) = output.take();
 
-                frag.emit(OpCode::TabSet, debug_info);
+                frag.emit(OpCode::SetIndex, debug_info);
                 frag.commit();
 
                 span.put(FieldType::Name)
@@ -347,7 +347,7 @@ fn index<'s, 'origin>(
                 frag.emit_load_stack(FragmentStackSlot(0), debug_info.clone());
                 frag.emit_load_literal(Literal::Int(index), debug_info.clone());
                 frag.emit_load_stack(value_slot, debug_info.clone());
-                frag.emit(OpCode::TabSet, debug_info.clone());
+                frag.emit(OpCode::SetIndex, debug_info.clone());
                 frag.emit_adjust_to(value_slot, debug_info.clone());
 
                 frag.commit();

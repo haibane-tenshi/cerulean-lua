@@ -1,3 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["repr", "parser", "rt", "gc", "lua_std", "exec"]
+members = ["repr", "parser", "rt", "gc", "lua_std", "exec", "gc_derive", "literal", "parser_traits", "pack"]
+

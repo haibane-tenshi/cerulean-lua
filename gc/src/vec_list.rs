@@ -1,3 +1,4 @@
+use std::alloc::Layout;
 use std::fmt::Debug;
 use std::ops::Range;
 use typed_index_collections::TiVec;
@@ -14,6 +15,26 @@ impl<I, G, T> VecList<I, G, T> {
             .iter()
             .filter(|place| place.is_occupied())
             .count()
+    }
+
+    pub(crate) fn health_check(&self) -> (usize, usize, usize) {
+        let mut occupied = 0;
+        let mut reserved = 0;
+        let mut dead = 0;
+
+        for place in self.values.iter() {
+            match place {
+                Place::Occupied { .. } => occupied += 1,
+                Place::Open { .. } => reserved += 1,
+                Place::Dead => dead += 1,
+            }
+        }
+
+        (occupied, reserved, dead)
+    }
+
+    pub(crate) fn item_layout(&self) -> Layout {
+        Layout::new::<Place<I, G, T>>()
     }
 }
 
@@ -101,6 +122,11 @@ where
 
     pub(crate) fn remove(&mut self, index: I) -> Option<T> {
         let place = self.values.get_mut(index)?;
+
+        if !place.is_occupied() {
+            return None;
+        }
+
         let r = place.remove(self.head);
 
         if place.is_open() {

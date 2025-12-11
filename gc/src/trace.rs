@@ -15,6 +15,7 @@ use std::num::{
 use std::ops::{ControlFlow, Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::process::Command;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -33,7 +34,7 @@ use crate::index::{Access, GcPtr};
 /// garbage collector uses no unsafe code.
 /// However, failure to provide correct implementation will likely cause
 /// some objects to be collected earlier than expected,
-/// leaving *dangling* [`GcCell`]/[`Gc`] *references* behind.
+/// leaving *dangling* [`GcCell`](super::GcCell)/[`Gc`](super::Gc) *references* behind.
 /// Any attempt to dereference such reference is *safe*
 /// but will fail returning `None`.
 ///
@@ -765,6 +766,10 @@ impl Trace for Instant {
 }
 
 impl Trace for SystemTime {
+    fn trace(&self, _collector: &mut Collector) {}
+}
+
+impl Trace for Command {
     fn trace(&self, _collector: &mut Collector) {}
 }
 

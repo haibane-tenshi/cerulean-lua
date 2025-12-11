@@ -1,10 +1,12 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::ops::{
-    Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub, SubAssign,
-};
 
-use super::{CoreTypes, Int, Type, TypeMismatchError, Types, Value};
+use super::ops::{
+    Add, AddAssign, CheckedDiv, CheckedFloorDiv, CheckedPow, CheckedRem, Div, DivAssign, FloorDiv,
+    Mul, MulAssign, Neg, Pow, Rem, RemAssign, Sub, SubAssign,
+};
+use super::{Int, Refs, Type, Value};
+use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Float(pub f64);
@@ -16,17 +18,6 @@ impl Float {
 
     pub fn to_bool(&self) -> bool {
         true
-    }
-
-    pub fn floor_div(self, rhs: Self) -> Self {
-        let Float(lhs) = self;
-        let Float(rhs) = rhs;
-
-        Float((lhs / rhs).floor())
-    }
-
-    pub fn exp(self, rhs: Self) -> Self {
-        Float(self.0.powf(rhs.0))
     }
 }
 
@@ -41,7 +32,7 @@ impl Display for Float {
 }
 
 impl From<Int> for Float {
-    /// Convert integer to float in Lua sense.
+    /// Coerce integer to float as Lua understands it.
     ///
     /// [Lua specifies][lua#3.4.3] that conversion results in
     /// * exact float representation if possible
@@ -53,10 +44,12 @@ impl From<Int> for Float {
     /// We take liberty in implementation and give it the same semantics
     /// as Rust's [int-to-float casts][rust_ref#numeric-cast].
     ///
+    /// See also [`coerce::int_to_flt`](crate::builtins::coerce::int_to_flt).
+    ///
     /// [lua#3.4.3]: https://www.lua.org/manual/5.4/manual.html#3.4.3
     /// [rust_ref#numeric-cast]: https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#numeric-cast
     fn from(value: Int) -> Self {
-        Float(value.0 as f64)
+        crate::builtins::coerce::int_to_flt(value)
     }
 }
 
@@ -150,6 +143,29 @@ impl DivAssign for Float {
     }
 }
 
+impl CheckedDiv for Float {
+    fn checked_div(self, rhs: Self) -> Option<Self::Output> {
+        Some(self / rhs)
+    }
+}
+
+impl FloorDiv for Float {
+    type Output = Self;
+
+    fn floor_div(self, rhs: Self) -> Self::Output {
+        let Float(lhs) = self;
+        let Float(rhs) = rhs;
+
+        Float((lhs / rhs).floor())
+    }
+}
+
+impl CheckedFloorDiv for Float {
+    fn checked_floor_div(self, rhs: Self) -> Option<Self::Output> {
+        Some(self.floor_div(rhs))
+    }
+}
+
 impl Rem for Float {
     type Output = Self;
 
@@ -168,14 +184,33 @@ impl RemAssign for Float {
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Float
+impl CheckedRem for Float {
+    fn checked_rem(self, rhs: Self) -> Option<Self::Output> {
+        Some(self % rhs)
+    }
+}
+
+impl Pow for Float {
+    type Output = Self;
+
+    fn pow(self, rhs: Self) -> Self::Output {
+        Float(self.0.powf(rhs.0))
+    }
+}
+
+impl CheckedPow for Float {
+    fn checked_pow(self, rhs: Self) -> Option<Self::Output> {
+        Some(self.pow(rhs))
+    }
+}
+
+impl<Rf> TryFrom<Value<Rf>> for Float
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Float(value) => Ok(Float(value)),
             value => {
@@ -190,10 +225,9 @@ where
     }
 }
 
-impl<Rf, Ty> From<Float> for Value<Rf, Ty>
+impl<Rf> From<Float> for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     fn from(value: Float) -> Self {
         let Float(value) = value;

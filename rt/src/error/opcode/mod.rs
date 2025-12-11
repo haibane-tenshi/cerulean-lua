@@ -12,10 +12,13 @@ mod una_op;
 
 use codespan_reporting::diagnostic::Diagnostic;
 use repr::debug_info::opcode;
+use repr::index::InstrId;
 use repr::opcode::OpCode;
 use std::ops::Range;
 
 use super::ExtraDiagnostic;
+use crate::chunk_cache::ChunkCache;
+use crate::runtime::FunctionPtr;
 
 pub use bin_op::Cause as BinOpCause;
 pub use invoke::Invoke;
@@ -31,6 +34,8 @@ pub use una_op::Cause as UnaOpCause;
 
 #[derive(Debug, Clone)]
 pub struct Error {
+    pub fn_ptr: FunctionPtr,
+    pub ip: InstrId,
     pub cause: Cause,
 }
 
@@ -46,16 +51,15 @@ pub enum Cause {
     Invoke(Invoke),
     UnaOp(UnaOpCause),
     BinOp(BinOpCause),
-    TabGet(TabCause),
-    TabSet(TabCause),
+    GetIndex(TabCause),
+    SetIndex(TabCause),
 }
 
 impl Error {
     pub fn into_diagnostic<FileId>(
         self,
         file_id: FileId,
-        opcode: OpCode,
-        debug_info: Option<opcode::DebugInfo>,
+        chunk_cache: &dyn ChunkCache,
     ) -> Diagnostic<FileId>
     where
         FileId: Clone,
@@ -63,7 +67,26 @@ impl Error {
         use table::TabDebugInfo;
         use Cause::*;
 
-        let Error { cause } = self;
+        let Error { fn_ptr, ip, cause } = self;
+
+        let chunk = chunk_cache
+            .chunk(fn_ptr.chunk_id)
+            .expect("closure should be constructed out of existing chunk");
+        let function = chunk
+            .get_function(fn_ptr.function_id)
+            .expect("closure should be constructed out of existing function");
+
+        let opcode = *function
+            .opcodes
+            .get(ip)
+            .expect("error should be constructed out of existing opcode");
+
+        let debug_info = chunk
+            .debug_info
+            .as_ref()
+            .and_then(|info| info.functions.get(fn_ptr.function_id))
+            .and_then(|info| info.opcodes.get(ip))
+            .cloned();
 
         let malformed_diagnostic = || Diagnostic::error().with_message("malformed diagnostic");
 
@@ -93,11 +116,11 @@ impl Error {
                     malformed_diagnostic()
                 }
             }
-            TabGet(cause) => {
-                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_tab_get))
+            GetIndex(cause) => {
+                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_get_index))
             }
-            TabSet(cause) => {
-                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_tab_set))
+            SetIndex(cause) => {
+                cause.into_diagnostic(file_id, debug_info.and_then(TabDebugInfo::with_set_index))
             }
         }
     }

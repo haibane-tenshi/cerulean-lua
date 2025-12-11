@@ -85,15 +85,16 @@
 //! one for normal values, one for light userdata and one for full userdata.
 //! Owning type index directly allows for very straightforward resolution to this situation.
 
-use std::fmt::{Debug, Pointer};
+use std::fmt::{Debug, Display, Pointer};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use crate::heap::arena::Arena;
-use crate::heap::store::{Addr, Counter, Gen, Index};
-use crate::heap::TypeIndex;
+use crate::heap::store::{Addr, Counter, Gen, Index, WeakCounter};
+use crate::heap::{Heap, TypeIndex};
 use crate::trace::Trace;
 use crate::userdata::{FullUserdata, Params, Userdata};
+
+pub use crate::heap::interned::Interned;
 
 mod sealed_access {
     use super::{Mut, Ref};
@@ -108,15 +109,30 @@ mod sealed_access {
 /// Trait for marking possible access permissions of a smart pointer.
 pub trait Access: sealed_access::Sealed {}
 
+/// Marker trait permitting by-reference (`&T`) access.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait RefAccess: Access {}
+
+/// Marker trait permitting by-mut-reference (`&mut T`) access.
+///
+/// Purpose of this trait is to serve as bound in [`Heap`]'s getter methods.
+/// You probably shouldn't use it for anything else or at all.
+pub trait MutAccess: RefAccess {}
+
 /// Marker type denoting immutable-only access permissions of smart pointer.
 pub struct Ref;
 
 impl Access for Ref {}
+impl RefAccess for Ref {}
 
 /// Marker type denoting mutable and immutable access permissions of smart pointer.
 pub struct Mut;
 
 impl Access for Mut {}
+impl RefAccess for Mut {}
+impl MutAccess for Mut {}
 
 /// Common type for all weak references.
 ///
@@ -156,6 +172,44 @@ where
         let GcPtr { index, gen, .. } = self;
 
         Addr { index, gen }
+    }
+
+    // pub(crate) fn transmute<U>(self) -> GcPtr<U, A>
+    // where
+    //     U: ?Sized,
+    // {
+    //     let GcPtr {
+    //         index,
+    //         gen,
+    //         ty,
+    //         _type,
+    //         _access,
+    //     } = self;
+
+    //     GcPtr {
+    //         index,
+    //         gen,
+    //         ty,
+    //         _type: PhantomData,
+    //         _access,
+    //     }
+    // }
+
+    pub(crate) fn upgrade_with(self, counter: Counter) -> RootPtr<T, A> {
+        let addr = self.addr();
+        let ty = self.ty();
+
+        RootPtr::new(addr, ty, counter)
+    }
+
+    /// Upgrade weak reference into strong one.
+    ///
+    /// This function is a convenience wrapper around [`Heap::upgrade`].
+    pub fn upgrade<M, P>(self, heap: &Heap<M, P>) -> Option<RootPtr<T, A>>
+    where
+        P: Params,
+    {
+        heap.upgrade(self)
     }
 
     /// Return location of referenced object.
@@ -202,7 +256,7 @@ where
     A: Access,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
+        write!(f, "{}", self.location())
     }
 }
 
@@ -231,6 +285,13 @@ where
     fn as_ref(&self) -> &Self {
         self
     }
+}
+
+impl<T, A> Unpin for GcPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
 }
 
 /// Common type for all strong references.
@@ -270,6 +331,10 @@ where
         GcPtr::new(self.addr(), self.ty)
     }
 
+    pub(crate) fn ty(&self) -> TypeIndex {
+        self.ty
+    }
+
     pub(crate) fn addr(&self) -> Addr {
         let RootPtr { index, gen, .. } = self;
 
@@ -277,6 +342,10 @@ where
             index: *index,
             gen: *gen,
         }
+    }
+
+    pub(crate) fn counter(&self) -> &Counter {
+        &self.counter
     }
 
     /// Return location of referenced object.
@@ -310,7 +379,7 @@ where
     A: Access,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}", self.location())
+        write!(f, "{}", self.location())
     }
 }
 
@@ -358,6 +427,13 @@ where
     fn as_ref(&self) -> &Self {
         self
     }
+}
+
+impl<T, A> Unpin for RootPtr<T, A>
+where
+    T: ?Sized,
+    A: Access,
+{
 }
 
 /// A weak reference to gc-allocated mutable value.
@@ -486,7 +562,7 @@ where
 ///
 /// # Construct
 ///
-/// [`Heap`](crate::Heap) naturally returns [`RootCell`] after allocating a value:
+/// [`Heap`] naturally returns [`RootCell`] after allocating a value:
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
@@ -529,7 +605,7 @@ where
 /// assert_eq!(heap.get_root(&strong), &4);
 /// ```
 ///
-/// Alternatively [`Heap`](crate::Heap) can be indexed using `&RootCell<T>`:
+/// Alternatively [`Heap`] can be indexed using `&RootCell<T>`:
 ///
 /// ```
 /// # use gc::{Heap, RootCell};
@@ -660,7 +736,7 @@ where
 ///
 /// # Construct
 ///
-/// [`Heap`](crate::Heap) naturally returns [`Root`] after allocating a value:
+/// [`Heap`] naturally returns [`Root`] after allocating a value:
 ///
 /// ```
 /// # use gc::{Heap, Root};
@@ -700,7 +776,7 @@ where
 /// assert_eq!(heap.get_root(&strong), &3);
 /// ```
 ///
-/// Alternatively [`Heap`](crate::Heap) can be indexed using `&Root<T>`:
+/// Alternatively [`Heap`] can be indexed using `&Root<T>`:
 ///
 /// ```
 /// # use gc::{Heap, Root};
@@ -720,6 +796,66 @@ where
         f.debug_struct("Root")
             .field("addr", &self.addr())
             .finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct WeakRoot<T> {
+    ty: TypeIndex,
+    addr: Addr,
+    counter: WeakCounter,
+    _marker: PhantomData<T>,
+}
+
+impl<T> WeakRoot<T> {
+    pub(crate) fn new(addr: Addr, ty: TypeIndex, counter: WeakCounter) -> Self {
+        WeakRoot {
+            addr,
+            ty,
+            counter,
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn downgrade<A>(&self) -> GcPtr<T, A>
+    where
+        A: Access,
+    {
+        GcPtr::new(self.addr, self.ty)
+    }
+
+    pub(crate) fn upgrade<A>(self) -> RootPtr<T, A>
+    where
+        A: Access,
+    {
+        let counter = self.counter.upgrade();
+        RootPtr::new(self.addr, self.ty, counter)
+    }
+}
+
+impl<T> Clone for WeakRoot<T> {
+    fn clone(&self) -> Self {
+        let WeakRoot {
+            ty,
+            addr,
+            counter,
+            _marker,
+        } = self;
+
+        Self {
+            ty: *ty,
+            addr: *addr,
+            counter: counter.clone(),
+            _marker: *_marker,
+        }
+    }
+}
+
+impl<T> Trace for WeakRoot<T>
+where
+    T: 'static,
+{
+    fn trace(&self, collector: &mut crate::Collector) {
+        collector.mark(self.downgrade::<Ref>());
     }
 }
 
@@ -846,167 +982,69 @@ where
     }
 }
 
-impl<T> Pointer for Location<T>
+impl<T> Display for Location<T>
 where
     T: ?Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:p}:{}", self.index, self.gen)
-    }
-}
-
-pub(crate) mod sealed {
-    use super::{Access, GcPtr, RootPtr};
-
-    #[doc(hidden)]
-    pub struct Addr(pub(crate) super::Addr);
-
-    #[doc(hidden)]
-    pub struct TypeIndex(pub(crate) super::TypeIndex);
-
-    pub trait Sealed {
-        #[doc(hidden)]
-        fn addr(&self) -> Addr;
-
-        #[doc(hidden)]
-        fn type_index(&self) -> TypeIndex;
-    }
-
-    impl<T, A> Sealed for GcPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        fn addr(&self) -> Addr {
-            Addr(GcPtr::addr(*self))
-        }
-
-        fn type_index(&self) -> TypeIndex {
-            TypeIndex(self.ty)
-        }
-    }
-
-    impl<T, A> Sealed for RootPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        fn addr(&self) -> Addr {
-            Addr(RootPtr::addr(self))
-        }
-
-        fn type_index(&self) -> TypeIndex {
-            TypeIndex(self.ty)
-        }
-    }
-}
-
-pub(crate) mod sealed_root {
-    use super::{Access, RootPtr};
-
-    #[doc(hidden)]
-    pub struct CounterRef<'a>(pub(crate) &'a super::Counter);
-
-    pub trait Sealed {
-        #[doc(hidden)]
-        fn counter(&self) -> CounterRef;
-    }
-
-    impl<T, A> Sealed for RootPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        fn counter(&self) -> CounterRef {
-            CounterRef(&self.counter)
-        }
-    }
-}
-
-pub(crate) mod sealed_upgrade {
-    use super::{Access, GcPtr, RootPtr};
-
-    #[doc(hidden)]
-    pub struct Counter(pub(crate) super::Counter);
-
-    pub trait Sealed {
-        type Target;
-
-        #[doc(hidden)]
-        fn upgrade(self, counter: Counter) -> Self::Target;
-    }
-
-    impl<T, A> Sealed for GcPtr<T, A>
-    where
-        T: ?Sized,
-        A: Access,
-    {
-        type Target = RootPtr<T, A>;
-
-        fn upgrade(self, counter: Counter) -> Self::Target {
-            let Counter(counter) = counter;
-            RootPtr::new(self.addr(), self.ty, counter)
-        }
+        write!(f, "{}@{:p}:{}", self.ty, self.index, self.gen)
     }
 }
 
 pub(crate) mod sealed_allocated {
-    use super::{FullUserdata, Params, Userdata};
+    use super::{FullUserdata, Heap, Params, Userdata};
 
     #[doc(hidden)]
-    pub struct ArenaRef<'a, M, P>(pub(crate) &'a dyn super::Arena<M, P>);
-
-    #[doc(hidden)]
-    pub struct ArenaMut<'a, M, P>(pub(crate) &'a mut dyn super::Arena<M, P>);
+    pub struct Ty(pub(crate) super::TypeIndex);
 
     #[doc(hidden)]
     pub struct Addr(pub(crate) super::Addr);
 
-    pub trait Sealed<M, P> {
+    pub trait Sealed<Heap> {
         #[doc(hidden)]
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self>;
+        fn get_ref(heap: &Heap, ty: Ty, addr: Addr) -> Option<&Self>;
 
         #[doc(hidden)]
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self>;
+        fn get_mut(heap: &mut Heap, ty: Ty, addr: Addr) -> Option<&mut Self>;
     }
 
-    impl<T, M, P> Sealed<M, P> for T
+    impl<T, M, P> Sealed<Heap<M, P>> for T
     where
         T: 'static,
         P: Params,
     {
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get(addr.0)
+        fn get_ref(heap: &Heap<M, P>, ty: Ty, addr: Addr) -> Option<&Self> {
+            heap.arena(ty.0)?.get(addr.0)
         }
 
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_mut(addr.0)
-        }
-    }
-
-    impl<M, P> Sealed<M, P> for dyn Userdata<P>
-    where
-        P: Params,
-    {
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get_userdata(addr.0)
-        }
-
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_userdata_mut(addr.0)
+        fn get_mut(heap: &mut Heap<M, P>, ty: Ty, addr: Addr) -> Option<&mut Self> {
+            heap.arena_mut(ty.0)?.get_mut(addr.0)
         }
     }
 
-    impl<M, P> Sealed<M, P> for dyn FullUserdata<M, P>
+    impl<M, P> Sealed<Heap<M, P>> for dyn Userdata<P>
     where
         P: Params,
     {
-        fn get_ref(arena: ArenaRef<'_, M, P>, addr: Addr) -> Option<&Self> {
-            arena.0.get_full_userdata(addr.0)
+        fn get_ref(heap: &Heap<M, P>, ty: Ty, addr: Addr) -> Option<&Self> {
+            heap.arena(ty.0)?.get_userdata(addr.0)
         }
 
-        fn get_mut(arena: ArenaMut<'_, M, P>, addr: Addr) -> Option<&mut Self> {
-            arena.0.get_full_userdata_mut(addr.0)
+        fn get_mut(heap: &mut Heap<M, P>, ty: Ty, addr: Addr) -> Option<&mut Self> {
+            heap.arena_mut(ty.0)?.get_userdata_mut(addr.0)
+        }
+    }
+
+    impl<M, P> Sealed<Heap<M, P>> for dyn FullUserdata<M, P>
+    where
+        P: Params,
+    {
+        fn get_ref(heap: &Heap<M, P>, ty: Ty, addr: Addr) -> Option<&Self> {
+            heap.arena(ty.0)?.get_full_userdata(addr.0)
+        }
+
+        fn get_mut(heap: &mut Heap<M, P>, ty: Ty, addr: Addr) -> Option<&mut Self> {
+            heap.arena_mut(ty.0)?.get_full_userdata_mut(addr.0)
         }
     }
 }
@@ -1024,130 +1062,145 @@ pub(crate) mod sealed_allocate_as {
     #[doc(hidden)]
     pub struct Counter(pub(crate) super::Counter);
 
-    pub trait Sealed<T: ?Sized, M, P> {
+    pub trait Sealed<T: ?Sized, Heap>: Sized {
         #[doc(hidden)]
-        fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter);
+        fn alloc_into(self, heap: &mut Heap) -> (Addr, TypeIndex, Counter);
+
+        #[doc(hidden)]
+        fn try_alloc_into(self, heap: &mut Heap) -> Result<(Addr, TypeIndex, Counter), Self>;
     }
 
-    impl<T, M, P> Sealed<T, M, P> for T
+    impl<T, M, P> Sealed<T, Heap<M, P>> for T
     where
         T: Trace,
         P: Params,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
-            use crate::heap::userdata_store::Concrete;
-
-            let value = Concrete::new(self);
-
-            let (addr, ty, counter) = heap.alloc_inner(value);
+            let (addr, ty, counter) = heap.alloc_verbatim(self);
             (Addr(addr), TypeIndex(ty), Counter(counter))
+        }
+
+        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
+            let (addr, ty, counter) = heap.try_alloc_verbatim(self)?;
+            Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
 
-    impl<T, M, P> Sealed<dyn Userdata<P>, M, P> for T
+    impl<T, M, P> Sealed<dyn Userdata<P>, Heap<M, P>> for T
     where
         T: Trace,
         P: Params,
+        M: Trace,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
-            use crate::heap::userdata_store::LightUd;
-
-            let value = LightUd::new(self);
-
-            let (addr, ty, counter) = heap.alloc_inner(value);
+            let (addr, ty, counter) = heap.alloc_userdata(self, None);
             (Addr(addr), TypeIndex(ty), Counter(counter))
+        }
+
+        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
+            let (addr, ty, counter) = heap.try_alloc_userdata(self, None)?;
+            Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
 
-    impl<T, M, P> Sealed<dyn FullUserdata<M, P>, M, P> for T
+    impl<T, M, P> Sealed<dyn FullUserdata<M, P>, Heap<M, P>> for T
     where
         T: Trace,
         M: Trace + Clone,
         P: Params,
     {
         fn alloc_into(self, heap: &mut Heap<M, P>) -> (Addr, TypeIndex, Counter) {
-            use crate::heap::userdata_store::FullUd;
-
-            let metatable = heap.metatable_of::<T>();
-            let value = FullUd::new(self, metatable.cloned());
-
-            let (addr, ty, counter) = heap.alloc_inner(value);
+            let metatable = heap.metatable_of::<T>().cloned();
+            let (addr, ty, counter) = heap.alloc_userdata(self, metatable);
             (Addr(addr), TypeIndex(ty), Counter(counter))
+        }
+
+        fn try_alloc_into(self, heap: &mut Heap<M, P>) -> Result<(Addr, TypeIndex, Counter), Self> {
+            let metatable = heap.metatable_of::<T>().cloned();
+            let (addr, ty, counter) = heap.try_alloc_userdata(self, metatable)?;
+            Ok((Addr(addr), TypeIndex(ty), Counter(counter)))
         }
     }
 }
 
-/// Marker trait permitting by-reference (`&T`) access.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-pub trait RefAccess<T: ?Sized>: sealed::Sealed {}
-
-/// Marker trait permitting by-mut-reference (`&mut T`) access.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-pub trait MutAccess<T: ?Sized>: RefAccess<T> {}
-
-/// Marker trait for strong references.
-///
-/// Purpose of this trait is to serve as bound in [`Heap`](crate::Heap)'s getter methods.
-/// You probably shouldn't use it for anything else or at all.
-pub trait Rooted: sealed_root::Sealed {}
-
-/// Marker trait for types that can be retrieved from [`Heap`](crate::Heap).
+/// Marker trait for types that can be retrieved from [`Heap`].
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s getter methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait Allocated<M, P>: sealed_allocated::Sealed<M, P> {}
+///
+/// The trait is implemented for all types references to which can be extracted out of heap,
+/// that is for which you can go from `Gc<T>` to `&T` for example.
+/// This is never a problem for *sized* types, however this is not true about *unsized* types.
+/// To extract a reference to unsized type you either need to reconstruct it from raw parts
+/// (which is impossible until Rust provides mechanism to interact with that)
+/// or have dedicated internal API methods for each individual unsized type you want to extract.
+/// The reason this trait exists is to mark those few blessed unsized types that we support.
+pub trait Allocated<Heap>: sealed_allocated::Sealed<Heap> {}
 
 /// Marker trait for types that can be allocated in `Heap`.
 ///
 /// Purpose of this trait is to serve as bound in `Heap`'s allocation methods.
 /// You probably shouldn't use it for anything else or at all.
-pub trait AllocateAs<T: ?Sized, M, P>: sealed_allocate_as::Sealed<T, M, P> {}
+pub trait AllocateAs<T: ?Sized, Heap>: sealed_allocate_as::Sealed<T, Heap> {}
 
-impl<T: ?Sized> RefAccess<T> for GcCell<T> {}
-impl<T: ?Sized> MutAccess<T> for GcCell<T> {}
-
-impl<T: ?Sized> RefAccess<T> for RootCell<T> {}
-impl<T: ?Sized> MutAccess<T> for RootCell<T> {}
-impl<T: ?Sized> Rooted for RootCell<T> {}
-
-impl<T: ?Sized> RefAccess<T> for Gc<T> {}
-
-impl<T: ?Sized> RefAccess<T> for Root<T> {}
-impl<T: ?Sized> Rooted for Root<T> {}
-
-impl<T, M, P> Allocated<M, P> for T
+impl<T, M, P> Allocated<Heap<M, P>> for T
 where
     T: 'static,
     P: Params,
 {
 }
 
-impl<M, P> Allocated<M, P> for dyn Userdata<P> where P: Params {}
+impl<M, P> Allocated<Heap<M, P>> for dyn Userdata<P> where P: Params {}
 
-impl<M, P> Allocated<M, P> for dyn FullUserdata<M, P> where P: Params {}
+impl<M, P> Allocated<Heap<M, P>> for dyn FullUserdata<M, P> where P: Params {}
 
-impl<T, M, P> AllocateAs<T, M, P> for T
+impl<T, M, P> AllocateAs<T, Heap<M, P>> for T
 where
     T: Trace,
     P: Params,
 {
 }
 
-impl<T, M, P> AllocateAs<dyn Userdata<P>, M, P> for T
+impl<T, M, P> AllocateAs<dyn Userdata<P>, Heap<M, P>> for T
 where
     T: Trace,
     P: Params,
+    M: Trace,
 {
 }
 
-impl<T, M, P> AllocateAs<dyn FullUserdata<M, P>, M, P> for T
+impl<T, M, P> AllocateAs<dyn FullUserdata<M, P>, Heap<M, P>> for T
 where
     T: Trace,
     M: Trace + Clone,
     P: Params,
 {
+}
+
+pub trait ToOwned<Owned> {
+    fn to_owned(&self) -> Owned;
+}
+
+impl<T> ToOwned<T> for T
+where
+    T: Clone,
+{
+    fn to_owned(&self) -> T {
+        self.clone()
+    }
+}
+
+impl ToOwned<String> for str {
+    fn to_owned(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl<T> ToOwned<Vec<T>> for [T]
+where
+    T: Clone,
+{
+    fn to_owned(&self) -> Vec<T> {
+        self.into()
+    }
 }

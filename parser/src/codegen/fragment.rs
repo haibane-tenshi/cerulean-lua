@@ -627,7 +627,7 @@ impl<'s, 'origin> Fragment<'s, 'origin> {
 #[derive(Debug)]
 pub struct Scope<'s, 'origin>(Fragment<'s, 'origin>);
 
-impl<'s, 'origin> Scope<'s, 'origin> {
+impl Scope<'_, '_> {
     pub fn commit(self, _span: Range<usize>) {
         self.0.commit(CommitKind::Scope)
     }
@@ -641,7 +641,7 @@ impl<'s, 'origin> Deref for Scope<'s, 'origin> {
     }
 }
 
-impl<'s, 'origin> DerefMut for Scope<'s, 'origin> {
+impl DerefMut for Scope<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -649,7 +649,7 @@ impl<'s, 'origin> DerefMut for Scope<'s, 'origin> {
 
 pub struct Decl<'s, 'origin>(Fragment<'s, 'origin>);
 
-impl<'s, 'origin> Decl<'s, 'origin> {
+impl Decl<'_, '_> {
     pub fn commit(self) {
         self.0.commit(CommitKind::Decl)
     }
@@ -663,7 +663,7 @@ impl<'s, 'origin> Deref for Decl<'s, 'origin> {
     }
 }
 
-impl<'s, 'origin> DerefMut for Decl<'s, 'origin> {
+impl DerefMut for Decl<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -671,7 +671,7 @@ impl<'s, 'origin> DerefMut for Decl<'s, 'origin> {
 
 pub struct Expr<'s, 'origin>(Fragment<'s, 'origin>);
 
-impl<'s, 'origin> Expr<'s, 'origin> {
+impl Expr<'_, '_> {
     pub fn commit(self) {
         self.0.commit(CommitKind::Expr)
     }
@@ -685,7 +685,7 @@ impl<'s, 'origin> Deref for Expr<'s, 'origin> {
     }
 }
 
-impl<'s, 'origin> DerefMut for Expr<'s, 'origin> {
+impl DerefMut for Expr<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }

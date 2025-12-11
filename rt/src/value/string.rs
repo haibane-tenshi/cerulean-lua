@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Debug, Display};
@@ -5,62 +6,16 @@ use std::path::PathBuf;
 
 use gc::Trace;
 
-use super::{Concat, CoreTypes, Len, TypeMismatchOrError, Types, Value};
-use crate::gc::{TryFromWithGc, TryIntoWithGc};
+use super::{Concat, Int, Len};
+use crate::ffi::arg_parser::ParseFrom;
 
-pub struct LuaString<T>(pub T);
-
-impl<T, Rf, Ty, Gc> TryFromWithGc<Value<Rf, Ty>, Gc> for LuaString<T>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    Rf::String<Ty::String>: TryIntoWithGc<T, Gc>,
-{
-    type Error = TypeMismatchOrError<<Rf::String<Ty::String> as TryIntoWithGc<T, Gc>>::Error>;
-
-    fn try_from_with_gc(value: Value<Rf, Ty>, gc: &mut Gc) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(t) => {
-                let r = t.try_into_with_gc(gc).map_err(TypeMismatchOrError::Other)?;
-                Ok(LuaString(r))
-            }
-            value => {
-                use super::{Type, TypeMismatchError};
-
-                let err = TypeMismatchError {
-                    expected: Type::String,
-                    found: value.type_(),
-                };
-
-                Err(TypeMismatchOrError::TypeMismatch(err))
-            }
-        }
-    }
-}
-
-impl<T, Rf, Ty> From<LuaString<T>> for Value<Rf, Ty>
-where
-    Rf: Types,
-    Ty: CoreTypes,
-    T: Into<Rf::String<Ty::String>>,
-{
-    fn from(value: LuaString<T>) -> Self {
-        let LuaString(value) = value;
-
-        Value::String(value.into())
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Trace)]
 pub struct PossiblyUtf8Vec(pub Vec<u8>);
 
-impl Trace for PossiblyUtf8Vec {
-    fn trace(&self, _collector: &mut gc::Collector) {}
-}
-
 impl Len for PossiblyUtf8Vec {
-    fn len(&self) -> usize {
-        self.0.len()
+    fn len(&self) -> Int {
+        let len = self.0.len();
+        Int(len.try_into().unwrap())
     }
 }
 
@@ -82,14 +37,20 @@ impl From<Vec<u8>> for PossiblyUtf8Vec {
     }
 }
 
+impl From<&[u8]> for PossiblyUtf8Vec {
+    fn from(value: &[u8]) -> Self {
+        Self(value.to_vec())
+    }
+}
+
 impl From<String> for PossiblyUtf8Vec {
     fn from(value: String) -> Self {
         Self(value.into())
     }
 }
 
-impl<'a> From<&'a str> for PossiblyUtf8Vec {
-    fn from(value: &'a str) -> Self {
+impl From<&str> for PossiblyUtf8Vec {
+    fn from(value: &str) -> Self {
         value.to_string().into()
     }
 }
@@ -177,6 +138,38 @@ impl<'a> TryFrom<&'a PossiblyUtf8Vec> for PathBuf {
     }
 }
 
+impl ParseFrom<PossiblyUtf8Vec> for Vec<u8> {
+    type Error = std::convert::Infallible;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        Ok(value.into())
+    }
+}
+
+impl ParseFrom<PossiblyUtf8Vec> for String {
+    type Error = std::string::FromUtf8Error;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl ParseFrom<PossiblyUtf8Vec> for OsString {
+    type Error = std::string::FromUtf8Error;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
+impl ParseFrom<PossiblyUtf8Vec> for PathBuf {
+    type Error = std::string::FromUtf8Error;
+
+    fn parse(value: &PossiblyUtf8Vec) -> Result<Self, Self::Error> {
+        value.try_into()
+    }
+}
+
 impl Debug for PossiblyUtf8Vec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match std::str::from_utf8(&self.0) {
@@ -206,3 +199,174 @@ impl Display for InvalidUtf8Error {
 }
 
 impl Error for InvalidUtf8Error {}
+
+pub trait AsEncoding {
+    /// View raw byte content of a Lua string.
+    fn as_bytes(&self) -> Option<&[u8]>;
+
+    /// View Lua string content as utf8-encoded string.
+    fn as_str(&self) -> Option<&str>;
+}
+
+pub trait IntoEncoding: AsEncoding {
+    /// Convert Lua string into byte array.
+    ///
+    /// Notice that this function is *infallible*.
+    /// Lua inherently expects that it can always treat strings as bag-of-bytes.
+    ///
+    /// The return type is [`Cow`] because a lot of the time Rust side doesn't require ownership in order to perform work,
+    /// so if your type already keeps the data in contiguous memory you may simply return a `&[u8]` pointing to it
+    /// and let Rust decide whether it needs to take ownership.
+    fn to_bytes(&self) -> Cow<'_, [u8]>;
+
+    /// Convert Lua string into utf8-encoded string.
+    ///
+    /// This function should return `None` when value cannot be interpreted as text.
+    ///
+    /// This function is an important interaction point between Lua-specific type and Rust ecosystem.
+    /// Lua states that it is encoding-agnostic, that is its string type can have arbitrary encoding.
+    /// This becomes a point of contention when interacting with Rust ecosystem:
+    /// Rust functions that work with strings expect it to be utf8-encoded, e.g. `&str` or `String`.
+    /// This method provides you with a way to convert from one to another.
+    ///
+    /// The return type is [`Cow`] because a lot of the time Rust side doesn't require ownership in order to perform work,
+    /// so if your type already contains text encoded in utf8 you may simply return a `&str` pointing into it.
+    fn to_str(&self) -> Option<Cow<'_, str>>;
+}
+
+pub trait FromEncoding:
+    for<'a> From<&'a [u8]> + From<Vec<u8>> + for<'a> From<&'a str> + From<String>
+{
+}
+
+impl<T> FromEncoding for T where
+    T: for<'a> From<&'a [u8]> + From<Vec<u8>> + for<'a> From<&'a str> + From<String>
+{
+}
+
+impl AsEncoding for Vec<u8> {
+    fn as_bytes(&self) -> Option<&[u8]> {
+        Some(self)
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        None
+    }
+}
+
+impl AsEncoding for String {
+    fn as_bytes(&self) -> Option<&[u8]> {
+        Some(self.as_bytes())
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        Some(self)
+    }
+}
+
+impl AsEncoding for PossiblyUtf8Vec {
+    fn as_bytes(&self) -> Option<&[u8]> {
+        Some(self.as_ref())
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        std::str::from_utf8(self.as_ref()).ok()
+    }
+}
+
+impl<T> AsEncoding for Interned<T>
+where
+    T: AsEncoding,
+{
+    fn as_bytes(&self) -> Option<&[u8]> {
+        self.as_inner().as_bytes()
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        self.as_inner().as_str()
+    }
+}
+
+impl IntoEncoding for Vec<u8> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.as_slice().into()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        None
+    }
+}
+
+impl IntoEncoding for String {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.as_bytes().into()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        Some(self.into())
+    }
+}
+
+impl IntoEncoding for PossiblyUtf8Vec {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.0.as_slice().into()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        let s = std::str::from_utf8(&self.0).ok()?;
+        Some(s.into())
+    }
+}
+
+impl<T> IntoEncoding for Interned<T>
+where
+    T: IntoEncoding,
+{
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        self.as_inner().to_bytes()
+    }
+
+    fn to_str(&self) -> Option<Cow<'_, str>> {
+        self.as_inner().to_str()
+    }
+}
+
+use gc::userdata::Params;
+use gc::{Gc, Interned, Root};
+
+use crate::error::{AlreadyDroppedOr, NotTextError};
+
+pub fn try_gc_to_str<T, M, P>(
+    ptr: Gc<Interned<T>>,
+    heap: &gc::Heap<M, P>,
+) -> Result<Cow<'_, str>, AlreadyDroppedOr<NotTextError<Interned<T>>>>
+where
+    T: IntoEncoding + 'static,
+    P: Params,
+{
+    use crate::gc::TryGet;
+
+    let value = heap.try_get(ptr)?;
+    match value.to_str() {
+        Some(r) => Ok(r),
+        None => {
+            let value = heap.try_upgrade(ptr)?;
+            Err(AlreadyDroppedOr::Other(NotTextError(value)))
+        }
+    }
+}
+
+pub fn try_root_to_str<'h, T, M, P>(
+    ptr: &Root<Interned<T>>,
+    heap: &'h gc::Heap<M, P>,
+) -> Result<Cow<'h, str>, NotTextError<Interned<T>>>
+where
+    T: IntoEncoding + 'static,
+    P: Params,
+{
+    let value = heap.get_root(ptr);
+    match value.to_str() {
+        Some(r) => Ok(r),
+        None => Err(NotTextError(ptr.clone())),
+    }
+}

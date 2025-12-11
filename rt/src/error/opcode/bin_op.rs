@@ -21,6 +21,7 @@ impl Cause {
         FileId: Clone,
     {
         use super::{ExtraDiagnostic, TotalSpan};
+        use crate::runtime::thread::frame::Event;
         use codespan_reporting::diagnostic::Label;
         use repr::opcode::{
             AriBinOp::{Add, Pow},
@@ -59,6 +60,11 @@ impl Cause {
             }
         }
 
+        let metamethod = {
+            let event: Event = op.into();
+            event.to_metamethod().to_str()
+        };
+
         // Well-formedness of ops when applied between values of the same type
         //
         //         | nil   | bool  | int   | float | string | fn    | table
@@ -72,7 +78,7 @@ impl Cause {
             // Tables out first.
             // It can always provide metamethods to override the op.
             (Table, _, _) | (_, _, Table) => diag.with_help([
-                format!("by default `{op}` cannot be applied to tables,\nhowever defining <?> metamethod will allow you to do it"),
+                format!("by default `{op}` cannot be applied to tables,\nhowever defining `{metamethod}` metamethod will allow you to do it"),
             ]),
             // Special help in case someone tries to do logical ops on bools.
             (Bool, BinOp::Bit(And | Or | Xor) | BinOp::Ari(Pow), Bool) => {

@@ -1,7 +1,8 @@
 use std::fmt::Display;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-use super::{CoreTypes, Type, TypeMismatchError, Types, Value};
+use super::{Refs, Type, Value};
+use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Boolean(pub bool);
@@ -72,14 +73,13 @@ impl BitXorAssign for Boolean {
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Boolean
+impl<Rf> TryFrom<Value<Rf>> for Boolean
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Bool(t) => Ok(Boolean(t)),
             value => {
@@ -93,10 +93,10 @@ where
         }
     }
 }
-impl<Rf, Ty> From<Boolean> for Value<Rf, Ty>
+
+impl<Rf> From<Boolean> for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     fn from(value: Boolean) -> Self {
         let Boolean(value) = value;

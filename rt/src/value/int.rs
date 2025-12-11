@@ -1,11 +1,13 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::ops::{
-    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
-    Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
-};
 
-use super::{CoreTypes, Float, Type, TypeMismatchError, Types, Value};
+use super::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitNot, BitOr, BitOrAssign, BitXor, BitXorAssign,
+    CheckedDiv, CheckedFloorDiv, CheckedPow, CheckedRem, Div, DivAssign, FloorDiv, Mul, MulAssign,
+    Neg, Pow, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
+};
+use super::{Float, Refs, Type, Value};
+use crate::ffi::arg_parser::TypeMismatchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int(pub i64);
@@ -17,14 +19,6 @@ impl Int {
 
     pub fn to_bool(&self) -> bool {
         true
-    }
-
-    pub fn floor_div(self, rhs: Self) -> Self {
-        self / rhs
-    }
-
-    pub fn exp(self, rhs: Self) -> Option<Self> {
-        rhs.0.try_into().ok().map(|rhs| self.0.pow(rhs)).map(Int)
     }
 }
 
@@ -178,11 +172,45 @@ impl DivAssign for Int {
     }
 }
 
+impl CheckedDiv for Int {
+    fn checked_div(self, rhs: Self) -> Option<Self::Output> {
+        if rhs != Int(0) {
+            Some(self / rhs)
+        } else {
+            None
+        }
+    }
+}
+
+impl FloorDiv for Int {
+    type Output = Self;
+
+    fn floor_div(self, rhs: Self) -> Self::Output {
+        self / rhs
+    }
+}
+
+impl CheckedFloorDiv for Int {
+    fn checked_floor_div(self, rhs: Self) -> Option<Self::Output> {
+        self.checked_div(rhs)
+    }
+}
+
 impl Rem for Int {
     type Output = Self;
 
     fn rem(self, rhs: Self) -> Self::Output {
         Int(self.0.rem_euclid(rhs.0))
+    }
+}
+
+impl CheckedRem for Int {
+    fn checked_rem(self, rhs: Self) -> Option<Self::Output> {
+        if rhs != Int(0) {
+            Some(self % rhs)
+        } else {
+            None
+        }
     }
 }
 
@@ -192,7 +220,50 @@ impl RemAssign for Int {
     }
 }
 
-impl Not for Int {
+impl Pow for Int {
+    type Output = Self;
+
+    fn pow(self, rhs: Self) -> Self::Output {
+        self.checked_pow(rhs).unwrap()
+    }
+}
+
+impl CheckedPow for Int {
+    fn checked_pow(self, rhs: Self) -> Option<Self::Output> {
+        let Int(lhs) = self;
+        let Int(rhs) = rhs;
+
+        match (lhs, rhs) {
+            (0, 0) => None,
+            (0, _) if rhs < 0 => None,
+            (_, 0) => Some(Int(1)),
+            (_, 1) => Some(Int(lhs)),
+            (1, _) => Some(Int(1)),
+            (-1, _) if rhs % 2 == 0 => Some(Int(1)),
+            (-1, _) if rhs % 2 != 0 => Some(Int(-1)),
+            (_, _) if rhs < 0 => Some(Int(0)),
+            (mut lhs, mut rhs) => {
+                let mask = 0b1;
+
+                let mut r = 1;
+                while rhs != 0 {
+                    if rhs & mask != 0 {
+                        r *= lhs;
+                        if r == 0 {
+                            break;
+                        }
+                    }
+                    lhs *= lhs;
+                    rhs >>= 1;
+                }
+
+                Some(Int(r))
+            }
+        }
+    }
+}
+
+impl BitNot for Int {
     type Output = Self;
 
     fn not(self) -> Self::Output {
@@ -294,14 +365,13 @@ impl ShrAssign for Int {
     }
 }
 
-impl<Rf, Ty> TryFrom<Value<Rf, Ty>> for Int
+impl<Rf> TryFrom<Value<Rf>> for Int
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     type Error = TypeMismatchError;
 
-    fn try_from(value: Value<Rf, Ty>) -> Result<Self, Self::Error> {
+    fn try_from(value: Value<Rf>) -> Result<Self, Self::Error> {
         match value {
             Value::Int(value) => Ok(Int(value)),
             value => {
@@ -316,10 +386,9 @@ where
     }
 }
 
-impl<Rf, Ty> From<Int> for Value<Rf, Ty>
+impl<Rf> From<Int> for Value<Rf>
 where
-    Rf: Types,
-    Ty: CoreTypes,
+    Rf: Refs,
 {
     fn from(value: Int) -> Self {
         let Int(value) = value;
