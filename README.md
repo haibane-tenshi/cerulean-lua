@@ -180,3 +180,7 @@ Since Rust's strings operate on utf-8, this projects opts for slightly stricter 
 * `std` implementation assumes utf-8 strings for anything that can be passed to OS such as paths.
   This is an easy decision, since from Rust side this is the only way to do so in cross-platform way.
   This generally removes the need to reencode strings on Lua side.
+
+# Licence
+
+This project is distributed under MIT licence.
